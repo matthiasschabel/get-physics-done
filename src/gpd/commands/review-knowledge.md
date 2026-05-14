@@ -72,16 +72,12 @@ Keep the wrapper thin and let the workflow own target resolution, review artifac
 
 <execution_context>
 @{GPD_INSTALL_DIR}/workflows/review-knowledge.md
-@{GPD_INSTALL_DIR}/templates/knowledge-schema.md
-@{GPD_INSTALL_DIR}/templates/knowledge.md
-@{GPD_INSTALL_DIR}/references/shared/canonical-schema-discipline.md
 </execution_context>
 
 <context>
 Review target: $ARGUMENTS
 
-@GPD/knowledge/
-@GPD/knowledge/reviews/
+Validated command-context owns knowledge target resolution. Use the explicit current-workspace canonical target returned by preflight; the workflow reads `GPD/knowledge/{knowledge_id}.md` and prior `GPD/knowledge/reviews/` artifacts only after the target is validated. Do not attach raw knowledge-directory includes from this wrapper.
 
 Use `GPD/STATE.md` only as optional background context when it exists. Strict knowledge review preflight is anchored to the explicit current-workspace knowledge target, not to project-state recovery.
 
@@ -95,11 +91,7 @@ If the target is ambiguous, the workflow must stop and ask for clarification.
 </context>
 
 <process>
-@{GPD_INSTALL_DIR}/references/shared/canonical-schema-discipline.md
-@{GPD_INSTALL_DIR}/templates/knowledge-schema.md
-@{GPD_INSTALL_DIR}/templates/knowledge.md
-
-Follow `@{GPD_INSTALL_DIR}/workflows/review-knowledge.md` exactly.
+Follow the included review-knowledge workflow exactly. The workflow owns schema loading, target validation, review artifact writing, freshness checks, and lifecycle updates.
 </process>
 
 <success_criteria>
@@ -109,5 +101,5 @@ Follow `@{GPD_INSTALL_DIR}/workflows/review-knowledge.md` exactly.
 - [ ] `approved` promotes the document to `stable` only when the review is fresh
 - [ ] `needs_changes` and `rejected` keep or mark the document `in_review`
 - [ ] Validation fails closed on non-canonical lookalikes, ambiguous targets, or stale approved evidence
-- [ ] No automatic migration, beginner onboarding exposure, or full supersession orchestration is claimed
+- [ ] No automatic import, beginner onboarding exposure, or full supersession orchestration is claimed
 </success_criteria>

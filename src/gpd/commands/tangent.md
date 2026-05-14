@@ -49,6 +49,7 @@ Use `branch-hypothesis` only after you have explicitly decided the tangent deser
 </inline_guidance>
 
 <process>
-Follow the tangent workflow from `@{GPD_INSTALL_DIR}/workflows/tangent.md` end-to-end.
+Follow the included tangent workflow end-to-end.
 Preserve the proposal-first rule: do not silently widen scope, auto-branch, or invent a persistent tangent state machine.
+Until the user chooses exactly one tangent outcome, do not present `gpd:quick`, `gpd:add-todo`, `gpd:branch-hypothesis`, `gpd:execute-phase`, or autonomous continuation as the selected next command; keep the next step at the explicit `gpd:tangent` chooser/user decision.
 </process>

@@ -12,8 +12,10 @@ from gpd.hooks.payload_roots import (
     _resolve_with_shared_service,
     normalize_workspace_text,
     payload_uses_alias_only_workspace_mapping,
+    project_dir_hint_from_payload,
     project_root_from_payload,
     resolve_payload_roots,
+    trusted_payload_project_root,
     workspace_dir_from_payload,
 )
 
@@ -147,18 +149,49 @@ def test_payload_uses_alias_only_workspace_mapping_detects_top_level_alias_only_
     )
 
 
-def test_payload_uses_alias_only_workspace_mapping_is_insensitive_to_workspace_key_order(tmp_path) -> None:
+def test_payload_uses_alias_only_workspace_mapping_respects_policy_primary_workspace_key(tmp_path) -> None:
     workspace = tmp_path / "workspace"
     project = tmp_path / "project"
     workspace.mkdir()
     project.mkdir()
 
-    assert payload_uses_alias_only_workspace_mapping(
+    assert not payload_uses_alias_only_workspace_mapping(
         {
             "workspace": {"current_dir": str(workspace)},
             "project_root": str(project),
         },
         hook_payload=_policy(workspace_keys=("current_dir", "cwd"), project_dir_keys=("project_root",)),
+    )
+
+
+def test_payload_uses_alias_only_workspace_mapping_uses_first_policy_workspace_key_as_primary(tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    project = tmp_path / "project"
+    workspace.mkdir()
+    project.mkdir()
+
+    assert not payload_uses_alias_only_workspace_mapping(
+        {
+            "workspace": {"workspace_dir": str(workspace)},
+            "project_root": str(project),
+        },
+        hook_payload=_policy(workspace_keys=("workspace_dir", "current_dir"), project_dir_keys=("project_root",)),
+    )
+
+
+def test_project_dir_hint_from_payload_requires_policy_owned_keys(tmp_path) -> None:
+    stray = tmp_path / "stray"
+    project = tmp_path / "project"
+
+    payload = {
+        "workspace": {"project_dir": str(stray)},
+        "project_root": str(project),
+    }
+
+    assert project_dir_hint_from_payload(payload, hook_payload=_policy(project_dir_keys=())) == ""
+    assert (
+        project_dir_hint_from_payload(payload, hook_payload=_policy(project_dir_keys=("project_root",)))
+        == str(project)
     )
 
 
@@ -252,26 +285,54 @@ def test_payload_roots_return_only_canonical_field_names(tmp_path) -> None:
         assert not hasattr(roots, legacy_name)
 
 
-def test_resolve_with_shared_service_uses_later_signature_after_type_error(tmp_path) -> None:
+def test_resolve_with_shared_service_uses_current_signature(tmp_path) -> None:
     workspace = tmp_path / "workspace"
     project = tmp_path / "project"
     workspace.mkdir()
     project.mkdir()
 
-    calls: list[tuple[str, ...]] = []
-
-    def _service(**kwargs):
-        calls.append(tuple(sorted(kwargs)))
-        if "payload" in kwargs or "data" in kwargs:
-            raise TypeError("unsupported signature")
-        if "workspace_dir" in kwargs and "project_dir" in kwargs and "cwd" in kwargs:
-            return (kwargs["workspace_dir"], kwargs["project_dir"])
-        raise TypeError("unsupported signature")
+    service = Mock(return_value=(str(workspace), str(project)))
 
     roots = _resolve_with_shared_service(
         {"workspace": str(workspace)},
         workspace_dir=str(workspace),
         project_dir=str(project),
+        target_path=str(workspace / "artifact.md"),
+        target_root=str(project / "paper"),
+        hook_payload=_policy(root_resolution_service=service),
+        cwd=str(tmp_path),
+    )
+
+    assert roots is not None
+    assert roots.workspace_dir == str(workspace.resolve(strict=False))
+    assert roots.project_root == str(project.resolve(strict=False))
+    service.assert_called_once_with(
+        payload={"workspace": str(workspace)},
+        workspace_dir=str(workspace),
+        project_dir=str(project),
+        target_path=str(workspace / "artifact.md"),
+        target_root=str(project / "paper"),
+        cwd=str(tmp_path),
+    )
+
+
+def test_resolve_with_shared_service_supports_narrow_callback_signatures(tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    project = tmp_path / "project"
+    workspace.mkdir()
+    project.mkdir()
+    seen_kwargs = {}
+
+    def _service(*, workspace_dir, project_dir, cwd=None):
+        seen_kwargs.update({"workspace_dir": workspace_dir, "project_dir": project_dir, "cwd": cwd})
+        return (workspace_dir, project_dir)
+
+    roots = _resolve_with_shared_service(
+        {"workspace": str(workspace)},
+        workspace_dir=str(workspace),
+        project_dir=str(project),
+        target_path=str(workspace / "artifact.md"),
+        target_root=str(project / "paper"),
         hook_payload=_policy(root_resolution_service=_service),
         cwd=str(tmp_path),
     )
@@ -279,7 +340,11 @@ def test_resolve_with_shared_service_uses_later_signature_after_type_error(tmp_p
     assert roots is not None
     assert roots.workspace_dir == str(workspace.resolve(strict=False))
     assert roots.project_root == str(project.resolve(strict=False))
-    assert len(calls) >= 3
+    assert seen_kwargs == {
+        "workspace_dir": str(workspace),
+        "project_dir": str(project),
+        "cwd": str(tmp_path),
+    }
 
 
 def test_resolve_with_shared_service_raises_non_signature_errors(tmp_path) -> None:
@@ -303,6 +368,28 @@ def test_resolve_with_shared_service_raises_non_signature_errors(tmp_path) -> No
         )
 
 
+def test_resolve_with_shared_service_does_not_mask_internal_type_error(tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    project = tmp_path / "project"
+    workspace.mkdir()
+    project.mkdir()
+
+    def _service(**_kwargs):
+        raise TypeError("internal service bug")
+
+    with pytest.raises(RuntimeError, match="shared root resolution service failed") as exc_info:
+        _resolve_with_shared_service(
+            {"workspace": str(workspace)},
+            workspace_dir=str(workspace),
+            project_dir=str(project),
+            hook_payload=_policy(root_resolution_service=_service),
+            cwd=str(tmp_path),
+        )
+
+    assert isinstance(exc_info.value.__cause__, TypeError)
+    assert "internal service bug" in str(exc_info.value.__cause__)
+
+
 def test_project_root_from_payload_prefers_explicit_project_dir_input(tmp_path) -> None:
     workspace = tmp_path / "project" / "src" / "notes"
     project = tmp_path / "project"
@@ -322,7 +409,7 @@ def test_project_root_from_payload_falls_back_to_workspace_when_resolution_fails
     workspace = tmp_path / "workspace"
     workspace.mkdir()
 
-    with patch("gpd.hooks.payload_roots.resolve_project_root", return_value=None):
+    with patch("gpd.hooks.payload_roots.resolve_project_roots", return_value=None):
         result = project_root_from_payload(
             {"project_dir": str(tmp_path / "missing")},
             str(workspace),
@@ -384,6 +471,7 @@ def test_resolve_payload_roots_marks_untrusted_project_dir_when_workspace_walkup
     workspace = project / "src" / "notes"
     workspace.mkdir(parents=True)
     (project / "GPD").mkdir()
+    (project / "GPD" / "PROJECT.md").write_text("# Project\n", encoding="utf-8")
 
     roots = resolve_payload_roots(
         {"workspace": {"cwd": str(workspace), "project_dir": str(tmp_path / "stale-project-dir")}},
@@ -434,10 +522,12 @@ def test_resolve_payload_roots_rejects_unrelated_verified_project_dir_hint(tmp_p
     workspace = project / "src" / "notes"
     workspace.mkdir(parents=True)
     (project / "GPD").mkdir()
+    (project / "GPD" / "PROJECT.md").write_text("# Project\n", encoding="utf-8")
 
     unrelated = tmp_path / "other-project"
     unrelated.mkdir()
     (unrelated / "GPD").mkdir()
+    (unrelated / "GPD" / "PROJECT.md").write_text("# Other\n", encoding="utf-8")
 
     roots = resolve_payload_roots(
         {"workspace": {"cwd": str(workspace), "project_dir": str(unrelated)}},
@@ -447,6 +537,54 @@ def test_resolve_payload_roots_rejects_unrelated_verified_project_dir_hint(tmp_p
     assert roots.workspace_dir == str(workspace.resolve(strict=False))
     assert roots.project_root == str(project.resolve(strict=False))
     assert roots.project_dir_present is True
+    assert roots.project_dir_trusted is False
+
+
+def test_trusted_payload_project_root_accepts_policy_owned_verified_ancestor(tmp_path) -> None:
+    project = tmp_path / "project"
+    workspace = project / "src" / "notes"
+    workspace.mkdir(parents=True)
+    (project / "GPD").mkdir()
+
+    result = trusted_payload_project_root(
+        {"workspace": {"cwd": str(workspace), "project_dir": str(project)}},
+        str(workspace),
+        hook_payload=_policy(workspace_keys=("cwd",), project_dir_keys=("project_dir",)),
+    )
+
+    assert result == str(project.resolve(strict=False))
+
+
+def test_trusted_payload_project_root_rejects_unrelated_project_hint(tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    unrelated = tmp_path / "other-project"
+    unrelated.mkdir()
+    (unrelated / "GPD").mkdir()
+
+    result = trusted_payload_project_root(
+        {"workspace": {"cwd": str(workspace), "project_dir": str(unrelated)}},
+        str(workspace),
+        hook_payload=_policy(workspace_keys=("cwd",), project_dir_keys=("project_dir",)),
+    )
+
+    assert result is None
+
+
+def test_resolve_payload_roots_does_not_capture_empty_ancestor_gpd_without_project_dir(tmp_path) -> None:
+    project = tmp_path / "project"
+    workspace = project / "src" / "notes"
+    workspace.mkdir(parents=True)
+    (project / "GPD").mkdir()
+
+    roots = resolve_payload_roots(
+        {"workspace": {"cwd": str(workspace)}},
+        policy_getter=lambda _cwd: _policy(workspace_keys=("cwd",), project_dir_keys=("project_dir",)),
+    )
+
+    assert roots.workspace_dir == str(workspace.resolve(strict=False))
+    assert roots.project_root == str(workspace.resolve(strict=False))
+    assert roots.project_dir_present is False
     assert roots.project_dir_trusted is False
 
 

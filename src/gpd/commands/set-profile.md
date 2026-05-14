@@ -29,5 +29,5 @@ This command only changes `model_profile`. If you want to pin concrete runtime m
 </execution_context>
 
 <process>
-Follow `@{GPD_INSTALL_DIR}/workflows/set-profile.md` exactly.
+This is an action command. Follow the included set-profile workflow exactly and execute its update step now; do not only describe the available profiles.
    </process>

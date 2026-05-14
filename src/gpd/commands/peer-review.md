@@ -29,6 +29,7 @@ command-policy:
       - .csv
       - .tsv
       - .xlsx
+      - .xlsm
     bootstrap_allowed: false
   output_policy:
     output_mode: managed
@@ -38,16 +39,16 @@ review-contract:
   review_mode: publication
   schema_version: 1
   required_outputs:
-    - "GPD/review/CLAIMS{round_suffix}.json"
-    - "GPD/review/STAGE-reader{round_suffix}.json"
-    - "GPD/review/STAGE-literature{round_suffix}.json"
-    - "GPD/review/STAGE-math{round_suffix}.json"
-    - "GPD/review/STAGE-physics{round_suffix}.json"
-    - "GPD/review/STAGE-interestingness{round_suffix}.json"
-    - "GPD/review/REVIEW-LEDGER{round_suffix}.json"
-    - "GPD/review/REFEREE-DECISION{round_suffix}.json"
-    - "GPD/REFEREE-REPORT{round_suffix}.md"
-    - "GPD/REFEREE-REPORT{round_suffix}.tex"
+    - "${REVIEW_ROOT}/CLAIMS{round_suffix}.json"
+    - "${REVIEW_ROOT}/STAGE-reader{round_suffix}.json"
+    - "${REVIEW_ROOT}/STAGE-literature{round_suffix}.json"
+    - "${REVIEW_ROOT}/STAGE-math{round_suffix}.json"
+    - "${REVIEW_ROOT}/STAGE-physics{round_suffix}.json"
+    - "${REVIEW_ROOT}/STAGE-interestingness{round_suffix}.json"
+    - "${REVIEW_ROOT}/REVIEW-LEDGER{round_suffix}.json"
+    - "${REVIEW_ROOT}/REFEREE-DECISION{round_suffix}.json"
+    - "${PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.md"
+    - "${PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.tex"
   required_evidence:
     - "existing manuscript or explicit external artifact target"
   blocking_conditions:
@@ -60,14 +61,14 @@ review-contract:
     - "manuscript"
     - "manuscript_proof_review"
   stage_artifacts:
-    - "GPD/review/CLAIMS{round_suffix}.json"
-    - "GPD/review/STAGE-reader{round_suffix}.json"
-    - "GPD/review/STAGE-literature{round_suffix}.json"
-    - "GPD/review/STAGE-math{round_suffix}.json"
-    - "GPD/review/STAGE-physics{round_suffix}.json"
-    - "GPD/review/STAGE-interestingness{round_suffix}.json"
-    - "GPD/review/REVIEW-LEDGER{round_suffix}.json"
-    - "GPD/review/REFEREE-DECISION{round_suffix}.json"
+    - "${REVIEW_ROOT}/CLAIMS{round_suffix}.json"
+    - "${REVIEW_ROOT}/STAGE-reader{round_suffix}.json"
+    - "${REVIEW_ROOT}/STAGE-literature{round_suffix}.json"
+    - "${REVIEW_ROOT}/STAGE-math{round_suffix}.json"
+    - "${REVIEW_ROOT}/STAGE-physics{round_suffix}.json"
+    - "${REVIEW_ROOT}/STAGE-interestingness{round_suffix}.json"
+    - "${REVIEW_ROOT}/REVIEW-LEDGER{round_suffix}.json"
+    - "${REVIEW_ROOT}/REFEREE-DECISION{round_suffix}.json"
   conditional_requirements:
     - when: project-backed manuscript review
       required_evidence:
@@ -106,9 +107,9 @@ review-contract:
         - "reproducibility_ready"
     - when: theorem-bearing claims are present
       required_outputs:
-        - "GPD/review/PROOF-REDTEAM{round_suffix}.md"
+        - "${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md"
       stage_artifacts:
-        - "GPD/review/PROOF-REDTEAM{round_suffix}.md"
+        - "${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md"
   scope_variants:
     - scope: explicit_artifact
       activation: explicit external artifact subject was supplied
@@ -141,8 +142,8 @@ allowed-tools:
 Conduct a skeptical peer review of a completed manuscript from the current GPD project or an explicit external artifact, using whatever supporting research artifacts are actually available.
 Peer review supports two intake modes: `project-backed manuscript review` and `standalone explicit-artifact review`.
 
-See `@{GPD_INSTALL_DIR}/references/publication/publication-pipeline-modes.md` for the canonical publication boundary. Keep the wrapper focused on the manuscript target, review prerequisites, and final routing. When announcing the panel to the user, say what each stage does in one concise sentence: Stage 1 maps the paper's claims; Stages 2-3 check prior work and mathematical soundness in parallel; theorem-bearing claims also trigger the auxiliary gpd-check-proof critic; Stage 4 checks whether the physical interpretation is supported; Stage 5 judges significance and venue fit; Stage 6 synthesizes everything into the final recommendation.
-Keep GPD-authored auxiliary review artifacts under `GPD/` in the invoking workspace. The manuscript itself and any manuscript-local publication manifests stay rooted at the resolved manuscript directory.
+See `{GPD_INSTALL_DIR}/references/publication/publication-pipeline-modes.md` for the canonical publication boundary. Keep the wrapper focused on the manuscript target, review prerequisites, and final routing. When announcing the panel to the user, say what each stage does in one concise sentence: Stage 1 maps the paper's claims; Stages 2-3 check prior work and mathematical soundness in parallel; theorem-bearing claims also trigger the auxiliary gpd-check-proof critic; Stage 4 checks whether the physical interpretation is supported; Stage 5 judges significance and venue fit; Stage 6 synthesizes everything into the final recommendation.
+Use centralized preflight's selected publication/review roots for GPD-authored review artifacts. Never write managed-subject review artifacts to the global `GPD/review` fallback. Keep the manuscript and manuscript-local publication manifests rooted at the resolved manuscript directory.
 
 **Why subagent:** Staged manuscript review burns context fast. Fresh context keeps the orchestrator lean.
 </objective>
@@ -157,17 +158,12 @@ Treat `project-backed manuscript review` as the strict publication-pipeline mode
 
 If the current folder is a GPD project, treat `GPD/STATE.md` and `GPD/ROADMAP.md` as optional project context. Do not require them for standalone external artifact review.
 Interpret the review contract in two modes: project-backed review requires project state, roadmap, conventions, research artifacts, verification reports, and manuscript-root publication artifacts. Fail closed for project-backed review missing required manuscript-root publication artifacts. For explicit external-artifact review: the resolved manuscript target is required, while manuscript-local publication artifacts are optional supporting context when present.
-If centralized preflight exposes a subject-owned publication root for an explicit external publication subject, keep the round-artifact family bound there and do not infer a full publication-tree migration from that one continuation path.
+If centralized preflight exposes a subject-owned publication root for a managed or explicit external publication subject, keep the round-artifact family bound there and do not infer a full publication-tree relocation from that one continuation path.
 
 The default in-project manuscript family is limited to `paper/`, `manuscript/`, and `draft/`.
-Compatibility note: centralized preflight may also hand you a resolved project-managed manuscript lane at `GPD/publication/{subject_slug}/manuscript`. Treat that as the active current-project manuscript subject, but do not relocate the staged review outputs beside the manuscript.
-Let centralized preflight resolve the active manuscript entrypoint from the explicit argument when provided, otherwise from the manuscript-root `ARTIFACT-MANIFEST.json`, then `PAPER-CONFIG.json`, then the canonical current manuscript entrypoint rules for those roots. Explicit external artifact intake may also target `.tex`, `.md`, `.txt`, or `.pdf`. Additional supported external artifact formats also include `.docx`, `.csv`, `.tsv`, and `.xlsx`. Keep canonical in-project manuscript-root discovery on the manifest/config-resolved `.tex` / `.md` entrypoint path for those roots. Do not use ad hoc wildcard discovery.
+Centralized preflight may also hand you a resolved project-managed manuscript lane at `GPD/publication/{subject_slug}/manuscript`. Treat that as the active current-project manuscript subject, but write staged review outputs to the selected review root `GPD/publication/{subject_slug}/review`, not beside the manuscript and not under the default global `GPD/review` path.
+Let centralized preflight resolve the active manuscript entrypoint from the explicit argument when provided, otherwise from the manuscript-root `ARTIFACT-MANIFEST.json`, then `PAPER-CONFIG.json`, then the canonical current manuscript entrypoint rules for those roots. Explicit external artifact intake may also target `.tex`, `.md`, `.txt`, or `.pdf`. Additional supported external artifact formats also include `.docx`, `.csv`, `.tsv`, `.xlsx`, and `.xlsm`. Keep canonical in-project manuscript-root discovery on the manifest/config-resolved `.tex` / `.md` entrypoint path for those roots. Do not use ad hoc wildcard discovery.
 If no explicit target is supplied, the workflow may either use the current GPD project manuscript when available or ask the user to point at a specific artifact path.
-
-```bash
-# Regression guardrail wording retained for test alignment:
-# Do not use ad hoc glob discovery.
-```
 
 </context>
 
@@ -178,12 +174,12 @@ Follow the included workflow file exactly.
 <success_criteria>
 - [ ] Manuscript target located or explicitly resolved from arguments
 - [ ] Review preflight passed or blocking issues were surfaced clearly
-- [ ] Claim index and specialist stage artifacts written under `GPD/review/`
-- [ ] Theorem-bearing manuscripts also produce `GPD/review/PROOF-REDTEAM{round_suffix}.md` from `gpd-check-proof`
-- [ ] `GPD/review/REVIEW-LEDGER{round_suffix}.json` and `GPD/review/REFEREE-DECISION{round_suffix}.json` created
+- [ ] Claim index and specialist stage artifacts written under `${REVIEW_ROOT}`
+- [ ] Theorem-bearing manuscripts also produce `${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md` from `gpd-check-proof`
+- [ ] `${REVIEW_ROOT}/REVIEW-LEDGER{round_suffix}.json` and `${REVIEW_ROOT}/REFEREE-DECISION{round_suffix}.json` created
 - [ ] Final adjudicating gpd-referee spawned with the stage artifacts and manuscript
-- [ ] `GPD/REFEREE-REPORT{round_suffix}.md` created with matching `.tex` companion
-- [ ] `GPD/CONSISTENCY-REPORT.md` created when supported by the referee workflow
+- [ ] `${PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.md` created with matching `.tex` companion
+- [ ] `${PUBLICATION_ROOT}/CONSISTENCY-REPORT.md` created when supported by the referee workflow
 - [ ] Recommendation, issue counts, and actionable next steps presented
 - [ ] Revision rounds respected if prior author responses already exist
 </success_criteria>

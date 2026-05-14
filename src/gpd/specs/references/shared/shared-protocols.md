@@ -69,7 +69,7 @@ Every phase, plan, or derivation must declare:
 
 At the start of every task:
 
-1. Read `convention_lock` from `state.json`; `STATE.md` is the readable mirror
+1. Read `convention_lock` from `state.json`; `STATE.md` is the readable state document
 2. Read `conventions` from the plan frontmatter
 3. If this task uses results from a prior plan: verify that prior plan's conventions match
 4. State explicitly at the top of every derivation file which conventions are in effect
@@ -428,7 +428,7 @@ Both researcher agents follow the same methodology, differing only in scope (pro
 |--------|----------------------|---------------------|
 | Scope | Entire project domain | Single phase domain |
 | Trigger | gpd:new-project | gpd:plan-phase or gpd:research-phase |
-| Output | GPD/research/ (5 files) | ${phase_dir}/{phase}-RESEARCH.md |
+| Output | GPD/literature/ (5 files) | ${phase_dir}/{phase}-RESEARCH.md |
 | Consumer | gpd-roadmapper | gpd-planner |
 | Commits | No (orchestrator commits) | No (orchestrator commits) |
 

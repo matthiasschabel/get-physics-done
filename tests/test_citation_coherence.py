@@ -1,4 +1,4 @@
-"""Tests for citation-bibliography coherence check (BUG-076)."""
+"""Assertions for the citation-bibliography coherence check."""
 
 from __future__ import annotations
 
@@ -23,6 +23,18 @@ class TestCitationBibCoherence:
         result = check_citation_bib_coherence(tex, bib)
         assert result.warnings == []
         assert result.unreferenced_bib_keys == set()
+        assert result.unresolved_cite_keys == set()
+
+    def test_commented_citations_ignored_but_escaped_percent_keeps_visible_citation(self) -> None:
+        tex = "% \\cite{hidden2026}\nValue is 50\\% of \\cite{visible2026}."
+        bib = (
+            "@article{hidden2026,\n  title={Hidden},\n  author={Doe},\n  year={2026}\n}\n"
+            "@article{visible2026,\n  title={Visible},\n  author={Doe},\n  year={2026}\n}\n"
+        )
+        result = check_citation_bib_coherence(tex, bib)
+
+        assert result.tex_cite_keys == {"visible2026"}
+        assert result.unreferenced_bib_keys == {"hidden2026"}
         assert result.unresolved_cite_keys == set()
 
     def test_partial_citation_warns_unreferenced(self) -> None:
@@ -143,13 +155,13 @@ class TestCitationBibCoherence:
         assert result.warnings == []
 
     def test_citetext_ignored_inner_citealp_extracted(self) -> None:
-        r"""\\citetext is excluded from the regex (BUG-076 fix).
+        r"""Assert \\citetext is excluded from the regex.
 
         \\citetext wraps free-form text that may contain nested citation
         commands like \\citealp.  Because the non-brace-aware regex
         ``\{([^}]*)\}`` truncates at the first inner ``}``, including
-        \\citetext produces garbage keys.  Instead, \\citetext is ignored
-        and the inner \\citealp commands are matched individually.
+        \\citetext produces garbage keys.  The extractor therefore ignores
+        \\citetext and matches the inner \\citealp commands individually.
         """
         tex = r"\citetext{see \citealp{a}; compare \citealp{b}}"
         bib = (

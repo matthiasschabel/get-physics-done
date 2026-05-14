@@ -12,6 +12,9 @@ __all__ = [
     "command_visibility_note",
     "MODEL_VISIBLE_CLOSED_SCHEMA_PHRASE",
     "AGENT_ARTIFACT_WRITE_AUTHORITIES",
+    "AGENT_FRONTMATTER_AUTHORITY_POINTER",
+    "INTERNAL_AGENT_BOUNDARY_POINTER",
+    "READ_ONLY_INTERNAL_AGENT_BOUNDARY_POINTER",
     "AGENT_COMMIT_AUTHORITIES",
     "AGENT_ROLE_FAMILIES",
     "AGENT_SHARED_STATE_AUTHORITIES",
@@ -44,6 +47,18 @@ AGENT_SURFACES = ("public", "internal")
 AGENT_ROLE_FAMILIES = ("worker", "analysis", "verification", "review", "coordination")
 AGENT_ARTIFACT_WRITE_AUTHORITIES = ("scoped_write", "read_only")
 AGENT_SHARED_STATE_AUTHORITIES = ("return_only", "direct")
+AGENT_FRONTMATTER_AUTHORITY_POINTER = (
+    "Authority: use the frontmatter-derived Agent Requirements block for commit, surface, artifact, and "
+    "shared-state policy."
+)
+INTERNAL_AGENT_BOUNDARY_POINTER = (
+    "Internal specialist boundary: stay inside assigned scoped artifacts and the return envelope; do not act as "
+    "the default writable implementation agent."
+)
+READ_ONLY_INTERNAL_AGENT_BOUNDARY_POINTER = (
+    "Internal specialist boundary: stay read-only inside assigned scoped artifacts and the return envelope; "
+    "do not act as the default writable implementation agent."
+)
 COMMAND_POLICY_FRONTMATTER_KEY = "command-policy"
 COMMAND_POLICY_PROMPT_WRAPPER_KEY = "command_policy"
 REVIEW_CONTRACT_MODES = ("publication", "review")
@@ -84,113 +99,63 @@ REVIEW_CONTRACT_PREFLIGHT_CHECKS = (
     "phase_summaries",
     "phase_proof_review",
 )
-_EPISTEMIC_GUARDRAIL_CLAUSES = (
-    "Apply scientific skepticism and critical thinking. Stress-test both the user's preferred explanation and your own first impression without treating the user as an adversary.",
-    "Prefer skeptical verification, disconfirming evidence, and explicit uncertainty over agreeable affirmation.",
-    "Do not claim any result, citation, file, or artifact exists unless you directly observed it in the provided context or produced it in this session.",
-    "If search, execution, or generation fails, report the failure plainly instead of inventing fallback content.",
-)
-
-
 def _join_disjunction(values: tuple[str, ...]) -> str:
     return " or ".join(f"`{value}`" for value in values)
-
-
-def _command_agent_labels() -> tuple[str, ...]:
-    try:
-        from gpd.registry import canonical_agent_names
-    except Exception:
-        return ()
-    return canonical_agent_names()
 
 
 def agent_visibility_note() -> str:
     return render_model_visible_note(
         "Agent YAML rules.",
         "`tools` is a list of tool names;",
-        f"`commit_authority` must be {_join_disjunction(AGENT_COMMIT_AUTHORITIES)};",
-        f"`surface` must be {_join_disjunction(AGENT_SURFACES)};",
-        f"`role_family` must be {_join_disjunction(AGENT_ROLE_FAMILIES)};",
-        f"`artifact_write_authority` must be {_join_disjunction(AGENT_ARTIFACT_WRITE_AUTHORITIES)};",
-        f"`shared_state_authority` must be {_join_disjunction(AGENT_SHARED_STATE_AUTHORITIES)}.",
-        *_EPISTEMIC_GUARDRAIL_CLAUSES,
+        "`commit_authority`, `surface`, `role_family`, `artifact_write_authority`, and `shared_state_authority` "
+        "must use the closed agent-authority vocabularies;",
+        "the active YAML values below are authoritative for this agent.",
     )
 
 
 def command_visibility_note() -> str:
-    agent_labels = _command_agent_labels()
-    agent_clause = (
-        f"`agent` when present must be one of {_join_disjunction(agent_labels)};"
-        if agent_labels
-        else "`agent` when present must match a built-in canonical agent label exactly;"
-    )
     return render_model_visible_note(
         "Command YAML rules.",
-        "Strict booleans only.",
-        f"`{COMMAND_POLICY_PROMPT_WRAPPER_KEY}` when present is the typed additive command-policy wrapper; "
-        f"its canonical frontmatter key is `{COMMAND_POLICY_FRONTMATTER_KEY}`;",
-        f"`{COMMAND_POLICY_PROMPT_WRAPPER_KEY}.schema_version` must be the integer `1`;",
-        f"`{COMMAND_POLICY_PROMPT_WRAPPER_KEY}.subject_policy`, "
-        f"`{COMMAND_POLICY_PROMPT_WRAPPER_KEY}.supporting_context_policy`, and "
-        f"`{COMMAND_POLICY_PROMPT_WRAPPER_KEY}.output_policy` are closed mappings when present;",
-        f"`{COMMAND_POLICY_PROMPT_WRAPPER_KEY}.subject_policy.explicit_input_kinds`, "
-        f"`{COMMAND_POLICY_PROMPT_WRAPPER_KEY}.subject_policy.allowed_suffixes`, "
-        f"`{COMMAND_POLICY_PROMPT_WRAPPER_KEY}.subject_policy.supported_roots`, "
-        f"`{COMMAND_POLICY_PROMPT_WRAPPER_KEY}.supporting_context_policy.required_file_patterns`, and "
-        f"`{COMMAND_POLICY_PROMPT_WRAPPER_KEY}.supporting_context_policy.optional_file_patterns` "
-        "are lists of strings when present;",
-        f"`{COMMAND_POLICY_PROMPT_WRAPPER_KEY}.supporting_context_policy.project_context_mode` "
-        f"must be {_join_disjunction(VALID_CONTEXT_MODES)} when present;",
-        f"`{COMMAND_POLICY_PROMPT_WRAPPER_KEY}.subject_policy.allowed_suffixes` must use dotted suffixes like `.tex` or `.md` when present;",
-        "Typed command policy is runtime-authoritative for command intake, supporting-context routing, and managed-output "
-        "surfaces when a command declares it. Keep legacy `context_mode`, `project_reentry_capable`, and `requires.files` "
-        "present as compatibility metadata even when typed policy refines runtime routing.",
-        f"`context_mode` must be {_join_disjunction(VALID_CONTEXT_MODES)};",
-        "`allowed_tools` is a list of tool names when present;",
-        "`requires` is a closed mapping when present; only `files` is supported.",
-        "`requires.files` is a string or list of strings.",
-        "Empty optional fields may be omitted.",
-        agent_clause,
-        "`project_reentry_capable` must be `true` or `false` and may be `true` only when `context_mode` is `project-required`.",
-        "Missing required files or other decisive evidence are blocking for strong claims; do not treat omissions or proxies as success.",
+        "Strict booleans only; omit empty optional fields.",
+        f"`{COMMAND_POLICY_PROMPT_WRAPPER_KEY}` is the typed additive command-policy wrapper "
+        f"(frontmatter `{COMMAND_POLICY_FRONTMATTER_KEY}`) with integer `schema_version: 1`.",
+        "Its list fields are string lists, suffix lists use dotted suffixes, and context modes use "
+        f"{_join_disjunction(VALID_CONTEXT_MODES)}.",
+        "When present, typed command policy controls intake, supporting-context routing, and managed outputs.",
+        "`allowed_tools` is a tool-name list.",
+        "`requires` supports only `files`, as a string or string list.",
+        "`agent` must match a built-in canonical agent label exactly.",
+        "`project_reentry_capable` is boolean and may be true only with `context_mode: project-required`.",
         "Any user-visible completion, checkpoint, blocked return, failed return, retry gate, or stop that expects later "
-        "action must end with a concrete `## > Next Up` or `## >> Next Up` section. Include copy-pasteable GPD "
-        "commands when they exist; otherwise name the exact artifact or review action. Use `gpd:suggest-next` as the "
-        "recovery/confirmation command for project-backed states.",
-        *_EPISTEMIC_GUARDRAIL_CLAUSES,
+        "action must end with `## > Next Up`; include concrete GPD commands and `gpd:suggest-next` for project-backed recovery.",
     )
 
 
 def review_contract_visibility_note() -> str:
-    review_modes = _join_disjunction(REVIEW_CONTRACT_MODES)
-    conditional_whens = _join_disjunction(REVIEW_CONTRACT_CONDITIONAL_WHENS)
-    required_states = _join_disjunction(REVIEW_CONTRACT_REQUIRED_STATES)
-    preflight_checks = _join_disjunction(REVIEW_CONTRACT_PREFLIGHT_CHECKS)
     return render_model_visible_note(
         "Review-contract YAML rules.",
         f"`{REVIEW_CONTRACT_PROMPT_WRAPPER_KEY}` is the wrapper key; `schema_version` must be the integer `1`;",
-        "Empty optional fields may be omitted.",
-        f"`review_mode` must be {review_modes};",
-        f"`required_state` when present must be {required_states};",
-        "`required_outputs`, `required_evidence`, `blocking_conditions`, `preflight_checks`, `stage_artifacts`, "
-        "and `scope_variants` are lists when present;",
-        f"`preflight_checks` entries must be {preflight_checks};",
-        f"`conditional_requirements[].when` must be one of {conditional_whens};",
-        "`conditional_requirements[].preflight_checks` is a list when present and its entries must also be valid `preflight_checks` values.",
-        "`conditional_requirements[].blocking_preflight_checks` is a list when present and its entries must also be valid `preflight_checks` values.",
+        "Omit empty optional fields.",
+        "`review_mode`, `required_state`, `preflight_checks`, `conditional_requirements[].when`, and scope-variant "
+        "preflight fields must use the closed review-contract vocabularies; active YAML values below are authoritative.",
+        "List fields when present: `required_outputs`, `required_evidence`, `blocking_conditions`, "
+        "`preflight_checks`, `stage_artifacts`, `scope_variants`;",
+        "`conditional_requirements[].preflight_checks` and `conditional_requirements[].blocking_preflight_checks` "
+        "are lists of valid preflight-check values when present.",
         "Each `conditional_requirements[].when` value may appear at most once.",
         "List fields reject blank entries and duplicates.",
-        "Each conditional requirement must declare at least one non-empty field.",
-        "`scope_variants[].scope` and `scope_variants[].activation` must be non-empty strings.",
-        "`scope_variants[].relaxed_preflight_checks` and `scope_variants[].optional_preflight_checks` are lists when present and their entries must also satisfy the top-level `preflight_checks` vocabulary.",
-        "`scope_variants[].required_outputs_override`, `scope_variants[].required_evidence_override`, and `scope_variants[].blocking_conditions_override` are lists when present.",
-        "Each `scope_variants[].scope` value may appear at most once.",
-        "Each scope variant must declare at least one non-empty override or preflight field.",
-        "Runtime applies active scope variants additively: `relaxed_preflight_checks` make checks non-blocking, "
-        "`optional_preflight_checks` make missing inputs advisory while still validating present artifacts, and "
-        "non-empty `*_override` lists replace the top-level list for the active scope.",
-        "Missing required outputs or evidence must stay explicit; do not omit, invent, or replace them with proxies.",
-        *_EPISTEMIC_GUARDRAIL_CLAUSES,
+        "Each conditional requirement needs one non-empty field.",
+        "`scope_variants[].scope`/`.activation` must be non-empty strings.",
+        "`scope_variants[].relaxed_preflight_checks`/`.optional_preflight_checks` are lists of valid "
+        "preflight-check values when present.",
+        "Scope override fields `required_outputs_override`, `required_evidence_override`, "
+        "`blocking_conditions_override` are lists when present.",
+        "`relaxed_preflight_checks` make named checks non-blocking for that scope; `optional_preflight_checks` "
+        "make missing inputs advisory.",
+        "Non-empty scope override lists replace matching top-level lists.",
+        "Each `scope_variants[].scope` may appear at most once.",
+        "Each scope variant needs one non-empty override or preflight field.",
+        "Runtime applies active scope variants additively.",
     )
 
 

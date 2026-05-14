@@ -12,7 +12,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from gpd._python_compat import MIN_SUPPORTED_PYTHON
+from gpd._python_compat import (
+    MIN_SUPPORTED_PYTHON,
+)
+from gpd._python_compat import (
+    RECOMMENDED_PYTHON_VERSION as PYTHON_COMPAT_RECOMMENDED_PYTHON_VERSION,
+)
 from gpd.core.return_contract import REQUIRED_RETURN_FIELDS, VALID_RETURN_STATUSES
 
 __all__ = [
@@ -46,6 +51,8 @@ __all__ = [
     "MIN_PYTHON_MAJOR",
     "MIN_PYTHON_MINOR",
     "OPTIONAL_PLANNING_FILES",
+    "OBSERVABILITY_CURRENT_EXECUTION_FILENAME",
+    "OBSERVABILITY_LAST_NOTIFY_FILENAME",
     "OBSERVABILITY_CURRENT_SESSION_FILENAME",
     "OBSERVABILITY_DIR_NAME",
     "OBSERVABILITY_SESSIONS_DIR_NAME",
@@ -178,7 +185,7 @@ EXECUTION_LINEAGE_HEAD_FILENAME = "execution-head.json"
 EXECUTION_LINEAGE_SCHEMA_VERSION = 1
 """Schema version for execution lineage records and head projections."""
 
-EXECUTION_LINEAGE_REDUCER_VERSION = "1"
+EXECUTION_LINEAGE_REDUCER_VERSION = "2"
 """Reducer version for the execution lineage projector."""
 
 MILESTONES_DIR_NAME = "milestones"
@@ -389,7 +396,7 @@ MIN_PYTHON_MAJOR = MIN_SUPPORTED_PYTHON[0]
 MIN_PYTHON_MINOR = MIN_SUPPORTED_PYTHON[1]
 """Minimum required Python minor version."""
 
-RECOMMENDED_PYTHON_VERSION: tuple[int, int] = (3, 12)
+RECOMMENDED_PYTHON_VERSION: tuple[int, int] = PYTHON_COMPAT_RECOMMENDED_PYTHON_VERSION
 """Recommended Python version for best compatibility."""
 
 SEED_PATTERN_INITIAL_OCCURRENCES: int = 5

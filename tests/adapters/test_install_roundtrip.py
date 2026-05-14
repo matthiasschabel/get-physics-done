@@ -1,4 +1,4 @@
-"""Integration tests: install → read back → verify for all 4 runtimes.
+"""Integration tests: install → read back → verify for all catalog runtimes.
 
 Tests that installed content matches source expectations for each adapter.
 Exercises both the write path (install) and the read path (loading/parsing
@@ -12,6 +12,7 @@ import json
 import os
 import re
 import tomllib
+from functools import cache
 from pathlib import Path
 
 import pytest
@@ -19,6 +20,7 @@ import pytest
 from gpd.adapters import get_adapter, iter_adapters
 from gpd.adapters.claude_code import ClaudeCodeAdapter
 from gpd.adapters.codex import CodexAdapter
+from gpd.adapters.copilot_cli import CopilotCliAdapter
 from gpd.adapters.gemini import GeminiAdapter
 from gpd.adapters.install_utils import (
     build_runtime_cli_bridge_command,
@@ -27,7 +29,13 @@ from gpd.adapters.install_utils import (
     translate_frontmatter_tool_names,
 )
 from gpd.adapters.opencode import OpenCodeAdapter
-from gpd.adapters.runtime_catalog import get_runtime_descriptor, get_shared_install_metadata, resolve_global_config_dir
+from gpd.adapters.runtime_catalog import (
+    get_runtime_descriptor,
+    get_shared_install_metadata,
+    iter_runtime_descriptors,
+    list_runtime_names,
+    resolve_global_config_dir,
+)
 from gpd.adapters.tool_names import build_canonical_alias_map
 from gpd.core.public_surface_contract import local_cli_bridge_commands
 from gpd.registry import load_agents_from_dir
@@ -35,8 +43,14 @@ from tests.doc_surface_contracts import assert_publication_lane_boundary_contrac
 
 REPO_GPD_ROOT = Path(__file__).resolve().parents[2] / "src" / "gpd"
 RUNTIME_ALIAS_MAP = build_canonical_alias_map(adapter.tool_name_map for adapter in iter_adapters())
+FULL_RUNTIME_MATRIX = tuple(descriptor.runtime_name for descriptor in iter_runtime_descriptors())
 _SHARED_INSTALL = get_shared_install_metadata()
 _INSTALL_CACHE: dict[tuple[str, tuple[str, ...]], Path] = {}
+VERIFIER_SCHEMA_INCLUDE_SUFFIXES = (
+    "templates/verification-report.md",
+    "templates/contract-results-schema.md",
+    "references/shared/canonical-schema-discipline.md",
+)
 
 
 def expected_opencode_bridge(target: Path, *, is_global: bool = False, explicit_target: bool = False) -> str:
@@ -83,6 +97,14 @@ def _collect_textual_artifacts(root: Path) -> str:
     return "\n".join(chunks)
 
 
+def _raw_include_count(text: str, include_suffix: str) -> int:
+    return sum(
+        1
+        for line in text.splitlines()
+        if line.strip().startswith("@") and line.strip().endswith(include_suffix)
+    )
+
+
 def _install_real_repo_for_runtime(tmp_path: Path, runtime: str, source_root: Path = REPO_GPD_ROOT) -> Path:
     if runtime == "claude-code":
         target = tmp_path / ".claude"
@@ -110,6 +132,12 @@ def _install_real_repo_for_runtime(tmp_path: Path, runtime: str, source_root: Pa
         OpenCodeAdapter().install(source_root, target)
         return target
 
+    if runtime == "copilot-cli":
+        target = tmp_path / ".copilot"
+        target.mkdir()
+        CopilotCliAdapter().install(source_root, target)
+        return target
+
     raise AssertionError(f"Unsupported runtime {runtime}")
 
 
@@ -121,6 +149,12 @@ def _install_gemini_for_tests(gpd_root: Path, target: Path) -> GeminiAdapter:
     return adapter
 
 
+def test_install_roundtrip_full_runtime_matrix_matches_catalog_runtimes() -> None:
+    assert FULL_RUNTIME_MATRIX == tuple(list_runtime_names())
+    assert FULL_RUNTIME_MATRIX == tuple(adapter.runtime_name for adapter in iter_adapters())
+
+
+@cache
 def _source_signature(root: Path) -> tuple[str, ...]:
     signature_entries: list[str] = []
     for path in sorted(root.rglob("*")):
@@ -244,7 +278,7 @@ def _read_compare_experiment_command(tmp_path: Path, target: Path, runtime: str)
         assert isinstance(prompt, str)
         return prompt
 
-    if runtime == "opencode":
+    if runtime in {"copilot-cli", "opencode"}:
         return (target / "command" / "gpd-compare-experiment.md").read_text(encoding="utf-8")
 
     raise AssertionError(f"Unsupported runtime {runtime}")
@@ -263,7 +297,7 @@ def _read_runtime_command_prompt(tmp_path: Path, target: Path, runtime: str, com
         assert isinstance(prompt, str)
         return prompt
 
-    if runtime == "opencode":
+    if runtime in {"copilot-cli", "opencode"}:
         return (target / "command" / f"gpd-{command_name}.md").read_text(encoding="utf-8")
 
     raise AssertionError(f"Unsupported runtime {runtime}")
@@ -282,14 +316,14 @@ def _read_runtime_update_surface(tmp_path: Path, target: Path, runtime: str) -> 
         assert isinstance(prompt, str)
         return prompt
 
-    if runtime == "opencode":
+    if runtime in {"copilot-cli", "opencode"}:
         return (target / "command" / "gpd-update.md").read_text(encoding="utf-8")
 
     raise AssertionError(f"Unsupported runtime {runtime}")
 
 
 def _read_runtime_agent_prompt(target: Path, runtime: str, agent_name: str) -> str:
-    if runtime in {"claude-code", "codex", "gemini", "opencode"}:
+    if runtime in {"claude-code", "codex", "copilot-cli", "gemini", "opencode"}:
         return (target / "agents" / f"{agent_name}.md").read_text(encoding="utf-8")
     raise AssertionError(f"Unsupported runtime {runtime}")
 
@@ -315,8 +349,9 @@ def _assert_installed_contract_visibility(
     execute_phase = _canonicalize_runtime_markdown(execute_phase, runtime=runtime)
     verify_work = _canonicalize_runtime_markdown(verify_work, runtime=runtime)
 
-    assert "Execute all phase plans with wave-based parallelization" in execute_phase
-    assert "Context budget: ~15% orchestrator, fresh context per subagent." in execute_phase
+    assert "Execute phase plans through the workflow-owned wave executor" in execute_phase
+    assert "references/orchestration/context-budget.md" in execute_phase
+    assert "<inline_guidance>" not in execute_phase
 
     assert "templates/contract-results-schema.md" in verifier
     assert "plan_contract_ref" in verifier
@@ -341,12 +376,12 @@ def _assert_installed_contract_visibility(
     assert "`uncertainty_markers`" in new_project
     assert "`context_intake`, `approach_policy`, and `uncertainty_markers` must each stay as objects, not strings or lists." in new_project
     assert "review_mode: publication" in write_paper
-    assert "GPD/AUTHOR-RESPONSE{round_suffix}.md" in write_paper
-    assert "GPD/review/REFEREE_RESPONSE{round_suffix}.md" in write_paper
-    assert "GPD/review/REVIEW-LEDGER{round_suffix}.json" in write_paper
-    assert "GPD/review/REFEREE-DECISION{round_suffix}.json" in write_paper
-    assert "GPD/REFEREE-REPORT{round_suffix}.md" in write_paper
-    assert "GPD/REFEREE-REPORT{round_suffix}.tex" in write_paper
+    assert "${selected_publication_root}/AUTHOR-RESPONSE{round_suffix}.md" in write_paper
+    assert "${selected_review_root}/REFEREE_RESPONSE{round_suffix}.md" in write_paper
+    assert "${selected_review_root}/REVIEW-LEDGER{round_suffix}.json" in write_paper
+    assert "${selected_review_root}/REFEREE-DECISION{round_suffix}.json" in write_paper
+    assert "${selected_publication_root}/REFEREE-REPORT{round_suffix}.md" in write_paper
+    assert "references/publication/publication-review-round-artifacts.md" in write_paper
 
     assert "Canonical contract schema and hard validation rules" in plan_phase
     assert (
@@ -368,10 +403,13 @@ def _assert_installed_contract_visibility(
     assert "{plan_id}-PROOF-REDTEAM.md" in execute_phase
     assert "Targeted flags narrow the optional check mix only." in verify_work
     assert "Every spawned agent is a one-shot delegation" in verify_work
-    assert "If a required proof-redteam audit is missing, stale, malformed, or not `passed`, spawn `gpd-check-proof` once" in verify_work
+    assert (
+        "For proof-bearing work, require a canonical `*-PROOF-REDTEAM.md` artifact; "
+        "if missing/stale/malformed/not `passed`, spawn `gpd-check-proof` once"
+    ) in verify_work
 
 
-@pytest.mark.parametrize("runtime", ["claude-code", "codex", "gemini", "opencode"])
+@pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)
 def test_installed_peer_review_prompt_keeps_publication_lane_boundary(
     real_installed_repo_factory,
     runtime: str,
@@ -380,14 +418,17 @@ def test_installed_peer_review_prompt_keeps_publication_lane_boundary(
     peer_review = _read_runtime_command_prompt(target.parent, target, runtime, "peer-review")
     peer_review = _canonicalize_runtime_markdown(peer_review, runtime=runtime)
 
-    assert "Keep GPD-authored auxiliary review artifacts under `GPD/` in the invoking workspace." in peer_review
     assert (
-        "The manuscript itself and any manuscript-local publication manifests stay rooted at the resolved manuscript directory."
+        "Use centralized preflight's selected publication/review roots for GPD-authored review artifacts."
+        in peer_review
+    )
+    assert (
+        "Keep the manuscript and manuscript-local publication manifests rooted at the resolved manuscript directory."
         in peer_review
     )
 
 
-@pytest.mark.parametrize("runtime", ["claude-code", "codex", "gemini", "opencode"])
+@pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)
 def test_installed_verifier_prompt_surface_keeps_one_wrapper_and_stays_within_budget(
     real_installed_repo_factory,
     runtime: str,
@@ -400,9 +441,8 @@ def test_installed_verifier_prompt_surface_keeps_one_wrapper_and_stays_within_bu
     assert verifier.count("## Agent Requirements") == 1
     assert verifier.index("## Agent Requirements") < verifier.index("## Bootstrap Discipline")
     if descriptor.native_include_support:
-        assert verifier.count("verification-report.md") == 1
-        assert verifier.count("contract-results-schema.md") == 1
-        assert verifier.count("canonical-schema-discipline.md") == 1
+        for include_suffix in VERIFIER_SCHEMA_INCLUDE_SUFFIXES:
+            assert _raw_include_count(verifier, include_suffix) == 1
     else:
         assert verifier.count("# Verification Report Template") == 1
         assert verifier.count("# Contract Results Schema") == 1
@@ -412,7 +452,7 @@ def test_installed_verifier_prompt_surface_keeps_one_wrapper_and_stays_within_bu
 
 
 @pytest.mark.no_stable_hook_python
-@pytest.mark.parametrize("runtime", ["claude-code"])
+@pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)
 def test_install_artifacts_pin_checkout_python_when_running_from_checkout(
     tmp_path: Path,
     runtime: str,
@@ -479,7 +519,7 @@ def test_shared_installed_markdown_preserves_round_aware_review_placeholders(
     assert saw_round_placeholder is True
 
 
-@pytest.mark.parametrize("runtime", ["claude-code", "codex", "gemini", "opencode"])
+@pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)
 def test_installed_referee_latex_template_exists_and_matches_source(
     real_installed_repo_factory,
     runtime: str,
@@ -492,6 +532,7 @@ def test_installed_referee_latex_template_exists_and_matches_source(
     assert source_template.exists()
     assert installed_template.exists()
     assert installed_template.read_bytes() == source_template.read_bytes()
+
 
 # ---------------------------------------------------------------------------
 # Claude Code: install → read back → compare
@@ -597,6 +638,26 @@ class TestCodexRoundtrip:
             assert "name:" in fm, f"{skill_dir.name} missing name field"
             assert "description:" in fm, f"{skill_dir.name} missing description field"
 
+    def test_generated_skills_stay_within_budget_and_basic_hygiene(self, installed: tuple[Path, Path]) -> None:
+        """Generated Codex skills stay bounded and have no unresolved install syntax."""
+        _, skills = installed
+        skill_paths = sorted(skills.glob("gpd-*/SKILL.md"))
+
+        assert skill_paths
+        for skill_md in skill_paths:
+            content = skill_md.read_text(encoding="utf-8")
+            line_count = len(content.splitlines())
+            char_count = len(content)
+
+            assert line_count <= 2_700, f"{skill_md.parent.name} has {line_count} lines"
+            assert char_count <= 145_000, f"{skill_md.parent.name} has {char_count} chars"
+            assert content.count("<codex_runtime_notes>") == 1, skill_md.parent.name
+            assert content.count("</codex_runtime_notes>") == 1, skill_md.parent.name
+            assert content.count("<!-- Managed by Get Physics Done (GPD). -->") == 1, skill_md.parent.name
+            assert "{GPD_INSTALL_DIR}" not in content, skill_md.parent.name
+            assert "@{GPD_INSTALL_DIR}" not in content, skill_md.parent.name
+            assert "/gpd:" not in content, skill_md.parent.name
+
     def test_command_count_matches_source(self, installed: tuple[Path, Path]) -> None:
         """Number of skills matches source command count."""
         _, skills = installed
@@ -669,7 +730,7 @@ class TestCodexRoundtrip:
         assert "files" in manifest
 
 
-@pytest.mark.parametrize("runtime", ["claude-code", "codex", "gemini", "opencode"])
+@pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)
 def test_real_installed_set_tier_models_prompt_keeps_direct_tier_override_contract(
     real_installed_repo_factory,
     runtime: str,
@@ -692,7 +753,7 @@ def test_real_installed_set_tier_models_prompt_keeps_direct_tier_override_contra
     assert "fastest / most economical" in content
 
 
-@pytest.mark.parametrize("runtime", ["claude-code", "codex", "gemini", "opencode"])
+@pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)
 def test_real_installed_compare_prompts_keep_gpd_output_contract_and_interactive_intake(
     real_installed_repo_factory,
     runtime: str,
@@ -717,7 +778,7 @@ def test_real_installed_compare_prompts_keep_gpd_output_contract_and_interactive
     assert "artifacts/comparisons/{slug}/" not in compare_experiment
 
 
-@pytest.mark.parametrize("runtime", ["claude-code", "codex", "gemini", "opencode"])
+@pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)
 def test_real_installed_public_local_cli_commands_stay_canonical(
     real_installed_repo_factory,
     runtime: str,
@@ -751,7 +812,7 @@ def test_help_like_skills_keep_canonical_local_cli_language(tmp_path: Path) -> N
     assert re.search(r"`[^`\n]*gpd\.runtime_cli[^`\n]*(?:--help|resume|cost)[^`\n]*`", settings_skill) is None
 
 
-@pytest.mark.parametrize("runtime", ["claude-code", "codex", "gemini", "opencode"])
+@pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)
 def test_real_installed_help_prompt_keeps_relaxed_technical_analysis_contract(
     real_installed_repo_factory,
     runtime: str,
@@ -770,7 +831,7 @@ def test_real_installed_help_prompt_keeps_relaxed_technical_analysis_contract(
     assert "Usage: `gpd:numerical-convergence results/mesh-study.csv`" in help_prompt
 
 
-@pytest.mark.parametrize("runtime", ["claude-code", "codex", "gemini", "opencode"])
+@pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)
 def test_real_installed_help_prompt_surfaces_bounded_write_paper_external_authoring_lane(
     real_installed_repo_factory,
     runtime: str,
@@ -782,10 +843,10 @@ def test_real_installed_help_prompt_surfaces_bounded_write_paper_external_author
     )
 
     assert_publication_lane_boundary_contract(help_prompt)
-    assert "Usage: `gpd:write-paper --intake intake/paper-authoring-input.json`" in help_prompt
+    assert "Usage: `gpd:write-paper --intake intake/write-paper-authoring-input.json`" in help_prompt
 
 
-@pytest.mark.parametrize("runtime", ["claude-code", "codex", "gemini", "opencode"])
+@pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)
 def test_installed_prompt_contract_visibility_survives_adapter_projection(
     real_installed_repo_factory,
     runtime: str,
@@ -815,7 +876,7 @@ def test_installed_prompt_contract_visibility_survives_adapter_projection(
     assert "Load on demand from `references/verification/examples/verifier-worked-examples.md`." in verifier
 
 
-@pytest.mark.parametrize("runtime", ["claude-code", "codex", "gemini", "opencode"])
+@pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)
 def test_installed_executor_bootstrap_surface_defers_completion_only_materials(
     real_installed_repo_factory,
     runtime: str,
@@ -829,7 +890,7 @@ def test_installed_executor_bootstrap_surface_defers_completion_only_materials(
     assert "Order-of-Limits Awareness" not in bootstrap
 
 
-@pytest.mark.parametrize("runtime", ["claude-code", "codex", "gemini", "opencode"])
+@pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)
 def test_installed_planner_bootstrap_surface_defers_execution_and_completion_materials(
     real_installed_repo_factory,
     runtime: str,
@@ -840,7 +901,10 @@ def test_installed_planner_bootstrap_surface_defers_execution_and_completion_mat
 
     assert separator == "On-demand references:"
     assert "phase-prompt.md" in bootstrap
-    assert "plan-contract-schema.md" in bootstrap
+    assert "planner contract schema is carried there" in bootstrap
+    assert "@{GPD_INSTALL_DIR}/templates/plan-contract-schema.md" not in bootstrap
+    if "# PLAN Contract Schema" in bootstrap:
+        assert bootstrap.count("# PLAN Contract Schema") == 1
     assert "Read config.json for planning behavior settings." not in bootstrap
     assert "## Summary Template" not in bootstrap
     assert "Order-of-Limits Awareness" not in bootstrap

@@ -10,10 +10,17 @@
         "workflows/sync-state.md"
       ],
       "required_init_fields": [
-        "prefer_mode",
+        "workspace_root",
+        "project_root",
+        "project_root_source",
+        "project_root_auto_selected",
+        "init_root_policy",
+        "project_reentry_mode",
+        "project_reentry_guidance",
         "state_md_exists",
         "state_json_exists",
         "state_json_backup_exists",
+        "state_recovery_guidance",
         "state_load_source",
         "state_integrity_issues",
         "platform"
@@ -54,7 +61,7 @@
         "workflows/sync-state.md"
       ],
       "required_init_fields": [
-        "prefer_mode",
+        "project_root",
         "state_md_exists",
         "state_json_exists",
         "state_json_backup_exists",
@@ -103,7 +110,7 @@
         "workflows/sync-state.md"
       ],
       "required_init_fields": [
-        "prefer_mode",
+        "project_root",
         "state_md_exists",
         "state_json_exists",
         "state_json_backup_exists",
@@ -150,7 +157,7 @@
         "workflows/sync-state.md"
       ],
       "required_init_fields": [
-        "prefer_mode",
+        "project_root",
         "state_md_exists",
         "state_json_exists",
         "state_json_backup_exists",

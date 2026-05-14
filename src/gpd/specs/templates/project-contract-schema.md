@@ -160,6 +160,15 @@ Canonical schema for the `project_contract` object inside `GPD/state.json`. This
 
 The `project_contract` value must be a JSON object. Do not replace it with prose, a list, or a string.
 
+Preferred validation + persistence path for prompt-authored contracts:
+
+```bash
+printf '%s\n' "$PROJECT_CONTRACT_JSON" | gpd --raw validate project-contract - --mode approved
+printf '%s\n' "$PROJECT_CONTRACT_JSON" | gpd state set-project-contract -
+```
+
+The stdin path is canonical because it keeps the exact approved JSON payload in-memory across validation and persistence. Do not tell the model to round-trip through a temporary file unless a human explicitly chose that workflow.
+
 `schema_version` must be the integer `1`. Unsupported schema versions are invalid.
 
 Project contracts must include at least one observable, claim, or deliverable.
@@ -167,6 +176,8 @@ Project contracts must include at least one observable, claim, or deliverable.
 `uncertainty_markers.weakest_anchors` and `uncertainty_markers.disconfirming_observations` must both be non-empty.
 
 Canonical IDs and other required string fields are trimmed before validation. Blank-after-trim values are invalid, and duplicates that differ only by surrounding whitespace still collide after normalization.
+
+Do not reuse the same ID across `observables[]`, `claims[]`, `deliverables[]`, `acceptance_tests[]`, `references[]`, `forbidden_proxies[]`, or `links[]`; target resolution becomes ambiguous.
 
 `scope.in_scope` must name at least one project boundary or objective.
 
@@ -191,29 +202,7 @@ The following fields always store arrays of objects, never arrays of plain strin
 - `forbidden_proxies[]` — `{ "id", "subject", "proxy", "reason" }`
 - `links[]` — `{ "id", "source", "target", "relation", "verified_by[]" }`
 
-Treat a claim as proof-bearing whenever any of these is true: `claim_kind` is `theorem`, `lemma`, `corollary`, `proposition`, or `claim`; the statement is theorem-like (`prove/show that`, explicit `for all` / `exists`, or uniqueness language); any proof field is already populated (`parameters`, `hypotheses`, `quantifiers`, `conclusion_clauses`, or `proof_deliverables`); or `observables[]` references a `proof_obligation` target.
-
-When that applies, require:
-
-- proof-bearing claims must keep `parameters`, `hypotheses`, `quantifiers`, `conclusion_clauses`, and `proof_deliverables` visible.
-- Do not collapse proof obligations into a generic claim statement.
-- `claims[].claim_kind` must use the closed vocabulary: `theorem | lemma | corollary | proposition | result | claim | other`.
-- Closed semantic enum fields use these exact lowercase literals:
-  - `claims[].claim_kind: theorem | lemma | corollary | proposition | result | claim | other`
-  - `observables[].kind: scalar | curve | map | classification | proof_obligation | other`
-  - `deliverables[].kind: figure | table | dataset | data | derivation | code | note | report | other`
-  - `acceptance_tests[].kind: existence | schema | benchmark | consistency | cross_method | limiting_case | symmetry | dimensional_analysis | convergence | oracle | proxy | reproducibility | proof_hypothesis_coverage | proof_parameter_coverage | proof_quantifier_domain | claim_to_proof_alignment | lemma_dependency_closure | counterexample_search | human_review | other`
-  - `acceptance_tests[].automation: automated | hybrid | human`
-  - `references[].kind: paper | dataset | prior_artifact | spec | user_anchor | other`
-  - `references[].role: definition | benchmark | method | must_consider | background | other`
-  - `required_actions[]: read | use | compare | cite | avoid`
-  - `links[].relation: supports | computes | visualizes | benchmarks | depends_on | evaluated_by | proves | uses_hypothesis | depends_on_lemma | other`
-- Closed-vocabulary enum fields use the exact lowercase literals shown here. Case drift such as `Theorem`, `Benchmark`, or `Read` fails strict validation.
-- `claims[].proof_deliverables[]` must be non-empty and contain only `deliverables[].id` values.
-- `claims[].parameters[]`, `claims[].hypotheses[]`, and `claims[].conclusion_clauses[]` must each be non-empty.
-- `claims[].acceptance_tests[]` must include at least one proof-specific test kind (`proof_hypothesis_coverage`, `proof_parameter_coverage`, `proof_quantifier_domain`, `claim_to_proof_alignment`, `lemma_dependency_closure`, or `counterexample_search`).
-- include an acceptance test with `kind: claim_to_proof_alignment` when the proof artifact must map a theorem-like claim to named hypotheses, parameters, and conclusion clauses.
-- `claims[].quantifiers[]` is optional but, when present, must stay a list (not a scalar string).
+@{GPD_INSTALL_DIR}/templates/contract-proof-obligation-rules.md
 
 ### Shared Grounding And Linkage Rules
 

@@ -5,6 +5,9 @@ argument-hint: "[phase number or file path]"
 context_mode: project-aware
 command-policy:
   schema_version: 1
+  subject_policy:
+    explicit_input_kinds:
+      - phase number or file path
   supporting_context_policy:
     project_context_mode: project-aware
     project_reentry_mode: disallowed
@@ -71,7 +74,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Follow the dimensional-analysis workflow: @{GPD_INSTALL_DIR}/workflows/dimensional-analysis.md
+Follow the included dimensional-analysis workflow.
 Preserve workspace-locked initialization, keep standalone/current-workspace durable outputs under `GPD/analysis/`, treat missing conventions as explicit user input instead of a fake project failure, and do not promise a standalone commit.
 
 **For comprehensive verification** (dimensional analysis + limiting cases + symmetries + convergence), use `gpd:verify-work`.
@@ -79,14 +82,7 @@ Preserve workspace-locked initialization, keep standalone/current-workspace dura
 
 <success_criteria>
 
-- [ ] Unit system established (natural, SI, etc.)
-- [ ] Dimensional assignments built for all quantities
-- [ ] Every equation in target identified and numbered
-- [ ] Term-by-term analysis performed on each equation
-- [ ] Function arguments verified dimensionless
-- [ ] Integration measures checked
-- [ ] Delta function dimensions verified
-- [ ] Natural units restored for key results
-- [ ] Report generated with all anomalies classified
-- [ ] Anomalies linked to specific locations in the derivation
-      </success_criteria>
+- [ ] Command context validated
+- [ ] Dimensional-analysis workflow executed as the authority for audit mechanics
+- [ ] Standalone/current-workspace outputs kept under `GPD/analysis/`
+</success_criteria>

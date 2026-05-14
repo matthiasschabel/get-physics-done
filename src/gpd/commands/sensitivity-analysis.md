@@ -5,6 +5,10 @@ argument-hint: "[--target quantity] [--params p1,p2,...] [--method analytical|nu
 context_mode: project-aware
 command-policy:
   schema_version: 1
+  subject_policy:
+    explicit_input_kinds:
+      - --target quantity
+      - --params p1,p2,...
   supporting_context_policy:
     project_context_mode: project-aware
     project_reentry_mode: disallowed
@@ -49,9 +53,7 @@ Interpretation:
 - If `--method` is omitted, let the workflow choose analytical, numerical, or combined
 - In standalone/current-workspace mode, centralized preflight requires explicit `--target` and `--params`
 - `GPD/STATE.md`, `GPD/ROADMAP.md`, and `GPD/analysis/PARAMETERS.md` are optional current-workspace background context when they exist
-
-@GPD/ROADMAP.md
-@GPD/STATE.md
+- Validated command-context owns optional current-workspace supporting context; the workflow re-loads needed background through its workspace-locked init step instead of this wrapper attaching raw project-file includes
 </context>
 
 <process>
@@ -65,7 +67,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Execute the sensitivity-analysis workflow from @{GPD_INSTALL_DIR}/workflows/sensitivity-analysis.md end-to-end.
+Execute the included sensitivity-analysis workflow end-to-end.
 
 If authoritative phase-backed project context exists, the workflow may write `${phase_dir}/SENSITIVITY-REPORT.md` and update uncertainty state through the CLI.
 If no authoritative phase-backed context exists, the durable output must stay under `GPD/analysis/sensitivity-{slug}.md` in the invoking workspace, with no `STATE.md` or `state.json` mutation and no standalone commit step.

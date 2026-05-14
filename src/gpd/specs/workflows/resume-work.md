@@ -7,34 +7,38 @@ Use this workflow when:
 </trigger>
 
 <purpose>
-Restore the selected project's full context so "Where were we?" has an immediate answer.
+Restore selected project context so "Where were we?" has an immediate answer.
 
 @{GPD_INSTALL_DIR}/references/orchestration/resume-vocabulary.md
 </purpose>
 
 <required_reading>
-@{GPD_INSTALL_DIR}/references/orchestration/continuation-format.md
-@{GPD_INSTALL_DIR}/references/orchestration/state-portability.md
-@{GPD_INSTALL_DIR}/templates/state-json-schema.md
+Bootstrap loads only immediate resume vocabulary. Later staged payloads name
+`{GPD_INSTALL_DIR}/references/orchestration/continuation-format.md`,
+`{GPD_INSTALL_DIR}/references/orchestration/state-portability.md`, and
+`{GPD_INSTALL_DIR}/templates/state-json-schema.md`; read them when entering those stages.
 </required_reading>
 
 <process>
 
+Runtime label: Show `gpd:` as native labels; keep local CLI `gpd ...` unchanged.
+
 <step name="initialize">
-Load the shared resume context in one call. `gpd:resume-work` is the guided runtime path, `gpd resume` is the public local read-only summary, `gpd resume --recent` is the cross-project discovery surface and workspace picker, and `gpd --raw resume` returns the canonical public view:
+Load resume bootstrap. `gpd:resume-work` is the guided runtime path; `gpd resume` is the public local read-only summary; `gpd resume --recent` is the cross-project discovery surface; `gpd --raw resume` is raw local JSON:
 
 ```bash
-INIT=$(gpd --raw resume)
+INIT=$(gpd --raw init resume --stage resume_bootstrap)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd initialization failed: $INIT"
   # STOP — display the error to the user and do not proceed.
 fi
 ```
 
-Parse JSON once and read it semantically:
+Parse JSON semantically:
 
 - **Requested workspace availability:** `workspace_state_exists`, `workspace_roadmap_exists`, `workspace_project_exists`, `workspace_planning_exists`
-- **Availability and contract authority:** `state_exists`, `roadmap_exists`, `project_exists`, `planning_exists`, `commit_docs`, `project_contract`, `project_contract_gate`, `project_contract_validation`, `project_contract_load_info`, `contract_intake`, `effective_reference_intake`, `active_reference_context`, `reference_artifacts_content`
+- **Selected project availability:** `state_exists`, `state_json_backup_exists`, `roadmap_exists`, `project_exists`, `planning_exists`
+- **Availability and contract authority:** `project_contract_gate` and peers are loaded by `STATE_RESTORE_INIT` before use
 - **Canonical continuation and recovery authority:** `resume_surface_schema_version`, `active_resume_kind`, `active_resume_origin`, `active_resume_pointer`, `active_bounded_segment`, `derived_execution_head`, `active_resume_result`, `continuity_handoff_file`, `recorded_continuity_handoff_file`, `missing_continuity_handoff_file`, `has_continuity_handoff`, `resume_candidates`, `execution_resumable`, `execution_paused_at`, `execution_review_pending`, `execution_pre_fanout_review_pending`, `execution_skeptical_requestioning_required`, `execution_downstream_locked`, `has_interrupted_agent`, `interrupted_agent_id`
 - **Machine advisory state:** `machine_change_detected`, `machine_change_notice`, `current_hostname`, `current_platform`, `session_hostname`, `session_platform`
 
@@ -42,29 +46,25 @@ Parse JSON once and read it semantically:
 
 The recent-project list is advisory and machine-local; once you choose a workspace, `gpd:resume-work` reloads that project's canonical state.
 
-When `active_resume_result` is present, treat it as the hydrated canonical result context for the current resume target. Use its `id` as the continuity anchor, but prefer its structured fields for the user-facing resume summary instead of restating only the raw identifier.
+**If `project_reentry_requires_selection` is true or `project_reentry_mode="ambiguous-recent-projects"`:** Stop before new-project routing or reconstruction. Show the recent-project count; tell the user to run `gpd resume --recent`, open the chosen workspace, and rerun `gpd:resume-work`.
 
-`workspace_state_exists` means the requested workspace could recover usable state from `GPD/state.json`, `GPD/state.json.bak`, or `GPD/STATE.md`. A stray unreadable file path by itself does not count as recoverable state.
-`state_exists` means the selected project root could recover usable state from `GPD/state.json`, `GPD/state.json.bak`, or `GPD/STATE.md`.
+**If `project_root_auto_selected` is true or `project_root_source="recent_project"`:** Runtime started outside the selected project. Do not quick-resume or act from the unrelated workspace. On bare "continue" or "go", stop. Show `project_root`; require explicit confirmation or a reopened project folder.
+
+When present, use `active_resume_result` as hydrated result context. Use its `id` as anchor, but summarize structured fields rather than only the raw identifier.
+
+`workspace_state_exists` / `state_exists` mean usable state from `GPD/state.json` or `GPD/STATE.md`; `GPD/state.json.bak` is only crash-recovery support. A stray unreadable path is not recoverable state.
 Use `workspace_*` to judge the user-requested workspace before auto-selection; use the selected-project fields after re-entry resolution.
 
-The shared resume resolver distinguishes canonical continuation authority, continuity mirrors, and the derived execution head:
+Resolver authority order: `GPD/state.json` / `continuation`, then `GPD/state.json.bak`, then `GPD/STATE.md`; `.continue-here.md` and live snapshots are context, not sole authority.
 
-- **storage authority:** `GPD/state.json`, with `GPD/state.json.bak` as the recovery backup; canonical `continuation` lives here
-- **editable mirror:** `GPD/STATE.md`
-- **temporary handoff artifact:** `GPD/phases/.../.continue-here.md`
-- **derived execution head / live execution overlay:** `GPD/observability/current-execution.json`, used as a compatibility projection when canonical bounded-segment state is absent
-
-The shared resume resolver is canonical-first: `state.json.continuation` wins, the canonical bounded segment and recorded handoff fields define the primary resume target, and the derived execution head only fills compatibility gaps when bounded-segment state is missing. Do not treat a single `.continue-here.md` file or compatibility snapshot as the sole authority.
-
-**If `planning_exists` is false:** This is a new project - route to gpd:new-project and do not attempt STATE.md reconstruction.
+**If `planning_exists` is false and no recent-project selection is required:** If recoverable state exists, repair first. Otherwise route to gpd:new-project and do not attempt STATE.md reconstruction.
 **If `state_exists` is false but `roadmap_exists` or `project_exists` is true:** Offer to reconstruct STATE.md from the existing project artifacts.
 
 If `active_resume_kind="bounded_segment"` and `active_bounded_segment` exists, treat that as the primary bounded resume target. The derived execution head may still project the bounded segment when canonical continuation is missing or incomplete, but it does not define a second resume system.
 
-`active_resume_kind` is narrower than the overall recovery status. A recorded handoff, a missing recorded handoff artifact, or advisory live execution can still exist when `active_resume_kind` is `None`; those compatibility cues still surface through `continuity_handoff_file` and `missing_continuity_handoff_file`, but the canonicalized `gpd --raw resume` surface keeps only the top-level public fields.
+`active_resume_kind` is narrower than the overall recovery status. A recorded handoff, a missing recorded handoff artifact, or advisory live execution can still exist when `active_resume_kind` is `None`; those status cues surface through `continuity_handoff_file` and `missing_continuity_handoff_file`, while `gpd --raw resume` keeps the top-level public fields canonical.
 
-If `active_resume_result` exists, surface it alongside the primary resume target so `gpd:resume-work` can recover the last canonical result context immediately. If a resume candidate carries a hydrated `last_result`, prefer that payload over `last_result_id`-only notes while still preserving the ID as the rerun anchor.
+Surface `active_resume_result` beside the primary target. If a candidate has hydrated `last_result`, prefer it over `last_result_id`-only notes while preserving the ID as rerun anchor.
 
 If `derived_execution_head` exists but `execution_resumable` is false, treat that live snapshot as advisory context only. If `active_resume_pointer` is empty, non-project, or missing on disk, call that out explicitly; in all such cases it is not a ranked bounded-segment resume candidate and does not justify `active_resume_kind="bounded_segment"`.
 
@@ -74,6 +74,17 @@ If `active_bounded_segment.first_result_gate_pending` is true, do not treat late
 </step>
 
 <step name="load_state">
+Load state-restore before using contract, reference, or readable state fields:
+
+```bash
+STATE_RESTORE_INIT=$(gpd --raw init resume --stage state_restore)
+if [ $? -ne 0 ]; then
+  echo "ERROR: gpd state-restore initialization failed: $STATE_RESTORE_INIT"
+  # STOP — display the error to the user and do not proceed.
+fi
+```
+
+Use `state_restore.required_init_fields` as the state/contract/reference payload.
 
 **machine_change_detection:** Compare the current hostname/platform with `state.json.continuation.machine.hostname` and `state.json.continuation.machine.platform`. If they differ, display the non-blocking machine-change notice from INIT and recommend rerunning the installer so runtime-local config stays current.
 
@@ -117,10 +128,21 @@ cat GPD/PROJECT.md
 </step>
 
 <step name="restore_persistent_state">
+Load derivation-restore before reconstructing derivation history:
+
+```bash
+DERIVATION_RESTORE_INIT=$(gpd --raw init resume --stage derivation_restore)
+if [ $? -ne 0 ]; then
+  echo "ERROR: gpd derivation-restore initialization failed: $DERIVATION_RESTORE_INIT"
+  # STOP — display the error to the user and do not proceed.
+fi
+```
+
+Use `derivation_restore.required_init_fields` as the derivation-history payload.
+
 **Read cumulative derivation history from `GPD/DERIVATION-STATE.md`:**
 
-This step reconstructs the full derivation history that has accumulated across
-all previous sessions, preventing lossy compression across context resets.
+This reconstructs accumulated derivation history and prevents lossy context resets.
 
 ```bash
 # Check if persistent derivation state exists
@@ -134,49 +156,21 @@ fi
 
 **If DERIVATION-STATE.md exists:**
 
-### Enforce Session Cap (Last 5 Sessions)
+### Check Session Cap (Last 5 Sessions)
 
-Before loading DERIVATION-STATE.md into context, enforce the hard cap to keep the file bounded:
+During read-only restoration, count session blocks and warn if over cap. Do not prune, rewrite, replace, or otherwise modify `GPD/DERIVATION-STATE.md` from `gpd:resume-work`.
 
 ```bash
 SESSION_COUNT=$(grep -c "^## Session:" GPD/DERIVATION-STATE.md 2>/dev/null || echo 0)
 
 if [ "$SESSION_COUNT" -gt 5 ]; then
-  echo "DERIVATION-STATE.md has ${SESSION_COUNT} session blocks (cap: 5). Pruning oldest..."
-
-  # Atomic read-modify-write: write to PID-unique .tmp, validate, then replace
-  TMP_FILE="GPD/DERIVATION-STATE.md.tmp.$$"
-  trap "rm -f '$TMP_FILE'" EXIT
-
-  KEEP_FROM=$(grep -n "^## Session:" GPD/DERIVATION-STATE.md | tail -5 | head -1 | cut -d: -f1)
-  HEADER_END=$(grep -n "^## Session:" GPD/DERIVATION-STATE.md | head -1 | cut -d: -f1)
-  HEADER_END=$((HEADER_END - 1))
-  {
-    head -n "$HEADER_END" GPD/DERIVATION-STATE.md
-    echo ""
-    echo "> Older session entries archived in git history."
-    echo "> Use \`git log -p -- GPD/DERIVATION-STATE.md\` to recover."
-    echo ""
-    tail -n +"$KEEP_FROM" GPD/DERIVATION-STATE.md
-  } > "$TMP_FILE"
-
-  TMP_LINES=$(wc -l < "$TMP_FILE")
-  if [ "$TMP_LINES" -lt 5 ]; then
-    echo "WARNING: Pruned file suspiciously small (${TMP_LINES} lines). Keeping original."
-    rm -f "$TMP_FILE"
-  elif ! grep -q "^# Derivation State" "$TMP_FILE"; then
-    echo "WARNING: Pruned file missing required header. Keeping original."
-    rm -f "$TMP_FILE"
-  else
-    cp "$TMP_FILE" GPD/DERIVATION-STATE.md && \
-      rm -f "$TMP_FILE" || \
-      echo "WARNING: Failed to replace DERIVATION-STATE.md. Original preserved."
-  fi
-  trap - EXIT
+  echo "WARNING: DERIVATION-STATE.md has ${SESSION_COUNT} session blocks (recommended cap: 5)."
+  echo "Read and summarize the file as-is; do not prune, rewrite, or replace it during resume restoration."
+  echo "After restoration, suggest the pause-work runtime command or an explicit maintenance pass if the researcher wants capping."
 fi
 ```
 
-This is the same cap enforcement logic used by pause-work.md. It keeps the 5 most recent `## Session:` blocks and archives older entries via git history.
+This is a report-only check. Mutating cap enforcement belongs to explicit write/maintenance workflows.
 
 1. **Read the full file** to reconstruct the complete equation/convention/result history across all sessions. If the latest handoff or session continuity metadata already carries a canonical `last_result_id`, prefer that value as the rerun anchor before rediscovering the target from prose or older summaries.
 2. **Cross-reference against state.json intermediate_results** to find any gaps:
@@ -223,6 +217,18 @@ If convention check fails, flag in the status presentation (step present_status)
 </step>
 
 <step name="check_incomplete_work">
+Load resume-routing before deciding what work is incomplete or resumable:
+
+```bash
+RESUME_ROUTING_INIT=$(gpd --raw init resume --stage resume_routing)
+if [ $? -ne 0 ]; then
+  echo "ERROR: gpd resume-routing initialization failed: $RESUME_ROUTING_INIT"
+  # STOP — display the error to the user and do not proceed.
+fi
+```
+
+Use `resume_routing.required_init_fields` as the routing payload.
+
 Look for incomplete work that needs attention:
 
 ```bash
@@ -238,15 +244,11 @@ if [ "$has_interrupted_agent" = "true" ]; then
 fi
 ```
 
-**Bounded execution segment detection:** If `active_resume_kind` is `bounded_segment`, `execution_resumable` is true, and `active_resume_pointer` is present, treat that bounded continuation as the primary resume target. The runtime currently ranks three semantic recovery families into `resume_candidates`: a resumable live execution snapshot, a recorded handoff, and an interrupted-agent marker. The backend may still retain compatibility intake for those families. If the live snapshot lacks a portable usable resume file, keep it visible only as advisory context. Do NOT invent additional candidates from plan files without summaries, auto-checkpoints, or other ad hoc checkpoints.
-
-The shared resume resolver keeps the derived execution head and the temporary handoff artifact subordinate to the storage authority chain. They refine the continuation target; they do not replace `GPD/state.json > GPD/state.json.bak > GPD/STATE.md`, and the compatibility mirror only backfills bounded-segment state for legacy compatibility when canonical bounded-segment state is absent. Nested raw-envelope aliases never outrank canonical fields.
+**Bounded execution segment detection:** If `active_resume_kind` is `bounded_segment`, `execution_resumable` is true, and `active_resume_pointer` is present, treat that bounded continuation as the primary resume target. The runtime ranks three recovery families into `resume_candidates`: a resumable live execution snapshot, a recorded handoff, and an interrupted-agent marker. If the live snapshot lacks a portable usable resume file, keep it visible only as advisory context. Do NOT invent additional candidates from plan files without summaries, auto-checkpoints, or other ad hoc checkpoints.
 
 Reason-scoped clears still matter on resume: a `first_result` clear does not retire `pre_fanout` or skeptical fields, and a `fanout unlock` does not clear the review gate by itself.
 
 When resuming from `first_result` or skeptical state, ask one concrete question first: "What decisive evidence is still owed before downstream work is trustworthy?" Do not resume fanout based only on proxy-looking success or "seems on track" prose.
-
-**Context budget note:** Context restoration (loading STATE.md, DERIVATION-STATE.md, PROJECT.md, the active execution snapshot, and roadmap) consumes approximately 15-20% of a fresh context window. Budget the remaining ~80% for actual research work. If the project has extensive derivation history or many prior decisions, restoration may consume up to 25%.
 
 **If PLAN without SUMMARY exists:**
 
@@ -344,7 +346,7 @@ Present complete research project status to user:
     Task: [task description from agent-history.json]
     Interrupted: [timestamp]
 
-    Resume with: task tool (resume parameter with agent ID)
+    Continue with: a fresh handoff built from the interrupted-agent record, or the canonical bounded segment if one has been recorded
 
 [If pending todos exist:]
 [N] pending todos -- gpd:check-todos to review
@@ -363,6 +365,11 @@ Present complete research project status to user:
 <step name="determine_next_action">
 Based on project state, determine the most logical next action:
 
+**If partial/recoverable state or `project_contract_gate.repair_required` needs repair:**
+-> Stop before planning, mutation, execution, reconstruction, or continuation update; writes none; next `gpd:sync-state`
+-> Choices exactly: `gpd:sync-state`, `gpd:health`, `gpd:resume-work` after repair; exclude `gpd:progress` and `gpd:new-project`
+-> This gate overrides quick-resume auto-execution; show only repair choices.
+
 **If `project_contract_gate.authoritative` is false:**
 -> Primary: Repair the blocked contract or state-integrity issue before planning or execution
 -> Option: Inspect the blocked contract context and supporting diagnostics without resuming downstream work
@@ -378,7 +385,7 @@ Based on project state, determine the most logical next action:
 -> Option: Inspect the live gate state without claiming the bounded segment is directly resumable
 
 **If interrupted agent exists:**
--> Primary: Resume interrupted agent (Task tool with resume parameter)
+-> Primary: Recreate the interrupted work as a fresh handoff, or continue the canonical bounded segment when one exists
 -> Option: Start fresh (abandon agent work)
 
 **If `continuity_handoff_file` exists and `execution_resumable` is false and no interrupted agent exists:**
@@ -414,6 +421,8 @@ Based on project state, determine the most logical next action:
 
 <step name="offer_options">
 Present contextual options based on project state:
+
+**If partial/recoverable state or `project_contract_gate.repair_required` needs repair:** keep writes none and show only `gpd:sync-state`, `gpd:health`, `gpd:resume-work` after repair.
 
 ```
 What would you like to do?
@@ -453,13 +462,13 @@ Based on user selection, route to appropriate workflow:
   ```
   ---
 
-  ## Next Up
+  ## > Next Up
 
   **{phase}-{plan}: [Plan Name]** -- [objective from PLAN.md]
 
   `gpd:execute-phase {phase}`
 
-  <sub>`/clear` first, then run `gpd:execute-phase {phase}`</sub>
+  <sub>Start a fresh context window, then run `gpd:execute-phase {phase}`</sub>
 
   ---
   ```
@@ -469,13 +478,13 @@ Based on user selection, route to appropriate workflow:
   ```
   ---
 
-  ## Next Up
+  ## > Next Up
 
   **Phase [N]: [Name]** -- [Goal from ROADMAP.md]
 
   `gpd:plan-phase [phase-number]`
 
-  <sub>`/clear` first, then run `gpd:plan-phase [phase-number]`</sub>
+  <sub>Start a fresh context window, then run `gpd:plan-phase [phase-number]`</sub>
 
   ---
 
@@ -486,23 +495,29 @@ Based on user selection, route to appropriate workflow:
   ---
   ```
 
-- **Transition** -> ./transition.md
+- **Transition** -> `{GPD_INSTALL_DIR}/workflows/transition.md`
 - **Check todos** -> Read GPD/todos/pending/, present summary
 - **Review alignment** -> Read PROJECT.md, compare to current state
 - **Something else** -> Ask what they need
   </step>
 
 <step name="update_continuation">
-Before proceeding to routed workflow, refresh canonical continuation via CLI
-(which then reprojects STATE.md and the legacy `session` continuity mirror):
+Refresh canonical continuation only after the selected route, phase, and handoff file are known. Do not write a generic resume marker just because this workflow was opened.
 
-```bash
+Template only - do not run as-is:
+
+```text
 gpd state record-session \
-  --stopped-at "Session resumed, proceeding to [action]" \
-  --resume-file "[updated if applicable; omit to keep the current pointer, or pass `—` to clear it]"
+  --stopped-at "<actual selected route and phase>" \
+  --resume-file "<actual project-relative handoff path>"
+
+gpd state record-session \
+  --stopped-at "<actual selected route; pointer intentionally cleared>" \
+  --resume-file none
 ```
 
-This ensures the canonical continuation payload reflects the resumed handoff state if the session ends unexpectedly. STATE.md and the legacy `session` fields should mirror that authoritative update after persistence.
+Use the second form only when the selected route intentionally clears the pointer. Never copy placeholder phase numbers, prose, or file paths into state.
+STATE.md should render the authoritative continuation update.
 </step>
 
 </process>
@@ -520,7 +535,9 @@ If STATE.md is missing but other artifacts exist and `planning_exists` is true:
 
 Reconstruct and write STATE.md, then proceed normally.
 
-If `planning_exists` is false, skip reconstruction and route to `gpd:new-project` instead.
+If `planning_exists` is false:
+- If recoverable state exists, repair recoverable state first, then run reconstruction.
+- If state is not recoverable, skip reconstruction and route to `gpd:new-project`.
 
 This handles cases where:
 
@@ -532,6 +549,8 @@ This handles cases where:
 <quick_resume>
 If user says "continue" or "go":
 
+- If `project_root_auto_selected` is true or `project_root_source="recent_project"`, quick resume is disabled; show the project path, require explicit confirmation or reopened folder, and do not continue automatically.
+- If partial/recoverable state or `project_contract_gate.repair_required` needs repair, quick resume must not auto-execute; show only repair choices.
 - Load state silently
 - Determine primary action
 - Execute immediately without presenting options
@@ -542,15 +561,10 @@ If user says "continue" or "go":
 <success_criteria>
 Resume is complete when:
 
-- [ ] STATE.md loaded (or reconstructed)
-- [ ] DERIVATION-STATE.md read and cross-referenced with state.json (if it exists)
-- [ ] DERIVATION-STATE.md pruned and capped to last 5 sessions (if applicable)
-- [ ] Persistent derivation history restored and summarized (equations, conventions, results, approximations)
-- [ ] Any gaps between DERIVATION-STATE.md and state.json flagged to user
-- [ ] Incomplete work detected and flagged
-- [ ] Research context restored (derivation state, parameters, intermediate results, approximations)
-- [ ] Clear status presented to user
-- [ ] Contextual next actions offered
-- [ ] User knows exactly where the research project stands
+- [ ] STATE.md loaded or reconstructed
+- [ ] DERIVATION-STATE.md read, cap-checked, cross-referenced with state.json, and summarized when present
+- [ ] Gaps, incomplete work, and restored research context surfaced
+- [ ] Clear status and contextual next actions presented
+- [ ] User knows where the project stands
 - [ ] Session continuity updated
 </success_criteria>

@@ -91,6 +91,12 @@ If the path does not exist, or if the path and knowledge_id do not match, stop a
 <step name="load_knowledge_doc">
 Read the current knowledge document and parse its frontmatter/body snapshot.
 
+Load the schema authorities before validation:
+
+- {GPD_INSTALL_DIR}/templates/knowledge-schema.md
+- {GPD_INSTALL_DIR}/templates/knowledge.md
+- {GPD_INSTALL_DIR}/references/shared/canonical-schema-discipline.md
+
 Use the strict knowledge schema to validate:
 
 - filename stem parity
@@ -174,7 +180,7 @@ In every case, preserve the document body unless the workflow explicitly needs t
 <step name="validate_schema">
 Validate the updated markdown against the strict knowledge schema before considering the task complete.
 
-Use the repo frontmatter validator against the final file:
+Use the GPD frontmatter validator against the final file:
 
 ```bash
 gpd frontmatter validate GPD/knowledge/{knowledge_id}.md --schema knowledge

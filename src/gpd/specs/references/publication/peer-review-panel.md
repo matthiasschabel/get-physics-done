@@ -39,8 +39,8 @@ Goal:
 - Flag narrative jumps, overclaims, and any places where the conclusions outrun the evidence.
 
 Output:
-- `GPD/review/CLAIMS{round_suffix}.json`
-- `GPD/review/STAGE-reader{round_suffix}.json`
+- `${REVIEW_ROOT}/CLAIMS{round_suffix}.json`
+- `${REVIEW_ROOT}/STAGE-reader{round_suffix}.json`
 
 ### Stage 2. Literature Context
 
@@ -51,7 +51,7 @@ Goal:
 - Identify missing foundational work, unacknowledged overlap, and inflated novelty claims.
 
 Output:
-- `GPD/review/STAGE-literature{round_suffix}.json`
+- `${REVIEW_ROOT}/STAGE-literature{round_suffix}.json`
 
 ### Stage 3. Mathematical Soundness
 
@@ -62,7 +62,7 @@ Goal:
 - If the validator requires theorem-bearing Stage 1 claims to be reviewed, do not sample only a subset: every theorem-bearing Stage 1 claim must be reviewed and proof-audited.
 
 Output:
-- `GPD/review/STAGE-math{round_suffix}.json`
+- `${REVIEW_ROOT}/STAGE-math{round_suffix}.json`
 
 ### Auxiliary Proof Critique Gate
 
@@ -74,7 +74,7 @@ Goal:
 - Try to break the proof by forcing narrower-case, dropped-parameter, or hidden-assumption failures into the open before final adjudication.
 
 Output:
-- `GPD/review/PROOF-REDTEAM{round_suffix}.md`
+- `${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md`
 
 ### Stage 4. Physical Soundness
 
@@ -84,7 +84,7 @@ Goal:
 - Check regime of validity, physical assumptions, interpretation, connection between math and physics, and whether the claimed physical conclusions are actually supported.
 
 Output:
-- `GPD/review/STAGE-physics{round_suffix}.json`
+- `${REVIEW_ROOT}/STAGE-physics{round_suffix}.json`
 
 ### Stage 5. Significance And Venue Fit
 
@@ -95,7 +95,7 @@ Goal:
 - Be willing to conclude that the paper is mathematically respectable but scientifically weak.
 
 Output:
-- `GPD/review/STAGE-interestingness{round_suffix}.json`
+- `${REVIEW_ROOT}/STAGE-interestingness{round_suffix}.json`
 
 ### Stage 6. Final Adjudication
 
@@ -106,15 +106,15 @@ Goal:
 - Spot-check the manuscript where the stage artifacts disagree or feel under-evidenced.
 - Issue the final recommendation.
 - Stage 6 may write only the adjudication artifacts listed under Output.
-- Treat `GPD/review/CLAIMS{round_suffix}.json`, every `GPD/review/STAGE-*.json`, and `GPD/review/PROOF-REDTEAM{round_suffix}.md` as read-only upstream evidence. Do not repair, rewrite, replace, or backfill them inside Stage 6.
+- Treat `${REVIEW_ROOT}/CLAIMS{round_suffix}.json`, every `${REVIEW_ROOT}/STAGE-*.json`, and `${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md` as read-only upstream evidence. Do not repair, rewrite, replace, or backfill them inside Stage 6.
 - If any upstream artifact is missing, malformed, stale, or mutually inconsistent, Stage 6 must fail closed and route the inconsistency back to the earliest failing upstream stage instead of patching those artifacts during adjudication.
 
 Output:
-- `GPD/review/REVIEW-LEDGER{round_suffix}.json`
-- `GPD/review/REFEREE-DECISION{round_suffix}.json`
-- `GPD/REFEREE-REPORT{round_suffix}.md`
-- `GPD/REFEREE-REPORT{round_suffix}.tex`
-- `GPD/CONSISTENCY-REPORT.md` when applicable, but only as a diagnostic sidecar. It does not authorize Stage 6 to mutate upstream stage artifacts.
+- `${REVIEW_ROOT}/REVIEW-LEDGER{round_suffix}.json`
+- `${REVIEW_ROOT}/REFEREE-DECISION{round_suffix}.json`
+- `${PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.md`
+- `${PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.tex`
+- `${PUBLICATION_ROOT}/CONSISTENCY-REPORT.md` when applicable, but only as a diagnostic sidecar. It does not authorize Stage 6 to mutate upstream stage artifacts.
 
 ## Fresh-Context Rule
 
@@ -190,7 +190,7 @@ Additionally:
 - Stage 1 must also emit `CLAIMS{round_suffix}.json` as a compact `ClaimIndex`.
 - Strict-stage specialist artifacts must use canonical names `STAGE-reader`, `STAGE-literature`, `STAGE-math`, `STAGE-physics`, `STAGE-interestingness`.
 - In strict mode, specialist stage filenames must match `STAGE-(reader|literature|math|physics|interestingness)(-R<round>)?.json`, and all five must share the same optional `-R<round>` suffix.
-- In strict mode, any additional noncanonical `stage_artifacts` entry fails validation rather than being ignored.
+- In strict mode, `REFEREE-DECISION{round_suffix}.json` `stage_artifacts` may list only those five canonical `STAGE-*.json` specialist reports for the active round. `CLAIMS{round_suffix}.json` is the separately validated claim index, not a `stage_artifacts` entry; any additional noncanonical entry fails validation rather than being ignored.
 - The final adjudicator must emit `REVIEW-LEDGER{round_suffix}.json` and `REFEREE-DECISION{round_suffix}.json` (empty suffix on the first round).
 - The artifact should stay compact. It is a decision handoff, not a second manuscript.
 - `StageReviewReport`, nested `ReviewFinding`, and nested `ProofAuditRecord` entries use a closed schema; do not invent extra keys beyond those shown here.
@@ -216,7 +216,7 @@ Additionally:
 - `manuscript_sha256` must be the lowercase 64-hex digest for the exact manuscript snapshot under review.
 - The filename `STAGE-<stage_id>{round_suffix}.json` and the JSON `round` field must agree: unsuffixed first-round artifacts use `round: 1`, and `-R<round>` filenames must use that same integer in `round`.
 - For Stages 2-5, `manuscript_path` and `manuscript_sha256` must exactly match the sibling `CLAIMS{round_suffix}.json` claim index for the same round.
-- In Stage 3, every reviewed theorem-bearing Stage 1 claim must receive exactly one `proof_audits[]` entry. Treat theorem-bearing status from the full Stage 1 claim record, not only from non-empty `theorem_assumptions` / `theorem_parameters` arrays: only `claim_kind: theorem | lemma | corollary | proposition` is theorem-bearing by kind alone, while `claim_kind: claim | result | other` becomes theorem-bearing only when non-empty theorem metadata or theorem-like statement text makes the proof obligation explicit. Missing proof audits, extra audits for unreviewed claims, or repeated `claim_id` values are contract failures, not soft omissions.
+- In Stage 3, every reviewed theorem-bearing Stage 1 claim must receive exactly one `proof_audits[]` entry. Treat theorem-bearing status from the full Stage 1 Paper `ClaimRecord`, not from the `ProjectContract` `ContractClaim` vocabulary and not only from non-empty `theorem_assumptions` / `theorem_parameters` arrays: only `claim_kind: theorem | lemma | corollary | proposition` is theorem-bearing by kind alone, while `claim_kind: claim | result | other` becomes theorem-bearing only when non-empty theorem metadata or theorem-like statement text makes the proof obligation explicit. Missing proof audits, extra audits for unreviewed claims, or repeated `claim_id` values are contract failures, not soft omissions.
 - If the validator requires theorem-bearing Stage 1 claims to be reviewed, every such claim must appear in `claims_reviewed` before the stage is considered complete.
 - In Stage 3, any uncovered theorem assumption, uncovered theorem parameter, or explicit theorem-to-proof mismatch caps `recommendation_ceiling` at `major_revision` or `reject`.
 - Every nested `ReviewFinding.issue_id` must match `REF-[A-Za-z0-9][A-Za-z0-9_-]*`.
@@ -258,7 +258,7 @@ Stage 1 `CLAIMS{round_suffix}.json` must follow this compact `ClaimIndex` shape:
 - The theorem-style `claim_kind` values are limited to `theorem`, `lemma`, `corollary`, and `proposition`.
 - Keep `section` as an empty string and `equation_refs`, `figure_refs`, `supporting_artifacts` as empty lists when unavailable.
 - Keep `theorem_assumptions` and `theorem_parameters` as arrays even when unavailable.
-- Do not treat `claim_kind: claim` as theorem-bearing by default. In staged peer review, a generic `claim` becomes theorem-bearing only when non-empty `theorem_assumptions`, non-empty `theorem_parameters`, or theorem-like statement text makes the proof obligation explicit.
+- Do not treat `claim_kind: claim` as theorem-bearing by default. This Paper `ClaimRecord` rule is intentionally different from `ProjectContract.claims[]`, where `claim_kind: claim` is proof-bearing contract vocabulary. In staged peer review, a generic `claim` becomes theorem-bearing only when non-empty `theorem_assumptions`, non-empty `theorem_parameters`, or theorem-like statement text makes the proof obligation explicit.
 - When a claim is theorem-bearing, set `claim_kind` explicitly instead of leaving it at `other`; use the theorem-style kinds when the manuscript actually presents a theorem, lemma, corollary, or proposition. `theorem_assumptions` must enumerate the theorem's explicit hypotheses or regime assumptions, and `theorem_parameters` must enumerate the free target parameters or quantified variables the proof must cover.
 - Do not silently drop statement parameters just because the derivation later centers or normalizes the algebra. If the statement quantifies over `r_0`, index `r_0`.
 - Do not invent locations, equations, figures, or supporting artifacts just to populate the schema.
@@ -297,11 +297,11 @@ Minimal final artifact shapes:
   "final_recommendation": "major_revision",
   "final_confidence": "medium",
   "stage_artifacts": [
-    "GPD/review/STAGE-reader{round_suffix}.json",
-    "GPD/review/STAGE-literature{round_suffix}.json",
-    "GPD/review/STAGE-math{round_suffix}.json",
-    "GPD/review/STAGE-physics{round_suffix}.json",
-    "GPD/review/STAGE-interestingness{round_suffix}.json"
+    "${REVIEW_ROOT}/STAGE-reader{round_suffix}.json",
+    "${REVIEW_ROOT}/STAGE-literature{round_suffix}.json",
+    "${REVIEW_ROOT}/STAGE-math{round_suffix}.json",
+    "${REVIEW_ROOT}/STAGE-physics{round_suffix}.json",
+    "${REVIEW_ROOT}/STAGE-interestingness{round_suffix}.json"
   ],
   "blocking_issue_ids": ["REF-001"]
 }
@@ -310,8 +310,8 @@ Minimal final artifact shapes:
 Validate both files before trusting the final recommendation:
 
 ```bash
-gpd validate review-ledger GPD/review/REVIEW-LEDGER{round_suffix}.json
-gpd validate referee-decision GPD/review/REFEREE-DECISION{round_suffix}.json --strict --ledger GPD/review/REVIEW-LEDGER{round_suffix}.json
+gpd validate review-ledger ${REVIEW_ROOT}/REVIEW-LEDGER{round_suffix}.json
+gpd validate referee-decision ${REVIEW_ROOT}/REFEREE-DECISION{round_suffix}.json --strict --ledger ${REVIEW_ROOT}/REVIEW-LEDGER{round_suffix}.json
 ```
 
 ## Recommendation Guardrails For The Final Referee
@@ -362,6 +362,7 @@ The final referee must preserve a compact claim-evidence table, at minimum:
 `claim | claim_type | manuscript_location | direct_evidence | support_status | overclaim_severity | required_fix`
 
 Unsupported central physical-interpretation or significance claims are never compatible with `minor_revision`.
+When a managed or project-backed review rejects because central claims, novelty framing, significance, or venue fit outrun the evidence, downstream machine-readable summaries should treat the review as completed but publication-blocked: claim state is overclaim-blocked, the active checkpoint is the review gate, and any rewrite continuation names the exact manuscript target under review.
 
 ## Claim-Discipline Rules
 

@@ -15,7 +15,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field
 
 from gpd.core.context import init_resume
-from gpd.core.costs import build_cost_summary, resolve_cost_advisory
+from gpd.core.costs import build_cost_summary, cost_advisory_requires_inspection, resolve_cost_advisory
 from gpd.core.observability import derive_execution_visibility, get_current_session_id
 from gpd.core.project_reentry import (
     project_reentry_candidate_summary,
@@ -23,7 +23,7 @@ from gpd.core.project_reentry import (
     resolve_project_reentry,
 )
 from gpd.core.public_surface_contract import recovery_local_snapshot_command
-from gpd.core.recent_projects import _strict_bool_value, list_recent_projects
+from gpd.core.recent_projects import RecentProjectsError, _strict_bool_value, list_recent_projects
 from gpd.core.recovery_advice import (
     RecoveryAdvice,
     build_recovery_advice,
@@ -120,7 +120,9 @@ def _selected_reentry_candidate(
     candidate_payload = _model_dump(selected_candidate)
     if candidate_payload is None and workspace_hint is not None:
         resolution = resolve_project_roots(workspace_hint)
-        if resolution is not None and resolution.has_project_layout:
+        if resolution is not None and (
+            resolution.has_project_layout or (resolution.walk_up_steps == 0 and (resolution.project_root / "GPD").is_dir())
+        ):
             project_root = resolution.project_root.resolve(strict=False)
             state_exists, roadmap_exists, project_exists = recoverable_project_context(project_root)
             candidate_payload = {
@@ -383,7 +385,7 @@ def _hydrate_resume_context_from_recent_project(
     resume_candidates = hydrated.get("resume_candidates")
     candidate = build_resume_candidate(
         build_resume_static_candidate(
-            source="session_resume_file",
+            source="handoff_resume_file",
             status=candidate_status,
             resume_file=resume_file,
             resumable=False,
@@ -474,8 +476,7 @@ def _workflow_next_actions(*, base_ready: bool) -> list[str]:
 
 
 def _cost_next_action(advisory: dict[str, object]) -> str | None:
-    state = str(advisory.get("state", "") or "").strip()
-    if state in {"at_or_over_budget", "near_budget", "mixed"}:
+    if cost_advisory_requires_inspection(advisory):
         return cost_inspect_action()
     return None
 
@@ -505,6 +506,14 @@ def _cost_payload(cost_summary: object) -> dict[str, object]:
     if project_root is not None:
         payload["project_root"] = project_root
     return payload
+
+
+def _safe_recent_projects(data_root: Path | None, *, last: int) -> list[object]:
+    try:
+        return list_recent_projects(data_root, last=last)
+    except RecentProjectsError as exc:
+        logger.warning("Ignoring malformed recent-project index while building runtime hints: %s", exc)
+        return []
 
 
 def build_runtime_hint_payload(
@@ -537,7 +546,7 @@ def build_runtime_hint_payload(
     execution_visibility = derive_execution_visibility(project_root)
     execution = _model_dump(execution_visibility)
 
-    recent_rows = list_recent_projects(data_root, last=recent_projects_last) if include_recovery else []
+    recent_rows = _safe_recent_projects(data_root, last=recent_projects_last) if include_recovery else []
     current_project = (
         _selected_reentry_candidate(reentry, workspace_hint=workspace_hint, recent_rows=recent_rows)
         if include_recovery and reentry is not None
@@ -572,7 +581,8 @@ def build_runtime_hint_payload(
     if cost_advisory is not None:
         cost["advisory"] = cost_advisory
 
-    resolved_runtime = surface_runtime if surface_runtime is not None else cost_summary.active_runtime if cost_summary is not None else None
+    ambient_runtime = cost_summary.active_runtime if cost_summary is not None else None
+    resolved_runtime = surface_runtime if surface_runtime is not None else ambient_runtime
 
     recovery_advice = None
     if include_recovery and reentry is not None:
@@ -581,8 +591,16 @@ def build_runtime_hint_payload(
             data_root=data_root,
             recent_rows=recent_rows,
             resume_payload=resume_context,
-            continue_command=_runtime_command("resume-work", cwd=project_root, runtime_name=resolved_runtime),
-            fast_next_command=_runtime_command("suggest-next", cwd=project_root, runtime_name=resolved_runtime),
+            continue_command=(
+                _runtime_command("resume-work", cwd=project_root, runtime_name=surface_runtime)
+                if surface_runtime is not None
+                else None
+            ),
+            fast_next_command=(
+                _runtime_command("suggest-next", cwd=project_root, runtime_name=surface_runtime)
+                if surface_runtime is not None
+                else None
+            ),
         )
     recovery = (
         {

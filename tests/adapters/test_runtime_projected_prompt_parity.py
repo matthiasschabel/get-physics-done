@@ -2,28 +2,63 @@
 
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 
 import pytest
 
-from gpd.adapters.install_utils import expand_at_includes, project_markdown_for_runtime
+import gpd.adapters.gemini as gemini_module
+from gpd.adapters import get_adapter
+from gpd.adapters.install_utils import (
+    DEFAULT_RUNTIME_BRIDGE_SHELL_FENCE_LANGUAGES,
+    build_runtime_cli_bridge_command,
+    expand_at_includes,
+    project_markdown_for_runtime,
+)
 from gpd.adapters.runtime_catalog import get_runtime_descriptor, iter_runtime_descriptors
 from gpd.core.model_visible_text import (
     agent_visibility_note,
-    command_visibility_note,
     review_contract_visibility_note,
 )
 from gpd.registry import _frontmatter_parts, _load_frontmatter_mapping, _parse_spawn_contracts
+from tests.prompt_metrics_support import iter_markdown_fences, runtime_command_visibility_note
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COMMANDS_DIR = REPO_ROOT / "src/gpd/commands"
 AGENTS_DIR = REPO_ROOT / "src/gpd/agents"
+WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
 
 RUNTIMES = tuple(descriptor.runtime_name for descriptor in iter_runtime_descriptors())
 VERIFIER_BUDGET_BY_NATIVE_INCLUDE_SUPPORT = {
     True: (900, 60_000),
     False: (6_500, 430_000),
 }
+VERIFIER_SCHEMA_INCLUDE_SUFFIXES = (
+    "templates/verification-report.md",
+    "templates/contract-results-schema.md",
+    "references/shared/canonical-schema-discipline.md",
+)
+VERIFY_WORK_CONCISE_GUIDANCE_FRAGMENTS = (
+    "Every spawned agent is a one-shot delegation",
+    "File-producing handoffs must prove the expected artifact exists before success is accepted.",
+    "For proof-bearing work, require a canonical `*-PROOF-REDTEAM.md` artifact; if missing/stale/malformed/not `passed`, spawn `gpd-check-proof` once",
+    "Route only on the canonical verification frontmatter and `gpd_return.status`",
+    "Do not recompute canonical verification status in this workflow.",
+    "verification_report_skeleton_bridge",
+    "writer_command",
+    "write body-only evidence",
+    "satisfies bridge `body_contract`",
+    "one fenced executed `python`/`bash` block",
+    "adjacent `**Output:**` plus fenced `output`",
+    "following `PASS`/`FAIL`/`INCONCLUSIVE` verdict",
+    "do not hand-author or reflow frontmatter",
+)
+VERIFY_WORK_FORBIDDEN_SOURCE_COMMAND_PREFIXES = (
+    "$gpd-verify-work",
+    "/gpd:verify-work",
+    "/gpd-verify-work",
+    "gpd-verify-work",
+)
 
 
 def _read(path: Path) -> str:
@@ -44,7 +79,7 @@ def _contract_bearing_command_surfaces() -> dict[str, tuple[str, ...]]:
     surfaces: dict[str, tuple[str, ...]] = {}
     for command_name in _command_names():
         meta = _command_frontmatter(command_name)
-        fragments = [command_visibility_note()]
+        fragments = []
         review_contract = meta.get("review-contract")
         if isinstance(review_contract, dict):
             fragments.append(review_contract_visibility_note())
@@ -71,7 +106,11 @@ def _runtime_expected_fragments(fragments: tuple[str, ...], *, runtime: str) -> 
 
 
 def _spawn_contract_commands() -> tuple[str, ...]:
-    return tuple(command_name for command_name in _command_names() if "<spawn_contract>" in _read(COMMANDS_DIR / f"{command_name}.md"))
+    return tuple(
+        command_name
+        for command_name in _command_names()
+        if "<spawn_contract>" in _read(COMMANDS_DIR / f"{command_name}.md")
+    )
 
 
 COMMAND_SURFACES = _contract_bearing_command_surfaces()
@@ -87,6 +126,14 @@ PLAN_AGENT_SURFACES = {
 RESULT_AGENT_SURFACES = {
     "gpd-verifier": (
         agent_visibility_note(),
+        "Fallback report-writer rule",
+        "writer_command",
+        "body-only evidence",
+        "Follow `body_contract` when present",
+        "one fenced executed `python`/`bash` block",
+        "adjacent `**Output:**` plus fenced `output`",
+        "following `PASS`/`FAIL`/`INCONCLUSIVE` verdict",
+        "Do not hand-author or reflow `VERIFICATION.md` YAML",
         "contract_results",
         "comparison_verdicts",
         "suggested_contract_checks",
@@ -102,8 +149,8 @@ RESULT_AGENT_SURFACES = {
     ),
 }
 PEER_REVIEW_PUBLICATION_LANE_FRAGMENTS = (
-    "Keep GPD-authored auxiliary review artifacts under `GPD/` in the invoking workspace.",
-    "The manuscript itself and any manuscript-local publication manifests stay rooted at the resolved manuscript directory.",
+    "Use centralized preflight's selected publication/review roots for GPD-authored review artifacts.",
+    "Keep the manuscript and manuscript-local publication manifests rooted at the resolved manuscript directory.",
 )
 
 
@@ -119,6 +166,55 @@ def _project_markdown(path: Path, runtime: str, *, is_agent: bool) -> str:
     )
 
 
+def _project_installed_shared_markdown(path: Path, runtime: str) -> str:
+    return get_adapter(runtime).translate_shared_markdown(_read(path), "/runtime/", install_scope="--local")
+
+
+def _bridge_for_projection(runtime: str, target_dir: Path) -> str:
+    descriptor = get_runtime_descriptor(runtime)
+    return build_runtime_cli_bridge_command(
+        runtime,
+        target_dir=target_dir,
+        config_dir_name=descriptor.config_dir_name,
+        is_global=False,
+    )
+
+
+def _project_fixture_command(content: str, runtime: str, target_dir: Path) -> str:
+    descriptor = get_runtime_descriptor(runtime)
+    return project_markdown_for_runtime(
+        content,
+        runtime=runtime,
+        path_prefix=f"./{descriptor.config_dir_name}/",
+        surface_kind="command",
+        install_scope="--local",
+        workflow_target_dir=target_dir,
+        command_name="projection-probe",
+    )
+
+
+def _shell_fence_bodies(text: str) -> tuple[str, ...]:
+    return tuple(
+        fence.body
+        for fence in iter_markdown_fences(text)
+        if fence.info.lower() in DEFAULT_RUNTIME_BRIDGE_SHELL_FENCE_LANGUAGES
+    )
+
+
+def _raw_include_count(text: str, include_suffix: str) -> int:
+    return sum(
+        1 for line in text.splitlines() if line.strip().startswith("@") and line.strip().endswith(include_suffix)
+    )
+
+
+def _first_shell_command(body: str) -> str | None:
+    for line in body.splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            return stripped
+    return None
+
+
 def _assert_fragments_visible(text: str, fragments: tuple[str, ...], *, label: str) -> None:
     missing = sorted(fragment for fragment in fragments if fragment not in text)
     assert not missing, f"{label} is missing contract-bearing fragments: {', '.join(missing)}"
@@ -130,9 +226,13 @@ def _extract_spawn_contracts(text: str) -> list[dict[str, object]]:
 
 @pytest.mark.parametrize("runtime", RUNTIMES)
 @pytest.mark.parametrize(("command_name", "expected_fragments"), tuple(COMMAND_SURFACES.items()))
-def test_runtime_projected_commands_keep_model_visible_contract_wrappers(command_name: str, expected_fragments: tuple[str, ...], runtime: str) -> None:
+def test_runtime_projected_commands_keep_model_visible_contract_wrappers(
+    command_name: str, expected_fragments: tuple[str, ...], runtime: str
+) -> None:
     projected = _project_markdown(COMMANDS_DIR / f"{command_name}.md", runtime, is_agent=False)
 
+    assert projected.count("## Command Requirements") == 1
+    assert runtime_command_visibility_note(runtime) in projected
     for fragment in _runtime_expected_fragments(expected_fragments, runtime=runtime):
         assert fragment in projected, f"{runtime} {command_name} missing {fragment!r}"
 
@@ -181,15 +281,47 @@ def test_runtime_projected_verifier_surface_keeps_one_wrapper_and_stays_within_b
     assert projected.count("## Agent Requirements") == 1
     assert projected.index("## Agent Requirements") < projected.index("## Bootstrap Discipline")
     if descriptor.native_include_support:
-        assert projected.count("verification-report.md") == 1
-        assert projected.count("contract-results-schema.md") == 1
-        assert projected.count("canonical-schema-discipline.md") == 1
+        for include_suffix in VERIFIER_SCHEMA_INCLUDE_SUFFIXES:
+            assert _raw_include_count(projected, include_suffix) == 1
     else:
         assert projected.count("# Verification Report Template") == 1
         assert projected.count("# Contract Results Schema") == 1
         assert projected.count("# Canonical Schema Discipline") == 1
     assert len(projected.splitlines()) <= line_budget
     assert len(projected) <= char_budget
+
+
+@pytest.mark.parametrize("runtime", RUNTIMES)
+def test_runtime_projected_verify_work_surface_keeps_concise_guidance_visible(runtime: str) -> None:
+    projected = _project_markdown(COMMANDS_DIR / "verify-work.md", runtime, is_agent=False)
+    descriptor = get_runtime_descriptor(runtime)
+    visible_text = (
+        _project_installed_shared_markdown(WORKFLOWS_DIR / "verify-work.md", runtime)
+        if descriptor.native_include_support
+        else projected
+    )
+
+    if descriptor.native_include_support:
+        assert _raw_include_count(projected, "workflows/verify-work.md") == 1
+    _assert_fragments_visible(
+        visible_text,
+        VERIFY_WORK_CONCISE_GUIDANCE_FRAGMENTS,
+        label=f"{runtime} verify-work",
+    )
+
+
+def test_verify_work_sources_keep_canonical_command_labels_before_projection() -> None:
+    source_text = "\n".join(
+        _read(path)
+        for path in (
+            COMMANDS_DIR / "verify-work.md",
+            WORKFLOWS_DIR / "verify-work.md",
+            AGENTS_DIR / "gpd-verifier.md",
+        )
+    )
+
+    for forbidden in VERIFY_WORK_FORBIDDEN_SOURCE_COMMAND_PREFIXES:
+        assert forbidden not in source_text
 
 
 @pytest.mark.parametrize("runtime", RUNTIMES)
@@ -219,3 +351,195 @@ def test_runtime_projected_spawn_contract_blocks_match_canonical_command_content
         return
 
     assert projected_contracts == expanded_contracts
+
+
+def test_codex_projected_command_surface_matches_install_runtime_rewrites(tmp_path: Path) -> None:
+    target_dir = tmp_path / ".codex"
+    bridge = _bridge_for_projection("codex", target_dir)
+    source = (
+        "---\n"
+        "name: gpd:projection-probe\n"
+        "description: Projection probe\n"
+        "allowed-tools:\n"
+        "  - shell\n"
+        "---\n"
+        "Ask ONE question inline (freeform, NOT ask_user):\n"
+        "\n"
+        "```bash\n"
+        "gpd --raw init progress --include state,config\n"
+        "```\n"
+    )
+
+    projected = _project_fixture_command(source, "codex", target_dir)
+
+    assert "<codex_runtime_notes>" in projected
+    assert "<codex_questioning>" in projected
+    assert "Ask exactly one inline freeform question with no preamble or restatement:" in projected
+    assert f"{bridge} --raw init progress --include state,config" in projected
+
+
+def test_gemini_projected_command_surface_matches_install_runtime_rewrites(tmp_path: Path) -> None:
+    target_dir = tmp_path / ".gemini"
+    bridge = _bridge_for_projection("gemini", target_dir)
+    source = (
+        "---\n"
+        "name: gpd:projection-probe\n"
+        "description: Projection probe\n"
+        "allowed-tools:\n"
+        "  - shell\n"
+        "---\n"
+        "```bash\n"
+        "gpd config ensure-section\n"
+        "INIT=$(gpd --raw init progress --include state,config)\n"
+        "if [ $? -ne 0 ]; then\n"
+        '  echo "ERROR: gpd initialization failed: $INIT"\n'
+        '  echo "$INIT"\n'
+        "  # STOP \u2014 display the error to the user and do not proceed.\n"
+        "fi\n"
+        "```\n"
+    )
+
+    projected = _project_fixture_command(source, "gemini", target_dir)
+
+    assert "<gemini_runtime_notes>" in projected
+    assert "Run these as separate shell calls in Gemini auto-edit mode." in projected
+    assert f"{bridge} config ensure-section" in projected
+    assert f'{bridge} config set model_profile "$PROFILE"' in projected
+    assert f"{bridge} --raw init progress --include state,config" not in projected
+    assert "INIT=$(gpd --raw init progress --include state,config)" not in projected
+    assert 'echo "$INIT"' not in projected
+
+
+def test_gemini_projected_shell_allowlist_matches_policy_prefixes(tmp_path: Path) -> None:
+    target_dir = tmp_path / ".gemini"
+    bridge = _bridge_for_projection("gemini", target_dir)
+    source = (
+        "---\n"
+        "name: gpd:projection-probe\n"
+        "description: Projection probe\n"
+        "allowed-tools:\n"
+        "  - shell\n"
+        "---\n"
+        "Runnable contract persistence must be file-backed in Gemini:\n"
+        "\n"
+        "```bash\n"
+        "printf '%s\\n' \"$PROJECT_CONTRACT_JSON\" | gpd --raw validate project-contract - --mode approved\n"
+        "```\n"
+        "\n"
+        "```bash\n"
+        "git init\n"
+        "```\n"
+        "\n"
+        "```bash\n"
+        "mkdir -p GPD\n"
+        "```\n"
+        "\n"
+        "Non-runnable contract-variable shorthand, for explanation only:\n"
+        "\n"
+        "```text\n"
+        "PROJECT_CONTRACT_JSON={...}\n"
+        "printf '%s\\n' \"$PROJECT_CONTRACT_JSON\"\n"
+        "```\n"
+    )
+
+    projected = _project_fixture_command(source, "gemini", target_dir)
+    policy_prefixes = tuple(tomllib.loads(gemini_module._render_gemini_policy_toml(bridge))["rule"][0]["commandPrefix"])
+
+    assert policy_prefixes == gemini_module._gemini_policy_command_prefixes(bridge)
+    for prefix in policy_prefixes:
+        assert f"  - `{prefix}`" in projected
+    assert all("PROJECT_CONTRACT_JSON" not in prefix for prefix in policy_prefixes)
+    assert all(not prefix.startswith("printf") for prefix in policy_prefixes)
+
+    shell_bodies = _shell_fence_bodies(projected)
+    assert shell_bodies
+    first_commands = tuple(command for body in shell_bodies if (command := _first_shell_command(body)))
+    assert first_commands == (
+        f"{bridge} --raw validate project-contract GPD/.approved-project-contract.json --mode approved",
+        "git init",
+        "mkdir -p GPD",
+    )
+    assert all(command.startswith(policy_prefixes) for command in first_commands)
+    assert "PROJECT_CONTRACT_JSON" not in "\n".join(shell_bodies)
+    assert "printf '%s\\n'" not in "\n".join(shell_bodies)
+    assert "```text\nPROJECT_CONTRACT_JSON={...}" in projected
+
+
+def test_gemini_real_command_shell_fences_start_with_policy_prefixes(tmp_path: Path) -> None:
+    target_dir = tmp_path / ".gemini"
+    bridge = _bridge_for_projection("gemini", target_dir)
+    policy_prefixes = gemini_module._gemini_policy_command_prefixes(bridge)
+    offenders: list[str] = []
+
+    for command_name in _command_names():
+        projected = project_markdown_for_runtime(
+            _read(COMMANDS_DIR / f"{command_name}.md"),
+            runtime="gemini",
+            path_prefix="./.gemini/",
+            surface_kind="command",
+            install_scope="--local",
+            workflow_target_dir=target_dir,
+            command_name=command_name,
+        )
+        for body in _shell_fence_bodies(projected):
+            first_command = _first_shell_command(body)
+            if first_command and not first_command.startswith(policy_prefixes):
+                offenders.append(f"{command_name}: {first_command}")
+
+    assert offenders == []
+
+
+@pytest.mark.parametrize("runtime", ("claude-code", "opencode"))
+def test_projected_command_surfaces_rewrite_fenced_cli_invocations_to_runtime_bridge(
+    runtime: str,
+    tmp_path: Path,
+) -> None:
+    descriptor = get_runtime_descriptor(runtime)
+    target_dir = tmp_path / descriptor.config_dir_name
+    bridge = _bridge_for_projection(runtime, target_dir)
+    source = (
+        "---\n"
+        "name: gpd:projection-probe\n"
+        "description: Projection probe\n"
+        "allowed-tools:\n"
+        "  - shell\n"
+        "---\n"
+        "Inline `gpd --raw init progress` stays prose.\n"
+        "\n"
+        "```bash\n"
+        "gpd --raw init progress --include state,config\n"
+        "```\n"
+    )
+
+    projected = _project_fixture_command(source, runtime, target_dir)
+
+    assert f"{bridge} --raw init progress --include state,config" in projected
+    assert "Inline `gpd --raw init progress` stays prose." in projected
+
+
+@pytest.mark.parametrize("runtime", RUNTIMES)
+def test_projected_command_surfaces_rewrite_tilde_fenced_cli_invocations_to_runtime_bridge(
+    runtime: str,
+    tmp_path: Path,
+) -> None:
+    descriptor = get_runtime_descriptor(runtime)
+    target_dir = tmp_path / descriptor.config_dir_name
+    bridge = _bridge_for_projection(runtime, target_dir)
+    source = (
+        "---\n"
+        "name: gpd:projection-probe\n"
+        "description: Projection probe\n"
+        "allowed-tools:\n"
+        "  - shell\n"
+        "---\n"
+        "Inline `gpd status` stays prose.\n"
+        "\n"
+        "~~~bash\n"
+        "gpd --raw init progress --include state,config\n"
+        "~~~\n"
+    )
+
+    projected = _project_fixture_command(source, runtime, target_dir)
+
+    assert f"{bridge} --raw init progress --include state,config" in projected
+    assert "Inline `gpd status` stays prose." in projected

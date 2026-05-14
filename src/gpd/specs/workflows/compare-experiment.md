@@ -21,7 +21,7 @@ Keep this init bound to the workspace the user invoked from. `compare-experiment
 - Run:
 
 ```bash
-INIT=$(gpd --raw init progress --include state --no-project-reentry)
+INIT=$(gpd --raw init progress --include state,protocols --no-project-reentry)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd initialization failed: $INIT"
   # STOP — display the error to the user and do not proceed.
@@ -29,7 +29,7 @@ fi
 ```
 
 - Parse JSON for: `commit_docs`, `state_exists`, `project_exists`, `current_phase`, `project_contract`, `project_contract_gate`, `project_contract_load_info`, `project_contract_validation`, `selected_protocol_bundle_ids`, `protocol_bundle_context`, `active_reference_context`
-- **If `state_exists` is true:** Read `GPD/state.json` to extract `convention_lock` for unit system, metric signature, and Fourier conventions. Extract active approximations and their validity ranges from state. Load `intermediate_results` from state for any previously computed quantities. If you need to locate a canonical prior result before comparing, use `gpd result search` to find it by identifier, equation, description, or upstream dependency path. Use `gpd result search --depends-on "{upstream_result_id}"` when you know the anchor result and need a flat list of all downstream dependents, especially if you are filtering by other result metadata at the same time. Use `gpd result downstream "{upstream_result_id}"` when you need the reverse dependency tree separated into direct and transitive dependents for impact analysis. Once a canonical `result_id` is known, use `gpd result show "{result_id}"` for the direct stored-result view before `gpd result deps "{result_id}"` when you need the full recorded dependency chain for one chosen result. Keep `gpd query search` for SUMMARY/frontmatter lookup.
+- **If `state_exists` is true:** Read `GPD/state.json` to extract `convention_lock` for unit system, metric signature, and Fourier conventions. Extract active approximations and their validity ranges from state. Load `intermediate_results` from state for any previously computed quantities. When locating canonical prior results, load and follow `{GPD_INSTALL_DIR}/references/results/result-lookup-policy.md`.
 - **If `state_exists` is false in the current workspace** (standalone usage): Proceed with explicit convention declarations required from user via ask_user (unit system, sign conventions, normalization)
 - **If `selected_protocol_bundle_ids` is non-empty:** Treat `protocol_bundle_context` as additive provenance guidance only. Keep any decisive-artifact, estimator, or benchmark expectations visible while choosing theory/data anchors, and record the bundle IDs / expectations in the output frontmatter when they materially informed the comparison.
 - **If `active_reference_context` is non-empty:** Keep those contract-backed anchors visible when selecting `reference_id`, interpreting tolerances, and deciding whether the comparison closes a decisive requirement.
@@ -314,6 +314,14 @@ Set `COMPARISON_OUTPUT_PATH="GPD/comparisons/[slug]-COMPARISON.md"` and `COMPARI
 ```bash
 mkdir -p GPD/comparisons "${COMPARISON_SUPPORT_DIR}"
 ```
+
+After writing `${COMPARISON_OUTPUT_PATH}`, run:
+
+```bash
+gpd validate comparison-contract "${COMPARISON_OUTPUT_PATH}"
+```
+
+If validation fails, treat the comparison artifact as incomplete: fix the frontmatter ledger before routing, committing, or presenting it as decisive evidence.
 
 ## 6. Generate Comparison Figures
 

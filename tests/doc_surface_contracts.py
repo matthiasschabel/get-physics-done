@@ -24,7 +24,7 @@ from gpd.core.public_surface_contract import (
     recovery_cross_workspace_command,
     recovery_local_snapshot_command,
 )
-from gpd.core.resume_surface import RESUME_COMPATIBILITY_ALIAS_FIELDS
+from gpd.core.resume_surface import RESUME_BACKEND_ONLY_FIELDS
 
 _RUNTIME_NAMES = tuple(descriptor.runtime_name for descriptor in iter_runtime_descriptors())
 
@@ -99,6 +99,17 @@ def _runtime_command_fragments(action: str) -> tuple[str, ...]:
     return tuple(fragments)
 
 
+def _runtime_command_contract_handoff_fragments(action: str) -> tuple[str, ...]:
+    return tuple(
+        fragment
+        for command in _runtime_command_variants(action)
+        for fragment in (
+            f"Follow the installed `{command}` command contract directly",
+            f"Use `{command}` as the selected runtime command label and follow its installed command contract directly",
+        )
+    )
+
+
 def _quoted_fragments(*values: str) -> tuple[str, ...]:
     fragments: list[str] = []
     seen: set[str] = set()
@@ -117,6 +128,7 @@ def _action_surface_fragments(action: str, *, include_bare: bool = False) -> tup
         fragments.append(f"`{action}`")
     fragments.extend(_runtime_command_fragments(action))
     return tuple(dict.fromkeys(fragments))
+
 
 __all__ = [
     "DOCTOR_RUNTIME_SCOPE_RE",
@@ -142,7 +154,7 @@ __all__ = [
     "assert_wolfram_plan_boundary_contract",
     "assert_workflow_preset_surface_contract",
     "resume_authority_public_vocabulary_intro",
-    "resume_compat_alias_fields",
+    "resume_backend_only_fields",
 ]
 
 
@@ -258,8 +270,8 @@ def resume_authority_public_vocabulary_intro() -> str:
     return _contract_string(section, "public_vocabulary_intro", label="resume_authority")
 
 
-def resume_compat_alias_fields() -> tuple[str, ...]:
-    return RESUME_COMPATIBILITY_ALIAS_FIELDS
+def resume_backend_only_fields() -> tuple[str, ...]:
+    return RESUME_BACKEND_ONLY_FIELDS
 
 
 def assert_unattended_readiness_contract(content: str) -> None:
@@ -378,8 +390,8 @@ def assert_help_command_quick_start_extract_contract(content: str) -> None:
     _assert_contains_any(
         content,
         (
-            "Start at the workflow-owned `## Quick Start` section.",
-            "workflow-owned `## Quick Start` section",
+            "Extract from `<!-- gpd-help:quick-start:start -->` through `<!-- gpd-help:quick-start:end -->`.",
+            "gpd-help:quick-start:start",
         ),
         label="help command quick-start reference anchor",
     )
@@ -387,22 +399,23 @@ def assert_help_command_quick_start_extract_contract(content: str) -> None:
     _assert_contains_any(
         content,
         (
-            "Include the workflow-owned `## Quick Start` section.",
-            "`## Quick Start` section",
+            "Exclude the marker comment lines themselves.",
+            "marker comment lines",
         ),
         label="help command quick-start extract boundary",
     )
     _assert_contains_any(
         content,
         (
-            "Stop before `## Command Index`.",
-            "before `## Command Index`",
+            "Exclude the marker comment lines themselves.",
+            "marker comment lines",
         ),
         label="help command command-index cutoff boundary",
     )
     _assert_contains_any(
         content,
         (
+            "Run <current-help-command> --all for the compact command index.",
             *tuple(
                 f"Run \\`{command}\\` for the compact command index."
                 for command in _runtime_command_variants("help --all")
@@ -425,22 +438,23 @@ def assert_help_command_all_extract_contract(content: str) -> None:
     _assert_contains_any(
         content,
         (
-            "Include the workflow-owned `## Command Index` section.",
-            "`## Command Index` section",
+            "Extract from `<!-- gpd-help:quick-start:start -->` through `<!-- gpd-help:command-index:end -->`.",
+            "gpd-help:command-index:end",
         ),
         label="help command command-index extract boundary",
     )
     _assert_contains_any(
         content,
         (
-            "Stop before `## Detailed Command Reference`.",
-            "before `## Detailed Command Reference`",
+            "Exclude the marker comment lines themselves.",
+            "marker comment lines",
         ),
         label="help command detailed-reference cutoff boundary",
     )
     _assert_contains_any(
         content,
         (
+            "Run <current-help-command> --command <name> for detailed help on one command.",
             *tuple(
                 f"Run \\`{command}\\` for detailed help on one command."
                 for command in _runtime_command_variants("help --command <name>")
@@ -497,6 +511,7 @@ def assert_help_command_single_command_extract_contract(content: str) -> None:
     _assert_contains_any(
         content,
         (
+            "Unknown command. Run <current-help-command> --all for the compact command index.",
             "Unknown command. Run `",
             *_quoted_fragments(*_runtime_command_variants("help --all")),
         ),
@@ -543,16 +558,12 @@ def assert_help_workflow_quick_start_taxonomy_contract(content: str) -> None:
     )
     _assert_contains_any(
         content,
-        (
-            *_runtime_command_fragments("tangent"),
-        ),
+        (*_runtime_command_fragments("tangent"),),
         label="quick-start tangent follow-up guidance",
     )
     _assert_contains_any(
         content,
-        (
-            *_runtime_command_fragments("branch-hypothesis"),
-        ),
+        (*_runtime_command_fragments("branch-hypothesis"),),
         label="quick-start branch-hypothesis follow-up guidance",
     )
 
@@ -761,37 +772,23 @@ def assert_start_workflow_router_contract(content: str) -> None:
 
     for label, options in (
         ("start recommended-next-steps heading", ("Recommended next steps:",)),
-        ("start other-useful-options heading", ("Other useful options",)),
+        (
+            "start primary-choices-only boundary",
+            ("only the commands that fit the detected folder state",),
+        ),
         ("start resume-work surface", _runtime_command_fragments("resume-work")),
         ("start progress surface", _runtime_command_fragments("progress")),
-        ("start suggest-next surface", _runtime_command_fragments("suggest-next")),
-        ("start quick surface", _runtime_command_fragments("quick")),
         ("start tour surface", _runtime_command_fragments("tour")),
         ("start map-research surface", _runtime_command_fragments("map-research")),
         ("start new-project --minimal surface", _runtime_command_fragments("new-project --minimal")),
         ("start new-project surface", _runtime_command_fragments("new-project")),
-        ("start explain surface", _runtime_command_fragments("explain")),
-        ("start help --all surface", _runtime_command_fragments("help --all")),
         (
             "start minimal-command-contract handoff",
-            tuple(
-                f"Follow the installed `{command}` command contract directly"
-                for command in _runtime_command_variants("new-project --minimal")
-            ),
+            _runtime_command_contract_handoff_fragments("new-project --minimal"),
         ),
         (
             "start new-project-command-contract handoff",
-            tuple(
-                f"Follow the installed `{command}` command contract directly"
-                for command in _runtime_command_variants("new-project")
-            ),
-        ),
-        (
-            "start help-command-contract handoff",
-            tuple(
-                f"Follow the installed `{command}` command contract directly"
-                for command in _runtime_command_variants("help --all")
-            ),
+            _runtime_command_contract_handoff_fragments("new-project"),
         ),
     ):
         _assert_contains_any(content, options, label=label)
@@ -875,16 +872,12 @@ def assert_beginner_router_bridge_contract(content: str) -> None:
     )
     _assert_contains_any(
         content,
-        (
-            *_action_surface_fragments("map-research", include_bare=True),
-        ),
+        (*_action_surface_fragments("map-research", include_bare=True),),
         label="map-research routing surface",
     )
     _assert_contains_any(
         content,
-        (
-            *_action_surface_fragments("resume-work", include_bare=True),
-        ),
+        (*_action_surface_fragments("resume-work", include_bare=True),),
         label="resume-work routing surface",
     )
     assert "gpd --help" in content
@@ -997,17 +990,16 @@ def assert_runtime_reset_rediscovery_contract(
     extra_reset_fragments: Iterable[str] = (),
     extra_reset_not_recovery_fragments: Iterable[str] = (),
 ) -> None:
-    assert "/clear" in content
     assert recovery_local_snapshot_command() in content
     assert recovery_cross_workspace_command() in content
     _assert_contains_any(
         content,
         (
-            "fresh-context reset",
+            "fresh context reset",
             "fresh context window",
             "reset the runtime window",
             "reset the runtime to a fresh context window",
-            "`/clear` first, then run `{next command}`",
+            "Start a fresh context window",
             *tuple(extra_reset_fragments),
         ),
         label="runtime reset wording",
@@ -1025,7 +1017,7 @@ def assert_runtime_reset_rediscovery_contract(
         content,
         (
             "not as a recovery step",
-            "instead of implying that `/clear` performs recovery",
+            "do not treat the fresh context reset as project recovery",
             *tuple(extra_reset_not_recovery_fragments),
         ),
         label="reset-not-recovery wording",
@@ -1036,10 +1028,9 @@ def assert_resume_authority_contract(
     content: str,
     *,
     allow_explicit_alias_examples: bool,
-    require_generic_compatibility_note: bool = False,
+    require_canonical_note: bool = False,
 ) -> None:
     contract = _resume_authority_contract()
-    compatibility_note = "Compatibility-only intake fields stay internal"
     assert _contract_string(contract, "durable_authority_phrase", label="resume_authority") in content
     assert _contract_string(contract, "public_vocabulary_intro", label="resume_authority") in content
     for field in _contract_string_list(contract, "public_fields", label="resume_authority"):
@@ -1048,36 +1039,19 @@ def assert_resume_authority_contract(
         _assert_contains_any(
             content,
             (
-                compatibility_note,
-                "Compatibility-only backend intake (`gpd init resume` only):",
-            ),
-            label="resume compatibility phrase",
-        )
-        _assert_contains_any(
-            content,
-            (
                 "session.resume_file",
-                "session_resume_file",
+                "handoff_resume_file",
                 "current_execution",
                 "interrupted_agent",
             ),
             label="compatibility alias examples",
         )
     else:
-        assert "compat_resume_surface" not in content
-        for alias in resume_compat_alias_fields():
+        assert "`resume_surface`" not in content
+        for alias in resume_backend_only_fields():
             assert alias not in content
-        assert "Compatibility-only backend intake (`gpd init resume` only):" not in content
-    if require_generic_compatibility_note:
-        lowered_content = content.lower()
-        _assert_contains_any(
-            lowered_content,
-            (
-                compatibility_note.lower(),
-                _contract_string(contract, "public_vocabulary_intro", label="resume_authority").lower(),
-            ),
-            label="generic compatibility note",
-        )
+    if require_canonical_note:
+        assert _contract_string(contract, "public_vocabulary_intro", label="resume_authority") in content
 
 
 def assert_runtime_readiness_handoff_contract(content: str) -> None:
@@ -1214,9 +1188,7 @@ def assert_install_summary_runtime_follow_up_contract(
     assert "Secondary follow-up" not in content
     _assert_contains_any(
         content,
-        (
-            "local diagnostics and later setup",
-        ),
+        ("local diagnostics and later setup",),
         label="install-summary local CLI bridge",
     )
     help_fragments = tuple(fragment for fragment in runtime_help_fragments if fragment)
@@ -1320,6 +1292,7 @@ def assert_publication_lane_boundary_contract(content: str) -> None:
     _assert_contains_any(
         content,
         (
+            "`peer-review` can review the current project manuscript or one explicit",
             "`gpd:peer-review` can review the current project manuscript or one explicit",
             "`gpd:peer-review` is the project-aware intake step and can review the current project manuscript or one explicit",
         ),
@@ -1331,6 +1304,7 @@ def assert_publication_lane_boundary_contract(content: str) -> None:
             "subject-owned publication root under `GPD/publication/{subject_slug}`",
             "subject-owned publication root at `GPD/publication/{subject_slug}`",
             "subject-owned publication root under `GPD/publication/{subject_slug}/...`",
+            "subject-owned publication root at `GPD/publication/{subject_slug}/...`",
             "outputs live under `GPD/publication/{subject_slug}/...`",
         ),
         label="subject-owned external continuation boundary",
@@ -1372,6 +1346,7 @@ def assert_publication_lane_boundary_contract(content: str) -> None:
     _assert_contains_any(
         content,
         (
+            "`peer-review` remains the standalone follow-on command",
             "`gpd:peer-review` remains the standalone follow-on command",
             "standalone follow-on command when the bounded external-authoring lane needs review",
             "route authored-manuscript review to standalone `gpd:peer-review`",
@@ -1383,6 +1358,7 @@ def assert_publication_lane_boundary_contract(content: str) -> None:
         (
             "Project-backed review/response/package outputs stay on their current `GPD/` and `GPD/review/` paths.",
             "Project-backed review/response/package outputs stay on their current `GPD/` and `GPD/review/` paths",
+            "Project-backed review/response/package outputs stay on the `GPD/` and `GPD/review/` paths",
             "project-backed outputs on their current GPD paths",
         ),
         label="project-backed publication outputs stay put",
@@ -1390,10 +1366,12 @@ def assert_publication_lane_boundary_contract(content: str) -> None:
     _assert_contains_any(
         content,
         (
+            "`respond-to-referees` stays tied to the resolved manuscript root",
             "`gpd:respond-to-referees` stays tied to the resolved manuscript root",
             "`gpd:respond-to-referees` and `gpd:arxiv-submission` still operate on the resolved manuscript root",
             "`gpd:respond-to-referees` and `gpd:arxiv-submission` stay tied to the resolved manuscript root",
             "embedded external staged-review parity remains deferred",
+            "embedded external staged-review parity is out of scope",
             "The later publication commands stay stricter:",
         ),
         label="resolved manuscript-root publication boundary",
@@ -1401,7 +1379,9 @@ def assert_publication_lane_boundary_contract(content: str) -> None:
     _assert_contains_any(
         content,
         (
-            "`gpd:arxiv-submission` only packages a GPD-owned manuscript root",
+            "`arxiv-submission` only packages a GPD-owned manuscript root or `.tex` entrypoint",
+            "`gpd:arxiv-submission` only packages a GPD-owned manuscript root or `.tex` entrypoint",
+            "`gpd:arxiv-submission` packages only a GPD-owned manuscript root or `.tex` entrypoint",
             "resolved GPD-owned manuscript root",
             "optional GPD-owned manuscript-root target",
         ),
@@ -1415,6 +1395,7 @@ def assert_publication_lane_boundary_contract(content: str) -> None:
             "This is not a full publication-root migration.",
             "This is not a full publication-root migration",
             "not a full publication-root migration",
+            "Publication-root handling stays bounded to these resolved manuscript, intake, review, response, and package roots.",
         ),
         label="manuscript-root migration boundary",
     )

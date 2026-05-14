@@ -37,6 +37,7 @@ review-contract:
     - manuscript-root reproducibility manifest
     - latest peer-review review ledger
     - latest peer-review referee decision
+    - latest response-round freshness status
   blocking_conditions:
     - missing project state
     - missing manuscript
@@ -48,6 +49,7 @@ review-contract:
     - missing latest staged peer-review decision evidence
     - manuscript-root reproducibility state is not ready for submission
     - unresolved publication blockers
+    - same-round or newer response artifacts without newer staged peer-review clearance
     - latest staged peer-review recommendation blocks submission packaging
     - degraded review integrity
   preflight_checks:
@@ -92,7 +94,7 @@ Prepare a completed paper for arXiv submission.
 
 Keep the wrapper thin and let the workflow own validation, packaging, and submission-gate details.
 
-**Why a dedicated command:** arXiv has specific requirements (no subdirectories in uploads, .bbl instead of .bib, specific figure formats, 00README.XXX for multi-file submissions). Getting these wrong means rejected submissions and wasted time. This command keeps the wrapper focused on the handoff instead of process duplication.
+arXiv-specific upload rules stay in the workflow, not this wrapper.
 
 Output: A submission-ready tarball and checklist of manual steps remaining.
 </objective>
@@ -102,7 +104,7 @@ Output: A submission-ready tarball and checklist of manual steps remaining.
 </execution_context>
 
 <context>
-Paper target: $ARGUMENTS (optional; when omitted, the workflow resolves the active GPD-owned manuscript root).
+Paper target: $ARGUMENTS (optional manuscript root or `.tex` entrypoint; when omitted, the workflow resolves the active GPD-owned manuscript root).
 
 Explicit manuscript subjects must stay under `paper/`, `manuscript/`, `draft/`, or `GPD/publication/{subject_slug}/manuscript/`.
 When `$ARGUMENTS` is omitted, use the current GPD project's resolved manuscript subject only; do not switch to standalone interactive intake or arbitrary external directories.
@@ -110,7 +112,7 @@ This remains a project-backed manuscript workflow: package the resolved built ma
 </context>
 
 <process>
-Follow `@{GPD_INSTALL_DIR}/workflows/arxiv-submission.md` exactly.
+Follow the included arxiv-submission workflow exactly.
 </process>
 
 <success_criteria>

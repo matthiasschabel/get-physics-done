@@ -1,5 +1,5 @@
 <purpose>
-Interactive configuration of autonomy, unattended execution budgets, GPD workflow agents (research, plan_checker, verifier), research profile selection, qualitative model-cost posture, runtime-specific tier model overrides, `execution.review_cadence`, git branching, and runtime-permission sync guidance. `gpd:settings` is the primary guided entrypoint for unattended-use setup. Recommend `Balanced` unless the user explicitly wants tighter supervision or YOLO-style speed. Use `gpd:set-tier-models` when the user only wants the narrow direct path for `tier-1` / `tier-2` / `tier-3` model ids. Updates `GPD/config.json` with user preferences including model profile, optional `model_overrides`, workflow toggles, execution cadence, and branching strategy.
+Interactive configuration of autonomy, unattended execution budgets, GPD workflow agents (research, plan_checker, verifier), research profile selection, qualitative model-cost posture, runtime-specific tier model overrides, `execution.review_cadence`, git branching, and runtime-permission sync guidance. `gpd:settings` is the primary guided entrypoint for unattended-use setup. Recommend `Supervised` as the default that matches the advisor cadence; use `Balanced` when the user wants a lighter checkpoint pace for unattended runs, or YOLO for maximum speed. Use `gpd:set-tier-models` when the user only wants the narrow direct path for `tier-1` / `tier-2` / `tier-3` model ids. Updates `GPD/config.json` with user preferences including model profile, optional `model_overrides`, workflow toggles, execution cadence, and branching strategy.
 </purpose>
 
 <preset_guidance>
@@ -20,7 +20,7 @@ When a preset is selected, resolve it into the current knobs:
 
 Current preset catalog:
 
-- `core-research` — recommended balanced default for most projects
+- `core-research` — recommended supervised default for most projects
 - `theory` — derivation-heavy workflow with `model_profile=deep-theory`
 - `numerics` — computation-heavy workflow with `model_profile=numerical`
 - `publication-manuscript` — paper-writing workflow with `model_profile=paper-writing`; `paper-build` remains the manuscript build contract, while LaTeX readiness still drives readiness for `write-paper` / `peer-review` and can degrade or block `paper-build` / `arxiv-submission`
@@ -40,42 +40,45 @@ Ensure config exists and load current state:
 
 ```bash
 gpd config ensure-section
-# Compatibility note for installer text checks:
-# INIT=$(gpd --raw init progress --include state,config)
 INIT=$(gpd --raw init progress --include state,config --no-project-reentry)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd initialization failed: $INIT"
   # STOP — display the error to the user and do not proceed.
 fi
+PROJECT_ROOT=$(echo "$INIT" | gpd json get .project_root --default ".")
 ```
 
 Creates `GPD/config.json` with defaults if missing and loads current config values.
+`--no-project-reentry` disables recent-project auto-selection for this settings bootstrap only. It must still allow normal ancestor GPD project resolution when the command is launched from a nested folder inside the current project.
 </step>
 
 <step name="read_current">
 ```bash
-cat GPD/config.json
+cat "$PROJECT_ROOT/GPD/config.json"
 ```
 
-Parse current values (default to `true` / first option if not present):
+Parse current values, using the schema defaults noted below when a key is absent:
 
-- `autonomy` -- human-in-the-loop level: `"supervised"`, `"balanced"` (default), `"yolo"`
+- `autonomy` -- human-in-the-loop level: `"supervised"` (default), `"balanced"`, `"yolo"`
 - `research_mode` -- research strategy: `"explore"`, `"balanced"` (default), `"exploit"`, `"adaptive"`
 - `model_overrides` -- optional runtime-scoped concrete model mapping for `tier-1`, `tier-2`, `tier-3`
 - `workflow.research` -- spawn researcher during plan-phase
 - `workflow.plan_checker` -- spawn plan checker during plan-phase
 - `workflow.verifier` -- spawn verifier during execute-phase (this does NOT disable mandatory proof red-teaming for `proof_obligation` work)
-- `execution.review_cadence` -- execution review density: `"dense"`, `"adaptive"` (default), `"sparse"`
+- `execution.review_cadence` -- execution review density: `"dense"` (default), `"adaptive"`, `"sparse"`
 - `execution.max_unattended_minutes_per_plan` -- wall-clock budget before a bounded continuation should be created
+- `execution.max_unattended_minutes_per_wave` -- wall-clock budget before a wave-level bounded continuation should be created
 - `execution.project_usd_budget` -- optional advisory USD budget for the whole current workspace / project
 - `execution.session_usd_budget` -- optional advisory USD budget for the current active session
 - `execution.checkpoint_after_n_tasks` -- task budget before a bounded continuation should be created
+- `execution.checkpoint_after_first_load_bearing_result` -- whether the first load-bearing result forces a review gate
+- `execution.checkpoint_before_downstream_dependent_tasks` -- whether downstream fanout waits on a review gate
 - `planning.commit_docs` -- whether planning artifacts are committed to git (default: `true`)
 - `parallelization` -- execute wave plans in parallel (default: `true`)
 - `model_profile` -- which agent model profile to use (default: `review`)
 - `model-cost posture` is a qualitative guidance layer only; it maps onto the existing `model_profile` and `model_overrides` choices and does not add a new persisted config key.
 - Optional USD budget guardrails are advisory only; `gpd cost` evaluates them, and missing telemetry keeps the result partial or estimated rather than exact.
-- `git.branching_strategy` -- branching approach (default: `"none"`)
+- `git.branching_strategy` -- `"branching_strategy": "none" | "per-phase" | "per-milestone"` (default: `"none"`)
 
 `research_mode` controls breadth vs focus only. It does **not** by itself authorize git-backed hypothesis branches, branch-like alternative plans, or side investigations; those still require an explicit tangent decision.
 
@@ -87,20 +90,25 @@ Project conventions do **not** live in `GPD/config.json`. Do not invent or prese
   </step>
 
 <step name="determine_runtime_for_model_overrides">
-Infer the active runtime before prompting for explicit model IDs.
+Infer the active runtime identifier before prompting for explicit model IDs.
 
-Use the current command syntax, tool names, environment, and local runtime config directories to infer the active runtime identifier for this install. For GPD-owned model resolution surfaces, prefer the runtime with a concrete GPD install when a higher-priority runtime appears active but is not actually installed for this workspace.
+Shared active-runtime rule: infer the active runtime identifier from command syntax, tool names, environment, and local runtime config directories; for GPD-owned model resolution surfaces, prefer a runtime with a concrete GPD install over a higher-priority hint that is not installed for this workspace.
 
 If the runtime is still ambiguous, ask the user which runtime they want to configure before continuing with model override questions.
+
+Record the resulting runtime id as `SELECTED_RUNTIME`. Use this same value for `model_overrides.<SELECTED_RUNTIME>` and every permissions status/sync command in this workflow; do not let permissions sync re-detect a different runtime after model overrides are written.
 
 If `model_overrides.<runtime>` already exists, surface the current `tier-1` / `tier-2` / `tier-3` values when presenting the settings form.
 </step>
 
 <step name="present_settings">
 
-> **Platform note:** If `ask_user` is not available, present these options in plain text and wait for the user's freeform response.
+@{GPD_INSTALL_DIR}/references/shared/interactive-choice-fallback.md
 
-Treat this as the primary guided unattended-use flow: explain that autonomy, unattended budgets, runtime permission sync, and conservative preset bundles all live here, and that `Balanced` is the recommended default for most users.
+Treat this as the primary guided unattended-use flow: explain that autonomy, unattended budgets, runtime permission sync, and conservative preset bundles all live here. `Supervised` is the default for frequent checkpoints. Point users at `Balanced` when they want fewer routine pauses after they trust the workflow.
+
+**Checkpoint keystrokes.** Most supervised checkpoints render a one-line summary and resume with `[Y/n/e]`: press **Enter** (or `Y`) to accept the recommended action, `n` to reject, `e` to edit or provide freeform feedback. Enter always means "accept what I just saw." A handful of physics-bearing or destructive checkpoints intentionally do not collapse to a single keystroke (convention lock, destructive rails, blocker triage, claim↔deliverable precheck, first-result gate after firing) — see `{GPD_INSTALL_DIR}/references/orchestration/checkpoint-ux-convention.md`.
+
 Teach one coherent posture-to-inspection loop:
 
 - choose a qualitative posture first (`Max Quality`, `Balanced`, `Budget-aware`)
@@ -121,7 +129,7 @@ Broader local reference surfaces stay outside this settings-specific follow-up l
 
 Before the detailed question list, offer a compact preset chooser when the user wants a starter bundle:
 
-- Core research (Recommended): preview the balanced default bundle over the existing knobs, then apply or customize
+- Core research (Recommended): preview the supervised default bundle over the existing knobs, then apply or customize
 - Theory: preview the derivation-heavy bundle over the existing knobs, then apply or customize
 - Numerics: preview the computation-heavy bundle over the existing knobs, then apply or customize
 - Publication / manuscript: preview the paper-writing bundle over the existing knobs, then apply or customize
@@ -133,12 +141,12 @@ Use ask_user with current values pre-selected:
 ```
 ask_user([
   {
-    question: "How much autonomy should the AI have? Supervised pauses constantly, Balanced is the recommended default for most unattended runs because it still pauses on important physics or scope decisions, and YOLO only stops on hard failures after runtime permissions are synced.",
+    question: "How much autonomy should the AI have? Supervised is the default and matches the advisor cadence — frequent checkpoints let you verify and redirect early. Balanced is for users who have built intuition for GPD's boundary. YOLO only stops on hard failures after runtime permissions are synced.",
     header: "Autonomy",
     multiSelect: false,
     options: [
-      { label: "Supervised", description: "Checkpoint after every important step. Best when you plan to stay nearby and approve each physics-bearing move." },
-      { label: "Balanced (Recommended)", description: "Best default for most unattended runs. AI handles routine work and pauses on important physics decisions, ambiguities, blockers, or scope changes." },
+      { label: "Supervised (Recommended)", description: "You carry the veto; GPD carries the task. Checkpoint at every physics-bearing decision so you can redirect early. Default cadence for new projects." },
+      { label: "Balanced", description: "Lighter checkpoint cadence for users who have built intuition for GPD's boundary. AI handles routine work and pauses on important physics decisions, ambiguities, blockers, or scope changes." },
       { label: "YOLO", description: "Fastest mode. AI auto-approves checkpoints, syncs the runtime to its most autonomous permission mode when supported, and only stops on hard failures." }
     ]
   },
@@ -217,8 +225,8 @@ ask_user([
     header: "Cadence",
     multiSelect: false,
     options: [
-	      { label: "Adaptive (Recommended)", description: "Inject first-result and risky-fanout gates automatically while letting clean segments continue. Independent of profile choice. Mandatory proof red-teaming still runs when proof obligations exist." },
-	      { label: "Dense", description: "Frequent bounded review points for high-risk or high-touch work." },
+	      { label: "Dense (Recommended)", description: "Every wave gates on its first load-bearing result (and on any `result/produce|log` event) before fan-out. The first-result gate and pre-fanout review are forced regardless of the risk classifier." },
+	      { label: "Adaptive", description: "Inject first-result and risky-fanout gates automatically while letting clean segments continue." },
 	      { label: "Sparse", description: "Fewest review stops, but required correctness gates still run. Sparse mode does not waive proof red-teaming for proof-bearing work." }
 	    ]
 	  },
@@ -253,10 +261,13 @@ ask_user([
 ])
 ```
 
-After the ask_user responses are collected, ask one compact inline follow-up for unattended execution budgets using the current values as defaults:
+After the ask_user responses are collected, ask one compact inline follow-up for unattended execution budgets and checkpoint controls using the current values as defaults:
 
 - `execution.max_unattended_minutes_per_plan`
 - `execution.max_unattended_minutes_per_wave`
+- `execution.checkpoint_after_n_tasks`
+- `execution.checkpoint_after_first_load_bearing_result`
+- `execution.checkpoint_before_downstream_dependent_tasks`
 
 Explain that these budgets bound how long GPD should keep running before it creates a continuation or another review stop. If the user is unsure, preserve the current values.
 
@@ -265,7 +276,7 @@ Then ask one compact inline follow-up for optional advisory USD budget guardrail
 - `execution.project_usd_budget`
 - `execution.session_usd_budget`
 
-Explain that these are optional read-only guardrails checked by `gpd cost` against recorded machine-local USD telemetry. They are advisory only, may stay partial or estimated when telemetry is missing, and never stop work automatically. If the user is unsure, preserve the current values. Blank / `none` should clear the corresponding USD budget.
+Explain that these are optional read-only guardrails checked by `gpd cost` against recorded machine-local USD telemetry. They are advisory only, may stay partial or estimated when telemetry is missing, and never stop work automatically. If the user is unsure, preserve the current values. To clear a configured USD budget, use literal JSON `null`. Blank means preserve the current value. Do not advertise or pass `none` or an empty string as a clearing value.
 
 </step>
 
@@ -291,7 +302,7 @@ Suggested defaults when the user wants a recommendation:
 
 Qualitative posture guidance:
 
-- **Balanced** is the default recommendation and should usually keep the runtime on its own defaults unless the user has a concrete reason to pin models.
+- For model-cost posture, **Balanced** is the default recommendation and should usually keep the runtime on its own defaults unless the user has a concrete reason to pin models.
 - **Budget-aware** should push the flow toward runtime defaults and away from explicit tier pinning unless the user asks for a specific override.
 - **Max Quality** should bias toward the strongest acceptable runtime-native model strings only when the user is already opting into explicit overrides.
 
@@ -304,55 +315,64 @@ Normalization rules:
 </step>
 
 <step name="update_config">
-Merge new settings into existing config.json:
+Apply each selected setting through the config CLI. This keeps storage canonical and avoids writing nested alias blocks by hand.
 
-```json
-{
-  ...existing_config,
-  "autonomy": "supervised" | "balanced" | "yolo",
-  "research_mode": "explore" | "balanced" | "exploit" | "adaptive",
-  "model_profile": "deep-theory" | "numerical" | "exploratory" | "review" | "paper-writing",
-  "parallelization": true/false,
-  "model_overrides": {
-    ...existing_model_overrides_for_other_runtimes,
-    "<active_runtime>": {
-      "tier-1": "runtime-native model string",
-      "tier-2": "runtime-native model string",
-      "tier-3": "runtime-native model string"
-    }
-  }, // include only non-empty tier values; omit or clear <active_runtime> when using runtime defaults
-  "planning": {
-    "commit_docs": true/false
-  },
-  "workflow": {
-    "research": true/false,
-    "plan_checker": true/false,
-    "verifier": true/false
-  },
-  "execution": {
-    "review_cadence": "dense" | "adaptive" | "sparse",
-    "max_unattended_minutes_per_plan": 45,
-    "max_unattended_minutes_per_wave": 90,
-    "project_usd_budget": 25.0,
-    "session_usd_budget": 5.0,
-    "checkpoint_after_n_tasks": 3,
-    "checkpoint_after_first_load_bearing_result": true/false,
-    "checkpoint_before_downstream_dependent_tasks": true/false
-  },
-  "git": {
-    "branching_strategy": "none" | "per-phase" | "per-milestone",
-    "phase_branch_template": "gpd/phase-{phase}-{slug}",
-    "milestone_branch_template": "gpd/{milestone}-{slug}"
-  }
-}
+Before applying, map the collected ask_user and inline follow-up responses into these variables only:
+
+- `SELECTED_AUTONOMY`
+- `SELECTED_RESEARCH_MODE`
+- `SELECTED_MODEL_PROFILE`
+- `SELECTED_PARALLELIZATION`
+- `SELECTED_COMMIT_DOCS`
+- `SELECTED_WORKFLOW_RESEARCH`
+- `SELECTED_WORKFLOW_PLAN_CHECKER`
+- `SELECTED_WORKFLOW_VERIFIER`
+- `SELECTED_REVIEW_CADENCE`
+- `SELECTED_MAX_UNATTENDED_MINUTES_PER_PLAN`
+- `SELECTED_MAX_UNATTENDED_MINUTES_PER_WAVE`
+- `SELECTED_CHECKPOINT_AFTER_N_TASKS`
+- `SELECTED_CHECKPOINT_AFTER_FIRST_RESULT`
+- `SELECTED_CHECKPOINT_BEFORE_DEPENDENTS`
+- `SELECTED_BRANCHING_STRATEGY`
+- `SELECTED_PROJECT_USD_BUDGET`
+- `SELECTED_SESSION_USD_BUDGET`
+- `SELECTED_RUNTIME`
+
+For optional USD budgets, valid write values are a positive number or literal JSON `null`; if the user left the answer blank, preserve the current value by skipping that `gpd config set` call. Preserve `git.phase_branch_template` and `git.milestone_branch_template` exactly as the current config stores them; this guided flow changes only `git.branching_strategy`.
+
+```bash
+gpd config set autonomy "$SELECTED_AUTONOMY"
+gpd config set research_mode "$SELECTED_RESEARCH_MODE"
+gpd config set model_profile "$SELECTED_MODEL_PROFILE"
+gpd config set parallelization "$SELECTED_PARALLELIZATION"
+gpd config set planning.commit_docs "$SELECTED_COMMIT_DOCS"
+gpd config set workflow.research "$SELECTED_WORKFLOW_RESEARCH"
+gpd config set workflow.plan_checker "$SELECTED_WORKFLOW_PLAN_CHECKER"
+gpd config set workflow.verifier "$SELECTED_WORKFLOW_VERIFIER"
+gpd config set execution.review_cadence "$SELECTED_REVIEW_CADENCE"
+gpd config set execution.max_unattended_minutes_per_plan "$SELECTED_MAX_UNATTENDED_MINUTES_PER_PLAN"
+gpd config set execution.max_unattended_minutes_per_wave "$SELECTED_MAX_UNATTENDED_MINUTES_PER_WAVE"
+gpd config set execution.checkpoint_after_n_tasks "$SELECTED_CHECKPOINT_AFTER_N_TASKS"
+gpd config set execution.checkpoint_after_first_load_bearing_result "$SELECTED_CHECKPOINT_AFTER_FIRST_RESULT"
+gpd config set execution.checkpoint_before_downstream_dependent_tasks "$SELECTED_CHECKPOINT_BEFORE_DEPENDENTS"
+gpd config set git.branching_strategy "$SELECTED_BRANCHING_STRATEGY"
+
+if [ -n "$SELECTED_PROJECT_USD_BUDGET" ]; then
+  # To clear the budget, SELECTED_PROJECT_USD_BUDGET must be literal JSON null.
+  gpd config set execution.project_usd_budget "$SELECTED_PROJECT_USD_BUDGET"
+fi
+if [ -n "$SELECTED_SESSION_USD_BUDGET" ]; then
+  # To clear the budget, SELECTED_SESSION_USD_BUDGET must be literal JSON null.
+  gpd config set execution.session_usd_budget "$SELECTED_SESSION_USD_BUDGET"
+fi
 ```
 
-Write updated config to `GPD/config.json`.
+For runtime model overrides, first merge the new `<SELECTED_RUNTIME>` tier map with existing `model_overrides` for other runtimes, then write the whole `model_overrides` object with `gpd config set model_overrides "$MODEL_OVERRIDES_JSON"`. Include only non-empty tier values; omit or clear `<SELECTED_RUNTIME>` when using runtime defaults.
 
 Then immediately sync runtime-owned permissions against the selected autonomy:
 
 ```bash
-PERMISSIONS_SYNC=$(gpd --raw permissions sync --autonomy "$SELECTED_AUTONOMY" 2>/dev/null || true)
+PERMISSIONS_SYNC=$(gpd --raw permissions sync --runtime "$SELECTED_RUNTIME" --autonomy "$SELECTED_AUTONOMY" 2>/dev/null || true)
 echo "$PERMISSIONS_SYNC"
 ```
 
@@ -406,9 +426,9 @@ Runtime sync:
 - {permissions_sync.message}
 - {permissions_sync.next_step if present}
 - If relaunch is still required, say clearly that unattended use is not ready yet under the newly selected autonomy setting.
-- `gpd permissions status --runtime <runtime> --autonomy balanced` and `gpd permissions sync --runtime <runtime> --autonomy balanced` in this workflow only handle runtime-owned permission alignment, not install validation.
+- `gpd permissions status --runtime <runtime> --autonomy <mode>` and `gpd permissions sync --runtime <runtime> --autonomy <mode>` in this workflow only handle runtime-owned permission alignment, not install validation. Use the selected autonomy value; if unchanged, that is `supervised`.
 
-Project conventions still live in `GPD/CONVENTIONS.md` and `GPD/state.json` (`convention_lock`), not in `GPD/config.json`.
+Project conventions still live in `GPD/state.json` (`convention_lock`) with `GPD/CONVENTIONS.md` as the projection/audit surface, not in `GPD/config.json`.
 
 Quick commands:
 - gpd:set-profile <profile> -- switch research profile
@@ -442,14 +462,14 @@ Workflow config from `GPD/config.json` is consumed by:
 - **gpd cost / runtime hints**: advisory USD budget guardrails for the current project/session when configured
 - **gpd hooks / runtime adapters**: Runtime-specific model overrides and related execution defaults
 
-Project conventions propagate separately through `GPD/CONVENTIONS.md` and `GPD/state.json` (`convention_lock`), where notation and unit choices remain the single source of truth for planning, execution, and verification.
+Project conventions propagate separately through `GPD/state.json` (`convention_lock`) and the `GPD/CONVENTIONS.md` projection, with the lock as the source of truth for planning, execution, and verification.
 </downstream_consumption>
 
 <success_criteria>
 
 - [ ] Current config read
 - [ ] Active runtime inferred or explicitly confirmed before model override guidance
-- [ ] User presented with autonomy guidance (`Balanced` recommended), unattended time-budget review, optional advisory USD budget guardrails, profile, model-cost posture, runtime-specific tier-model handling, workflow toggles, review cadence, and git branching
+- [ ] User presented with autonomy guidance (`Supervised` recommended as the default), unattended time-budget review, optional advisory USD budget guardrails, profile, model-cost posture, runtime-specific tier-model handling, workflow toggles, review cadence, and git branching
 - [ ] Config updated with model_profile, optional model_overrides, workflow, execution, and git sections
 - [ ] Runtime permissions sync attempted after autonomy is written, with relaunch guidance surfaced when required
 - [ ] Relaunch-required state explained as not unattended-ready yet

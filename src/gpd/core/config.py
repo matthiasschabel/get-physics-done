@@ -13,7 +13,7 @@ from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from gpd.adapters.runtime_catalog import normalize_runtime_name
 from gpd.core.constants import PLANNING_DIR_NAME, ProjectLayout
@@ -26,6 +26,7 @@ __all__ = [
     "MODEL_PROFILES",
     "AutonomyMode",
     "BranchingStrategy",
+    "ExecutionPreferences",
     "GPDProjectConfig",
     "ModelProfile",
     "ModelTier",
@@ -302,13 +303,29 @@ def _validate_model_profile_matrix() -> None:
                 raise ConfigError(f"MODEL_PROFILES[{agent_name!r}][{profile_name!r}] must be a ModelTier")
 
 
-# Profile-independent view retained for public callers; resolution uses the full matrix.
+# Profile-independent view for public callers; resolution itself uses the full matrix.
 AGENT_DEFAULT_TIERS: dict[str, ModelTier] = {
     agent_name: profile_map[ModelProfile.REVIEW.value]
     for agent_name, profile_map in MODEL_PROFILES.items()
 }
 
 # ─── Config Model ───────────────────────────────────────────────────────────────
+
+
+class ExecutionPreferences(BaseModel):
+    """Execution-surface preferences that override automatic orchestration.
+
+    When ``strict_wait`` is true, the harness will not auto-interrupt workers
+    at the ``max_unattended_minutes_*`` timeouts and will not return early
+    ``status: checkpoint`` just to free user context — workers are allowed to
+    run to natural completion. ``never_interrupt_running_workers`` and
+    ``never_auto_close_child_agents`` are narrower knobs for callers who want
+    only one of those guarantees.
+    """
+
+    strict_wait: bool = False
+    never_interrupt_running_workers: bool = False
+    never_auto_close_child_agents: bool = False
 
 
 class GPDProjectConfig(BaseModel):
@@ -320,8 +337,8 @@ class GPDProjectConfig(BaseModel):
     """
 
     model_profile: ModelProfile = ModelProfile.REVIEW
-    autonomy: AutonomyMode = AutonomyMode.BALANCED
-    review_cadence: ReviewCadence = ReviewCadence.ADAPTIVE
+    autonomy: AutonomyMode = AutonomyMode.SUPERVISED
+    review_cadence: ReviewCadence = ReviewCadence.DENSE
     research_mode: ResearchMode = ResearchMode.BALANCED
 
     # Workflow toggles
@@ -330,13 +347,16 @@ class GPDProjectConfig(BaseModel):
     plan_checker: bool = True
     verifier: bool = True
     parallelization: bool = True
-    max_unattended_minutes_per_plan: int = Field(default=45, ge=1)
-    max_unattended_minutes_per_wave: int = Field(default=90, ge=1)
-    checkpoint_after_n_tasks: int = Field(default=3, ge=1)
+    max_unattended_minutes_per_plan: int = Field(default=15, ge=1)
+    max_unattended_minutes_per_wave: int = Field(default=30, ge=1)
+    checkpoint_after_n_tasks: int = Field(default=1, ge=1)
     checkpoint_after_first_load_bearing_result: bool = True
     checkpoint_before_downstream_dependent_tasks: bool = True
     project_usd_budget: float | None = Field(default=None, gt=0)
     session_usd_budget: float | None = Field(default=None, gt=0)
+
+    # Execution preferences (wait/interrupt semantics).
+    execution_preferences: ExecutionPreferences = Field(default_factory=ExecutionPreferences)
 
     # Git settings
     branching_strategy: BranchingStrategy = BranchingStrategy.NONE
@@ -397,6 +417,18 @@ class GPDProjectConfig(BaseModel):
 
         return normalized or None
 
+    @model_validator(mode="after")
+    def _enforce_dense_requires_first_result_gate(self) -> GPDProjectConfig:
+        if (
+            self.review_cadence is ReviewCadence.DENSE
+            and self.checkpoint_after_first_load_bearing_result is False
+        ):
+            raise ValueError(
+                "review_cadence=dense requires checkpoint_after_first_load_bearing_result=true; "
+                "remove the override or set review_cadence to adaptive or sparse."
+            )
+        return self
+
 
 # ─── Config Loading ─────────────────────────────────────────────────────────────
 
@@ -438,6 +470,13 @@ _EFFECTIVE_CONFIG_LEAVES: dict[str, Callable[[GPDProjectConfig], object]] = {
     "research_mode": lambda config: _enum_value(config.research_mode),
     "session_usd_budget": lambda config: config.session_usd_budget,
     "verifier": lambda config: config.verifier,
+    "strict_wait": lambda config: config.execution_preferences.strict_wait,
+    "never_interrupt_running_workers": (
+        lambda config: config.execution_preferences.never_interrupt_running_workers
+    ),
+    "never_auto_close_child_agents": (
+        lambda config: config.execution_preferences.never_auto_close_child_agents
+    ),
 }
 
 _EFFECTIVE_CONFIG_SECTIONS: dict[str, Callable[[GPDProjectConfig], dict[str, object]]] = {
@@ -461,6 +500,11 @@ _EFFECTIVE_CONFIG_SECTIONS: dict[str, Callable[[GPDProjectConfig], dict[str, obj
         "research": config.research,
         "plan_checker": config.plan_checker,
         "verifier": config.verifier,
+    },
+    "execution_preferences": lambda config: {
+        "strict_wait": config.execution_preferences.strict_wait,
+        "never_interrupt_running_workers": config.execution_preferences.never_interrupt_running_workers,
+        "never_auto_close_child_agents": config.execution_preferences.never_auto_close_child_agents,
     },
 }
 
@@ -500,6 +544,12 @@ _CONFIG_KEY_ALIASES: dict[str, str] = {
     "workflow.plan_checker": "plan_checker",
     "workflow.research": "research",
     "workflow.verifier": "verifier",
+    "strict_wait": "strict_wait",
+    "never_interrupt_running_workers": "never_interrupt_running_workers",
+    "never_auto_close_child_agents": "never_auto_close_child_agents",
+    "execution_preferences.strict_wait": "strict_wait",
+    "execution_preferences.never_interrupt_running_workers": "never_interrupt_running_workers",
+    "execution_preferences.never_auto_close_child_agents": "never_auto_close_child_agents",
 }
 
 _CANONICAL_CONFIG_STORAGE_PATHS: dict[str, tuple[str, ...]] = {
@@ -521,6 +571,15 @@ _CANONICAL_CONFIG_STORAGE_PATHS.update(
         ),
         "project_usd_budget": ("execution", "project_usd_budget"),
         "session_usd_budget": ("execution", "session_usd_budget"),
+        "strict_wait": ("execution_preferences", "strict_wait"),
+        "never_interrupt_running_workers": (
+            "execution_preferences",
+            "never_interrupt_running_workers",
+        ),
+        "never_auto_close_child_agents": (
+            "execution_preferences",
+            "never_auto_close_child_agents",
+        ),
     }
 )
 
@@ -670,12 +729,15 @@ _ALLOWED_CONFIG_ROOT_KEYS = frozenset(
         "session_usd_budget",
         "commit_docs",
         "execution",
+        "execution_preferences",
         "git",
         "max_unattended_minutes_per_plan",
         "max_unattended_minutes_per_wave",
         "milestone_branch_template",
         "model_overrides",
         "model_profile",
+        "never_auto_close_child_agents",
+        "never_interrupt_running_workers",
         "parallelization",
         "phase_branch_template",
         "plan_checker",
@@ -683,6 +745,7 @@ _ALLOWED_CONFIG_ROOT_KEYS = frozenset(
         "research",
         "review_cadence",
         "research_mode",
+        "strict_wait",
         "verifier",
         "workflow",
     }
@@ -702,9 +765,25 @@ _ALLOWED_CONFIG_SECTION_KEYS = {
             "session_usd_budget",
         }
     ),
+    "execution_preferences": frozenset(
+        {
+            "strict_wait",
+            "never_interrupt_running_workers",
+            "never_auto_close_child_agents",
+        }
+    ),
     "planning": frozenset({"commit_docs"}),
     "workflow": frozenset({"plan_checker", "research", "verifier"}),
 }
+
+
+def _invalid_config_section_types(parsed: dict[str, object]) -> list[str]:
+    """Return known nested config sections that are present but not objects."""
+    return sorted(
+        key
+        for key, value in parsed.items()
+        if key in _ALLOWED_CONFIG_SECTION_KEYS and not isinstance(value, dict)
+    )
 
 
 def _unsupported_config_keys(parsed: dict[str, object]) -> list[str]:
@@ -772,6 +851,17 @@ def _model_from_parsed_config(parsed: dict[str, object]) -> GPDProjectConfig:
     """Build the canonical config model from a parsed config payload."""
     if not isinstance(parsed, dict):
         raise ConfigError("config.json must be a JSON object")
+
+    invalid_section_types = _invalid_config_section_types(parsed)
+    if invalid_section_types:
+        section_messages = ", ".join(
+            f"`{section}` must be a JSON object" for section in invalid_section_types
+        )
+        raise ConfigError(
+            "Invalid config.json section types: "
+            + section_messages
+            + f". Fix or delete {PLANNING_DIR_NAME}/config.json"
+        )
 
     unsupported_keys = _unsupported_config_keys(parsed)
     if unsupported_keys:
@@ -895,6 +985,35 @@ def _model_from_parsed_config(parsed: dict[str, object]) -> GPDProjectConfig:
             model_overrides=_coalesce(
                 _get_nested(parsed, "model_overrides"),
                 None,
+            ),
+            execution_preferences=ExecutionPreferences(
+                strict_wait=_coalesce(
+                    _get_nested(
+                        parsed,
+                        "strict_wait",
+                        section="execution_preferences",
+                        field="strict_wait",
+                    ),
+                    _CONFIG_DEFAULTS.execution_preferences.strict_wait,
+                ),
+                never_interrupt_running_workers=_coalesce(
+                    _get_nested(
+                        parsed,
+                        "never_interrupt_running_workers",
+                        section="execution_preferences",
+                        field="never_interrupt_running_workers",
+                    ),
+                    _CONFIG_DEFAULTS.execution_preferences.never_interrupt_running_workers,
+                ),
+                never_auto_close_child_agents=_coalesce(
+                    _get_nested(
+                        parsed,
+                        "never_auto_close_child_agents",
+                        section="execution_preferences",
+                        field="never_auto_close_child_agents",
+                    ),
+                    _CONFIG_DEFAULTS.execution_preferences.never_auto_close_child_agents,
+                ),
             ),
         )
     except (ValueError, TypeError) as e:

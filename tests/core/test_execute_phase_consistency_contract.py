@@ -1,4 +1,4 @@
-"""Focused regressions for the execute-phase consistency-check seam."""
+"""Focused assertions for the execute-phase consistency-check seam."""
 
 from __future__ import annotations
 
@@ -20,6 +20,10 @@ def test_execute_phase_consistency_check_uses_typed_return_and_file_gate() -> No
     assert "expected_artifacts:" in workflow
     assert "{phase_dir}/CONSISTENCY-CHECK.md" in workflow
     assert "Return exactly one typed `gpd_return` envelope with `status: completed | checkpoint | blocked | failed`" in workflow
+    assert (
+        "Append the same typed YAML `gpd_return` block to `{phase_dir}/CONSISTENCY-CHECK.md` before returning"
+        in workflow
+    )
     assert "Artifact gate:" in workflow
     assert "gpd_return.status: completed" in workflow
     assert "gpd_return.status: checkpoint" in workflow
@@ -37,4 +41,5 @@ def test_execute_phase_consistency_check_no_longer_routes_on_legacy_status() -> 
     assert "Return consistency_status with any issues found." not in workflow
     assert "Proceed without cross-phase consistency checking for this wave." not in workflow
     assert "Present issues to user with resolution options" not in workflow
-    assert "Do not infer success from prose headings or untyped legacy routing." in workflow
+    assert "Do not infer success from prose headings or untyped routing." in workflow
+    assert "Do not hand-author or paste a synthetic `gpd_return`" in workflow

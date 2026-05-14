@@ -20,7 +20,6 @@ if TYPE_CHECKING:
     from gpd.adapters.base import RuntimeAdapter
 
 _REGISTRY: dict[str, type[RuntimeAdapter]] = {}
-_LOADED = False
 
 
 def _load_adapter_class(descriptor: RuntimeDescriptor) -> type[RuntimeAdapter]:
@@ -41,25 +40,19 @@ def _load_adapter_class(descriptor: RuntimeDescriptor) -> type[RuntimeAdapter]:
             f"Adapter class {descriptor.adapter_class!r} in module {descriptor.adapter_module!r} "
             f"for runtime {descriptor.runtime_name!r} is not a RuntimeAdapter subclass"
         )
+    try:
+        adapter_runtime_name = adapter_class().runtime_name
+    except Exception as exc:
+        raise RuntimeError(
+            f"Adapter class {descriptor.adapter_class!r} in module {descriptor.adapter_module!r} "
+            f"for runtime {descriptor.runtime_name!r} could not report its runtime identity"
+        ) from exc
+    if adapter_runtime_name != descriptor.runtime_name:
+        raise RuntimeError(
+            f"Runtime catalog entry {descriptor.runtime_name!r} points to adapter class "
+            f"{descriptor.adapter_class!r} with runtime identity {adapter_runtime_name!r}"
+        )
     return adapter_class
-
-
-def _ensure_loaded() -> None:
-    global _LOADED  # noqa: PLW0603
-    if _LOADED:
-        return
-
-    registry: dict[str, type[RuntimeAdapter]] = {}
-    seen_runtime_names: set[str] = set()
-    for descriptor in iter_runtime_descriptors():
-        if descriptor.runtime_name in seen_runtime_names:
-            raise RuntimeError(f"Duplicate runtime name in runtime catalog: {descriptor.runtime_name!r}")
-        seen_runtime_names.add(descriptor.runtime_name)
-        registry[descriptor.runtime_name] = _load_adapter_class(descriptor)
-
-    _REGISTRY.clear()
-    _REGISTRY.update(registry)
-    _LOADED = True
 
 
 def _ensure_runtime_loaded(runtime_name: str) -> type[RuntimeAdapter]:

@@ -5,6 +5,9 @@ argument-hint: "[equation or topic to derive]"
 context_mode: project-aware
 command-policy:
   schema_version: 1
+  subject_policy:
+    explicit_input_kinds:
+      - equation or topic to derive
   supporting_context_policy:
     project_context_mode: project-aware
     project_reentry_mode: disallowed
@@ -45,7 +48,9 @@ Keep standalone/current-workspace durable derivation artifacts under `GPD/analys
   </objective>
 
 <context>
-@GPD/STATE.md
+Target: $ARGUMENTS
+
+Validated command-context owns optional current-workspace state detection. Use the `CONTEXT` payload plus the workflow-owned init/result lookup for any available `GPD/STATE.md` background; this wrapper must not attach raw project-file includes.
 </context>
 
 <execution_context>
@@ -65,14 +70,7 @@ fi
 
 ## 1. Execute the Derivation Workflow
 
-Execute the derive-equation workflow from @{GPD_INSTALL_DIR}/workflows/derive-equation.md end-to-end.
-Preserve all workflow gates (assumption statement, notation, step-by-step derivation, verification, documentation).
-
-The workflow will:
-1. Set up the derivation context with a workspace-locked bootstrap (no ancestor-project reentry), including canonical result lookup via `gpd result search` and direct stored-result inspection via `gpd result show "{result_id}"` when the target already has a known registry entry
-2. Guide you through a step-by-step derivation with checkpoints
-3. Verify dimensional consistency at each step
-4. Check limiting cases of the final result
-5. Write the derivation artifact to a phase sibling only when authoritative phase context exists; otherwise keep the durable output under the current-workspace `GPD/analysis/` tree
-6. Record the derived equation in the project's `intermediate_results` registry through the executable `gpd result persist-derived` bridge only when authoritative phase context is available; the workflow reuses or carries forward a stable `result_id` request on reruns, preserves the actual canonical `result_id` when the bridge reuses an existing entry, and seeds continuity automatically through the canonical continuation path when an active continuation context exists. runs without authoritative phase context stop after writing the derivation document under the current-workspace `GPD/analysis/` tree and do not write project registry state
+Execute the included derive-equation workflow end-to-end.
+Preserve its gates: canonical result lookup via `gpd result search` and direct stored-result inspection via `gpd result show "{result_id}"`, assumptions, notation, derivation steps, dimensional checks, limiting cases, artifact write, and registry persistence only when authoritative phase context exists.
+Registry writes use `gpd result persist-derived`, reuse or carry forward a stable `result_id`, preserve the actual canonical `result_id`, seed continuation, and stay disabled for standalone artifacts.
 </process>

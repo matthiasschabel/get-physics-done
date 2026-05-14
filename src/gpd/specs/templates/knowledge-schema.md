@@ -220,8 +220,8 @@ All list-valued subfields must remain YAML lists.
 review:
   reviewed_at: "2026-04-07T12:00:00Z"
   review_round: 1
-  reviewer_kind: human
-  reviewer_id: gpd-knowledge-reviewer
+  reviewer_kind: workflow
+  reviewer_id: gpd-review-knowledge
   decision: approved
   summary: "The document is reviewed and ready for downstream use."
   approval_artifact_path: "GPD/knowledge/reviews/K-renormalization-group-fixed-points-R1-REVIEW.md"
@@ -295,10 +295,10 @@ The following conditional rules are mandatory:
 
 ## Explicit Deferrals
 
-Public command registration and shared help coverage are part of the supported authoring surface now. Stable reviewed knowledge is already visible through the shared runtime reference surfaces. The remaining deferred behaviors are:
+Public command registration and shared help coverage are part of the supported authoring surface. Stable reviewed knowledge is visible through the shared runtime reference surfaces. The remaining deferred behaviors are:
 
-1. migration/backfill for older knowledge files
-2. alias repair or heuristic filename repair for legacy docs
+1. repair for non-canonical knowledge files
+2. alias repair or heuristic filename repair for non-canonical docs
 3. beginner onboarding exposure
 4. automatic promotion of a draft to stable without review
 5. `knowledge_deps` or `related_artifacts` as accepted frontmatter fields

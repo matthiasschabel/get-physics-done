@@ -7,6 +7,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from gpd.mcp.paper.models import SUPPORTED_PAPER_JOURNALS
+
 __all__ = [
     "Severity",
     "CoverageMetric",
@@ -24,7 +26,10 @@ __all__ = [
     "PaperQualityIssue",
     "CategoryScore",
     "PaperQualityReport",
+    "BUILDER_SCORER_FALLBACKS",
     "score_paper_quality",
+    "SCORING_ONLY_JOURNALS",
+    "SUPPORTED_SCORING_JOURNALS",
     "validate_tex_draft",
 ]
 
@@ -107,9 +112,7 @@ class FiguresQualityInput(BaseModel):
     decisive_artifacts_referenced_in_text: CoverageMetric = Field(
         default_factory=lambda: CoverageMetric(not_applicable=True)
     )
-    decisive_artifact_roles_clear: CoverageMetric = Field(
-        default_factory=lambda: CoverageMetric(not_applicable=True)
-    )
+    decisive_artifact_roles_clear: CoverageMetric = Field(default_factory=lambda: CoverageMetric(not_applicable=True))
 
 
 class CitationsQualityInput(BaseModel):
@@ -288,6 +291,40 @@ JOURNAL_RULES: dict[str, dict[str, object]] = {
     },
 }
 
+BUILDER_SCORER_FALLBACKS: dict[str, str] = {
+    "mnras": "generic",
+    "jfm": "generic",
+}
+SCORING_ONLY_JOURNALS = frozenset({"prd", "prb", "prc", "nature_physics"})
+SUPPORTED_SCORING_JOURNALS = frozenset(JOURNAL_RULES) | frozenset(BUILDER_SCORER_FALLBACKS)
+
+
+def _journal_key(value: str) -> str:
+    return value.lower().replace(" ", "_")
+
+
+def _journal_rule_for_key(journal_key: str) -> dict[str, object]:
+    fallback_key = BUILDER_SCORER_FALLBACKS.get(journal_key, journal_key)
+    return JOURNAL_RULES.get(fallback_key, JOURNAL_RULES["generic"])
+
+
+def _validate_journal_policy() -> None:
+    missing_builder_journals = set(SUPPORTED_PAPER_JOURNALS) - SUPPORTED_SCORING_JOURNALS
+    if missing_builder_journals:
+        missing = ", ".join(sorted(missing_builder_journals))
+        raise RuntimeError(f"builder journal(s) missing paper-quality scorer policy: {missing}")
+    invalid_fallbacks = set(BUILDER_SCORER_FALLBACKS) - set(SUPPORTED_PAPER_JOURNALS)
+    if invalid_fallbacks:
+        invalid = ", ".join(sorted(invalid_fallbacks))
+        raise RuntimeError(f"paper-quality builder fallback(s) are not supported builder journals: {invalid}")
+    invalid_scoring_only = SCORING_ONLY_JOURNALS & set(SUPPORTED_PAPER_JOURNALS)
+    if invalid_scoring_only:
+        invalid = ", ".join(sorted(invalid_scoring_only))
+        raise RuntimeError(f"paper-quality scoring-only journal(s) now have builder support: {invalid}")
+
+
+_validate_journal_policy()
+
 
 def _ratio_points(ratio: float, full_points: float) -> float:
     if ratio >= 1.0:
@@ -329,7 +366,9 @@ def _status_for_score(score: float) -> str:
     return "not_ready"
 
 
-def _metric_issue(category: str, check: str, points: float, max_points: float, summary: str) -> PaperQualityIssue | None:
+def _metric_issue(
+    category: str, check: str, points: float, max_points: float, summary: str
+) -> PaperQualityIssue | None:
     if points >= max_points:
         return None
     severity = Severity.major if points == 0 else Severity.minor
@@ -361,9 +400,7 @@ def score_paper_quality(data: PaperQualityInput) -> PaperQualityReport:
     if not data.results.decisive_comparison_failures_scoped.not_applicable:
         decisive_result_ratios.append(data.results.decisive_comparison_failures_scoped.ratio)
     comparison_ratio = (
-        min(decisive_result_ratios)
-        if decisive_result_ratios
-        else data.results.comparison_with_prior_work_present.ratio
+        min(decisive_result_ratios) if decisive_result_ratios else data.results.comparison_with_prior_work_present.ratio
     )
 
     eq_checks = {
@@ -392,7 +429,9 @@ def score_paper_quality(data: PaperQualityInput) -> PaperQualityReport:
         "notation_consistent": 5.0 * data.conventions.notation_consistent.ratio,
     }
 
-    unreliable_count = sum(1 for c in data.verification.key_result_confidences if c == VerificationConfidence.unreliable)
+    unreliable_count = sum(
+        1 for c in data.verification.key_result_confidences if c == VerificationConfidence.unreliable
+    )
     verification_checks = {
         "report_passed": 5.0 * data.verification.report_passed.ratio,
         "contract_targets_verified": _ratio_points(data.verification.contract_targets_verified.ratio, 5.0),
@@ -412,8 +451,12 @@ def score_paper_quality(data: PaperQualityInput) -> PaperQualityReport:
     }
 
     categories = {
-        "equations": CategoryScore(name="equations", score=sum(eq_checks.values()), max_score=CATEGORY_MAX["equations"], checks=eq_checks),
-        "figures": CategoryScore(name="figures", score=sum(figures_checks.values()), max_score=CATEGORY_MAX["figures"], checks=figures_checks),
+        "equations": CategoryScore(
+            name="equations", score=sum(eq_checks.values()), max_score=CATEGORY_MAX["equations"], checks=eq_checks
+        ),
+        "figures": CategoryScore(
+            name="figures", score=sum(figures_checks.values()), max_score=CATEGORY_MAX["figures"], checks=figures_checks
+        ),
         "citations": CategoryScore(
             name="citations",
             score=sum(citation_checks.values()),
@@ -438,7 +481,9 @@ def score_paper_quality(data: PaperQualityInput) -> PaperQualityReport:
             max_score=CATEGORY_MAX["completeness"],
             checks=completeness_checks,
         ),
-        "results": CategoryScore(name="results", score=sum(results_checks.values()), max_score=CATEGORY_MAX["results"], checks=results_checks),
+        "results": CategoryScore(
+            name="results", score=sum(results_checks.values()), max_score=CATEGORY_MAX["results"], checks=results_checks
+        ),
     }
 
     issues.extend(
@@ -556,7 +601,10 @@ def score_paper_quality(data: PaperQualityInput) -> PaperQualityReport:
                 blocking=True,
             )
         )
-    if not data.results.comparison_with_prior_work_present.not_applicable and not data.results.comparison_with_prior_work_present.passed:
+    if (
+        not data.results.comparison_with_prior_work_present.not_applicable
+        and not data.results.comparison_with_prior_work_present.passed
+    ):
         blockers.append(
             PaperQualityIssue(
                 category="results",
@@ -619,6 +667,7 @@ def score_paper_quality(data: PaperQualityInput) -> PaperQualityReport:
         "contract_results_parse_ok": "Contract-results ledger could not be parsed cleanly.",
         "contract_results_alignment_ok": "Contract-results ledger is not aligned with the active contract.",
         "comparison_verdicts_valid": "Comparison verdict ledgers are malformed or inconsistent.",
+        "figure_tracker_parse_ok": "Figure tracker could not be parsed cleanly.",
     }
     for check_name, summary in integrity_blockers.items():
         if check_name in data.journal_extra_checks and not data.journal_extra_checks[check_name]:
@@ -632,6 +681,14 @@ def score_paper_quality(data: PaperQualityInput) -> PaperQualityReport:
                 )
             )
     extra_artifact_blockers = {
+        "manuscript_reference_status_present": (
+            "citations",
+            "Manuscript reference status is missing; bibliography provenance is not connected to the active manuscript.",
+        ),
+        "manuscript_reference_bridge_complete": (
+            "citations",
+            "Manuscript references are not bridged to both BibTeX keys and reference ids.",
+        ),
         "empty_citation_commands_absent": (
             "citations",
             "Empty \\cite{} commands remain in the manuscript.",
@@ -655,8 +712,8 @@ def score_paper_quality(data: PaperQualityInput) -> PaperQualityReport:
 
     base_score = round(sum(category.score for category in categories.values()), 2)
 
-    journal_key = data.journal.lower().replace(" ", "_")
-    journal_rule = JOURNAL_RULES.get(journal_key, JOURNAL_RULES["generic"])
+    journal_key = _journal_key(data.journal)
+    journal_rule = _journal_rule_for_key(journal_key)
     multipliers = journal_rule["multipliers"]
 
     adjusted_total = 0.0
@@ -742,7 +799,7 @@ _CITE_CMD_PREFIX_WITH_NOCITE = (
 
 _MISSING_CITE_FINDING_RE = re.compile(_CITE_CMD_PREFIX + r"(?:\[[^\]]*\])*\{MISSING:")
 _EMPTY_CITE_FINDING_RE = re.compile(_CITE_CMD_PREFIX + r"(?:\[[^\]]*\])*\{\s*\}")
-_EMPTY_REF_FINDING_RE = re.compile(r"\\ref\{\s*\}")
+_EMPTY_REF_FINDING_RE = re.compile(r"\\(?:ref|eqref|autoref|pageref|nameref|cref|Cref)\{\s*\}")
 _EMPTY_LABEL_FINDING_RE = re.compile(r"\\label\{\s*\}")
 _LABEL_FINDING_RE = re.compile(r"\\label\{([^}]+)\}")
 _BEGIN_ENV_FINDING_RE = re.compile(r"\\begin\{([^}]+)\}")
@@ -764,6 +821,15 @@ def _comment_start_index(line: str) -> int | None:
     return None
 
 
+def _visible_tex_line(line: str) -> str:
+    comment_start = _comment_start_index(line)
+    return line if comment_start is None else line[:comment_start]
+
+
+def _visible_tex_content(tex_content: str) -> str:
+    return "\n".join(_visible_tex_line(line) for line in tex_content.splitlines())
+
+
 def validate_tex_draft(tex_content: str) -> list[DraftingFinding]:
     """Return structured draft-lint findings without mutating manuscript text."""
 
@@ -773,8 +839,7 @@ def validate_tex_draft(tex_content: str) -> list[DraftingFinding]:
     visible_lines: list[str] = []
 
     for lineno, line in enumerate(tex_content.splitlines(), start=1):
-        comment_start = _comment_start_index(line)
-        visible = line if comment_start is None else line[:comment_start]
+        visible = _visible_tex_line(line)
         visible_lines.append(visible)
 
         for match in _PLACEHOLDER_FINDING_RE.finditer(visible):

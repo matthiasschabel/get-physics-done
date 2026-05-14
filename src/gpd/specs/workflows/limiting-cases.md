@@ -45,7 +45,7 @@ fi
 
 - A nonzero init exit is a hard stop, not standalone mode.
 - Parse JSON for: `commit_docs`, `project_exists`, `state_exists`.
-- **If init succeeds** (non-empty JSON with `state_exists: true`): Extract `convention_lock` for unit system and sign conventions. Extract `intermediate_results` from state for previously verified expressions. If you need to find the canonical expression first, use `gpd result search` by identifier, equation, or description; once a canonical `result_id` is known, use `gpd result show "{result_id}"` for the direct stored-result view before checking limits. Keep `gpd query search` for SUMMARY/frontmatter lookup. Extract active approximations and their validity ranges — these define the limits to check.
+- **If init succeeds** (non-empty JSON with `state_exists: true`): Extract `convention_lock` for unit system and sign conventions. Extract `intermediate_results` from state for previously verified expressions. If you need canonical stored-result context before checking limits, load and follow `{GPD_INSTALL_DIR}/references/results/result-lookup-policy.md`. Extract active approximations and their validity ranges — these define the limits to check.
 - **If init succeeds** (non-empty JSON with `state_exists: false`): Proceed in standalone mode with explicit convention declarations required from user via ask_user.
 - If `TARGET_KIND=phase`, resolve authoritative phase context inside the current workspace:
 
@@ -80,6 +80,18 @@ fi
 ```
 
 Limiting case checks depend on conventions — e.g., the sign of k^2 = m^2 vs k^2 = -m^2 in the non-relativistic limit depends on metric signature.
+
+For phase targets, honor contract-critical anchors before writing a limiting-cases report.
+If the loaded state, phase plan, or reference intake names a required benchmark,
+comparison target, prior artifact, or must-read reference for the selected limit,
+inspect that artifact explicitly before claiming or writing limit verification. If
+the required benchmark/comparison evidence is missing, malformed, stale, or fails
+the decisive comparison, stop before writing `${OUTPUT_PATH}`. Report the blocker,
+keep `status` blocked/gaps-found, and route to `gpd:plan-phase ${phase_number} --gaps`.
+Use `gpd:debug ${phase_number}` only after this command has produced
+concrete symbolic or numerical limit evidence that localizes a faulty derivation
+or implementation; do not fall back to `gpd:suggest-next` when the missing or
+failed contract evidence and phase number are already known.
 
 ## 1. Identify the Result(s) to Check
 

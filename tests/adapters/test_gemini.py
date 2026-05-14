@@ -6,21 +6,29 @@ import json
 import os
 import re
 import shlex
+import shutil
+import tomllib
 from pathlib import Path
 
 import pytest
 
+import gpd.adapters.gemini as gemini_module
 from gpd.adapters.gemini import (
     _GEMINI_APPROVED_CONTRACT_PATH,
     GeminiAdapter,
     _convert_frontmatter_to_gemini,
     _convert_gemini_tool_name,
     _convert_to_gemini_toml,
+    _gemini_policy_command_prefixes,
+    _inject_gemini_command_runtime_note,
+    _render_gemini_command_prompt,
     _render_gemini_policy_toml,
+    _render_gemini_shell_allowlist,
     _rewrite_gemini_shell_workflow_guidance,
     _rewrite_gpd_cli_invocations,
 )
 from gpd.adapters.install_utils import build_runtime_cli_bridge_command, hook_python_interpreter
+from gpd.hooks.install_metadata import assess_install_target
 from tests.adapters.review_contract_test_utils import (
     assert_review_contract_prompt_surface,
     compile_review_contract_fixture_for_runtime,
@@ -44,6 +52,15 @@ def _make_managed_home_python(tmp_path: Path) -> Path:
     managed_python.parent.mkdir(parents=True, exist_ok=True)
     managed_python.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
     return managed_python
+
+
+def _assert_no_manifestless_gpd_artifacts(target: Path) -> None:
+    assert not (target / "gpd-file-manifest.json").exists()
+    assert not (target / "get-physics-done").exists()
+    assert not (target / "commands" / "gpd").exists()
+    assert not (target / "agents").exists()
+    assert not (target / "hooks").exists()
+    assert not (target / "policies").exists()
 
 
 @pytest.fixture()
@@ -180,21 +197,21 @@ class TestConvertFrontmatterToGemini:
         assert "Task" not in result.split("---", 2)[1] if result.count("---") >= 2 else True
 
     def test_sub_tags_stripped_without_frontmatter(self) -> None:
-        """Regression: <sub> tags must be stripped even when there is no frontmatter."""
+        """Assert <sub> tags are stripped even when there is no frontmatter."""
         content = "Text with <sub>subscript</sub> here"
         result = _convert_frontmatter_to_gemini(content)
         assert "<sub>" not in result
         assert "*(subscript)*" in result
 
     def test_sub_tags_stripped_with_unclosed_frontmatter(self) -> None:
-        """Regression: <sub> tags stripped even with malformed (unclosed) frontmatter."""
+        """Assert <sub> tags are stripped even with malformed (unclosed) frontmatter."""
         content = "---\nname: test\nText with <sub>subscript</sub> here"
         result = _convert_frontmatter_to_gemini(content)
         assert "<sub>" not in result
         assert "*(subscript)*" in result
 
     def test_duplicate_tools_deduplicated(self) -> None:
-        """Regression: tools appearing in both tools: and allowed-tools: are deduplicated."""
+        """Assert tools appearing in both tools: and allowed-tools: are deduplicated."""
         content = "---\nname: test\ntools: Read, Write\nallowed-tools:\n  - Read\n  - Bash\n---\nBody"
         result = _convert_frontmatter_to_gemini(content)
         # read_file should appear exactly once
@@ -285,12 +302,39 @@ class TestConvertToGeminiToml:
 
 
 class TestRewriteGeminiShellWorkflowGuidance:
-    def test_rewrites_updated_set_profile_block_with_reentry_comment_and_flag(self) -> None:
+    def test_rewrites_set_profile_validation_shell_block_to_non_shell_guidance(self) -> None:
+        content = (
+            "```bash\n"
+            "PROFILE=\"$(printf '%s' \"$ARGUMENTS\" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')\"\n"
+            'case "$PROFILE" in\n'
+            "  deep-theory|numerical|exploratory|review|paper-writing) ;;\n"
+            '  "")\n'
+            '    echo "ERROR: Missing profile. Valid profiles: deep-theory, numerical, exploratory, review, paper-writing"\n'
+            "    exit 1\n"
+            "    ;;\n"
+            "  *[[:space:]]*)\n"
+            '    echo "ERROR: set-profile accepts exactly one profile argument."\n'
+            "    exit 1\n"
+            "    ;;\n"
+            "  *)\n"
+            '    echo "ERROR: Invalid profile \\"$PROFILE\\". Valid profiles: deep-theory, numerical, exploratory, review, paper-writing"\n'
+            "    exit 1\n"
+            "    ;;\n"
+            "esac\n"
+            "```"
+        )
+
+        result = _rewrite_gemini_shell_workflow_guidance(content)
+
+        assert "Validate the single profile argument without a shell call" in result
+        assert "PROFILE=\"$(" not in result
+        assert 'case "$PROFILE"' not in result
+        assert "```bash" not in result
+
+    def test_rewrites_updated_set_profile_block_with_reentry_flag(self) -> None:
         content = (
             "```bash\n"
             "gpd config ensure-section\n"
-            "# Compatibility note for installer text checks:\n"
-            "# INIT=$(gpd --raw init progress --include state,config)\n"
             "INIT=$(gpd --raw init progress --include state,config --no-project-reentry)\n"
             "if [ $? -ne 0 ]; then\n"
             '  echo "ERROR: gpd initialization failed: $INIT"\n'
@@ -303,9 +347,136 @@ class TestRewriteGeminiShellWorkflowGuidance:
 
         assert "Run these as separate shell calls in Gemini auto-edit mode." in result
         assert "gpd config ensure-section" in result
-        assert "gpd --raw init progress --include state,config --no-project-reentry" in result
+        assert 'gpd config set model_profile "$PROFILE"' in result
+        assert "gpd --raw init progress --include state,config" not in result
         assert "INIT=$(" not in result
         assert "if [ $? -ne 0 ]" not in result
+
+    def test_rewrites_whole_captured_init_block_with_echo_var(self) -> None:
+        content = (
+            "```bash\n"
+            "BOOTSTRAP=$(gpd --raw init progress --include state,config)\n"
+            "if [ $? -ne 0 ]; then\n"
+            '  echo "ERROR: bootstrap failed: $BOOTSTRAP"\n'
+            '  echo "$BOOTSTRAP"\n'
+            "  exit 1\n"
+            "fi\n"
+            "```"
+        )
+
+        result = _rewrite_gemini_shell_workflow_guidance(content)
+
+        assert "# Gemini: run initialization directly." in result
+        assert "gpd --raw init progress --include state,config" in result
+        assert "BOOTSTRAP=$(" not in result
+        assert 'echo "$BOOTSTRAP"' not in result
+        assert "if [ $? -ne 0 ]" not in result
+
+    def test_rewrites_generic_captured_gpd_status_block(self) -> None:
+        content = (
+            "```bash\n"
+            "CHECK=$(gpd --raw validate project-contract GPD/contract.json 2>&1)\n"
+            "if [ $? -ne 0 ]; then\n"
+            '  echo "$CHECK"\n'
+            "  exit 1\n"
+            "fi\n"
+            "```"
+        )
+
+        result = _rewrite_gemini_shell_workflow_guidance(content)
+
+        assert "# Gemini: run this command directly." in result
+        assert "gpd --raw validate project-contract GPD/contract.json 2>&1" in result
+        assert "CHECK=$(" not in result
+        assert "$CHECK" not in result
+        assert "if [ $? -ne 0 ]" not in result
+
+    def test_rewrites_generic_captured_gpd_echo_block(self) -> None:
+        content = '```bash\nPREVIEW=$(gpd pre-commit-check --files GPD/STATE.md 2>&1) || true\necho "$PREVIEW"\n```'
+
+        result = _rewrite_gemini_shell_workflow_guidance(content)
+
+        assert "# Gemini: run this command directly." in result
+        assert "gpd pre-commit-check --files GPD/STATE.md 2>&1 || true" in result
+        assert "PREVIEW=$(" not in result
+        assert "$PREVIEW" not in result
+
+
+class TestGeminiCommandRuntimeNotes:
+    def test_runtime_note_injection_is_idempotent(self) -> None:
+        bridge_command = "/runtime/gpd-cli"
+        content = "---\nname: gpd:status\ndescription: Show project status\n---\n```bash\ngpd status\n```\n"
+
+        once = _inject_gemini_command_runtime_note(content, bridge_command, include_shell_allowlist=True)
+        twice = _inject_gemini_command_runtime_note(once, bridge_command, include_shell_allowlist=True)
+
+        assert once == twice
+        assert twice.count("<gemini_runtime_notes>") == 1
+        assert twice.count("<gemini_shell_runtime_notes>") == 1
+        assert twice.count("Gemini runtime compatibility:") == 1
+        assert twice.count("Gemini shell compatibility:") == 1
+
+    def test_runtime_note_reinjection_can_drop_shell_allowlist(self) -> None:
+        bridge_command = "/runtime/gpd-cli"
+        content = (
+            "<gemini_runtime_notes>\nold runtime note\n</gemini_runtime_notes>\n\n"
+            "<gemini_shell_runtime_notes>\nold shell note\n</gemini_shell_runtime_notes>\n\n"
+            "Summarize project status."
+        )
+
+        result = _inject_gemini_command_runtime_note(content, bridge_command, include_shell_allowlist=False)
+
+        assert result.count("<gemini_runtime_notes>") == 1
+        assert "<gemini_shell_runtime_notes>" not in result
+        assert "old runtime note" not in result
+        assert "old shell note" not in result
+
+    def test_non_shell_command_prompt_omits_full_shell_allowlist(self) -> None:
+        bridge_command = "/runtime/gpd-cli"
+        content = (
+            "---\n"
+            "name: gpd:status\n"
+            "description: Show project status\n"
+            "---\n"
+            "Summarize the current project state and ask exactly one question."
+        )
+
+        result = _render_gemini_command_prompt(content, bridge_command=bridge_command)
+
+        assert "<gemini_runtime_notes>" in result
+        assert "Gemini runtime compatibility" in result
+        assert "enforced shell-prefix allowlist" not in result
+        assert "`git init`" not in result
+        assert "`mkdir -p GPD`" not in result
+
+    def test_shell_command_prompt_keeps_full_shell_allowlist(self) -> None:
+        bridge_command = "/runtime/gpd-cli"
+        content = "---\nname: gpd:status\ndescription: Show project status\n---\n```bash\ngpd status\n```\n"
+
+        result = _render_gemini_command_prompt(content, bridge_command=bridge_command)
+
+        assert "<gemini_runtime_notes>" in result
+        assert "<gemini_shell_runtime_notes>" in result
+        assert "enforced shell-prefix allowlist" in result
+        assert f"`{bridge_command}`" in result
+        assert "`git init`" in result
+        assert "`mkdir -p GPD`" in result
+        assert "PROJECT_CONTRACT_JSON" not in result
+        assert "printf '%s\\n'" not in result
+        assert "If `run_shell_command` is denied by policy, stop and report the policy block" in result
+        assert f"{bridge_command} status" in result
+
+    def test_rendered_shell_allowlist_matches_policy_prefixes(self) -> None:
+        bridge_command = "/runtime/gpd-cli"
+        rendered_allowlist = _render_gemini_shell_allowlist(bridge_command)
+        policy_prefixes = _gemini_policy_command_prefixes(bridge_command)
+        parsed_policy = tomllib.loads(_render_gemini_policy_toml(bridge_command))
+
+        assert tuple(parsed_policy["rule"][0]["commandPrefix"]) == policy_prefixes
+        for prefix in policy_prefixes:
+            assert f"`{prefix}`" in rendered_allowlist
+        assert "PROJECT_CONTRACT_JSON" not in rendered_allowlist
+        assert "printf '%s\\n'" not in rendered_allowlist
 
 
 class TestInstall:
@@ -585,11 +756,11 @@ class TestInstall:
 
         settings = json.loads((target / "settings.json").read_text(encoding="utf-8"))
         hook_python = hook_python_interpreter()
-        expected_statusline_path = str(target / 'hooks' / 'statusline.py').replace("\\", "/")
+        expected_statusline_path = str(target / "hooks" / "statusline.py").replace("\\", "/")
         assert settings["statusLine"]["command"] == f"{shlex.quote(hook_python)} {expected_statusline_path}"
         session_start = settings.get("hooks", {}).get("SessionStart", [])
         cmds = [h.get("command", "") for entry in session_start for h in (entry.get("hooks") or [])]
-        expected_check_update_path = str(target / 'hooks' / 'check_update.py').replace("\\", "/")
+        expected_check_update_path = str(target / "hooks" / "check_update.py").replace("\\", "/")
         expected_check_update_cmd = f"{shlex.quote(hook_python)} {expected_check_update_path}"
         assert expected_check_update_cmd in cmds
 
@@ -656,8 +827,8 @@ class TestInstall:
 
         settings = json.loads((target / "settings.json").read_text(encoding="utf-8"))
         wolfram = settings["mcpServers"]["gpd-wolfram"]
-        assert wolfram["command"] == "gpd-mcp-wolfram"
-        assert wolfram["args"] == []
+        assert wolfram["command"] == hook_python_interpreter()
+        assert wolfram["args"] == ["-m", "gpd.mcp.integrations.wolfram_bridge"]
         assert wolfram["env"] == {"GPD_WOLFRAM_MCP_ENDPOINT": "https://example.invalid/api/mcp"}
         assert wolfram["trust"] is True
         assert "super-secret-token" not in json.dumps(wolfram)
@@ -703,8 +874,8 @@ class TestInstall:
 
         settings = json.loads((target / "settings.json").read_text(encoding="utf-8"))
         wolfram = settings["mcpServers"]["gpd-wolfram"]
-        assert wolfram["command"] == "gpd-mcp-wolfram"
-        assert wolfram["args"] == []
+        assert wolfram["command"] == hook_python_interpreter()
+        assert wolfram["args"] == ["-m", "gpd.mcp.integrations.wolfram_bridge"]
         assert wolfram["env"]["GPD_WOLFRAM_MCP_ENDPOINT"] == "https://custom.invalid/api/mcp"
         assert wolfram["env"]["EXTRA_FLAG"] == "1"
         assert wolfram["cwd"] == "/tmp/custom-wolfram"
@@ -732,6 +903,22 @@ class TestInstall:
         settings = json.loads((target / "settings.json").read_text(encoding="utf-8"))
         assert "gpd-wolfram" not in settings.get("mcpServers", {})
 
+    def test_install_fails_closed_for_malformed_project_integrations_before_copying_artifacts(
+        self,
+        adapter: GeminiAdapter,
+        gpd_root: Path,
+        tmp_path: Path,
+    ) -> None:
+        target = tmp_path / ".gemini"
+        target.mkdir()
+        (tmp_path / "GPD").mkdir()
+        (tmp_path / "GPD" / "integrations.json").write_text('{"wolfram":', encoding="utf-8")
+
+        with pytest.raises(RuntimeError, match="Malformed integrations config"):
+            adapter.install(gpd_root, target)
+
+        _assert_no_manifestless_gpd_artifacts(target)
+
     def test_install_adds_policy_path_shell_sentinel_and_policy_file(
         self,
         adapter: GeminiAdapter,
@@ -754,11 +941,16 @@ class TestInstall:
         assert 'toolName = "run_shell_command"' in policy
         assert 'modes = ["autoEdit"]' in policy
         assert "allow_redirection = true" in policy
-        import tomllib
+
         parsed_policy = tomllib.loads(policy)
         bridge = expected_gemini_bridge(target)
-        assert bridge in parsed_policy["rule"][0]["commandPrefix"]
+        policy_prefixes = parsed_policy["rule"][0]["commandPrefix"]
+        assert bridge in policy_prefixes
+        assert not any("PROJECT_CONTRACT_JSON" in prefix for prefix in policy_prefixes)
+        assert not any(prefix.startswith("printf") for prefix in policy_prefixes)
         assert '"git init"' in policy
+        assert '"mkdir -p GPD"' in policy
+        assert "GPD/research" not in policy
 
     def test_install_surfaces_shell_prefix_allowlist_in_model_facing_content(
         self,
@@ -779,7 +971,9 @@ class TestInstall:
         assert f"`{expected_bridge}`" in command
         assert "`git init`" in command
         assert "`mkdir -p GPD`" in command
-        assert "`printf '%s\\n' \"$PROJECT_CONTRACT_JSON\"`" in command
+        assert "`mkdir -p GPD/research`" not in command
+        assert "PROJECT_CONTRACT_JSON" not in command
+        assert "printf '%s\\n'" not in command
 
     def test_install_preserves_existing_policy_paths_and_mcp_trust_choice(
         self,
@@ -814,6 +1008,42 @@ class TestInstall:
         assert settings["policyPaths"] == [existing_policy_path, str((target / "policies").resolve())]
         assert settings["tools"]["allowed"] == ["write_file"]
         assert settings["mcpServers"]["gpd-state"]["trust"] is False
+
+    def test_install_reads_commit_attribution_from_target_settings_not_policy_toml(
+        self,
+        adapter: GeminiAdapter,
+        gpd_root: Path,
+        tmp_path: Path,
+    ) -> None:
+        target = tmp_path / ".gemini"
+        target.mkdir()
+        (target / "settings.json").write_text(
+            json.dumps({"attribution": {"commit": "Target Local <target@example.com>"}}),
+            encoding="utf-8",
+        )
+        policy_dir = target / "policies"
+        policy_dir.mkdir()
+        (policy_dir / "gpd-auto-edit.toml").write_text(
+            json.dumps({"attribution": {"commit": "Wrong Policy <wrong@example.com>"}}),
+            encoding="utf-8",
+        )
+        for relpath in ("commands/help.md", "agents/gpd-verifier.md"):
+            source_path = gpd_root / relpath
+            source_path.write_text(
+                source_path.read_text(encoding="utf-8") + "\nCo-Authored-By: AI Runtime <ai@example.com>\n",
+                encoding="utf-8",
+            )
+
+        assert adapter.commit_attribution_config_path(explicit_config_dir=str(target)) == target / "settings.json"
+
+        adapter.install(gpd_root, target)
+
+        command = (target / "commands" / "gpd" / "help.toml").read_text(encoding="utf-8")
+        agent = (target / "agents" / "gpd-verifier.md").read_text(encoding="utf-8")
+        assert "Co-Authored-By: Target Local <target@example.com>" in command
+        assert "Co-Authored-By: Target Local <target@example.com>" in agent
+        assert "Wrong Policy <wrong@example.com>" not in command
+        assert "Wrong Policy <wrong@example.com>" not in agent
 
     def test_install_writes_manifest(self, adapter: GeminiAdapter, gpd_root: Path, tmp_path: Path) -> None:
         target = tmp_path / ".gemini"
@@ -859,19 +1089,21 @@ class TestInstall:
         assert f"When shell steps call the GPD CLI, use {expected_bridge}" in command
         assert "Run the init command as its own shell call in Gemini auto-edit mode." in workflow
         assert "INIT=$(gpd --raw init new-project)" not in workflow
-        assert f'INIT=$({expected_bridge} --raw init new-project)' not in workflow
+        assert f"INIT=$({expected_bridge} --raw init new-project)" not in workflow
         assert f"{expected_bridge} --raw init new-project" in workflow
         assert f"{expected_bridge} commit " in workflow
         assert ' gpd commit "' not in workflow
         assert f"{expected_bridge} --raw validate project-contract {_GEMINI_APPROVED_CONTRACT_PATH}" in command
         assert f"{expected_bridge} state set-project-contract {_GEMINI_APPROVED_CONTRACT_PATH}" in command
+        assert "PROJECT_CONTRACT_JSON" not in command
+        assert "printf '%s\\n'" not in command
         assert "PROJECT_CONTRACT_JSON" not in workflow
         assert "PROJECT_CONTRACT_JSON" not in state_schema
         assert "PRE_CHECK=$(" not in workflow
         assert f"{expected_bridge} --raw validate project-contract {_GEMINI_APPROVED_CONTRACT_PATH}" in workflow
         assert f"{expected_bridge} state set-project-contract {_GEMINI_APPROVED_CONTRACT_PATH}" in workflow
-        assert f"{expected_bridge} --raw validate project-contract {_GEMINI_APPROVED_CONTRACT_PATH}" in state_schema
-        assert f"{expected_bridge} state set-project-contract {_GEMINI_APPROVED_CONTRACT_PATH}" in state_schema
+        assert f"{expected_bridge} --raw validate project-contract {_GEMINI_APPROVED_CONTRACT_PATH}" not in state_schema
+        assert f"{expected_bridge} state set-project-contract {_GEMINI_APPROVED_CONTRACT_PATH}" not in state_schema
 
     def test_install_rewrites_set_profile_shell_block_for_gemini(
         self,
@@ -886,18 +1118,18 @@ class TestInstall:
 
         content = (target / "commands" / "gpd" / "set-profile.toml").read_text(encoding="utf-8")
 
-        assert "Run these as separate shell calls in Gemini auto-edit mode." in content
-        assert "Do not combine them into one multi-line shell block." in content
         assert "INIT=$(" not in content
         assert "if [ $? -ne 0 ]" not in content
+        assert 'PROFILE="$(' not in content
+        assert 'case "$PROFILE"' not in content
         assert expected_gemini_bridge(target) + " config ensure-section" in content
-        assert expected_gemini_bridge(target) + " --raw init progress --include state,config --no-project-reentry" in content
-
+        assert expected_gemini_bridge(target) + " config set model_profile" in content
+        assert expected_gemini_bridge(target) + " --raw init progress --include state,config" not in content
 
     def test_install_agents_replace_runtime_placeholders(
         self, adapter: GeminiAdapter, gpd_root: Path, tmp_path: Path
     ) -> None:
-        """Regression: _copy_agents_gemini must pass runtime='gemini' to replace_placeholders."""
+        """Assert _copy_agents_gemini passes runtime='gemini' to replace_placeholders."""
         target = tmp_path / ".gemini"
         target.mkdir()
         adapter.install(gpd_root, target)
@@ -969,6 +1201,17 @@ class TestInstall:
         assert missing == ("settings.json",)
         assert adapter.missing_install_verification_artifacts(target) == ()
 
+    def test_install_completeness_requires_catalog_command_surface(
+        self, adapter: GeminiAdapter, gpd_root: Path, tmp_path: Path
+    ) -> None:
+        target = tmp_path / ".gemini"
+        target.mkdir()
+        adapter.install(gpd_root, target)
+
+        shutil.rmtree(target / "commands" / "gpd")
+
+        assert "commands/gpd" in adapter.missing_install_artifacts(target)
+
     def test_install_fails_closed_for_malformed_settings_json(
         self,
         adapter: GeminiAdapter,
@@ -985,6 +1228,7 @@ class TestInstall:
             adapter.install(gpd_root, target)
 
         assert settings_path.read_text(encoding="utf-8") == before
+        _assert_no_manifestless_gpd_artifacts(target)
 
     def test_install_fails_closed_for_structurally_invalid_settings_json(
         self,
@@ -1002,6 +1246,7 @@ class TestInstall:
             adapter.install(gpd_root, target)
 
         assert settings_path.read_text(encoding="utf-8") == before
+        _assert_no_manifestless_gpd_artifacts(target)
 
     def test_install_fails_closed_for_structurally_invalid_mcp_server_entry(
         self,
@@ -1019,6 +1264,7 @@ class TestInstall:
             adapter.install(gpd_root, target)
 
         assert settings_path.read_text(encoding="utf-8") == before
+        _assert_no_manifestless_gpd_artifacts(target)
 
     def test_reinstall_fails_closed_for_malformed_managed_config_manifest(
         self,
@@ -1047,9 +1293,9 @@ class TestInstall:
     ) -> None:
         """force_statusline=True must override a pre-existing non-GPD statusline.
 
-        Regression: previously install() called finalize_install internally
-        without forwarding force_statusline, so the CLI's subsequent call
-        with force_statusline=True was silently discarded.
+        install() must forward ``force_statusline`` into its internal
+        ``finalize_install`` call so that the CLI's subsequent call with
+        ``force_statusline=True`` is honored rather than silently discarded.
         """
         target = tmp_path / ".gemini"
         target.mkdir()
@@ -1093,6 +1339,86 @@ class TestInstall:
             adapter.finalize_install(result)
 
         assert settings_path.read_text(encoding="utf-8") == before
+        assessment = assess_install_target(target, expected_runtime=adapter.runtime_name)
+        assert assessment.state == "owned_incomplete"
+        assert "settings.json" in assessment.missing_install_artifacts
+
+    @pytest.mark.parametrize(
+        ("settings_key", "expected_error", "expected_missing"),
+        [
+            ("hooks", "update hook not configured", "settings.json update hook"),
+            ("mcpServers", "MCP servers are not configured", "settings.json mcpServers"),
+        ],
+    )
+    def test_finalize_install_verifies_persisted_settings(
+        self,
+        adapter: GeminiAdapter,
+        gpd_root: Path,
+        tmp_path: Path,
+        settings_key: str,
+        expected_error: str,
+        expected_missing: str,
+    ) -> None:
+        target = tmp_path / ".gemini"
+        target.mkdir()
+        result = adapter.install(gpd_root, target)
+        result["settings"].pop(settings_key)
+
+        with pytest.raises(RuntimeError, match=expected_error):
+            adapter.finalize_install(result)
+
+        assert (target / "settings.json").exists()
+        assert result.get("settingsWritten") is not True
+        assessment = assess_install_target(target, expected_runtime=adapter.runtime_name)
+        assert assessment.state == "owned_incomplete"
+        assert expected_missing in assessment.missing_install_artifacts
+
+    @pytest.mark.parametrize("missing_field", ["settingsPath", "settings", "statuslineCommand"])
+    def test_finalize_install_fails_closed_for_missing_deferred_payload_field(
+        self,
+        adapter: GeminiAdapter,
+        gpd_root: Path,
+        tmp_path: Path,
+        missing_field: str,
+    ) -> None:
+        target = tmp_path / ".gemini"
+        target.mkdir()
+        result = adapter.install(gpd_root, target)
+        result.pop(missing_field)
+
+        with pytest.raises(RuntimeError, match="deferred install result is malformed"):
+            adapter.finalize_install(result)
+
+        assert not (target / "settings.json").exists()
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("settingsPath", ["settings.json"]),
+            ("settings", []),
+            ("settings", {"policyPaths": {}}),
+            ("statuslineCommand", 123),
+            ("shouldInstallStatusline", "yes"),
+            ("settingsWritten", "yes"),
+        ],
+    )
+    def test_finalize_install_fails_closed_for_invalid_deferred_payload_field(
+        self,
+        adapter: GeminiAdapter,
+        gpd_root: Path,
+        tmp_path: Path,
+        field: str,
+        value: object,
+    ) -> None:
+        target = tmp_path / ".gemini"
+        target.mkdir()
+        result = adapter.install(gpd_root, target)
+        result[field] = value
+
+        with pytest.raises(RuntimeError, match="deferred install result is malformed"):
+            adapter.finalize_install(result)
+
+        assert not (target / "settings.json").exists()
 
     def test_finalize_install_fails_closed_for_structurally_invalid_settings_json(
         self,
@@ -1112,11 +1438,14 @@ class TestInstall:
             adapter.finalize_install(result)
 
         assert settings_path.read_text(encoding="utf-8") == before
+        assessment = assess_install_target(target, expected_runtime=adapter.runtime_name)
+        assert assessment.state == "owned_incomplete"
+        assert "settings.json" in assessment.missing_install_artifacts
 
     def test_install_agents_at_includes_receive_runtime(
         self, adapter: GeminiAdapter, gpd_root: Path, tmp_path: Path
     ) -> None:
-        """Regression: expand_at_includes in _copy_agents_gemini must receive runtime='gemini'.
+        """Assert expand_at_includes in _copy_agents_gemini receives runtime='gemini'.
 
         Agents with @ includes pointing at specs that contain {GPD_CONFIG_DIR}
         must have those placeholders replaced during include expansion.
@@ -1129,8 +1458,7 @@ class TestInstall:
             encoding="utf-8",
         )
         (agents_src / "gpd-includer.md").write_text(
-            "---\nname: gpd-includer\ndescription: test\n---\n"
-            "@{GPD_INSTALL_DIR}/references/runtime-ref.md\n",
+            "---\nname: gpd-includer\ndescription: test\n---\n@{GPD_INSTALL_DIR}/references/runtime-ref.md\n",
             encoding="utf-8",
         )
 
@@ -1142,6 +1470,20 @@ class TestInstall:
         assert "{GPD_CONFIG_DIR}" not in includer
         assert "{GPD_RUNTIME_FLAG}" not in includer
         assert "--gemini" in includer
+
+    def test_install_commands_translate_expanded_includes_to_gemini_command_labels(
+        self, adapter: GeminiAdapter, gpd_root: Path, tmp_path: Path
+    ) -> None:
+        gpd_root = Path(__file__).resolve().parents[2] / "src" / "gpd"
+        target = tmp_path / ".gemini"
+        target.mkdir()
+        adapter.install(gpd_root, target)
+
+        tour = (target / "commands" / "gpd" / "tour.toml").read_text(encoding="utf-8")
+
+        assert "Runtime label: Show `/gpd:` as native labels;" in tour
+        assert "`/gpd:start`" in tour
+        assert "`gpd:start`" not in tour
 
     def test_install_agents_inline_gpd_agents_dir_includes(
         self, adapter: GeminiAdapter, gpd_root: Path, tmp_path: Path
@@ -1204,6 +1546,29 @@ class TestRuntimePermissions:
         assert result["sync_applied"] is True
         assert result["launch_command"] == shlex.quote(str(wrapper))
         assert result["requires_relaunch"] is True
+
+    def test_sync_runtime_permissions_yolo_wrapper_uses_catalog_launch_command(
+        self,
+        adapter: GeminiAdapter,
+        gpd_root: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        class _Descriptor:
+            launch_command = "/tmp/Gemini CLI/gemini"
+            public_command_surface_prefix = "/gpd:"
+
+        monkeypatch.setattr(gemini_module, "get_runtime_descriptor", lambda runtime: _Descriptor())
+        target = tmp_path / ".gemini"
+        target.mkdir()
+        adapter.install(gpd_root, target)
+
+        adapter.sync_runtime_permissions(target, autonomy="yolo")
+        wrapper = target / "get-physics-done" / "bin" / "gemini-gpd-yolo"
+
+        assert wrapper.read_text(encoding="utf-8") == (
+            f'#!/bin/sh\nexec {shlex.quote(_Descriptor.launch_command)} --approval-mode=yolo "$@"\n'
+        )
 
     def test_sync_runtime_permissions_non_yolo_removes_launcher_wrapper(
         self,
@@ -1413,7 +1778,7 @@ class TestUninstall:
 
 
 class TestRewriteWindowsPathEscape:
-    """Regression: Windows paths with backslashes must not be interpreted as
+    """Assert Windows paths with backslashes are not interpreted as
     escape sequences by ``re.sub``.  See discussion #12."""
 
     def test_rewrite_gpd_cli_invocations_preserves_prose_and_quotes(self) -> None:
@@ -1454,7 +1819,7 @@ class TestRewriteWindowsPathEscape:
 
 
 class TestPolicyTomlWindowsPath:
-    """Regression: policy TOML must be valid even when bridge_command contains
+    """Assert policy TOML stays valid even when bridge_command contains
     Windows backslash paths.  See discussion #12."""
 
     def test_render_policy_toml_with_windows_path(self) -> None:
@@ -1466,3 +1831,5 @@ class TestPolicyTomlWindowsPath:
         prefixes = parsed["rule"][0]["commandPrefix"]
         assert any("python" in p for p in prefixes)
         assert any("git init" in p for p in prefixes)
+        assert all("PROJECT_CONTRACT_JSON" not in p for p in prefixes)
+        assert all(not p.startswith("printf") for p in prefixes)

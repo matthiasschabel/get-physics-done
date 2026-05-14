@@ -1,6 +1,6 @@
 # Agent Delegation Reference
 
-This is the canonical delegation contract for spawned GPD agents. Reuse these rules anywhere a workflow, runtime note, or continuation template needs to describe a handoff.
+This is the canonical delegation contract for spawned GPD agents. Reuse these rules anywhere a workflow, runtime note, infrastructure reference, or continuation template needs to describe a handoff. Other prompt surfaces should link here instead of restating these rules.
 
 ## Delegation Invariants
 
@@ -31,7 +31,7 @@ task(
 | Method | Agent Spawn Method |
 |--------|-------------------|
 | **Subagent spawning** | `task(subagent_type="gpd-{agent}", model="{model}", readonly=false, prompt="...")` or equivalent; omit `model` when it resolves empty |
-| **Projected command surface** | Invoke the runtime's installed GPD command or agent action surface. For example, some runtimes expose `gpd:{agent}` slash commands. |
+| **Projected command surface** | Invoke the runtime's installed GPD command or agent action surface. |
 | **Tool discovery** | Agents may appear on the runtime's discoverable action/tool surface after installation |
 | **Fallback** | Execute the installed agent prompt instructions sequentially in the main context |
 
@@ -98,6 +98,8 @@ shared_state_policy: return_only | direct
 </spawn_contract>
 ```
 
+File-producing or state-sensitive spawned prompts must include this block directly in the prompt text. The only allowed exemption is an adjacent documented exemption stating that the task is read-only, produces no artifacts, and returns no shared-state update; the prompt must still state the structured return envelope.
+
 Use the fields this way:
 
 - `write_scope.mode`: `scoped_write` for normal subagents with isolated artifact ownership. Use `direct` only when the subagent is explicitly allowed to mutate canonical shared state.
@@ -112,5 +114,5 @@ If the task does not produce files, still state the `shared_state_policy` and th
 Add this before any task() call in a workflow:
 
 ```
-> **Runtime delegation:** Spawn a subagent for the task below. Adapt the `task()` call to your runtime's agent spawning mechanism. If `model` resolves to `null` or an empty string, omit it so the runtime uses its default model. Always pass `readonly=false` for file-producing agents. If subagent spawning is unavailable, execute these steps sequentially in the main context.
+> **Runtime delegation:** Spawn a subagent for the task below. Adapt the `task()` call to your runtime's agent spawning mechanism. If `model` resolves to `null` or an empty string, omit it so the runtime uses its default model. Always pass `readonly=false` for file-producing agents.
 ```

@@ -32,7 +32,7 @@ from gpd.core.costs import (
     CostSummary,
     _profile_tier_mix,
 )
-from gpd.core.frontmatter import FrontmatterParseError
+from gpd.core.frontmatter import FrontmatterParseError, extract_frontmatter, validate_frontmatter
 from gpd.core.health import (
     CheckStatus,
     DoctorReport,
@@ -54,8 +54,11 @@ from gpd.core.public_surface_contract import (
     local_cli_unattended_readiness_command,
     local_cli_validate_command_context_command,
 )
-from gpd.core.resume_surface import RESUME_COMPATIBILITY_ALIAS_FIELDS
+from gpd.core.recent_projects import record_recent_project
+from gpd.core.reproducibility import compute_sha256
+from gpd.core.resume_surface import RESUME_BACKEND_ONLY_FIELDS
 from gpd.core.state import default_state_dict, generate_state_markdown, save_state_json, save_state_markdown
+from tests.latex_test_support import latex_capability_payload as _latex_capability_payload
 from tests.latex_test_support import toolchain_capability as _toolchain_capability
 from tests.runtime_test_support import (
     FOREIGN_RUNTIME,
@@ -83,6 +86,10 @@ def _normalize_cli_output(text: str) -> str:
     return " ".join(_ANSI_ESCAPE_RE.sub("", text).split())
 
 
+def _has_warning_with_fragments(warnings: list[str], *fragments: str) -> bool:
+    return any(all(fragment in warning for fragment in fragments) for warning in warnings)
+
+
 _COST_TEST_RUNTIME = "runtime-under-test"
 _COST_TEST_MODEL = "model-under-test"
 _CONFIG_FILE_RUNTIME = runtime_with_permissions_surface("config-file")
@@ -92,7 +99,7 @@ FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "stage0"
 
 
 def _assert_no_top_level_resume_aliases(payload: dict[str, object]) -> None:
-    for key in RESUME_COMPATIBILITY_ALIAS_FIELDS:
+    for key in RESUME_BACKEND_ONLY_FIELDS:
         assert key not in payload
 
 
@@ -118,6 +125,36 @@ def _make_checkout(tmp_path: Path, version: str = "9.9.9") -> Path:
     for subdir in ("commands", "agents", "hooks", "specs"):
         (gpd_root / subdir).mkdir(parents=True, exist_ok=True)
     return repo_root
+
+
+def _artifact_manifest_payload(
+    manuscript: Path,
+    *,
+    title: str = "Curvature Flow Bounds",
+    journal: str = "prl",
+    artifact_id: str = "tex-paper",
+    artifact_path: str | None = None,
+) -> dict[str, object]:
+    digest = compute_sha256(manuscript)
+    return {
+        "version": 1,
+        "paper_title": title,
+        "journal": journal,
+        "created_at": "2026-04-02T00:00:00+00:00",
+        "manuscript_sha256": digest,
+        "manuscript_mtime_ns": manuscript.stat().st_mtime_ns,
+        "artifacts": [
+            {
+                "artifact_id": artifact_id,
+                "category": "tex",
+                "path": artifact_path or manuscript.name,
+                "sha256": digest,
+                "produced_by": "test",
+                "sources": [],
+                "metadata": {},
+            }
+        ],
+    }
 
 
 def _write_managed_publication_manuscript(
@@ -154,6 +191,13 @@ def _bootstrap_publication_project(project_root: Path) -> None:
     save_state_markdown(project_root, generate_state_markdown(state))
     (planning / "PROJECT.md").write_text("# Project\n", encoding="utf-8")
     (planning / "CONVENTIONS.md").write_text("# Conventions\n", encoding="utf-8")
+
+
+def _mark_verified_project_root(project_root: Path) -> None:
+    planning = project_root / "GPD"
+    planning.mkdir(parents=True, exist_ok=True)
+    save_state_json(project_root, default_state_dict())
+    (planning / "PROJECT.md").write_text("# Project\n", encoding="utf-8")
 
 
 def _write_write_paper_authoring_input(
@@ -407,7 +451,7 @@ def test_integrations_enable_and_disable_wolfram_persist_project_local_config(tm
     config_path = project_root / "GPD" / "integrations.json"
     assert config_path.exists()
     saved = json.loads(config_path.read_text(encoding="utf-8"))
-    assert saved["wolfram"]["enabled"] is True
+    assert saved["wolfram"] == {"enabled": True}
 
     disable_result = runner.invoke(app, ["--cwd", str(project_root), "--raw", "integrations", "disable", "wolfram"])
     assert disable_result.exit_code == 0
@@ -419,6 +463,8 @@ def test_integrations_enable_and_disable_wolfram_persist_project_local_config(tm
     status_payload = json.loads(status_result.output)
     assert status_payload["enabled"] is False
     assert status_payload["state"] == "disabled"
+    saved = json.loads(config_path.read_text(encoding="utf-8"))
+    assert saved["wolfram"] == {"enabled": False}
 
 
 @pytest.mark.parametrize("command", ("status", "enable", "disable"))
@@ -435,8 +481,8 @@ def test_integrations_commands_use_project_root_config_from_nested_workspace(tmp
     project_root = tmp_path / "project"
     nested_workspace = project_root / "notes" / "scratch"
     nested_workspace.mkdir(parents=True)
+    _mark_verified_project_root(project_root)
     config_path = project_root / "GPD" / "integrations.json"
-    config_path.parent.mkdir(parents=True)
     config_path.write_text('{"wolfram":{"enabled":false}}', encoding="utf-8")
 
     status_result = runner.invoke(app, ["--cwd", str(nested_workspace), "--raw", "integrations", "status", "wolfram"])
@@ -454,7 +500,7 @@ def test_integrations_commands_use_project_root_config_from_nested_workspace(tmp
     assert not (nested_workspace / "GPD").exists()
 
 
-def test_integrations_status_rejects_legacy_api_key_env_field(tmp_path: Path) -> None:
+def test_integrations_status_rejects_unsupported_api_key_env_field(tmp_path: Path) -> None:
     config_path = tmp_path / "GPD" / "integrations.json"
     config_path.parent.mkdir(parents=True)
     config_path.write_text(
@@ -514,7 +560,7 @@ def test_workflow_preset_show_raw_outputs_central_contract() -> None:
     assert payload["label"] == "Core research"
     assert payload["required_checks"] == []
     assert payload["recommended_config"]["model_profile"] == "review"
-    assert payload["summary"] == "Balanced default workflow for planning, execution, and verification."
+    assert payload["summary"] == "Supervised default workflow for planning, execution, and verification."
 
 
 def test_workflow_preset_apply_dry_run_previews_changed_knobs(tmp_path: Path) -> None:
@@ -555,7 +601,6 @@ def test_workflow_preset_apply_dry_run_previews_changed_knobs(tmp_path: Path) ->
         "workflow.verifier",
     ]
     assert payload["changed_keys"] == [
-        "autonomy",
         "execution.review_cadence",
         "parallelization",
         "planning.commit_docs",
@@ -564,10 +609,9 @@ def test_workflow_preset_apply_dry_run_previews_changed_knobs(tmp_path: Path) ->
         "workflow.verifier",
     ]
     assert payload["ignored_keys"] == ["model_cost_posture"]
-    assert payload["unchanged_keys"] == ["research_mode", "model_profile"]
+    assert payload["unchanged_keys"] == ["autonomy", "research_mode", "model_profile"]
     assert payload["changes"] == [
-        {"key": "autonomy", "before": "supervised", "after": "balanced"},
-        {"key": "execution.review_cadence", "before": "sparse", "after": "adaptive"},
+        {"key": "execution.review_cadence", "before": "sparse", "after": "dense"},
         {"key": "parallelization", "before": False, "after": True},
         {"key": "planning.commit_docs", "before": False, "after": True},
         {"key": "workflow.research", "before": False, "after": True},
@@ -575,12 +619,12 @@ def test_workflow_preset_apply_dry_run_previews_changed_knobs(tmp_path: Path) ->
         {"key": "workflow.verifier", "before": False, "after": True},
     ]
     resulting_config = payload["resulting_config"]
-    assert resulting_config["autonomy"] == "balanced"
+    assert resulting_config["autonomy"] == "supervised"
     assert resulting_config["research_mode"] == "balanced"
     assert resulting_config["model_profile"] == "review"
     assert resulting_config["parallelization"] is True
     assert resulting_config["commit_docs"] is True
-    assert resulting_config["execution"]["review_cadence"] == "adaptive"
+    assert resulting_config["execution"]["review_cadence"] == "dense"
     assert resulting_config["execution"]["checkpoint_after_n_tasks"] == 7
     assert resulting_config["execution"]["checkpoint_before_downstream_dependent_tasks"] is False
     assert resulting_config["research"] is True
@@ -632,7 +676,6 @@ def test_workflow_preset_apply_writes_merged_config(tmp_path: Path) -> None:
         "workflow.verifier",
     ]
     assert payload["changed_keys"] == [
-        "autonomy",
         "research_mode",
         "model_profile",
         "workflow.research",
@@ -640,13 +683,14 @@ def test_workflow_preset_apply_writes_merged_config(tmp_path: Path) -> None:
         "workflow.verifier",
     ]
     assert payload["unchanged_keys"] == [
+        "autonomy",
         "execution.review_cadence",
         "parallelization",
         "planning.commit_docs",
     ]
 
     written = json.loads(config_path.read_text(encoding="utf-8"))
-    assert written["autonomy"] == "balanced"
+    assert written["autonomy"] == "supervised"
     assert written["research_mode"] == "exploit"
     assert written["model_profile"] == "paper-writing"
     assert written["parallelization"] is False
@@ -658,6 +702,52 @@ def test_workflow_preset_apply_writes_merged_config(tmp_path: Path) -> None:
     assert written["verifier"] is True
     assert "planning" not in written
     assert "workflow" not in written
+
+
+def test_workflow_preset_apply_uses_ancestor_config_from_nested_workspace(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    nested_cwd = project_root / "notes" / "nested"
+    nested_cwd.mkdir(parents=True)
+    config_path = project_root / "GPD" / "config.json"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text(
+        json.dumps(
+            {
+                "autonomy": "supervised",
+                "research_mode": "adaptive",
+                "model_profile": "review",
+                "parallelization": False,
+                "workflow": {"research": False, "plan_checker": False, "verifier": False},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        ["--cwd", str(nested_cwd), "--raw", "presets", "apply", "publication-manuscript"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["config_path"] == str(config_path)
+    written = json.loads(config_path.read_text(encoding="utf-8"))
+    assert written["research_mode"] == "exploit"
+    assert written["model_profile"] == "paper-writing"
+    assert written["research"] is True
+    assert not (nested_cwd / "GPD").exists()
+
+
+def test_workflow_preset_apply_dry_run_projectless_does_not_create_gpd_dir(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        ["--cwd", str(tmp_path), "--raw", "presets", "apply", "publication-manuscript", "--dry-run"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    assert not (tmp_path / "GPD").exists()
 
 
 def _sample_cost_summary(workspace: Path) -> CostSummary:
@@ -855,7 +945,40 @@ def test_permissions_status_raw_includes_runtime_capabilities(tmp_path: Path) ->
 def test_observe_help_surfaces_read_only_execution_snapshot_command() -> None:
     result = runner.invoke(app, ["observe", "execution", "--help"])
     assert result.exit_code == 0
-    assert "Show the current local execution status without modifying project state." in result.output
+    assert "Show the current local execution status without modifying project state." in _normalize_cli_output(
+        result.output
+    )
+
+
+def test_observe_and_trace_help_label_read_only_and_writing_subcommands() -> None:
+    observe_help = runner.invoke(app, ["observe", "--help"])
+    assert observe_help.exit_code == 0
+    observe_output = _normalize_cli_output(observe_help.output)
+    assert "event/export are the subcommands that write files" in observe_output
+
+    observe_event_help = runner.invoke(app, ["observe", "event", "--help"])
+    assert observe_event_help.exit_code == 0
+    assert "Record one local observability event (writes session logs)." in observe_event_help.output
+
+    observe_show_help = runner.invoke(app, ["observe", "show", "--help"])
+    assert observe_show_help.exit_code == 0
+    assert "without modifying project state" in _normalize_cli_output(observe_show_help.output)
+
+    trace_help = runner.invoke(app, ["trace", "--help"])
+    assert trace_help.exit_code == 0
+    trace_output = _normalize_cli_output(trace_help.output)
+    assert "show is read-only" in trace_output
+    assert "start/log/stop write trace state" in trace_output
+
+    trace_show_help = runner.invoke(app, ["trace", "show", "--help"])
+    assert trace_show_help.exit_code == 0
+    assert "Inspect trace events with optional filters without modifying project state." in _normalize_cli_output(
+        trace_show_help.output
+    )
+
+    trace_stop_help = runner.invoke(app, ["trace", "stop", "--help"])
+    assert trace_stop_help.exit_code == 0
+    assert "writes trace and observability state" in _normalize_cli_output(trace_stop_help.output)
 
 
 def test_doctor_help_surfaces_runtime_readiness_mode() -> None:
@@ -901,6 +1024,19 @@ def test_permissions_sync_help_surfaces_guided_runtime_changes() -> None:
     assert "--runtime" in normalized_output
     assert "--autonomy" in normalized_output
     assert "--target-dir" in normalized_output
+
+
+def test_config_set_tier_models_help_surfaces_targeted_runtime_options() -> None:
+    result = runner.invoke(app, ["config", "set-tier-models", "--help"])
+    normalized_output = _normalize_cli_output(result.output)
+
+    assert result.exit_code == 0
+    assert "Update model_overrides for one runtime" in normalized_output
+    assert "--runtime" in normalized_output
+    assert "--tier-1" in normalized_output
+    assert "--tier-2" in normalized_output
+    assert "--tier-3" in normalized_output
+    assert "--clear" in normalized_output
 
 
 def test_active_runtime_settings_command_falls_back_to_runtime_neutral_reference(
@@ -1063,6 +1199,7 @@ def _write_install_manifest(
             {
                 "runtime": runtime,
                 "install_scope": install_scope,
+                "explicit_target": False,
             }
         ),
         encoding="utf-8",
@@ -1284,8 +1421,8 @@ def test_resume_runtime_commands_logs_runtime_resolution_failures(
     assert any("Failed to resolve runtime-specific resume commands" in record.message for record in caplog.records)
 
 
-def test_resume_origin_label_no_longer_exposes_legacy_session_alias() -> None:
-    assert cli_module._resume_origin_label("legacy_session") == "Unknown"
+def test_resume_origin_label_rejects_unknown_session_alias() -> None:
+    assert cli_module._resume_origin_label("session_alias") == "Unknown"
 
 
 def test_resume_recent_raw_surfaces_machine_local_recent_projects(tmp_path: Path, monkeypatch) -> None:
@@ -1458,7 +1595,7 @@ def test_resume_recent_raw_downgrades_missing_handoff_rows_to_non_resumable(tmp_
     assert parsed["projects"][0]["resume_file_reason"] == "resume file missing"
     assert parsed["projects"][0]["resumable"] is False
     assert parsed["recovery_advice"]["resume_surface_schema_version"] == 1
-    assert "compat_resume_surface" not in parsed["recovery_advice"]
+    assert "resume_surface" not in parsed["recovery_advice"]
 
 
 def test_resume_plain_output_hints_recent_when_workspace_is_missing(tmp_path: Path, monkeypatch) -> None:
@@ -1486,6 +1623,64 @@ def test_resume_plain_output_hints_recent_when_workspace_is_missing(tmp_path: Pa
     assert result.exit_code == 0
     assert "No GPD planning directory" in result.output
     assert local_cli_resume_recent_command() in result.output
+
+
+def test_resume_plain_output_surfaces_ambiguous_recent_project_reason(tmp_path: Path, monkeypatch) -> None:
+    workspace = tmp_path / "outside-ambiguous"
+    workspace.mkdir()
+    first_project = tmp_path / "first-project"
+    second_project = tmp_path / "second-project"
+    monkeypatch.chdir(workspace)
+    monkeypatch.setattr(
+        "gpd.core.context.init_resume",
+        lambda _cwd: {
+            "workspace_root": workspace.as_posix(),
+            "project_root": None,
+            "project_root_source": None,
+            "project_root_auto_selected": False,
+            "project_reentry_mode": "ambiguous-recent-projects",
+            "project_reentry_requires_selection": True,
+            "project_reentry_selected_candidate": None,
+            "project_reentry_candidates": [
+                {
+                    "source": "recent_project",
+                    "project_root": first_project.as_posix(),
+                    "available": True,
+                    "recoverable": True,
+                    "resumable": True,
+                },
+                {
+                    "source": "recent_project",
+                    "project_root": second_project.as_posix(),
+                    "available": True,
+                    "recoverable": True,
+                    "resumable": True,
+                },
+            ],
+            "workspace_state_exists": False,
+            "workspace_roadmap_exists": False,
+            "workspace_project_exists": False,
+            "workspace_planning_exists": False,
+            "planning_exists": False,
+            "state_exists": False,
+            "roadmap_exists": False,
+            "project_exists": False,
+            "resume_candidates": [],
+            "has_live_execution": False,
+            "execution_resumable": False,
+            "execution_paused_at": None,
+            "autonomy": None,
+            "research_mode": None,
+        },
+    )
+
+    result = runner.invoke(app, ["resume"])
+
+    assert result.exit_code == 0
+    output = _normalize_cli_output(result.output)
+    assert "GPD found 2 recoverable recent projects on this machine, so you need to choose one." in output
+    assert "2 recoverable choices require explicit selection" in output
+    assert local_cli_resume_recent_command() in output
 
 
 def test_resume_plain_output_surfaces_auto_selected_recent_project(tmp_path: Path, monkeypatch) -> None:
@@ -1869,6 +2064,7 @@ def test_read_only_state_progress_and_suggest_resolve_ancestor_without_migration
     nested_cwd.mkdir(parents=True)
     (project_root / "GPD").mkdir()
     (project_root / "GPD" / "STATE.md").write_text("# State\n", encoding="utf-8")
+    (project_root / "GPD" / "ROADMAP.md").write_text("# Roadmap\n", encoding="utf-8")
     (nested_cwd / "PROJECT.md").write_text("# Nested note\n", encoding="utf-8")
     monkeypatch.setattr(
         cli_module,
@@ -1904,6 +2100,46 @@ def test_read_only_state_progress_and_suggest_resolve_ancestor_without_migration
     mock_progress.assert_called_once_with(project_root.resolve(), "json")
     mock_suggest.assert_called_once_with(project_root.resolve())
     assert not (nested_cwd / "GPD").exists()
+
+
+def test_project_scoped_cwd_resolves_ancestor_before_migrating_nested_notes(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    nested_cwd = project_root / "notes" / "nested"
+    nested_cwd.mkdir(parents=True)
+    (project_root / "GPD").mkdir()
+    (project_root / "GPD" / "PROJECT.md").write_text("# Root project\n", encoding="utf-8")
+    (project_root / "GPD" / "ROADMAP.md").write_text("# Root roadmap\n", encoding="utf-8")
+    (project_root / "GPD" / "STATE.md").write_text("# State\n", encoding="utf-8")
+    (nested_cwd / "PROJECT.md").write_text("# Nested note\n", encoding="utf-8")
+
+    assert cli_module._project_scoped_cwd(nested_cwd) == project_root.resolve()
+    assert not (nested_cwd / "GPD").exists()
+
+
+def test_workspace_locked_cwd_does_not_migrate_nested_notes_under_ancestor_project(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    nested_cwd = project_root / "notes" / "nested"
+    nested_cwd.mkdir(parents=True)
+    (project_root / "GPD").mkdir()
+    (project_root / "GPD" / "PROJECT.md").write_text("# Root project\n", encoding="utf-8")
+    (project_root / "GPD" / "ROADMAP.md").write_text("# Root roadmap\n", encoding="utf-8")
+    (project_root / "GPD" / "STATE.md").write_text("# State\n", encoding="utf-8")
+    (nested_cwd / "PROJECT.md").write_text("# Nested note\n", encoding="utf-8")
+
+    assert cli_module._workspace_locked_cwd(nested_cwd) == nested_cwd.resolve()
+    assert not (nested_cwd / "GPD").exists()
+
+
+def test_config_project_scoped_cwd_does_not_cross_nested_vcs_boundary(tmp_path: Path) -> None:
+    ancestor_project = tmp_path / "ancestor-project"
+    nested_checkout = ancestor_project / "GitHub" / "tooling"
+    nested_cwd = nested_checkout / "src"
+    nested_cwd.mkdir(parents=True)
+    (nested_checkout / ".git").mkdir()
+    (ancestor_project / "GPD").mkdir(parents=True)
+    (ancestor_project / "GPD" / "PROJECT.md").write_text("# Ancestor project\n", encoding="utf-8")
+
+    assert cli_module._config_project_scoped_cwd(nested_cwd) == nested_cwd.resolve()
 
 
 def test_resume_plain_output_surfaces_session_handoff_status(tmp_path: Path, monkeypatch) -> None:
@@ -2209,7 +2445,7 @@ def test_resume_plain_output_surfaces_machine_change_as_advisory_status(tmp_path
 def test_resume_plain_output_keeps_machine_change_notice_when_session_handoff_is_primary(
     tmp_path: Path, monkeypatch
 ) -> None:
-    # Compatibility-only guard: this still exercises the legacy session mirror while the public surface ages out.
+    # Exercise the canonical continuation handoff path through the public resume surface.
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
         "gpd.core.context.init_resume",
@@ -2221,7 +2457,7 @@ def test_resume_plain_output_keeps_machine_change_notice_when_session_handoff_is
             "resume_candidates": [
                 {
                     "kind": "continuity_handoff",
-                    "source": "session_resume_file",
+                    "source": "handoff_resume_file",
                     "status": "handoff",
                     "resume_file": "GPD/phases/04/.continue-here.md",
                     "resumable": False,
@@ -2300,7 +2536,7 @@ def test_resume_plain_output_surfaces_missing_handoff_status(tmp_path: Path, mon
             "resume_candidates": [
                 {
                     "kind": "continuity_handoff",
-                    "source": "session_resume_file",
+                    "source": "handoff_resume_file",
                     "status": "missing",
                     "resume_file": "GPD/phases/04/.continue-here.md",
                     "resumable": False,
@@ -2339,7 +2575,7 @@ def test_resume_raw_adds_canonical_recovery_projection_fields(tmp_path: Path, mo
             "project_exists": True,
             "resume_candidates": [
                 {
-                    "source": "session_resume_file",
+                    "source": "handoff_resume_file",
                     "status": "handoff",
                     "resume_file": resume_file,
                     "resumable": False,
@@ -2365,8 +2601,8 @@ def test_resume_raw_adds_canonical_recovery_projection_fields(tmp_path: Path, mo
     payload = json.loads(result.output)
     _assert_no_top_level_resume_aliases(payload)
     assert payload["recovery_advice"]["resume_surface_schema_version"] == 1
-    assert "compat_resume_surface" not in payload["recovery_advice"]
-    for key in RESUME_COMPATIBILITY_ALIAS_FIELDS:
+    assert "resume_surface" not in payload["recovery_advice"]
+    for key in RESUME_BACKEND_ONLY_FIELDS:
         assert key not in payload["recovery_advice"]
     assert payload["active_resume_kind"] == "continuity_handoff"
     assert payload["active_resume_origin"] == "canonical_continuation"
@@ -2376,7 +2612,7 @@ def test_resume_raw_adds_canonical_recovery_projection_fields(tmp_path: Path, mo
     assert payload["recovery_summary"] == (
         "A continuity handoff is available, but no resumable bounded segment is currently active."
     )
-    assert "compat_resume_surface" not in payload
+    assert "resume_surface" not in payload
     assert payload.get("resume_mode_label", "none") == "none"
     assert payload["resume_candidates"][0]["origin"] == "canonical_continuation"
     assert payload["recovery_candidates"][0]["kind"] == "continuity_handoff"
@@ -2436,7 +2672,7 @@ def test_resume_raw_keeps_derived_execution_head_origin_when_only_live_snapshot_
     assert payload["resume_candidates"][0]["origin"] == "derived_execution_head"
     assert payload["recovery_candidates"][0]["origin"] == "derived_execution_head"
     assert payload["primary_recovery_target"]["origin"] == "derived_execution_head"
-    assert "compat_resume_surface" not in payload
+    assert "resume_surface" not in payload
 
 
 def test_resume_raw_keeps_derived_execution_head_origin_when_active_bounded_segment_is_projected(
@@ -2510,7 +2746,7 @@ def test_resume_raw_drops_malformed_resume_candidates_from_public_output(tmp_pat
             "project_exists": True,
             "resume_candidates": [
                 {
-                    "source": "session_resume_file",
+                    "source": "handoff_resume_file",
                     "status": "handoff",
                     "resume_file": resume_file,
                     "resumable": False,
@@ -2540,7 +2776,7 @@ def test_resume_raw_drops_malformed_resume_candidates_from_public_output(tmp_pat
     _assert_no_top_level_resume_aliases(payload)
     assert payload["resume_candidates"] == [
         {
-            "source": "session_resume_file",
+            "source": "handoff_resume_file",
             "status": "handoff",
             "resume_file": resume_file,
             "resumable": False,
@@ -2623,6 +2859,1044 @@ def test_validate_verification_contract_help_surfaces_stale_proof_gate_visibilit
     normalized_output = _normalize_cli_output(result.output)
     assert "Validate VERIFICATION frontmatter and contract-result alignment" in normalized_output
     assert "stale proof-audit blockers when recorded" in normalized_output
+    assert "oracle evidence" in normalized_output
+
+
+def test_validate_comparison_contract_help_surfaces_verdict_ledger_visibility() -> None:
+    result = runner.invoke(app, ["validate", "comparison-contract", "--help"])
+
+    assert result.exit_code == 0
+    normalized_output = _normalize_cli_output(result.output)
+    assert "Validate standalone comparison artifact frontmatter and comparison_verdicts" in normalized_output
+    assert "GPD/comparisons/*-COMPARISON.md" in normalized_output
+
+
+def _compact_plan_with_missing_must_surface_benchmark() -> str:
+    return (
+        "---\n"
+        "phase: 01-baseline\n"
+        "plan: 01\n"
+        "type: execute\n"
+        "wave: 1\n"
+        "depends_on: []\n"
+        "files_modified: []\n"
+        "interactive: false\n"
+        "conventions:\n"
+        "  units: natural\n"
+        "contract:\n"
+        "  schema_version: 1\n"
+        "  scope:\n"
+        "    question: Verify the fresh result against the decisive benchmark.\n"
+        "    in_scope: [stale verification refresh]\n"
+        "  context_intake:\n"
+        "    must_read_refs: [ref-stale-verification-benchmark]\n"
+        "    must_include_prior_outputs: [GPD/phases/00-baseline/00-SUMMARY.md]\n"
+        "    context_gaps: [The decisive benchmark artifact is intentionally absent.]\n"
+        "  claims:\n"
+        "    - id: claim-stale-verification\n"
+        "      statement: Current result agrees with the decisive benchmark.\n"
+        "      deliverables: [deliv-stale-verification-data]\n"
+        "      acceptance_tests: [test-stale-verification-decisive]\n"
+        "      references: [ref-stale-verification-benchmark]\n"
+        "  deliverables:\n"
+        "    - id: deliv-stale-verification-data\n"
+        "      kind: data\n"
+        "      path: artifacts/phase4/result.json\n"
+        "      description: Fresh numerical result to compare against the benchmark.\n"
+        "  references:\n"
+        "    - id: ref-stale-verification-benchmark\n"
+        "      kind: dataset\n"
+        "      locator: artifacts/benchmark/reference.json\n"
+        "      role: benchmark\n"
+        "      why_it_matters: Decisive benchmark for stale verification detection.\n"
+        "      applies_to: [claim-stale-verification]\n"
+        "      must_surface: true\n"
+        "      required_actions: [read, compare]\n"
+        "  acceptance_tests:\n"
+        "    - id: test-stale-verification-decisive\n"
+        "      subject: claim-stale-verification\n"
+        "      kind: benchmark\n"
+        "      procedure: Read and compare the decisive benchmark reference.\n"
+        "      pass_condition: Current result matches the benchmark within tolerance.\n"
+        "      evidence_required: [deliv-stale-verification-data, ref-stale-verification-benchmark]\n"
+        "  forbidden_proxies:\n"
+        "    - id: fp-stale-verification-prose-only\n"
+        "      subject: claim-stale-verification\n"
+        "      proxy: Prose-only pass without reading the decisive benchmark.\n"
+        "      reason: Would miss stale or absent benchmark evidence.\n"
+        "  uncertainty_markers:\n"
+        "    weakest_anchors: [Missing benchmark reference]\n"
+        "    disconfirming_observations: [Benchmark file is absent]\n"
+        "---\n\n"
+        "Plan body.\n"
+    )
+
+
+def _assert_forbidden_verification_fields_absent(value: object) -> None:
+    forbidden_fields = {"runtime", "computational_oracle", "gpd_return"}
+    if isinstance(value, dict):
+        assert not forbidden_fields.intersection(value)
+        for child in value.values():
+            _assert_forbidden_verification_fields_absent(child)
+    elif isinstance(value, list):
+        for child in value:
+            _assert_forbidden_verification_fields_absent(child)
+
+
+def _write_stale_refresh_skeleton_plan(project_root: Path) -> Path:
+    phase_dir = project_root / "GPD" / "phases" / "01-baseline"
+    phase_dir.mkdir(parents=True)
+    baseline_dir = project_root / "GPD" / "phases" / "00-baseline"
+    baseline_dir.mkdir(parents=True)
+    (baseline_dir / "00-SUMMARY.md").write_text("prior baseline", encoding="utf-8")
+    plan_path = phase_dir / "01-PLAN.md"
+    plan_path.write_text(_compact_plan_with_missing_must_surface_benchmark(), encoding="utf-8")
+    return plan_path
+
+
+def _write_verification_body_file(tmp_path: Path, body: str, *, name: str = "verification-body.md") -> Path:
+    body_path = tmp_path / name
+    body_path.write_text(body, encoding="utf-8")
+    return body_path
+
+
+def _raw_payload_from_result(result) -> dict[str, object]:
+    candidates = [result.output]
+    try:
+        stderr = result.stderr
+    except ValueError:
+        stderr = ""
+    if stderr:
+        candidates.append(stderr)
+    for candidate in candidates:
+        text = candidate.strip()
+        if not text:
+            continue
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            continue
+        assert isinstance(payload, dict)
+        return payload
+    raise AssertionError(f"result did not contain a JSON object:\n{result.output}")
+
+
+def _colon_rich_verification_body() -> str:
+    return (
+        "# Verification\n\n"
+        "## Evidence\n\n"
+        "The stale pass is not supported: current hash differs from the old report.\n\n"
+        "A separate runtime return would look like this and must stay out of YAML:\n\n"
+        "```yaml\n"
+        "gpd_return:\n"
+        "  status: completed\n"
+        "  message: Fresh schema-oriented gap report written.\n"
+        "```\n"
+    )
+
+
+def _body_without_oracle_evidence() -> str:
+    return (
+        "# Verification\n\n"
+        "## Evidence\n\n"
+        "The report records a gap: the benchmark reference is still absent.\n"
+        "This prose deliberately has no executed code block, no output block, and no verdict line.\n"
+    )
+
+
+def test_verification_report_skeleton_raw_uses_plan_contract_and_builder_payload(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    phase_dir = tmp_path / "GPD" / "phases" / "01-baseline"
+    phase_dir.mkdir(parents=True)
+    baseline_dir = tmp_path / "GPD" / "phases" / "00-baseline"
+    baseline_dir.mkdir(parents=True)
+    (baseline_dir / "00-SUMMARY.md").write_text("prior baseline", encoding="utf-8")
+    plan_path = phase_dir / "01-PLAN.md"
+    plan_path.write_text(_compact_plan_with_missing_must_surface_benchmark(), encoding="utf-8")
+    calls: dict[str, object] = {}
+
+    def fake_builder(*, contract, plan_path, plan_contract_ref, status, **kwargs):
+        del kwargs
+        reference = contract.references[0]
+        claim = contract.claims[0]
+        test = contract.acceptance_tests[0]
+        calls["contract"] = contract
+        calls["plan_path"] = plan_path
+        calls["plan_contract_ref"] = plan_contract_ref
+        calls["status"] = status
+        return {
+            "frontmatter": {
+                "phase": "01-baseline",
+                "verified": "<fill-me>",
+                "status": status,
+                "score": "<fill-me>",
+                "plan_contract_ref": plan_contract_ref,
+                "contract_results": {
+                    "claims": {
+                        claim.id: {
+                            "status": "blocked",
+                            "summary": f"Blocked until {reference.id} is read and compared.",
+                        }
+                    },
+                    "deliverables": {},
+                    "acceptance_tests": {
+                        test.id: {
+                            "status": "blocked",
+                            "summary": f"Blocked until {reference.id} is available.",
+                        }
+                    },
+                    "references": {
+                        reference.id: {
+                            "status": "missing",
+                            "completed_actions": [],
+                            "missing_actions": list(reference.required_actions),
+                            "summary": f"Required benchmark artifact {reference.locator} is absent.",
+                        }
+                    },
+                    "forbidden_proxies": {},
+                    "uncertainty_markers": {
+                        "weakest_anchors": ["Missing benchmark reference"],
+                        "disconfirming_observations": ["Benchmark file is absent"],
+                    },
+                },
+                "comparison_verdicts": [
+                    {
+                        "subject_id": claim.id,
+                        "subject_kind": "claim",
+                        "subject_role": "decisive",
+                        "reference_id": reference.id,
+                        "comparison_kind": "benchmark",
+                        "metric": "reference_availability",
+                        "threshold": "benchmark artifact exists and is compared",
+                        "verdict": "inconclusive",
+                        "recommended_action": f"Restore {reference.locator} and rerun the comparison.",
+                    }
+                ],
+                "suggested_contract_checks": [
+                    {
+                        "check": "contract.benchmark_reproduction",
+                        "reason": f"{reference.id} is missing required read and compare actions.",
+                        "suggested_subject_kind": "acceptance_test",
+                        "suggested_subject_id": test.id,
+                        "evidence_path": "GPD/phases/01-baseline/01-VERIFICATION.md",
+                    }
+                ],
+            },
+            "frontmatter_yaml": (
+                "---\n"
+                "phase: 01-baseline\n"
+                "status: gaps_found\n"
+                f"plan_contract_ref: {plan_contract_ref}\n"
+                "contract_results:\n"
+                "  claims: {}\n"
+                "---\n"
+            ),
+            "markdown_draft": (
+                "---\n"
+                "phase: 01-baseline\n"
+                "status: gaps_found\n"
+                f"plan_contract_ref: {plan_contract_ref}\n"
+                "---\n\n"
+                "# Verification\n\n"
+                "## Validation Commands\n\n"
+                "```bash\n"
+                "gpd validate verification-contract GPD/phases/01-baseline/01-VERIFICATION.md\n"
+                "```\n"
+            ),
+            "validation_commands": [
+                "gpd validate verification-contract GPD/phases/01-baseline/01-VERIFICATION.md",
+            ],
+            "authoring_rules": ["Use the generated frontmatter as the starting YAML."],
+        }
+
+    monkeypatch.setattr(cli_module, "_load_verification_report_skeleton_builder", lambda: fake_builder)
+
+    result = runner.invoke(
+        app,
+        ["--raw", "verification-report", "skeleton", str(plan_path), "--status", "gaps_found"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    frontmatter = payload["frontmatter"]
+    references = frontmatter["contract_results"]["references"]
+    assert payload["plan_path"] == str(plan_path)
+    assert payload["plan_contract_ref"] == "GPD/phases/01-baseline/01-PLAN.md#/contract"
+    assert payload["target_status"] == "gaps_found"
+    assert frontmatter["plan_contract_ref"] == payload["plan_contract_ref"]
+    assert references["ref-stale-verification-benchmark"] == {
+        "status": "missing",
+        "completed_actions": [],
+        "missing_actions": ["read", "compare"],
+        "summary": "Required benchmark artifact artifacts/benchmark/reference.json is absent.",
+    }
+    assert frontmatter["comparison_verdicts"][0]["reference_id"] == "ref-stale-verification-benchmark"
+    assert frontmatter["suggested_contract_checks"][0]["check"] == "contract.benchmark_reproduction"
+    assert payload["frontmatter_yaml"].startswith("---\nphase: 01-baseline")
+    assert payload["markdown_draft"].startswith("---\nphase: 01-baseline")
+    assert payload["validation_commands"] == [
+        "gpd validate verification-contract GPD/phases/01-baseline/01-VERIFICATION.md",
+    ]
+    assert payload["authoring_rules"] == ["Use the generated frontmatter as the starting YAML."]
+    assert calls["plan_path"] == plan_path
+    assert calls["plan_contract_ref"] == payload["plan_contract_ref"]
+    assert calls["status"] == "gaps_found"
+    assert calls["contract"].references[0].must_surface is True
+    assert not (phase_dir / "01-VERIFICATION.md").exists()
+    _assert_forbidden_verification_fields_absent(payload)
+
+
+def test_verification_report_skeleton_uses_project_local_ref_when_outer_directory_is_named_gpd(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "outer" / "GPD" / "project"
+    phase_dir = project_root / "GPD" / "phases" / "01-baseline"
+    phase_dir.mkdir(parents=True)
+    baseline_dir = project_root / "GPD" / "phases" / "00-baseline"
+    baseline_dir.mkdir(parents=True)
+    (baseline_dir / "00-SUMMARY.md").write_text("prior baseline", encoding="utf-8")
+    plan_path = phase_dir / "01-PLAN.md"
+    plan_path.write_text(_compact_plan_with_missing_must_surface_benchmark(), encoding="utf-8")
+
+    def fake_builder(*, contract, plan_path, plan_contract_ref, status, **kwargs):
+        del contract, plan_path, kwargs
+        return {
+            "frontmatter": {
+                "phase": "01-baseline",
+                "verified": "1970-01-01T00:00:00Z",
+                "status": status,
+                "score": "gap skeleton",
+                "plan_contract_ref": plan_contract_ref,
+            },
+            "target_report_path": str(phase_dir / "01-VERIFICATION.md"),
+        }
+
+    monkeypatch.setattr(cli_module, "_load_verification_report_skeleton_builder", lambda: fake_builder)
+
+    result = runner.invoke(
+        app,
+        ["--raw", "verification-report", "skeleton", str(plan_path)],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["plan_contract_ref"] == "GPD/phases/01-baseline/01-PLAN.md#/contract"
+    assert payload["frontmatter"]["plan_contract_ref"] == "GPD/phases/01-baseline/01-PLAN.md#/contract"
+    assert payload["validation_commands"] == [
+        "gpd frontmatter validate GPD/phases/01-baseline/01-VERIFICATION.md --schema verification",
+        "gpd validate verification-contract GPD/phases/01-baseline/01-VERIFICATION.md",
+    ]
+
+
+def test_verification_report_output_target_resolves_payload_relative_paths_by_scope(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    phase_dir = tmp_path / "GPD" / "phases" / "01-baseline"
+    phase_dir.mkdir(parents=True)
+    plan_path = phase_dir / "01-PLAN.md"
+    launch_dir = tmp_path / "launch"
+    launch_dir.mkdir()
+    monkeypatch.setattr(cli_module, "_get_cwd", lambda: launch_dir)
+
+    builder_target = cli_module._verification_report_output_target(
+        None,
+        payload={"target_report_path": "custom-VERIFICATION.md"},
+        plan_path=plan_path,
+    )
+    explicit_target = cli_module._verification_report_output_target(
+        "explicit-VERIFICATION.md",
+        payload={"target_report_path": "custom-VERIFICATION.md"},
+        plan_path=plan_path,
+    )
+    project_target = cli_module._verification_report_output_target(
+        None,
+        payload={"target_report_path": "GPD/phases/01-baseline/01-VERIFICATION.md"},
+        plan_path=plan_path,
+    )
+
+    assert builder_target == (phase_dir / "custom-VERIFICATION.md").resolve(strict=False)
+    assert explicit_target == (launch_dir / "explicit-VERIFICATION.md").resolve(strict=False)
+    assert project_target == (tmp_path / "GPD" / "phases" / "01-baseline" / "01-VERIFICATION.md").resolve(
+        strict=False
+    )
+
+
+def test_verification_report_skeleton_raw_uses_real_builder(tmp_path: Path) -> None:
+    phase_dir = tmp_path / "GPD" / "phases" / "01-baseline"
+    phase_dir.mkdir(parents=True)
+    baseline_dir = tmp_path / "GPD" / "phases" / "00-baseline"
+    baseline_dir.mkdir(parents=True)
+    (baseline_dir / "00-SUMMARY.md").write_text("prior baseline", encoding="utf-8")
+    plan_path = phase_dir / "01-PLAN.md"
+    plan_path.write_text(_compact_plan_with_missing_must_surface_benchmark(), encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        ["--raw", "verification-report", "skeleton", str(plan_path), "--status", "gaps_found"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    frontmatter = payload["frontmatter"]
+    assert payload["plan_contract_ref"] == "GPD/phases/01-baseline/01-PLAN.md#/contract"
+    assert payload["target_report_path"] == str(phase_dir / "01-VERIFICATION.md")
+    assert frontmatter["status"] == "gaps_found"
+    assert frontmatter["contract_results"]["claims"]["claim-stale-verification"]["status"] == "blocked"
+    assert (
+        frontmatter["contract_results"]["acceptance_tests"]["test-stale-verification-decisive"]["status"] == "blocked"
+    )
+    assert frontmatter["contract_results"]["references"]["ref-stale-verification-benchmark"]["missing_actions"] == [
+        "read",
+        "compare",
+    ]
+    assert all("evidence" not in verdict for verdict in frontmatter["comparison_verdicts"])
+    assert "status: gaps_found" in payload["frontmatter_yaml"]
+    assert "evidence: []" not in payload["frontmatter_yaml"]
+    assert "linked_ids: []" not in payload["frontmatter_yaml"]
+    assert payload["markdown_draft"].startswith("---")
+    assert "gpd validate verification-contract GPD/phases/01-baseline/01-VERIFICATION.md" in payload["markdown_draft"]
+    _assert_forbidden_verification_fields_absent(payload)
+
+
+def test_verification_report_skeleton_default_prints_markdown_draft_not_rich_table(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    phase_dir = tmp_path / "GPD" / "phases" / "01-baseline"
+    phase_dir.mkdir(parents=True)
+    baseline_dir = tmp_path / "GPD" / "phases" / "00-baseline"
+    baseline_dir.mkdir(parents=True)
+    (baseline_dir / "00-SUMMARY.md").write_text("prior baseline", encoding="utf-8")
+    plan_path = phase_dir / "01-PLAN.md"
+    plan_path.write_text(_compact_plan_with_missing_must_surface_benchmark(), encoding="utf-8")
+
+    def fake_builder(*, contract, plan_path, plan_contract_ref, status, **kwargs):
+        del kwargs
+        del contract, plan_path
+        return {
+            "frontmatter": {"phase": "01-baseline", "status": status, "plan_contract_ref": plan_contract_ref},
+            "frontmatter_yaml": (
+                f"---\nphase: 01-baseline\nstatus: gaps_found\nplan_contract_ref: {plan_contract_ref}\n---\n"
+            ),
+            "markdown_draft": (
+                "---\n"
+                "phase: 01-baseline\n"
+                "status: gaps_found\n"
+                f"plan_contract_ref: {plan_contract_ref}\n"
+                "---\n\n"
+                "# Verification\n\n"
+                "## Validation Commands\n\n"
+                "```bash\n"
+                "gpd validate verification-contract GPD/phases/01-baseline/01-VERIFICATION.md\n"
+                "```\n"
+            ),
+            "validation_commands": [
+                "gpd validate verification-contract GPD/phases/01-baseline/01-VERIFICATION.md",
+            ],
+            "authoring_rules": ["Do not hand-convert raw JSON."],
+        }
+
+    monkeypatch.setattr(cli_module, "_load_verification_report_skeleton_builder", lambda: fake_builder)
+
+    result = runner.invoke(app, ["verification-report", "skeleton", str(plan_path)], catch_exceptions=False)
+
+    assert result.exit_code == 0, result.output
+    assert result.output.startswith("---\nphase: 01-baseline")
+    assert "# Verification" in result.output
+    assert "gpd validate verification-contract GPD/phases/01-baseline/01-VERIFICATION.md" in result.output
+    assert "frontmatter" not in result.output
+    assert "target_status" not in result.output
+    assert "┏" not in result.output
+
+
+def test_verification_report_skeleton_fallback_validation_commands_quote_report_refs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    phase_dir = tmp_path / "GPD" / "phases" / "01 with space"
+    phase_dir.mkdir(parents=True)
+    baseline_dir = tmp_path / "GPD" / "phases" / "00-baseline"
+    baseline_dir.mkdir(parents=True)
+    (baseline_dir / "00-SUMMARY.md").write_text("prior baseline", encoding="utf-8")
+    plan_path = phase_dir / "01-PLAN.md"
+    plan_path.write_text(_compact_plan_with_missing_must_surface_benchmark(), encoding="utf-8")
+
+    def fake_builder(*, contract, plan_path, plan_contract_ref, status, **kwargs):
+        del contract, plan_path, kwargs
+        return {
+            "frontmatter": {
+                "phase": "01 with space",
+                "verified": "1970-01-01T00:00:00Z",
+                "status": status,
+                "score": "gap skeleton",
+                "plan_contract_ref": plan_contract_ref,
+            },
+            "target_report_ref": "GPD/phases/01 with space/01-VERIFICATION.md",
+        }
+
+    monkeypatch.setattr(cli_module, "_load_verification_report_skeleton_builder", lambda: fake_builder)
+
+    result = runner.invoke(
+        app,
+        ["--raw", "verification-report", "skeleton", str(plan_path)],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["validation_commands"] == [
+        "gpd frontmatter validate 'GPD/phases/01 with space/01-VERIFICATION.md' --schema verification",
+        "gpd validate verification-contract 'GPD/phases/01 with space/01-VERIFICATION.md'",
+    ]
+
+
+def test_verification_report_skeleton_rejects_non_plan_frontmatter_before_builder(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    phase_dir = tmp_path / "GPD" / "phases" / "01-baseline"
+    phase_dir.mkdir(parents=True)
+    baseline_dir = tmp_path / "GPD" / "phases" / "00-baseline"
+    baseline_dir.mkdir(parents=True)
+    (baseline_dir / "00-SUMMARY.md").write_text("prior baseline", encoding="utf-8")
+    summary_path = phase_dir / "01-SUMMARY.md"
+    summary_path.write_text(
+        _compact_plan_with_missing_must_surface_benchmark().replace(
+            "type: execute\n",
+            "completed: true\ndepth: full\nprovides:\n  claims: []\n",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    def unexpected_builder(**kwargs):
+        raise AssertionError(f"verification skeleton builder should not run for invalid PLAN input: {kwargs}")
+
+    monkeypatch.setattr(cli_module, "_load_verification_report_skeleton_builder", lambda: unexpected_builder)
+
+    result = runner.invoke(
+        app,
+        ["--raw", "verification-report", "skeleton", str(summary_path)],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 1
+    payload = _raw_payload_from_result(result)
+    assert "requires a valid PLAN.md" in str(payload["error"])
+    assert "type" in str(payload["error"])
+
+
+def test_verification_report_skeleton_frontmatter_format_prints_yaml_only(tmp_path: Path) -> None:
+    phase_dir = tmp_path / "GPD" / "phases" / "01-baseline"
+    phase_dir.mkdir(parents=True)
+    baseline_dir = tmp_path / "GPD" / "phases" / "00-baseline"
+    baseline_dir.mkdir(parents=True)
+    (baseline_dir / "00-SUMMARY.md").write_text("prior baseline", encoding="utf-8")
+    plan_path = phase_dir / "01-PLAN.md"
+    plan_path.write_text(_compact_plan_with_missing_must_surface_benchmark(), encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        ["verification-report", "skeleton", str(plan_path), "--format", "frontmatter"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    assert result.output.startswith("---\n")
+    assert "status: gaps_found" in result.output
+    assert "contract_results:" in result.output
+    assert "# Verification" not in result.output
+    assert "frontmatter:" not in result.output
+    assert "target_status:" not in result.output
+    assert "target_report_path:" not in result.output
+    assert "evidence: []" not in result.output
+    assert "linked_ids: []" not in result.output
+
+
+def test_verification_report_skeleton_format_json_outputs_json_without_raw(tmp_path: Path) -> None:
+    phase_dir = tmp_path / "GPD" / "phases" / "01-baseline"
+    phase_dir.mkdir(parents=True)
+    baseline_dir = tmp_path / "GPD" / "phases" / "00-baseline"
+    baseline_dir.mkdir(parents=True)
+    (baseline_dir / "00-SUMMARY.md").write_text("prior baseline", encoding="utf-8")
+    plan_path = phase_dir / "01-PLAN.md"
+    plan_path.write_text(_compact_plan_with_missing_must_surface_benchmark(), encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        ["verification-report", "skeleton", str(plan_path), "--format", "json"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["frontmatter"]["status"] == "gaps_found"
+    assert payload["target_status"] == "gaps_found"
+    assert "frontmatter_yaml" in payload
+    assert "markdown_draft" in payload
+    assert "validation_commands" in payload
+    assert "authoring_rules" in payload
+
+
+def test_verification_report_skeleton_write_refuses_existing_without_force(tmp_path: Path) -> None:
+    plan_path = _write_stale_refresh_skeleton_plan(tmp_path)
+    target_path = plan_path.with_name("01-VERIFICATION.md")
+    original = "existing verification report\n"
+    target_path.write_text(original, encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        [
+            "verification-report",
+            "skeleton",
+            str(plan_path),
+            "--write",
+            "--output",
+            str(target_path),
+            "--validate",
+            "frontmatter",
+        ],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 1, result.output
+    assert "exists" in result.output.lower()
+    assert "--force" in result.output
+    assert target_path.read_text(encoding="utf-8") == original
+
+
+def test_verification_report_skeleton_write_creates_target_with_generated_yaml(tmp_path: Path) -> None:
+    plan_path = _write_stale_refresh_skeleton_plan(tmp_path)
+    target_path = plan_path.with_name("01-VERIFICATION.md")
+    colon_rich_score = "Freshness check failed: stale pass unsupported because benchmark is missing"
+
+    result = runner.invoke(
+        app,
+        [
+            "--raw",
+            "verification-report",
+            "skeleton",
+            str(plan_path),
+            "--write",
+            "--output",
+            str(target_path),
+            "--verified",
+            "2026-05-04T03:21:16Z",
+            "--score",
+            colon_rich_score,
+            "--validate",
+            "frontmatter",
+        ],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = _raw_payload_from_result(result)
+    assert payload["written"] is True
+    assert payload["target_report_path"] == str(target_path)
+    assert target_path.exists()
+    content = target_path.read_text(encoding="utf-8")
+    frontmatter, body = extract_frontmatter(content)
+    assert frontmatter["status"] == "gaps_found"
+    assert frontmatter["verified"] == "2026-05-04T03:21:16Z"
+    assert frontmatter["score"] == colon_rich_score
+    assert frontmatter["plan_contract_ref"] == "GPD/phases/01-baseline/01-PLAN.md#/contract"
+    assert "gpd_return" not in frontmatter
+    assert "# Verification" in body
+    validation = validate_frontmatter(content, "verification", source_path=target_path)
+    assert validation.valid, validation.errors
+
+
+def test_verification_report_skeleton_write_body_file_keeps_colon_text_out_of_yaml(tmp_path: Path) -> None:
+    plan_path = _write_stale_refresh_skeleton_plan(tmp_path)
+    target_path = plan_path.with_name("01-VERIFICATION.md")
+    body_path = _write_verification_body_file(tmp_path, _colon_rich_verification_body())
+
+    result = runner.invoke(
+        app,
+        [
+            "--raw",
+            "verification-report",
+            "skeleton",
+            str(plan_path),
+            "--write",
+            "--output",
+            str(target_path),
+            "--body-file",
+            str(body_path),
+            "--validate",
+            "frontmatter",
+        ],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = _raw_payload_from_result(result)
+    assert payload["written"] is True
+    content = target_path.read_text(encoding="utf-8")
+    frontmatter, body = extract_frontmatter(content)
+    assert "gpd_return" not in frontmatter
+    assert "The stale pass is not supported: current hash differs" in body
+    assert "gpd_return:\n  status: completed" in body
+    frontmatter_yaml = payload.get("frontmatter_yaml", "")
+    assert "The stale pass is not supported: current hash differs" not in str(frontmatter_yaml)
+    assert "gpd_return:" not in str(frontmatter_yaml)
+
+
+def test_verification_report_skeleton_write_rejects_body_file_frontmatter(tmp_path: Path) -> None:
+    plan_path = _write_stale_refresh_skeleton_plan(tmp_path)
+    target_path = plan_path.with_name("01-VERIFICATION.md")
+    body_path = _write_verification_body_file(
+        tmp_path,
+        "---\nstatus: passed\n---\n\n# Verification Body\n",
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "--raw",
+            "verification-report",
+            "skeleton",
+            str(plan_path),
+            "--write",
+            "--output",
+            str(target_path),
+            "--body-file",
+            str(body_path),
+            "--validate",
+            "frontmatter",
+        ],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 1
+    payload = _raw_payload_from_result(result)
+    assert "body-only Markdown" in str(payload["error"])
+    assert not target_path.exists()
+
+
+def test_verification_report_skeleton_write_contract_validation_blocks_replace_on_failure(tmp_path: Path) -> None:
+    plan_path = _write_stale_refresh_skeleton_plan(tmp_path)
+    target_path = plan_path.with_name("01-VERIFICATION.md")
+    original = "existing canonical report\n"
+    target_path.write_text(original, encoding="utf-8")
+    body_path = _write_verification_body_file(tmp_path, _body_without_oracle_evidence())
+
+    result = runner.invoke(
+        app,
+        [
+            "--raw",
+            "verification-report",
+            "skeleton",
+            str(plan_path),
+            "--write",
+            "--force",
+            "--output",
+            str(target_path),
+            "--body-file",
+            str(body_path),
+            "--validate",
+            "contract",
+        ],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 1, result.output
+    payload = _raw_payload_from_result(result)
+    assert payload["written"] is False
+    validation = payload["validation"]
+    assert isinstance(validation, dict)
+    assert validation["mode"] == "contract"
+    assert validation["valid"] is False
+    assert any("oracle" in error.lower() or "executed code block" in error.lower() for error in validation["errors"])
+    recovery = payload["recovery"]
+    assert isinstance(recovery, dict)
+    assert recovery["safe_next_step"] == "Edit only the Markdown body file, then rerun the writer command."
+    body_file_contract = recovery["body_file_contract"]
+    assert isinstance(body_file_contract, list)
+    assert any("body-only Markdown" in rule for rule in body_file_contract)
+    assert any("fenced executed" in rule and "fenced `output`" in rule for rule in body_file_contract)
+    assert any("PASS`/`FAIL`/`INCONCLUSIVE" in rule for rule in body_file_contract)
+    rerun_command = recovery["rerun_command"]
+    assert isinstance(rerun_command, str)
+    assert "gpd verification-report skeleton" in rerun_command
+    assert "--write" in rerun_command
+    assert "--force" in rerun_command
+    assert "--validate contract" in rerun_command
+    assert cli_module._format_display_path(body_path) in rerun_command
+    assert target_path.read_text(encoding="utf-8") == original
+
+
+def test_verification_report_skeleton_write_contract_validation_passes_with_oracle_body(tmp_path: Path) -> None:
+    plan_path = _write_stale_refresh_skeleton_plan(tmp_path)
+    target_path = plan_path.with_name("01-VERIFICATION.md")
+    body_path = _write_verification_body_file(tmp_path, _oracle_evidence_body())
+
+    result = runner.invoke(
+        app,
+        [
+            "--raw",
+            "verification-report",
+            "skeleton",
+            str(plan_path),
+            "--write",
+            "--output",
+            str(target_path),
+            "--body-file",
+            str(body_path),
+            "--validate",
+            "contract",
+        ],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = _raw_payload_from_result(result)
+    assert payload["written"] is True
+    validation = payload["validation"]
+    assert isinstance(validation, dict)
+    assert validation["mode"] == "contract"
+    assert validation["valid"] is True
+    assert validation["errors"] == []
+    assert validation["oracle_evidence_count"] >= 1
+    assert "recovery" not in payload
+    content = target_path.read_text(encoding="utf-8")
+    _, body = extract_frontmatter(content)
+    assert "FAIL: relative error exceeds the benchmark tolerance." in body
+
+
+def test_verification_report_skeleton_raw_write_reports_validation_and_warnings(tmp_path: Path) -> None:
+    plan_path = _write_stale_refresh_skeleton_plan(tmp_path)
+    target_path = plan_path.with_name("01-VERIFICATION.md")
+
+    result = runner.invoke(
+        app,
+        [
+            "--raw",
+            "verification-report",
+            "skeleton",
+            str(plan_path),
+            "--write",
+            "--output",
+            str(target_path),
+            "--validate",
+            "frontmatter",
+        ],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = _raw_payload_from_result(result)
+    assert payload["written"] is True
+    assert payload["target_report_path"] == str(target_path)
+    validation = payload["validation"]
+    assert isinstance(validation, dict)
+    assert validation["mode"] == "frontmatter"
+    assert validation["valid"] is True
+    assert validation["errors"] == []
+    assert isinstance(payload["warnings"], list) and payload["warnings"]
+    assert any("frontmatter" in warning.lower() for warning in payload["warnings"])
+    assert any("gpd_return" in warning for warning in payload["warnings"])
+
+
+def _write_benchmark_contract_phase(project_root: Path) -> Path:
+    phase_dir = project_root / "GPD" / "phases" / "01-benchmark"
+    phase_dir.mkdir(parents=True)
+    (phase_dir / "01-01-PLAN.md").write_text(
+        (FIXTURES_DIR / "plan_with_contract.md").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    return phase_dir
+
+
+def _oracle_evidence_body() -> str:
+    return (
+        "# Verification\n\n"
+        "```python\n"
+        "print({'relative_error': 0.04, 'threshold': 0.01})\n"
+        "```\n\n"
+        "**Output:**\n"
+        "```output\n"
+        "{'relative_error': 0.04, 'threshold': 0.01}\n"
+        "```\n\n"
+        "FAIL: relative error exceeds the benchmark tolerance.\n"
+    )
+
+
+def _invalid_verification_report_with_live_row_mistakes() -> str:
+    return (
+        "---\n"
+        "phase: 01-benchmark\n"
+        "verified: 2026-05-03T12:00:00Z\n"
+        "status: failed\n"
+        "score: 0/3 contract targets verified\n"
+        "runtime: codex\n"
+        "computational_oracle:\n"
+        "  status: passed\n"
+        "plan_contract_ref: GPD/phases/01-benchmark/01-01-PLAN.md#/contract\n"
+        "contract_results:\n"
+        "  claims:\n"
+        "    - id: claim-benchmark\n"
+        "      status: failed\n"
+        "      summary: Benchmark comparison currently misses tolerance.\n"
+        "  deliverables:\n"
+        "    - id: deliv-figure\n"
+        "      status: passed\n"
+        "      summary: Figure exists with the comparison overlay.\n"
+        "  acceptance_tests:\n"
+        "    - id: test-benchmark\n"
+        "      status: failed\n"
+        "      summary: Benchmark comparison exceeds tolerance.\n"
+        "  references:\n"
+        "    - id: ref-benchmark\n"
+        "      status: completed\n"
+        "      completed_actions: [read, compare, cite]\n"
+        "      missing_actions: []\n"
+        "  forbidden_proxies:\n"
+        "    - id: fp-benchmark\n"
+        "      status: rejected\n"
+        "  uncertainty_markers:\n"
+        "    weakest_anchors: [Reference tolerance interpretation]\n"
+        "    disconfirming_observations: [Benchmark agreement disappears once normalization is fixed]\n"
+        "comparison_verdicts:\n"
+        "  - subject_id: claim-benchmark\n"
+        "    subject_kind: claim\n"
+        "    subject_role: decisive\n"
+        "    reference_id: ref-benchmark\n"
+        "    comparison_kind: benchmark\n"
+        "    metric: relative_error\n"
+        '    threshold: "<= 0.01"\n'
+        "    verdict: fail\n"
+        "    reason: The live report used a non-canonical explanation key.\n"
+        "---\n\n"
+        f"{_oracle_evidence_body()}"
+    )
+
+
+def _verification_report_with_explicit_missing_reference_gap() -> str:
+    return (
+        "---\n"
+        "phase: 01-benchmark\n"
+        "verified: 2026-05-03T12:00:00Z\n"
+        "status: gaps_found\n"
+        "score: 0/3 contract targets verified\n"
+        "plan_contract_ref: GPD/phases/01-benchmark/01-01-PLAN.md#/contract\n"
+        "contract_results:\n"
+        "  claims:\n"
+        "    claim-benchmark:\n"
+        "      status: blocked\n"
+        "      summary: Benchmark cannot be verified until ref-benchmark is read and compared.\n"
+        "      linked_ids: [deliv-figure, test-benchmark, ref-benchmark]\n"
+        "  deliverables:\n"
+        "    deliv-figure:\n"
+        "      status: blocked\n"
+        "      path: figures/benchmark.png\n"
+        "      summary: Figure cannot be accepted without the benchmark comparison.\n"
+        "      linked_ids: [claim-benchmark, test-benchmark, ref-benchmark]\n"
+        "  acceptance_tests:\n"
+        "    test-benchmark:\n"
+        "      status: blocked\n"
+        "      summary: Benchmark comparison is blocked because the decisive reference is unavailable.\n"
+        "      linked_ids: [claim-benchmark, deliv-figure, ref-benchmark]\n"
+        "  references:\n"
+        "    ref-benchmark:\n"
+        "      status: missing\n"
+        "      completed_actions: []\n"
+        "      missing_actions: [read, compare, cite]\n"
+        "      summary: Benchmark anchor is unavailable, so required actions remain missing.\n"
+        "  forbidden_proxies:\n"
+        "    fp-benchmark:\n"
+        "      status: rejected\n"
+        "      notes: Qualitative trend agreement was not accepted without the numerical benchmark.\n"
+        "  uncertainty_markers:\n"
+        "    weakest_anchors: [Missing benchmark reference]\n"
+        "    unvalidated_assumptions: [No independent tolerance interpretation]\n"
+        "    competing_explanations: [Normalization could explain the discrepancy]\n"
+        "    disconfirming_observations: [Benchmark agreement is not established]\n"
+        "comparison_verdicts:\n"
+        "  - subject_id: claim-benchmark\n"
+        "    subject_kind: claim\n"
+        "    subject_role: decisive\n"
+        "    reference_id: ref-benchmark\n"
+        "    comparison_kind: benchmark\n"
+        "    metric: relative_error\n"
+        '    threshold: "<= 0.01"\n'
+        "    verdict: inconclusive\n"
+        "    recommended_action: Read and compare the benchmark reference before accepting the result.\n"
+        "    notes: The decisive reference is not available in this verification pass.\n"
+        "suggested_contract_checks:\n"
+        "  - check: Read and compare the benchmark reference.\n"
+        "    reason: ref-benchmark is missing read, compare, and cite actions.\n"
+        "    suggested_subject_kind: reference\n"
+        "    suggested_subject_id: ref-benchmark\n"
+        "    evidence_path: GPD/phases/01-benchmark/01-VERIFICATION.md\n"
+        "---\n\n"
+        f"{_oracle_evidence_body()}"
+    )
+
+
+def test_validate_verification_contract_accepts_explicit_missing_reference_gap(tmp_path: Path) -> None:
+    phase_dir = _write_benchmark_contract_phase(tmp_path)
+    verification_path = phase_dir / "01-VERIFICATION.md"
+    verification_path.write_text(_verification_report_with_explicit_missing_reference_gap(), encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        ["--raw", "validate", "verification-contract", str(verification_path)],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["valid"] is True
+    assert payload["errors"] == []
+
+
+def test_validate_verification_contract_rejects_live_row_mistakes_from_product_validators(
+    tmp_path: Path,
+) -> None:
+    from gpd.core.correctness_validators import validate_verification_oracle_evidence
+    from gpd.core.frontmatter import validate_frontmatter
+
+    phase_dir = _write_benchmark_contract_phase(tmp_path)
+    verification_path = phase_dir / "01-VERIFICATION.md"
+    content = _invalid_verification_report_with_live_row_mistakes()
+    verification_path.write_text(content, encoding="utf-8")
+
+    schema_result = validate_frontmatter(content, "verification", source_path=verification_path)
+    oracle_result = validate_verification_oracle_evidence(content, source_path=verification_path)
+    expected_errors = [*schema_result.errors, *oracle_result.errors]
+
+    result = runner.invoke(
+        app,
+        ["--raw", "validate", "verification-contract", str(verification_path)],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 1, result.output
+    payload = json.loads(result.output)
+    assert payload["valid"] is False
+    assert payload["missing"] == schema_result.missing
+    assert payload["present"] == schema_result.present
+    assert payload["schema_name"] == schema_result.schema_name
+    assert payload["oracle_evidence_count"] == oracle_result.evidence_count
+    assert sorted(payload["errors"]) == sorted(expected_errors)
+    assert oracle_result.valid is True
+    assert "status: must be one of passed, gaps_found, expert_needed, human_needed" in expected_errors
+    assert any(error.startswith("runtime:") for error in expected_errors)
+    assert any(error.startswith("computational_oracle:") for error in expected_errors)
+    assert any("contract_results:" in error and "claims" in error for error in expected_errors)
+    assert any(
+        "comparison_verdicts:" in error and "reason" in error and "Extra inputs are not permitted" in error
+        for error in expected_errors
+    )
 
 
 def test_validate_command_context_help_surfaces_registry_argument_name() -> None:
@@ -2632,6 +3906,20 @@ def test_validate_command_context_help_surfaces_registry_argument_name() -> None
     assert "Command registry key or gpd:name" in result.output
 
 
+def test_validate_command_context_unknown_command_surfaces_user_facing_error(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        ["--raw", "--cwd", str(tmp_path), "validate", "command-context", "not-a-real-command"],
+    )
+
+    assert result.exit_code == 1
+    assert isinstance(result.exception, cli_module.GPDError)
+    assert "Unknown GPD command: gpd:not-a-real-command" in str(result.exception)
+    assert "Internal error" not in str(result.exception)
+    assert "Internal error" not in result.output
+    assert "Internal error" not in result.stderr
+
+
 @patch("gpd.core.contract_validation.validate_project_contract")
 def test_validate_project_contract_uses_ancestor_project_root_from_nested_cwd(
     mock_validate_contract,
@@ -2639,7 +3927,7 @@ def test_validate_project_contract_uses_ancestor_project_root_from_nested_cwd(
 ) -> None:
     project_root = tmp_path / "project"
     nested_cwd = project_root / "workspace" / "nested"
-    (project_root / "GPD").mkdir(parents=True, exist_ok=True)
+    _mark_verified_project_root(project_root)
     nested_cwd.mkdir(parents=True, exist_ok=True)
     contract_path = nested_cwd / "contract.json"
     contract_path.write_text((FIXTURES_DIR / "project_contract.json").read_text(encoding="utf-8"), encoding="utf-8")
@@ -2762,6 +4050,24 @@ def _plan_with_tool_requirements(tool_requirements_block: str) -> str:
     return fixture.replace("interactive: false\n", f"interactive: false\n{tool_requirements_block}", 1)
 
 
+def _plan_with_prose_contract_anchors_only() -> str:
+    return (
+        "---\n"
+        "phase: 01\n"
+        "plan_id: 01-01\n"
+        "title: Execute the deterministic fixture baseline\n"
+        "status: planned_ready\n"
+        "command_authority: $gpd-plan-phase 01\n"
+        "execution_authority: $gpd-execute-phase 01\n"
+        "---\n"
+        "\n"
+        "## Contract Anchors\n"
+        "\n"
+        "- Observable: `obs-benchmark`\n"
+        "- Claim under test: `claim-benchmark`\n"
+    )
+
+
 def _plan_with_knowledge_controls(
     *,
     knowledge_gate: str | None = None,
@@ -2796,6 +4102,45 @@ def test_validate_plan_preflight_passes_when_no_specialized_tools_are_declared(t
     assert payload["passed"] is True
     assert payload["requirements"] == []
     assert payload["guidance"] == "No machine-checkable specialized tool requirements declared."
+
+
+def test_validate_plan_preflight_rejects_invalid_frontmatter_before_tool_checks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan_path = tmp_path / "01-01-PLAN.md"
+    plan_content = _plan_with_prose_contract_anchors_only().replace(
+        "---\n\n## Contract Anchors",
+        (
+            "tool_requirements:\n"
+            "  - id: wolfram-cas\n"
+            "    tool: wolfram\n"
+            "    purpose: Should not run when frontmatter is invalid.\n"
+            "    required: true\n"
+            "---\n\n## Contract Anchors"
+        ),
+        1,
+    )
+    plan_path.write_text(plan_content, encoding="utf-8")
+
+    def fail_probe(*args, **kwargs):
+        raise AssertionError("tool probes must not run after invalid frontmatter")
+
+    monkeypatch.setattr("gpd.core.tool_preflight._probe_tool", fail_probe)
+
+    result = runner.invoke(
+        app,
+        ["--raw", "validate", "plan-preflight", str(plan_path)],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 1, result.output
+    payload = json.loads(result.output)
+    assert payload["validation_passed"] is False
+    assert payload["passed"] is False
+    assert payload["requirements"] == []
+    assert "Missing required frontmatter field: plan" in payload["errors"]
+    assert "Missing required frontmatter field: contract" in payload["errors"]
 
 
 def test_validate_plan_preflight_blocks_on_missing_required_wolfram(
@@ -2908,17 +4253,19 @@ def test_resolve_model_help_lists_supported_runtime_ids():
 def test_state_help():
     result = runner.invoke(app, ["state", "--help"])
     assert result.exit_code == 0
-    assert "load" in result.output
-    assert "get" in result.output
-    assert "update" in result.output
+    output = _normalize_cli_output(result.output)
+    assert "load" in output
+    assert "get" in output
+    assert "update" in output
 
 
 def test_phase_help():
     result = runner.invoke(app, ["phase", "--help"])
     assert result.exit_code == 0
-    assert "list" in result.output
-    assert "add" in result.output
-    assert "complete" in result.output
+    output = _normalize_cli_output(result.output)
+    assert "list" in output
+    assert "add" in output
+    assert "complete" in output
 
 
 def test_session_command_is_not_exposed():
@@ -2936,7 +4283,7 @@ def test_view_command_is_not_exposed():
 # ─── state subcommands ──────────────────────────────────────────────────────
 
 
-@patch("gpd.core.state.state_load")
+@patch("gpd.core.state.state_load_readonly")
 def test_state_load(mock_load):
     mock_result = MagicMock()
     mock_result.model_dump.return_value = {"position": {"current_phase": "42"}}
@@ -2946,11 +4293,11 @@ def test_state_load(mock_load):
     mock_load.assert_called_once()
 
 
-@patch("gpd.core.state.state_load")
+@patch("gpd.core.state.state_load_readonly")
 def test_state_load_uses_ancestor_project_root_from_nested_cwd(mock_load, tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     nested_cwd = project_root / "workspace" / "nested"
-    (project_root / "GPD").mkdir(parents=True, exist_ok=True)
+    _mark_verified_project_root(project_root)
     nested_cwd.mkdir(parents=True, exist_ok=True)
 
     mock_result = MagicMock()
@@ -2963,7 +4310,7 @@ def test_state_load_uses_ancestor_project_root_from_nested_cwd(mock_load, tmp_pa
     mock_load.assert_called_once_with(project_root.resolve())
 
 
-@patch("gpd.core.state.state_get")
+@patch("gpd.core.state.state_get_readonly")
 def test_state_get_section(mock_get):
     mock_result = MagicMock()
     mock_result.model_dump.return_value = {"section": "position", "data": {}}
@@ -2973,7 +4320,68 @@ def test_state_get_section(mock_get):
     mock_get.assert_called_once()
 
 
-@patch("gpd.core.state.state_get")
+def test_state_get_include_returns_structured_sections_from_canonical_state(tmp_path: Path) -> None:
+    state = default_state_dict()
+    state["position"]["current_phase"] = "03"
+    state["position"]["current_phase_name"] = "verification"
+    state["continuation"] = {
+        "handoff": {
+            "recorded_at": "2026-04-25T12:00:00+00:00",
+            "stopped_at": "Phase 03 Plan 2",
+            "resume_file": "NEXT.md",
+            "last_result_id": "R-03-02",
+        },
+        "machine": {
+            "hostname": "workstation",
+            "platform": "Darwin arm64",
+            "recorded_at": "2026-04-25T12:00:00+00:00",
+        },
+    }
+    save_state_json(tmp_path, state)
+
+    result = runner.invoke(
+        app,
+        ["--raw", "--cwd", str(tmp_path), "state", "get", "--include", "position,session,continuation,handoff"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["position"]["current_phase"] == "03"
+    assert payload["session"]["hostname"] == "workstation"
+    assert payload["session"]["resume_file"] == "NEXT.md"
+    assert payload["continuation"]["handoff"]["last_result_id"] == "R-03-02"
+    assert payload["handoff"]["stopped_at"] == "Phase 03 Plan 2"
+    assert "session" not in payload["continuation"]
+
+
+def test_state_get_include_rejects_unknown_sections(tmp_path: Path) -> None:
+    save_state_json(tmp_path, default_state_dict())
+
+    result = runner.invoke(
+        app,
+        ["--raw", "--cwd", str(tmp_path), "state", "get", "--include", "position,unknown"],
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stderr)
+    assert "Unknown --include value for state get: unknown" in payload["error"]
+
+
+def test_state_get_include_rejects_positional_section(tmp_path: Path) -> None:
+    save_state_json(tmp_path, default_state_dict())
+
+    result = runner.invoke(
+        app,
+        ["--raw", "--cwd", str(tmp_path), "state", "get", "position", "--include", "continuation"],
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stderr)
+    assert "state get accepts either a positional section or --include, not both" in payload["error"]
+
+
+@patch("gpd.core.state.state_get_readonly")
 def test_state_active_hypothesis(mock_get):
     mock_result = MagicMock()
     mock_result.value = "**Branch:** hypothesis/alt-method\n**Description:** investigate a fallback"
@@ -2992,7 +4400,7 @@ def test_state_active_hypothesis(mock_get):
     }
 
 
-@patch("gpd.core.state.state_get")
+@patch("gpd.core.state.state_get_readonly")
 def test_state_active_hypothesis_missing_section(mock_get):
     mock_result = MagicMock()
     mock_result.value = None
@@ -3049,7 +4457,7 @@ def test_state_set_project_contract_uses_ancestor_project_root_from_nested_cwd(
 ) -> None:
     project_root = tmp_path / "project"
     nested_cwd = project_root / "workspace" / "nested"
-    (project_root / "GPD").mkdir(parents=True, exist_ok=True)
+    _mark_verified_project_root(project_root)
     nested_cwd.mkdir(parents=True, exist_ok=True)
     contract_path = nested_cwd / "contract.json"
     contract_path.write_text((FIXTURES_DIR / "project_contract.json").read_text(encoding="utf-8"), encoding="utf-8")
@@ -3147,6 +4555,7 @@ def test_state_validate_pass(mock_validate):
     mock_validate.return_value = mock_result
     result = runner.invoke(app, ["state", "validate"])
     assert result.exit_code == 0
+    mock_validate.assert_called_once_with(ANY, recover_intent=False, acquire_lock=False)
 
 
 @patch("gpd.core.state.state_validate")
@@ -3157,9 +4566,132 @@ def test_state_validate_fail(mock_validate):
     mock_validate.return_value = mock_result
     result = runner.invoke(app, ["state", "validate"])
     assert result.exit_code == 1
+    mock_validate.assert_called_once_with(ANY, recover_intent=False, acquire_lock=False)
+
+
+@patch("gpd.core.state.state_validate")
+def test_state_validate_uses_read_only_ancestor_root_without_migration(
+    mock_validate: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "project"
+    nested_cwd = project_root / "notes" / "scratch"
+    (project_root / "GPD").mkdir(parents=True)
+    nested_cwd.mkdir(parents=True)
+    (project_root / "GPD" / "STATE.md").write_text("# State\n", encoding="utf-8")
+    (project_root / "GPD" / "ROADMAP.md").write_text("# Canonical roadmap\n", encoding="utf-8")
+    for filename in ("PROJECT.md", "ROADMAP.md"):
+        (project_root / filename).write_text(f"# Root {filename}\n", encoding="utf-8")
+    monkeypatch.setattr(
+        cli_module,
+        "_migrate_planning_files",
+        lambda _cwd: (_ for _ in ()).throw(AssertionError("state validate must not migrate planning files")),
+    )
+    mock_result = MagicMock()
+    mock_result.valid = True
+    mock_result.model_dump.return_value = {"valid": True, "issues": []}
+    mock_validate.return_value = mock_result
+
+    result = runner.invoke(app, ["--cwd", str(nested_cwd), "--raw", "state", "validate"], catch_exceptions=False)
+
+    assert result.exit_code == 0, result.output
+    mock_validate.assert_called_once_with(project_root.resolve(), recover_intent=False, acquire_lock=False)
+    assert not (project_root / "GPD" / "PROJECT.md").exists()
+    assert (project_root / "GPD" / "ROADMAP.md").read_text(encoding="utf-8") == "# Canonical roadmap\n"
+
+
+def test_read_only_marker_backed_project_scoped_cwd_ignores_bare_ancestor_gpd_dir(tmp_path: Path) -> None:
+    ancestor = tmp_path / "ancestor"
+    nested_cwd = ancestor / "child" / "work"
+    (ancestor / "GPD").mkdir(parents=True)
+    nested_cwd.mkdir(parents=True)
+
+    assert cli_module._read_only_marker_backed_project_scoped_cwd(nested_cwd) == nested_cwd.resolve()
+
+
+def test_json_input_root_helpers_ignore_bare_ancestor_gpd_dir(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ancestor = tmp_path / "ancestor"
+    nested_cwd = ancestor / "child" / "work"
+    (ancestor / "GPD").mkdir(parents=True)
+    nested_cwd.mkdir(parents=True)
+    artifact_path = nested_cwd / "referee-decision.json"
+    artifact_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(cli_module, "_cwd", nested_cwd)
+
+    assert cli_module._project_root_for_json_input(artifact_path.name) == nested_cwd.resolve()
+    assert cli_module._enclosing_project_root_for_json_input(artifact_path.name) is None
+
+
+def test_json_input_root_helpers_use_marker_backed_project_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "project"
+    nested_cwd = project_root / "GPD" / "review"
+    _mark_verified_project_root(project_root)
+    nested_cwd.mkdir(parents=True, exist_ok=True)
+    artifact_path = nested_cwd / "referee-decision.json"
+    artifact_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(cli_module, "_cwd", nested_cwd)
+
+    assert cli_module._project_root_for_json_input(artifact_path.name) == project_root.resolve()
+    assert cli_module._enclosing_project_root_for_json_input(artifact_path.name) == project_root.resolve()
+
+
+def test_state_validate_projectless_read_only_does_not_create_gpd_dir(tmp_path: Path) -> None:
+    result = runner.invoke(app, ["--cwd", str(tmp_path), "--raw", "state", "validate"], catch_exceptions=False)
+
+    assert result.exit_code == 1, result.output
+    assert not (tmp_path / "GPD").exists()
+
+
+def test_state_validate_does_not_recover_pending_state_intent(tmp_path: Path) -> None:
+    stale_state = default_state_dict()
+    stale_state["position"]["current_phase"] = "01"
+    save_state_json(tmp_path, stale_state)
+    save_state_markdown(tmp_path, generate_state_markdown(stale_state))
+
+    layout = ProjectLayout(tmp_path)
+    (layout.phases_dir / "01-test").mkdir(parents=True)
+    recovered_state = default_state_dict()
+    recovered_state["position"]["current_phase"] = "05"
+    json_tmp = layout.gpd / ".state-json-tmp"
+    md_tmp = layout.gpd / ".state-md-tmp"
+    json_tmp.write_text(json.dumps(recovered_state, indent=2) + "\n", encoding="utf-8")
+    md_tmp.write_text(generate_state_markdown(recovered_state), encoding="utf-8")
+    layout.state_intent.write_text(f"{json_tmp}\n{md_tmp}\n", encoding="utf-8")
+
+    before_state = layout.state_json.read_text(encoding="utf-8")
+
+    result = runner.invoke(app, ["--cwd", str(tmp_path), "--raw", "state", "validate"], catch_exceptions=False)
+
+    assert result.exit_code == 0, result.output
+    assert layout.state_intent.exists()
+    assert json_tmp.exists()
+    assert md_tmp.exists()
+    assert layout.state_json.read_text(encoding="utf-8") == before_state
+    assert json.loads(layout.state_json.read_text(encoding="utf-8"))["position"]["current_phase"] == "01"
 
 
 # ─── phase subcommands ──────────────────────────────────────────────────────
+
+
+def _nested_project_root(tmp_path: Path) -> tuple[Path, Path]:
+    project_root = tmp_path / "project"
+    nested_cwd = project_root / "workspace" / "nested"
+    _mark_verified_project_root(project_root)
+    nested_cwd.mkdir(parents=True, exist_ok=True)
+    return project_root, nested_cwd
+
+
+def _cli_model_result(payload: dict[str, object] | None = None) -> MagicMock:
+    result = MagicMock()
+    result.model_dump.return_value = payload or {"ok": True}
+    return result
 
 
 @patch("gpd.core.phases.list_phases")
@@ -3182,6 +4714,77 @@ def test_phase_list_with_filters_uses_file_listing(mock_list_files):
 
     assert result.exit_code == 0
     mock_list_files.assert_called_once_with(ANY, file_type="plans", phase="01")
+
+
+@pytest.mark.parametrize(
+    ("command_args", "patch_target", "expected_args", "expected_kwargs", "return_value"),
+    [
+        (["phase", "list"], "gpd.core.phases.list_phases", (), {}, _cli_model_result({"phases": []})),
+        (
+            ["phase", "list", "--type", "plans", "--phase", "01"],
+            "gpd.core.phases.list_phase_files",
+            (),
+            {"file_type": "plans", "phase": "01"},
+            _cli_model_result({"files": []}),
+        ),
+        (["phase", "index", "42"], "gpd.core.phases.phase_plan_index", ("42",), {}, _cli_model_result()),
+        (["phase", "find", "42"], "gpd.core.phases.find_phase", ("42",), {}, _cli_model_result()),
+        (["phase", "next-decimal", "42"], "gpd.core.phases.next_decimal_phase", ("42",), {}, "42.1"),
+        (
+            ["phase", "validate-waves", "42"],
+            "gpd.core.phases.validate_phase_waves",
+            ("42",),
+            {},
+            _cli_model_result({"validation": {"valid": True}}),
+        ),
+    ],
+)
+def test_phase_read_only_commands_use_ancestor_project_root_from_nested_cwd(
+    tmp_path: Path,
+    command_args: list[str],
+    patch_target: str,
+    expected_args: tuple[str, ...],
+    expected_kwargs: dict[str, object],
+    return_value: object,
+) -> None:
+    project_root, nested_cwd = _nested_project_root(tmp_path)
+    if patch_target.endswith("validate_phase_waves"):
+        return_value.validation.valid = True  # type: ignore[attr-defined]
+
+    with patch(patch_target, return_value=return_value) as mock_command:
+        result = runner.invoke(app, ["--cwd", str(nested_cwd), *command_args])
+
+    assert result.exit_code == 0, result.output
+    mock_command.assert_called_once()
+    assert mock_command.call_args.args == (project_root.resolve(), *expected_args)
+    assert mock_command.call_args.kwargs == expected_kwargs
+
+
+@pytest.mark.parametrize(
+    ("command_args", "patch_target", "expected_args", "expected_kwargs"),
+    [
+        (["phase", "add", "Compute", "cross", "section"], "gpd.core.phases.phase_add", ("Compute cross section",), {}),
+        (["phase", "insert", "42", "Check", "limits"], "gpd.core.phases.phase_insert", ("42", "Check limits"), {}),
+        (["phase", "remove", "42", "--force"], "gpd.core.phases.phase_remove", ("42",), {"force": True}),
+        (["phase", "complete", "42"], "gpd.core.phases.phase_complete", ("42",), {}),
+    ],
+)
+def test_phase_mutating_commands_use_ancestor_project_root_from_nested_cwd(
+    tmp_path: Path,
+    command_args: list[str],
+    patch_target: str,
+    expected_args: tuple[str, ...],
+    expected_kwargs: dict[str, object],
+) -> None:
+    project_root, nested_cwd = _nested_project_root(tmp_path)
+
+    with patch(patch_target, return_value=_cli_model_result()) as mock_command:
+        result = runner.invoke(app, ["--cwd", str(nested_cwd), *command_args])
+
+    assert result.exit_code == 0, result.output
+    mock_command.assert_called_once()
+    assert mock_command.call_args.args == (project_root.resolve(), *expected_args)
+    assert mock_command.call_args.kwargs == expected_kwargs
 
 
 @patch("gpd.core.phases.phase_add")
@@ -3265,7 +4868,7 @@ def test_validate_phase_artifacts_does_not_swallow_programmer_errors(tmp_path: P
 # ─── raw output ─────────────────────────────────────────────────────────────
 
 
-@patch("gpd.core.state.state_load")
+@patch("gpd.core.state.state_load_readonly")
 def test_raw_json_output(mock_load):
     mock_load.return_value = {"position": {"current_phase": "42"}}
     result = runner.invoke(app, ["--raw", "state", "load"])
@@ -3426,6 +5029,171 @@ def test_validate_command_context_accepts_tokenized_standalone_arguments(tmp_pat
     assert payload["passed"] is True
 
 
+def test_validate_command_context_accepts_inline_arguments_in_command_label(tmp_path: Path) -> None:
+    empty_dir = tmp_path / "empty-context"
+    empty_dir.mkdir()
+
+    result = runner.invoke(
+        app,
+        [
+            "--raw",
+            "--cwd",
+            str(empty_dir),
+            "validate",
+            "command-context",
+            "gpd:discover finite-temperature RG flow --depth deep",
+        ],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["command"] == "gpd:discover"
+    assert payload["context_mode"] == "project-aware"
+    assert payload["passed"] is True
+
+
+@pytest.mark.parametrize("label", ["gpd:new-project --minimal", "$gpd-new-project --minimal", "new-project --minimal"])
+def test_validate_command_context_normalizes_inline_new_project_labels(label: str, tmp_path: Path) -> None:
+    empty_dir = tmp_path / "empty-context"
+    empty_dir.mkdir()
+
+    result = runner.invoke(
+        app,
+        ["--raw", "--cwd", str(empty_dir), "validate", "command-context", label],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["command"] == "gpd:new-project"
+    assert payload["context_mode"] == "projectless"
+
+
+def test_validate_command_context_global_and_projectless_do_not_migrate_root_planning_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "PROJECT.md").write_text("# Root project note\n", encoding="utf-8")
+    (workspace / "ROADMAP.md").write_text("# Root roadmap note\n", encoding="utf-8")
+    monkeypatch.setattr(
+        cli_module,
+        "_migrate_planning_files",
+        lambda _cwd: (_ for _ in ()).throw(AssertionError("projectless/global preflight must be read-only")),
+    )
+
+    for command_name in ("new-project", "help"):
+        result = runner.invoke(
+            app,
+            ["--raw", "--cwd", str(workspace), "validate", "command-context", command_name],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0, result.output
+
+
+def test_validate_command_context_project_required_does_not_migrate_root_planning_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    (workspace / "GPD").mkdir(parents=True)
+    (workspace / "PROJECT.md").write_text("# Root project note\n", encoding="utf-8")
+    (workspace / "ROADMAP.md").write_text("# Root roadmap note\n", encoding="utf-8")
+    monkeypatch.setattr(
+        cli_module,
+        "_migrate_planning_files",
+        lambda _cwd: (_ for _ in ()).throw(AssertionError("command-context preflight must be read-only")),
+    )
+
+    result = runner.invoke(
+        app,
+        ["--raw", "--cwd", str(workspace), "validate", "command-context", "research-phase", "1"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 1, result.output
+    assert not (workspace / "GPD" / "PROJECT.md").exists()
+    assert not (workspace / "GPD" / "ROADMAP.md").exists()
+
+
+def test_validate_command_context_sync_state_accepts_partial_state_workspace(tmp_path: Path) -> None:
+    state = default_state_dict()
+    save_state_json(tmp_path, state)
+
+    result = runner.invoke(
+        app,
+        ["--raw", "--cwd", str(tmp_path), "validate", "command-context", "sync-state"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["command"] == "gpd:sync-state"
+    assert payload["passed"] is True
+    assert payload["project_exists"] is False
+    assert any(check["name"] == "state_exists" and check["passed"] for check in payload["checks"])
+
+
+def test_validate_command_context_sync_state_does_not_auto_select_recent_project(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_root = tmp_path / "data"
+    recent_project = tmp_path / "recent-project"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    save_state_json(recent_project, default_state_dict())
+    resume_file = recent_project / "GPD" / "phases" / "01" / ".continue-here.md"
+    resume_file.parent.mkdir(parents=True, exist_ok=True)
+    resume_file.write_text("resume here\n", encoding="utf-8")
+    record_recent_project(
+        recent_project,
+        store_root=data_root,
+        session_data={
+            "last_session_at": "2026-04-28T12:00:00+00:00",
+            "resume_file": "GPD/phases/01/.continue-here.md",
+        },
+    )
+    monkeypatch.setenv("GPD_DATA_DIR", str(data_root))
+
+    result = runner.invoke(
+        app,
+        ["--raw", "--cwd", str(outside), "validate", "command-context", "sync-state"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 1, result.output
+    payload = json.loads(result.output)
+    assert payload["passed"] is False
+    assert not any("auto-selected recoverable recent project" in check["detail"] for check in payload["checks"])
+    assert any(
+        check["name"] == "project_reentry"
+        and check["detail"] == "no recoverable current-workspace project target found"
+        for check in payload["checks"]
+    )
+
+
+def test_validate_command_context_resume_work_accepts_partial_roadmap_workspace(tmp_path: Path) -> None:
+    planning = tmp_path / "GPD"
+    planning.mkdir()
+    (planning / "ROADMAP.md").write_text("# Roadmap\n", encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        ["--raw", "--cwd", str(tmp_path), "validate", "command-context", "resume-work"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["command"] == "gpd:resume-work"
+    assert payload["passed"] is True
+    assert payload["project_exists"] is False
+    assert any(check["name"] == "roadmap_exists" and check["passed"] for check in payload["checks"])
+
+
 def test_validate_command_context_accepts_tokenized_explain_arguments(tmp_path: Path) -> None:
     empty_dir = tmp_path / "empty-context"
     empty_dir.mkdir()
@@ -3448,6 +5216,35 @@ def test_validate_command_context_accepts_tokenized_explain_arguments(tmp_path: 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert payload["command"] == "gpd:explain"
+    assert payload["context_mode"] == "project-aware"
+    assert payload["passed"] is True
+
+
+def test_validate_command_context_accepts_negative_parameter_sweep_range(tmp_path: Path) -> None:
+    empty_dir = tmp_path / "empty-context"
+    empty_dir.mkdir()
+
+    result = runner.invoke(
+        app,
+        [
+            "--raw",
+            "--cwd",
+            str(empty_dir),
+            "validate",
+            "command-context",
+            "parameter-sweep",
+            "results/mesh-study.py",
+            "--param",
+            "coupling",
+            "--range",
+            "-1:1:20",
+        ],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["command"] == "gpd:parameter-sweep"
     assert payload["context_mode"] == "project-aware"
     assert payload["passed"] is True
 
@@ -3772,7 +5569,6 @@ def test_result_upsert_without_explicit_id(mock_upsert, tmp_path: Path):
 def test_result_upsert_recovers_from_malformed_primary_state(mock_upsert, tmp_path: Path) -> None:
     backup_state = default_state_dict()
     backup_state["position"]["current_phase"] = "07"
-    backup_state["session"]["last_result_id"] = "R-backup"
     _write_recoverable_result_state(tmp_path, backup_state)
 
     mock_result = MagicMock()
@@ -3814,7 +5610,6 @@ def test_result_upsert_recovers_from_malformed_primary_state(mock_upsert, tmp_pa
     state_arg = mock_upsert.call_args.args[0]
     assert state_arg["position"]["current_phase"] == "07"
     assert state_arg["continuation"]["handoff"]["last_result_id"] is None
-    assert state_arg["session"]["last_result_id"] is None
 
 
 @patch("gpd.core.state.save_state_json_locked")
@@ -4200,7 +5995,7 @@ def test_result_persist_derived_uses_resolved_result_id_for_real_state_write(
 
     state = json.loads((cwd / "GPD" / "state.json").read_text(encoding="utf-8"))
     assert [item["id"] for item in state["intermediate_results"]] == ["R-02-effective-mass"]
-    assert state["session"]["last_result_id"] is None
+    assert "session" not in state
     assert state["continuation"]["handoff"]["last_result_id"] is None
 
 
@@ -4307,7 +6102,6 @@ def test_result_update_recovers_from_malformed_primary_state(mock_result_update,
 def test_result_add_recovers_from_malformed_primary_state(mock_result_add, tmp_path: Path) -> None:
     backup_state = default_state_dict()
     backup_state["position"]["current_phase"] = "10"
-    backup_state["session"]["last_result_id"] = "R-recovered"
     _write_recoverable_result_state(tmp_path, backup_state)
 
     mock_result = MagicMock()
@@ -4345,7 +6139,6 @@ def test_result_add_recovers_from_malformed_primary_state(mock_result_add, tmp_p
     state_arg = mock_result_add.call_args.args[0]
     assert state_arg["position"]["current_phase"] == "10"
     assert state_arg["continuation"]["handoff"]["last_result_id"] is None
-    assert state_arg["session"]["last_result_id"] is None
 
 
 @pytest.mark.parametrize(
@@ -4367,7 +6160,6 @@ def test_auxiliary_mutation_commands_recover_from_malformed_primary_state(
 ) -> None:
     backup_state = default_state_dict()
     backup_state["position"]["current_phase"] = "10"
-    backup_state["session"]["last_result_id"] = "R-recovered"
     _write_recoverable_result_state(tmp_path, backup_state)
 
     captured: dict[str, object] = {}
@@ -4391,7 +6183,6 @@ def test_auxiliary_mutation_commands_recover_from_malformed_primary_state(
     assert isinstance(state_arg, dict)
     assert state_arg["position"]["current_phase"] == "10"
     assert state_arg["continuation"]["handoff"]["last_result_id"] is None
-    assert state_arg["session"]["last_result_id"] is None
 
 
 @patch("gpd.core.state.save_state_json_locked")
@@ -4402,7 +6193,6 @@ def test_convention_set_fails_closed_for_malformed_primary_state(
 ) -> None:
     backup_state = default_state_dict()
     backup_state["position"]["current_phase"] = "10"
-    backup_state["session"]["last_result_id"] = "R-recovered"
     _write_recoverable_result_state(tmp_path, backup_state)
 
     def _fake_convention_set(lock: object, key: str, value: str, *, force: bool = False) -> object:
@@ -4554,6 +6344,21 @@ def test_doctor(mock_doctor):
         "specs_dir": SPECS_DIR,
         "live_executable_probes": False,
     }
+
+
+@patch("gpd.core.health.run_doctor")
+def test_doctor_human_output_preserves_literal_bracketed_values(mock_doctor) -> None:
+    mock_result = MagicMock()
+    mock_result.model_dump.return_value = {
+        "warning": "Install with: pip install 'get-physics-done[paper]'",
+        "details": {"package_extra": "get-physics-done[paper]"},
+    }
+    mock_doctor.return_value = mock_result
+
+    result = runner.invoke(app, ["doctor"])
+
+    assert result.exit_code == 0
+    assert "get-physics-done[paper]" in result.output
 
 
 def test_doctor_live_executable_probes_pass_through(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -5390,7 +7195,7 @@ def test_observe_execution_raw_reads_local_visibility_snapshot(tmp_path: Path) -
     assert any("gpd observe show --session cli-session-1 --last 20" in step for step in payload["suggested_next_steps"])
 
 
-def test_observe_execution_raw_prefers_lineage_head_over_legacy_current_execution_snapshot(
+def test_observe_execution_raw_prefers_lineage_head_over_stale_current_execution_snapshot(
     tmp_path: Path,
 ) -> None:
     observability = tmp_path / "GPD" / "observability"
@@ -5398,11 +7203,11 @@ def test_observe_execution_raw_prefers_lineage_head_over_legacy_current_executio
     (observability / "current-execution.json").write_text(
         json.dumps(
             {
-                "session_id": "legacy-session",
+                "session_id": "stale-session",
                 "phase": "09",
                 "plan": "02",
                 "segment_status": "paused",
-                "current_task": "Legacy snapshot task",
+                "current_task": "Stale snapshot task",
                 "updated_at": "2026-03-27T12:01:00+00:00",
             }
         ),
@@ -5428,7 +7233,7 @@ def test_observe_execution_raw_prefers_lineage_head_over_legacy_current_executio
     assert payload["current_task"] == "Lineage head task"
     assert payload["current_execution"]["current_task"] == "Lineage head task"
     assert payload["current_execution"]["segment_status"] == "blocked"
-    assert payload["current_task"] != "Legacy snapshot task"
+    assert payload["current_task"] != "Stale snapshot task"
 
 
 def test_observe_execution_human_output_keeps_waiting_state_distinct_from_possibly_stalled(tmp_path: Path) -> None:
@@ -5719,7 +7524,7 @@ def test_cli_invocation_does_not_write_observability_files_without_explicit_even
 def test_suggest_uses_ancestor_project_root_from_nested_cwd(mock_suggest, tmp_path: Path, monkeypatch) -> None:
     project_root = tmp_path / "project"
     nested_cwd = project_root / "work" / "nested"
-    (project_root / "GPD").mkdir(parents=True, exist_ok=True)
+    _mark_verified_project_root(project_root)
     nested_cwd.mkdir(parents=True, exist_ok=True)
 
     mock_result = MagicMock()
@@ -5737,7 +7542,7 @@ def test_suggest_uses_ancestor_project_root_from_nested_cwd(mock_suggest, tmp_pa
 def test_suggest_uses_ancestor_project_root_from_cleared_cwd(mock_suggest, tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     nested_cwd = project_root / "work" / "nested"
-    (project_root / "GPD").mkdir(parents=True, exist_ok=True)
+    _mark_verified_project_root(project_root)
     nested_cwd.mkdir(parents=True, exist_ok=True)
     nested_cwd.rmdir()
 
@@ -5755,7 +7560,7 @@ def test_suggest_uses_ancestor_project_root_from_cleared_cwd(mock_suggest, tmp_p
 def test_suggest_forwards_limit_and_serializes_raw_output_from_nested_cwd(mock_suggest, tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     nested_cwd = project_root / "work" / "nested"
-    (project_root / "GPD").mkdir(parents=True, exist_ok=True)
+    _mark_verified_project_root(project_root)
     nested_cwd.mkdir(parents=True, exist_ok=True)
 
     payload = {
@@ -5847,6 +7652,17 @@ def test_init_execute_phase_forwards_stage_option(mock_init):
     mock_init.assert_called_once()
     assert mock_init.call_args.args == (cli_module._get_cwd(), "42")
     assert mock_init.call_args.kwargs == {"includes": set(), "stage": "phase_bootstrap"}
+
+
+@patch("gpd.core.context.init_execute_phase", side_effect=ValueError("Unknown execute-phase stage 'bad'."))
+def test_init_execute_phase_raw_invalid_stage_reports_clean_json_error(mock_init):
+    result = runner.invoke(app, ["--raw", "init", "execute-phase", "42", "--stage", "bad"])
+
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["error"] == "Unknown execute-phase stage 'bad'."
+    assert "Traceback" not in result.output
+    mock_init.assert_called_once()
 
 
 @patch("gpd.core.context.init_new_project")
@@ -6028,10 +7844,46 @@ def test_init_resume(mock_init):
     mock_init.assert_called_once()
 
 
+@patch("gpd.core.context.init_resume")
+def test_init_resume_work_alias_delegates_to_resume(mock_init) -> None:
+    mock_result = MagicMock()
+    mock_result.model_dump.return_value = {"segment_candidates": []}
+    mock_init.return_value = mock_result
+
+    result = runner.invoke(app, ["init", "resume-work"])
+
+    assert result.exit_code == 0
+    mock_init.assert_called_once()
+
+
+@patch("gpd.core.context.init_arxiv_submission")
+def test_init_arxiv_submission_stage_route_is_reachable(mock_init) -> None:
+    mock_result = MagicMock()
+    mock_result.model_dump.return_value = {"staged_loading": {"stage_id": "bootstrap"}}
+    mock_init.return_value = mock_result
+
+    result = runner.invoke(app, ["init", "arxiv-submission", "--stage", "bootstrap"])
+
+    assert result.exit_code == 0
+    assert mock_init.call_args.kwargs == {"stage": "bootstrap"}
+
+
+@patch("gpd.core.context.init_respond_to_referees")
+def test_init_respond_to_referees_stage_route_is_reachable(mock_init) -> None:
+    mock_result = MagicMock()
+    mock_result.model_dump.return_value = {"staged_loading": {"stage_id": "bootstrap"}}
+    mock_init.return_value = mock_result
+
+    result = runner.invoke(app, ["init", "respond-to-referees", "--stage", "bootstrap"])
+
+    assert result.exit_code == 0
+    assert mock_init.call_args.kwargs == {"subject": None, "stage": "bootstrap"}
+
+
 def test_paper_build_uses_default_config_surface(tmp_path: Path):
     nested_cwd = tmp_path / "notes"
     nested_cwd.mkdir()
-    (tmp_path / "GPD").mkdir()
+    _mark_verified_project_root(tmp_path)
     paper_dir = tmp_path / "paper"
     paper_dir.mkdir()
     (paper_dir / "PAPER-CONFIG.json").write_text(
@@ -6086,27 +7938,7 @@ def test_paper_build_uses_default_config_surface(tmp_path: Path):
     ]
     assert payload["manifest_path"] == "../paper/ARTIFACT-MANIFEST.json"
     assert payload["pdf_path"] == "../paper/configured_paper.pdf"
-    assert payload["toolchain"] == {
-        "compiler": "pdflatex",
-        "available": True,
-        "compiler_available": True,
-        "full_toolchain_available": True,
-        "compiler_path": "/usr/bin/pdflatex",
-        "distribution": "TeX Live",
-        "latexmk_available": True,
-        "bibtex_available": True,
-        "bibliography_support_available": True,
-        "kpsewhich_available": True,
-        "pdftotext_available": None,
-        "tectonic_available": False,
-        "tectonic_path": None,
-        "readiness_state": "ready",
-        "message": "pdflatex found (TeX Live): /usr/bin/pdflatex",
-        "paper_build_ready": True,
-        "arxiv_submission_ready": True,
-        "pdf_review_ready": True,
-        "warnings": [],
-    }
+    assert payload["toolchain"] == _latex_capability_payload()
     assert len(payload["warnings"]) == 1
     assert "temporary directory" in payload["warnings"][0]
 
@@ -6117,6 +7949,164 @@ def test_paper_build_uses_default_config_surface(tmp_path: Path):
     assert kwargs["bib_data"] is not None
     assert kwargs["citation_sources"] is None
     assert kwargs["enrich_bibliography"] is True
+
+
+def test_paper_build_bare_discovers_unique_managed_publication_config(tmp_path: Path) -> None:
+    manuscript_dir = tmp_path / "GPD" / "publication" / "curvature-flow" / "manuscript"
+    manuscript_dir.mkdir(parents=True)
+    config_path = manuscript_dir / "PAPER-CONFIG.json"
+    manuscript_path = manuscript_dir / "managed_manuscript.tex"
+    manuscript_path.write_text("\\documentclass{article}\\begin{document}Managed\\end{document}\n", encoding="utf-8")
+    config_path.write_text(
+        json.dumps(
+            {
+                "title": "Managed Manuscript",
+                "output_filename": "managed_manuscript",
+                "authors": [{"name": "A. Researcher"}],
+                "abstract": "Abstract.",
+                "sections": [{"title": "Intro", "content": "Hello."}],
+                "figures": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result_payload = MagicMock()
+    result_payload.tex_path = manuscript_path
+    result_payload.manifest_path = manuscript_dir / "ARTIFACT-MANIFEST.json"
+    result_payload.bibliography_audit_path = manuscript_dir / "BIBLIOGRAPHY-AUDIT.json"
+    result_payload.bibliography_audit = None
+    result_payload.reference_bibtex_keys = {}
+    result_payload.pdf_path = manuscript_dir / "managed_manuscript.pdf"
+    result_payload.success = True
+    result_payload.errors = []
+
+    with patch("gpd.mcp.paper.compiler.build_paper", new=AsyncMock(return_value=result_payload)) as mock_build:
+        result = runner.invoke(app, ["--raw", "--cwd", str(tmp_path), "paper-build"], catch_exceptions=False)
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["config_path"] == "./GPD/publication/curvature-flow/manuscript/PAPER-CONFIG.json"
+    assert payload["output_dir"] == "./GPD/publication/curvature-flow/manuscript"
+    assert payload["tex_path"] == "./GPD/publication/curvature-flow/manuscript/managed_manuscript.tex"
+    args = mock_build.await_args.args
+    assert args[1] == manuscript_dir.resolve(strict=False)
+
+
+def test_paper_build_emits_manifest_and_audit_sidecars_by_default(tmp_path: Path) -> None:
+    paper_dir = tmp_path / "paper"
+    paper_dir.mkdir()
+    (paper_dir / "PAPER-CONFIG.json").write_text(
+        json.dumps(
+            {
+                "title": "Configured Paper",
+                "authors": [{"name": "A. Researcher"}],
+                "abstract": "Abstract.",
+                "sections": [{"title": "Intro", "content": "Hello."}],
+                "figures": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result_payload = MagicMock()
+    result_payload.tex_path = paper_dir / "configured_paper.tex"
+    result_payload.manifest_path = paper_dir / "ARTIFACT-MANIFEST.json"
+    result_payload.bibliography_audit_path = paper_dir / "BIBLIOGRAPHY-AUDIT.json"
+    result_payload.bibliography_audit = None
+    result_payload.reference_bibtex_keys = {}
+    result_payload.pdf_path = paper_dir / "configured_paper.pdf"
+    result_payload.success = True
+    result_payload.errors = []
+
+    with patch("gpd.mcp.paper.compiler.build_paper", new=AsyncMock(return_value=result_payload)) as mock_build:
+        result = runner.invoke(
+            app,
+            ["--raw", "--cwd", str(tmp_path), "paper-build"],
+            catch_exceptions=False,
+        )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["manifest_path"] == "./paper/ARTIFACT-MANIFEST.json"
+    assert payload["bibliography_audit_path"] == "./paper/BIBLIOGRAPHY-AUDIT.json"
+    assert payload["mode"] == {"minimal": False, "sidecar_root": None}
+
+    kwargs = mock_build.await_args.kwargs
+    assert kwargs["sidecar_root"] is None
+    assert kwargs["artifact_manifest_output_path"] is None
+    assert kwargs["bibliography_audit_output_path"] is None
+    assert kwargs["emit_artifact_manifest"] is True
+    assert kwargs["emit_bibliography_audit"] is True
+
+
+def test_paper_build_minimal_suppresses_manifest_and_audit_sidecars(tmp_path: Path) -> None:
+    paper_dir = tmp_path / "paper"
+    paper_dir.mkdir()
+    (paper_dir / "PAPER-CONFIG.json").write_text(
+        json.dumps(
+            {
+                "title": "Configured Paper",
+                "authors": [{"name": "A. Researcher"}],
+                "abstract": "Abstract.",
+                "sections": [{"title": "Intro", "content": "Hello."}],
+                "figures": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result_payload = MagicMock()
+    result_payload.tex_path = paper_dir / "configured_paper.tex"
+    result_payload.manifest_path = None
+    result_payload.bibliography_audit_path = None
+    result_payload.bibliography_audit = None
+    result_payload.reference_bibtex_keys = {}
+    result_payload.pdf_path = paper_dir / "configured_paper.pdf"
+    result_payload.success = True
+    result_payload.errors = []
+
+    with patch("gpd.mcp.paper.compiler.build_paper", new=AsyncMock(return_value=result_payload)) as mock_build:
+        result = runner.invoke(
+            app,
+            ["--raw", "--cwd", str(tmp_path), "paper-build", "--minimal"],
+            catch_exceptions=False,
+        )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["manifest_path"] == ""
+    assert payload["bibliography_audit_path"] == ""
+    assert payload["mode"]["minimal"] is True
+    assert payload["mode"]["sidecar_root"] is None
+
+    kwargs = mock_build.await_args.kwargs
+    assert kwargs["sidecar_root"] is None
+    assert kwargs["emit_artifact_manifest"] is False
+    assert kwargs["emit_bibliography_audit"] is False
+
+
+@pytest.mark.parametrize("legacy_flag", ["--with-provenance", "--with-audits", "--with-review-sidecars"])
+def test_paper_build_rejects_legacy_sidecar_flags(legacy_flag: str, tmp_path: Path) -> None:
+    with patch("gpd.mcp.paper.compiler.build_paper", new=AsyncMock()) as mock_build:
+        result = runner.invoke(app, ["--raw", "--cwd", str(tmp_path), "paper-build", legacy_flag])
+
+    normalized_output = _normalize_cli_output(result.output)
+    assert result.exit_code != 0
+    assert "No such option" in normalized_output
+    assert legacy_flag in normalized_output
+    mock_build.assert_not_called()
+
+
+def test_paper_build_help_omits_legacy_sidecar_flags() -> None:
+    result = runner.invoke(app, ["paper-build", "--help"])
+
+    normalized_output = _normalize_cli_output(result.output)
+    assert result.exit_code == 0
+    assert "--minimal" in normalized_output
+    assert "--with-provenance" not in normalized_output
+    assert "--with-audits" not in normalized_output
+    assert "--with-review-sidecars" not in normalized_output
 
 
 def test_paper_build_rejects_ambiguous_supported_config_roots_without_a_resolved_manuscript(tmp_path: Path) -> None:
@@ -6235,21 +8225,12 @@ def test_validate_paper_quality_from_project_rejects_ambiguous_manuscript_roots(
         )
         (manuscript_dir / "ARTIFACT-MANIFEST.json").write_text(
             json.dumps(
-                {
-                    "version": 1,
-                    "paper_title": f"{root_name.title()} Manuscript",
-                    "journal": "jhep",
-                    "created_at": "2026-04-03T00:00:00Z",
-                    "artifacts": [
-                        {
-                            "artifact_id": f"{root_name}-manuscript",
-                            "category": "tex",
-                            "path": f"{stem}.tex",
-                            "sha256": "0" * 64,
-                            "produced_by": "test",
-                        }
-                    ],
-                }
+                _artifact_manifest_payload(
+                    manuscript_dir / f"{stem}.tex",
+                    title=f"{root_name.title()} Manuscript",
+                    journal="jhep",
+                    artifact_id=f"{root_name}-manuscript",
+                )
             ),
             encoding="utf-8",
         )
@@ -6281,7 +8262,103 @@ def test_validate_paper_quality_from_project_rejects_missing_manuscript_root(tmp
     )
 
 
-def test_paper_build_does_not_discover_legacy_planning_configs(tmp_path: Path, capsys) -> None:
+def test_validate_paper_quality_from_project_resolves_relative_root_against_cli_cwd(tmp_path: Path) -> None:
+    expected_root = (tmp_path / "project").resolve(strict=False)
+    expected_root.mkdir()
+    ready_report = SimpleNamespace(ready_for_submission=True)
+
+    with (
+        patch.object(
+            cli_module,
+            "resolve_current_manuscript_resolution",
+            return_value=SimpleNamespace(status="resolved", detail="paper"),
+        ) as mock_resolve,
+        patch(
+            "gpd.core.paper_quality_artifacts.build_paper_quality_input",
+            return_value={"paper": "input"},
+        ) as mock_build,
+        patch("gpd.core.paper_quality.score_paper_quality", return_value=ready_report),
+    ):
+        result = runner.invoke(
+            app,
+            ["--raw", "--cwd", str(tmp_path), "validate", "paper-quality", "--from-project", "project"],
+            catch_exceptions=False,
+        )
+
+    assert result.exit_code == 0
+    mock_resolve.assert_called_once_with(expected_root, allow_markdown=True)
+    mock_build.assert_called_once_with(expected_root)
+
+
+def test_validate_reproducibility_manifest_check_paths_uses_manifest_file_root(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    (workspace / "GPD").mkdir(parents=True)
+    manifest_root = workspace / "paper"
+    manifest_root.mkdir()
+    (manifest_root / "data").mkdir()
+    (manifest_root / "scripts").mkdir()
+    (manifest_root / "results").mkdir()
+    (manifest_root / "data" / "input.csv").write_text("x\n", encoding="utf-8")
+    (manifest_root / "scripts" / "run.py").write_text("print('ok')\n", encoding="utf-8")
+    (manifest_root / "results" / "out.json").write_text("{}\n", encoding="utf-8")
+    manifest_path = manifest_root / "reproducibility-manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "paper_title": "Manifest Local Paths",
+                "date": "2026-04-27",
+                "environment": {
+                    "python_version": "3.12.1",
+                    "package_manager": "uv",
+                    "required_packages": [{"package": "numpy", "version": "1.26.4"}],
+                    "lock_file": "uv.lock",
+                    "system_requirements": {},
+                },
+                "input_data": [
+                    {
+                        "name": "input",
+                        "source": "data/input.csv",
+                        "version_or_date": "2026-04-27",
+                        "checksum_sha256": "a" * 64,
+                    }
+                ],
+                "generated_data": [{"name": "output", "script": "scripts/run.py", "checksum_sha256": "b" * 64}],
+                "execution_steps": [
+                    {"name": "run", "command": "python scripts/run.py", "outputs": ["results/out.json"]}
+                ],
+                "output_files": [{"path": "results/out.json", "checksum_sha256": "c" * 64}],
+                "resource_requirements": [{"step": "run", "cpu_cores": 1, "memory_gb": 1.0}],
+                "verification_steps": ["rerun pipeline", "compare outputs", "inspect artifacts"],
+                "minimum_viable": "1 core",
+                "recommended": "1 core",
+                "last_verified": "2026-04-27",
+                "last_verified_platform": "macOS 15 arm64",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "--raw",
+            "--cwd",
+            str(workspace),
+            "validate",
+            "reproducibility-manifest",
+            "paper/reproducibility-manifest.json",
+            "--check-paths",
+        ],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["valid"] is True
+    assert payload["reproducibility_ready"] is True
+
+
+def test_paper_build_does_not_discover_internal_planning_configs(tmp_path: Path, capsys) -> None:
     planning_paper_dir = tmp_path / "GPD" / "paper"
     planning_paper_dir.mkdir(parents=True)
     (planning_paper_dir / "PAPER-CONFIG.json").write_text(
@@ -6308,7 +8385,7 @@ def test_paper_build_does_not_discover_legacy_planning_configs(tmp_path: Path, c
     assert "GPD/paper" not in payload["error"]
 
 
-def test_paper_build_rejects_explicit_legacy_planning_config_path(tmp_path: Path, capsys) -> None:
+def test_paper_build_rejects_explicit_internal_planning_config_path(tmp_path: Path, capsys) -> None:
     planning_paper_dir = tmp_path / "GPD" / "paper"
     planning_paper_dir.mkdir(parents=True)
     (planning_paper_dir / "PAPER-CONFIG.json").write_text(
@@ -6331,10 +8408,10 @@ def test_paper_build_rejects_explicit_legacy_planning_config_path(tmp_path: Path
 
     captured = capsys.readouterr()
     payload = json.loads(captured.err)
-    assert "no longer supported" in payload["error"]
+    assert "are not supported" in payload["error"]
 
 
-def test_paper_build_rejects_explicit_legacy_hidden_planning_config_path(tmp_path: Path, capsys) -> None:
+def test_paper_build_allows_explicit_legacy_hidden_paper_config_as_normal_path(tmp_path: Path) -> None:
     planning_paper_dir = tmp_path / ".gpd" / "paper"
     planning_paper_dir.mkdir(parents=True)
     (tmp_path / ".gpd" / "state.json").write_text("{}\n", encoding="utf-8")
@@ -6351,15 +8428,31 @@ def test_paper_build_rejects_explicit_legacy_hidden_planning_config_path(tmp_pat
         encoding="utf-8",
     )
 
-    try:
-        cli_module.app(args=["--raw", "--cwd", str(tmp_path), "paper-build", ".gpd/paper/PAPER-CONFIG.json"])
-    except SystemExit as exc:
-        assert exc.code == 1
+    result_payload = MagicMock()
+    result_payload.tex_path = planning_paper_dir / "planning_lowercase.tex"
+    result_payload.manifest_path = planning_paper_dir / "ARTIFACT-MANIFEST.json"
+    result_payload.bibliography_audit_path = None
+    result_payload.bibliography_audit = None
+    result_payload.pdf_path = planning_paper_dir / "planning_lowercase.pdf"
+    result_payload.success = True
+    result_payload.errors = []
 
-    captured = capsys.readouterr()
-    payload = json.loads(captured.err)
-    assert ".gpd/paper" in payload["error"]
-    assert "no longer supported" in payload["error"]
+    with (
+        patch("gpd.mcp.paper.compiler.detect_latex_toolchain", return_value=_toolchain_capability()),
+        patch("gpd.mcp.paper.compiler.build_paper", new=AsyncMock(return_value=result_payload)) as mock_build,
+    ):
+        result = runner.invoke(
+            app,
+            ["--raw", "--cwd", str(tmp_path), "paper-build", ".gpd/paper/PAPER-CONFIG.json"],
+            catch_exceptions=False,
+        )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["config_path"] == "./.gpd/paper/PAPER-CONFIG.json"
+    assert payload["output_dir"] == "./.gpd/paper"
+    assert any("custom project directory" in warning for warning in payload["warnings"])
+    mock_build.assert_awaited_once()
 
 
 def test_paper_build_preserves_explicit_relative_config_path_from_nested_cwd(tmp_path: Path) -> None:
@@ -6502,6 +8595,32 @@ def test_resolve_latest_publication_review_round_artifacts_uses_subject_owned_re
     assert round_bundle.round_number == 2
     assert round_bundle.review_ledger == subject_review_dir / "REVIEW-LEDGER-R2.json"
     assert round_bundle.referee_decision == subject_review_dir / "REFEREE-DECISION-R2.json"
+
+
+def test_resolve_latest_publication_review_round_artifacts_keeps_cli_latest_even_if_stale(
+    tmp_path: Path,
+) -> None:
+    manuscript = tmp_path / "paper" / "main.tex"
+    manuscript.parent.mkdir(parents=True)
+    manuscript.write_text("\\documentclass{article}\\begin{document}Main\\end{document}\n", encoding="utf-8")
+    review_dir = tmp_path / "GPD" / "review"
+    review_dir.mkdir(parents=True)
+    (review_dir / "REVIEW-LEDGER-R2.json").write_text("{}", encoding="utf-8")
+    (review_dir / "REFEREE-DECISION-R2.json").write_text("{}", encoding="utf-8")
+    stale_ledger = review_dir / "REVIEW-LEDGER-R3.json"
+    stale_decision = review_dir / "REFEREE-DECISION-R3.json"
+    stale_ledger.write_text("{}", encoding="utf-8")
+    stale_decision.write_text("{}", encoding="utf-8")
+
+    round_bundle = cli_module._resolve_latest_publication_review_round_artifacts(
+        tmp_path,
+        manuscript=manuscript,
+    )
+
+    assert round_bundle is not None
+    assert round_bundle.round_number == 3
+    assert round_bundle.review_ledger == stale_ledger
+    assert round_bundle.referee_decision == stale_decision
 
 
 def test_resolve_latest_publication_response_round_artifacts_uses_subject_owned_publication_root_for_managed_manuscript(
@@ -6694,31 +8813,94 @@ def test_review_preflight_respond_to_referees_accepts_explicit_manuscript_and_re
     assert payload["passed"] is True
 
 
+def test_review_preflight_arxiv_submission_rejects_review_ledger_round_mismatch(tmp_path: Path) -> None:
+    _bootstrap_publication_project(tmp_path)
+    paper_dir = tmp_path / "paper"
+    paper_dir.mkdir()
+    manuscript = paper_dir / "main.tex"
+    manuscript.write_text("\\documentclass{article}\\begin{document}Paper\\end{document}\n", encoding="utf-8")
+    (paper_dir / "ARTIFACT-MANIFEST.json").write_text(
+        json.dumps(_artifact_manifest_payload(manuscript, title="Round Mismatch")),
+        encoding="utf-8",
+    )
+    review_dir = tmp_path / "GPD" / "review"
+    review_dir.mkdir(parents=True)
+    (review_dir / "REVIEW-LEDGER-R2.json").write_text(
+        json.dumps({"version": 1, "round": 1, "manuscript_path": "paper/main.tex", "issues": []}),
+        encoding="utf-8",
+    )
+    (review_dir / "REFEREE-DECISION-R2.json").write_text(
+        json.dumps(
+            {
+                "manuscript_path": "paper/main.tex",
+                "final_recommendation": "minor_revision",
+                "final_confidence": "medium",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "--raw",
+            "--cwd",
+            str(tmp_path),
+            "validate",
+            "review-preflight",
+            "arxiv-submission",
+            "paper/main.tex",
+            "--strict",
+        ],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 1, result.output
+    payload = json.loads(result.output)
+    checks = {check["name"]: check for check in payload["checks"]}
+    assert checks["review_ledger"]["passed"] is True
+    assert checks["review_ledger_valid"]["passed"] is False
+    assert "review ledger round 1 does not match required review round 2" in checks["review_ledger_valid"]["detail"]
+    assert checks["referee_decision_valid"]["passed"] is False
+    assert (
+        "referee decision cannot be validated against a review ledger whose embedded round does not match required review round 2"
+        in checks["referee_decision_valid"]["detail"]
+    )
+
+
+def test_validate_review_preflight_accepts_inline_peer_review_subject(tmp_path: Path) -> None:
+    manuscript = tmp_path / "README.md"
+    manuscript.write_text("# External manuscript\n\nA standalone review target.\n", encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        [
+            "--raw",
+            "--cwd",
+            str(tmp_path),
+            "validate",
+            "review-preflight",
+            "peer-review README.md",
+        ],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    checks = {check["name"]: check for check in payload["checks"]}
+    assert payload["command"] == "gpd:peer-review"
+    assert payload["passed"] is True
+    assert checks["manuscript"]["passed"] is True
+    assert "README.md" in checks["manuscript"]["detail"]
+
+
 def test_resolve_review_preflight_manuscript_directory_uses_manifest_declared_entrypoint(tmp_path: Path) -> None:
     manuscript_dir = tmp_path / "paper"
     manuscript_dir.mkdir()
     manuscript = manuscript_dir / "curvature_flow_bounds.tex"
     manuscript.write_text("\\documentclass{article}\\begin{document}Hello\\end{document}", encoding="utf-8")
     (manuscript_dir / "ARTIFACT-MANIFEST.json").write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "paper_title": "Curvature Flow Bounds",
-                "journal": "prl",
-                "created_at": "2026-04-02T00:00:00+00:00",
-                "artifacts": [
-                    {
-                        "artifact_id": "tex-paper",
-                        "category": "tex",
-                        "path": "curvature_flow_bounds.tex",
-                        "sha256": "0" * 64,
-                        "produced_by": "test",
-                        "sources": [],
-                        "metadata": {},
-                    }
-                ],
-            }
-        ),
+        json.dumps(_artifact_manifest_payload(manuscript)),
         encoding="utf-8",
     )
 
@@ -6740,25 +8922,7 @@ def test_resolve_review_preflight_manuscript_reports_ambiguous_project_state(tmp
         manuscript = manuscript_dir / "curvature_flow_bounds.tex"
         manuscript.write_text("\\documentclass{article}\\begin{document}Hello\\end{document}", encoding="utf-8")
         (manuscript_dir / "ARTIFACT-MANIFEST.json").write_text(
-            json.dumps(
-                {
-                    "version": 1,
-                    "paper_title": "Curvature Flow Bounds",
-                    "journal": "prl",
-                    "created_at": "2026-04-02T00:00:00+00:00",
-                    "artifacts": [
-                        {
-                            "artifact_id": f"tex-{root_name}",
-                            "category": "tex",
-                            "path": "curvature_flow_bounds.tex",
-                            "sha256": "0" * 64,
-                            "produced_by": "test",
-                            "sources": [],
-                            "metadata": {},
-                        }
-                    ],
-                }
-            ),
+            json.dumps(_artifact_manifest_payload(manuscript, artifact_id=f"tex-{root_name}")),
             encoding="utf-8",
         )
 
@@ -6782,25 +8946,7 @@ def test_resolve_review_preflight_manuscript_explicit_supported_root_bypasses_pr
         manuscript = root / "curvature_flow_bounds.tex"
         manuscript.write_text("\\documentclass{article}\\begin{document}Hello\\end{document}", encoding="utf-8")
         (root / "ARTIFACT-MANIFEST.json").write_text(
-            json.dumps(
-                {
-                    "version": 1,
-                    "paper_title": "Curvature Flow Bounds",
-                    "journal": "prl",
-                    "created_at": "2026-04-02T00:00:00+00:00",
-                    "artifacts": [
-                        {
-                            "artifact_id": f"tex-{root_name}",
-                            "category": "tex",
-                            "path": "curvature_flow_bounds.tex",
-                            "sha256": "0" * 64,
-                            "produced_by": "test",
-                            "sources": [],
-                            "metadata": {},
-                        }
-                    ],
-                }
-            ),
+            json.dumps(_artifact_manifest_payload(manuscript, artifact_id=f"tex-{root_name}")),
             encoding="utf-8",
         )
 
@@ -6824,25 +8970,7 @@ def test_resolve_review_preflight_manuscript_explicit_supported_file_requires_ma
     manuscript = manuscript_dir / "curvature_flow_bounds.tex"
     manuscript.write_text("\\documentclass{article}\\begin{document}Hello\\end{document}", encoding="utf-8")
     (manuscript_dir / "ARTIFACT-MANIFEST.json").write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "paper_title": "Curvature Flow Bounds",
-                "journal": "prl",
-                "created_at": "2026-04-02T00:00:00+00:00",
-                "artifacts": [
-                    {
-                        "artifact_id": "tex-paper",
-                        "category": "tex",
-                        "path": "curvature_flow_bounds.tex",
-                        "sha256": "0" * 64,
-                        "produced_by": "test",
-                        "sources": [],
-                        "metadata": {},
-                    }
-                ],
-            }
-        ),
+        json.dumps(_artifact_manifest_payload(manuscript)),
         encoding="utf-8",
     )
     (manuscript_dir / "PAPER-CONFIG.json").write_text(
@@ -6879,25 +9007,7 @@ def test_resolve_review_preflight_manuscript_uses_workspace_cwd_for_relative_tar
     manuscript_dir.mkdir()
     manuscript.write_text("\\documentclass{article}\\begin{document}Hello\\end{document}", encoding="utf-8")
     (manuscript_dir / "ARTIFACT-MANIFEST.json").write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "paper_title": "Curvature Flow Bounds",
-                "journal": "prl",
-                "created_at": "2026-04-02T00:00:00+00:00",
-                "artifacts": [
-                    {
-                        "artifact_id": "tex-paper",
-                        "category": "tex",
-                        "path": "curvature_flow_bounds.tex",
-                        "sha256": "0" * 64,
-                        "produced_by": "test",
-                        "sources": [],
-                        "metadata": {},
-                    }
-                ],
-            }
-        ),
+        json.dumps(_artifact_manifest_payload(manuscript)),
         encoding="utf-8",
     )
 
@@ -6923,25 +9033,7 @@ def test_resolve_review_preflight_manuscript_nested_supported_directory_resolves
     manuscript = sections_dir / "curvature_flow_bounds.tex"
     manuscript.write_text("\\documentclass{article}\\begin{document}Hello\\end{document}", encoding="utf-8")
     (manuscript_dir / "ARTIFACT-MANIFEST.json").write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "paper_title": "Curvature Flow Bounds",
-                "journal": "prl",
-                "created_at": "2026-04-02T00:00:00+00:00",
-                "artifacts": [
-                    {
-                        "artifact_id": "tex-paper",
-                        "category": "tex",
-                        "path": "sections/curvature_flow_bounds.tex",
-                        "sha256": "0" * 64,
-                        "produced_by": "test",
-                        "sources": [],
-                        "metadata": {},
-                    }
-                ],
-            }
-        ),
+        json.dumps(_artifact_manifest_payload(manuscript, artifact_path="sections/curvature_flow_bounds.tex")),
         encoding="utf-8",
     )
 
@@ -6966,25 +9058,7 @@ def test_resolve_review_preflight_manuscript_rejects_nested_supported_directory_
     manuscript = manuscript_dir / "main.tex"
     manuscript.write_text("\\documentclass{article}\\begin{document}Hello\\end{document}", encoding="utf-8")
     (manuscript_dir / "ARTIFACT-MANIFEST.json").write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "paper_title": "Curvature Flow Bounds",
-                "journal": "prl",
-                "created_at": "2026-04-02T00:00:00+00:00",
-                "artifacts": [
-                    {
-                        "artifact_id": "tex-paper",
-                        "category": "tex",
-                        "path": "main.tex",
-                        "sha256": "0" * 64,
-                        "produced_by": "test",
-                        "sources": [],
-                        "metadata": {},
-                    }
-                ],
-            }
-        ),
+        json.dumps(_artifact_manifest_payload(manuscript)),
         encoding="utf-8",
     )
 
@@ -7011,9 +9085,8 @@ def test_resolve_review_preflight_manuscript_rejects_missing_out_of_root_target_
 
     assert resolved is None
     assert (
-        detail
-        == "explicit manuscript target must stay under `paper/`, `manuscript/`, `draft/`, "
-        "or `GPD/publication/<subject_slug>/manuscript/` inside the current project"
+        detail == "explicit manuscript target must stay under `paper/`, `manuscript/`, `draft/`, "
+        "or `GPD/publication/<subject_slug>[/manuscript/]` inside the current project"
     )
 
 
@@ -7023,25 +9096,7 @@ def test_resolve_review_preflight_manuscript_reports_inconsistent_project_state(
     manuscript = manuscript_dir / "curvature_flow_bounds.tex"
     manuscript.write_text("\\documentclass{article}\\begin{document}Hello\\end{document}", encoding="utf-8")
     (manuscript_dir / "ARTIFACT-MANIFEST.json").write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "paper_title": "Curvature Flow Bounds",
-                "journal": "prl",
-                "created_at": "2026-04-02T00:00:00+00:00",
-                "artifacts": [
-                    {
-                        "artifact_id": "tex-paper",
-                        "category": "tex",
-                        "path": "curvature_flow_bounds.tex",
-                        "sha256": "0" * 64,
-                        "produced_by": "test",
-                        "sources": [],
-                        "metadata": {},
-                    }
-                ],
-            }
-        ),
+        json.dumps(_artifact_manifest_payload(manuscript)),
         encoding="utf-8",
     )
     (manuscript_dir / "PAPER-CONFIG.json").write_text(
@@ -7107,7 +9162,9 @@ def test_resolve_review_preflight_manuscript_rejects_unsupported_explicit_target
     )
 
     assert resolved is None
-    assert "must stay under `paper/`, `manuscript/`, `draft/`, or `GPD/publication/<subject_slug>/manuscript/`" in detail
+    assert (
+        "must stay under `paper/`, `manuscript/`, `draft/`, or `GPD/publication/<subject_slug>[/manuscript/]`"
+    ) in detail
 
 
 @pytest.mark.parametrize("suffix", [".docx", ".csv", ".tsv", ".xlsx"])
@@ -7215,7 +9272,7 @@ def test_paper_build_without_bibliography_does_not_import_pybtex(tmp_path: Path,
     assert mock_build.await_args.kwargs["bib_data"] is None
 
 
-def test_paper_build_auto_discovers_single_literature_citation_sources_sidecar(tmp_path: Path) -> None:
+def test_paper_build_auto_discovers_bound_literature_citation_sources_sidecar(tmp_path: Path) -> None:
     nested_cwd = tmp_path / "notes"
     nested_cwd.mkdir()
     (tmp_path / "GPD").mkdir()
@@ -7236,7 +9293,7 @@ def test_paper_build_auto_discovers_single_literature_citation_sources_sidecar(t
 
     literature_dir = tmp_path / "GPD" / "literature"
     literature_dir.mkdir(parents=True)
-    (literature_dir / "topic-CITATION-SOURCES.json").write_text(
+    (literature_dir / "configured_paper-CITATION-SOURCES.json").write_text(
         json.dumps(
             [
                 {
@@ -7267,18 +9324,76 @@ def test_paper_build_auto_discovers_single_literature_citation_sources_sidecar(t
     assert result.exit_code == 0
     payload = json.loads(result.output)
     assert payload["bibliography_source"] == ""
-    assert payload["citation_sources_path"] == "../GPD/literature/topic-CITATION-SOURCES.json"
+    assert payload["citation_sources_path"] == "../GPD/literature/configured_paper-CITATION-SOURCES.json"
     assert any("temporary directory" in warning for warning in payload["warnings"])
     assert mock_build.await_args.kwargs["citation_sources"] is not None
     assert mock_build.await_args.kwargs["citation_sources"][0].title == "Auto Reference"
 
 
-def test_paper_build_auto_discovers_legacy_research_citation_sources_sidecar_when_literature_is_missing(
+def test_paper_build_ignores_unbound_single_literature_citation_sources_sidecar(tmp_path: Path) -> None:
+    nested_cwd = tmp_path / "notes"
+    nested_cwd.mkdir()
+    (tmp_path / "GPD").mkdir()
+    paper_dir = tmp_path / "paper"
+    paper_dir.mkdir()
+    (paper_dir / "PAPER-CONFIG.json").write_text(
+        json.dumps(
+            {
+                "title": "Configured Paper",
+                "authors": [{"name": "A. Researcher"}],
+                "abstract": "Abstract.",
+                "sections": [{"title": "Intro", "content": "Hello."}],
+                "figures": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    literature_dir = tmp_path / "GPD" / "literature"
+    literature_dir.mkdir(parents=True)
+    (literature_dir / "stale-topic-CITATION-SOURCES.json").write_text(
+        json.dumps(
+            [
+                {
+                    "reference_id": "ref-stale",
+                    "source_type": "paper",
+                    "title": "Stale Reference",
+                    "authors": ["A. Author"],
+                    "year": "2024",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result_payload = MagicMock()
+    result_payload.manifest_path = paper_dir / "ARTIFACT-MANIFEST.json"
+    result_payload.bibliography_audit_path = None
+    result_payload.pdf_path = paper_dir / "configured_paper.pdf"
+    result_payload.success = True
+    result_payload.errors = []
+
+    with (
+        patch("gpd.mcp.paper.compiler.detect_latex_toolchain", return_value=_toolchain_capability()),
+        patch("gpd.mcp.paper.compiler.build_paper", new=AsyncMock(return_value=result_payload)) as mock_build,
+    ):
+        result = runner.invoke(app, ["--raw", "--cwd", str(nested_cwd), "paper-build"], catch_exceptions=False)
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["citation_sources_path"] == ""
+    assert any(
+        "Ignoring unbound literature-review citation-source sidecar" in warning for warning in payload["warnings"]
+    )
+    assert mock_build.await_args.kwargs["citation_sources"] is None
+
+
+def test_paper_build_ignores_research_citation_sources_sidecar_when_literature_is_missing(
     tmp_path: Path,
 ) -> None:
     nested_cwd = tmp_path / "notes"
     nested_cwd.mkdir()
-    (tmp_path / "GPD").mkdir()
+    _mark_verified_project_root(tmp_path)
     paper_dir = tmp_path / "paper"
     paper_dir.mkdir()
     (paper_dir / "PAPER-CONFIG.json").write_text(
@@ -7300,9 +9415,9 @@ def test_paper_build_auto_discovers_legacy_research_citation_sources_sidecar_whe
         json.dumps(
             [
                 {
-                    "reference_id": "ref-legacy",
+                    "reference_id": "ref-current",
                     "source_type": "paper",
-                    "title": "Legacy Reference",
+                    "title": "Current Reference",
                     "authors": ["A. Author"],
                     "year": "2023",
                 }
@@ -7326,10 +9441,9 @@ def test_paper_build_auto_discovers_legacy_research_citation_sources_sidecar_whe
 
     assert result.exit_code == 0
     payload = json.loads(result.output)
-    assert payload["citation_sources_path"] == "../GPD/research/topic-CITATION-SOURCES.json"
+    assert payload["citation_sources_path"] == ""
     assert any("temporary directory" in warning for warning in payload["warnings"])
-    assert mock_build.await_args.kwargs["citation_sources"] is not None
-    assert mock_build.await_args.kwargs["citation_sources"][0].title == "Legacy Reference"
+    assert mock_build.await_args.kwargs["citation_sources"] is None
 
 
 def test_paper_build_warns_when_multiple_literature_citation_sidecars_exist(tmp_path: Path) -> None:
@@ -7588,19 +9702,13 @@ def test_paper_build_surfaces_partial_toolchain_warnings(tmp_path: Path) -> None
     payload = json.loads(result.output)
     assert payload["toolchain"]["paper_build_ready"] is True
     assert payload["toolchain"]["arxiv_submission_ready"] is False
-    assert payload["toolchain"]["warnings"] == [
-        "latexmk not found; multi-pass compilation will fall back to manual passes.",
-        "kpsewhich not found; TeX resource checks will assume installed resources.",
-        "latexmk not found; repeated LaTeX passes may be degraded.",
-        "kpsewhich not found; TeX resource checks may be best-effort only.",
-    ]
-    assert any(
-        warning == "latexmk not found; repeated LaTeX passes may be degraded." for warning in payload["warnings"]
-    )
-    assert any(
-        warning == "kpsewhich not found; TeX resource checks may be best-effort only."
-        for warning in payload["warnings"]
-    )
+    toolchain_warnings = payload["toolchain"]["warnings"]
+    assert _has_warning_with_fragments(toolchain_warnings, "latexmk not found", "manual passes")
+    assert _has_warning_with_fragments(toolchain_warnings, "kpsewhich not found", "installed resources")
+    assert _has_warning_with_fragments(toolchain_warnings, "latexmk not found", "degraded")
+    assert _has_warning_with_fragments(toolchain_warnings, "kpsewhich not found", "best-effort")
+    assert _has_warning_with_fragments(payload["warnings"], "latexmk not found", "degraded")
+    assert _has_warning_with_fragments(payload["warnings"], "kpsewhich not found", "best-effort")
 
 
 def test_paper_build_toolchain_payload_surfaces_missing_bibtex_as_hard_failure_risk() -> None:
@@ -7682,6 +9790,69 @@ def test_sync_phase_checkpoints_subcommand(mock_sync):
     result = runner.invoke(app, ["sync-phase-checkpoints"])
     assert result.exit_code == 0
     mock_sync.assert_called_once()
+
+
+@patch("gpd.core.checkpoints.sync_phase_checkpoints")
+def test_sync_phase_checkpoints_uses_ancestor_project_root_from_nested_cwd(mock_sync, tmp_path: Path) -> None:
+    project_root, nested_cwd = _nested_project_root(tmp_path)
+    mock_sync.return_value = _cli_model_result({"generated": False})
+
+    result = runner.invoke(app, ["--cwd", str(nested_cwd), "sync-phase-checkpoints"])
+
+    assert result.exit_code == 0, result.output
+    mock_sync.assert_called_once_with(project_root.resolve())
+
+
+@patch("gpd.core.commands.cmd_validate_return")
+def test_validate_return_prefers_launch_cwd_relative_file_from_nested_cwd(mock_validate, tmp_path: Path) -> None:
+    project_root, nested_cwd = _nested_project_root(tmp_path)
+    launch_return = nested_cwd / "RETURN.md"
+    project_return = project_root / "RETURN.md"
+    launch_return.write_text("launch cwd return\n", encoding="utf-8")
+    project_return.write_text("project return\n", encoding="utf-8")
+    mock_result = _cli_model_result({"passed": True})
+    mock_result.passed = True
+    mock_validate.return_value = mock_result
+
+    result = runner.invoke(app, ["--cwd", str(nested_cwd), "validate-return", "RETURN.md"])
+
+    assert result.exit_code == 0, result.output
+    mock_validate.assert_called_once_with(launch_return.resolve())
+
+
+@patch("gpd.core.commands.cmd_validate_return")
+def test_validate_return_falls_back_to_project_relative_file_from_nested_cwd(mock_validate, tmp_path: Path) -> None:
+    project_root, nested_cwd = _nested_project_root(tmp_path)
+    project_return = project_root / "GPD" / "phases" / "01" / "RETURN.md"
+    project_return.parent.mkdir(parents=True, exist_ok=True)
+    project_return.write_text("project return\n", encoding="utf-8")
+    mock_result = _cli_model_result({"passed": True})
+    mock_result.passed = True
+    mock_validate.return_value = mock_result
+
+    result = runner.invoke(app, ["--cwd", str(nested_cwd), "validate-return", "GPD/phases/01/RETURN.md"])
+
+    assert result.exit_code == 0, result.output
+    mock_validate.assert_called_once_with(project_return.resolve())
+
+
+@patch("gpd.core.commands.cmd_apply_return_updates")
+def test_apply_return_updates_uses_project_root_and_project_relative_file_from_nested_cwd(
+    mock_apply,
+    tmp_path: Path,
+) -> None:
+    project_root, nested_cwd = _nested_project_root(tmp_path)
+    project_return = project_root / "GPD" / "phases" / "01" / "RETURN.md"
+    project_return.parent.mkdir(parents=True, exist_ok=True)
+    project_return.write_text("project return\n", encoding="utf-8")
+    mock_result = _cli_model_result({"passed": True, "status": "applied"})
+    mock_result.passed = True
+    mock_apply.return_value = mock_result
+
+    result = runner.invoke(app, ["--cwd", str(nested_cwd), "apply-return-updates", "GPD/phases/01/RETURN.md"])
+
+    assert result.exit_code == 0, result.output
+    mock_apply.assert_called_once_with(project_root.resolve(), project_return.resolve())
 
 
 @patch("gpd.core.commands.cmd_regression_check")

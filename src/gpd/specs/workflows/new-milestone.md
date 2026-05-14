@@ -25,8 +25,8 @@ fi
 Parse JSON for: `researcher_model`, `synthesizer_model`, `roadmapper_model`, `commit_docs`, `autonomy`, `research_mode`, `research_enabled`, `current_milestone`, `current_milestone_name`, `project_exists`, `roadmap_exists`, `state_exists`, `project_contract`, `project_contract_gate`, `project_contract_validation`, `project_contract_load_info`, `platform`.
 
 **Mode-aware behavior:**
-- `autonomy=supervised`: Pause for user confirmation after requirements gathering and before roadmap generation.
-- `autonomy=balanced` (default): Execute the full pipeline automatically and pause only if milestone scope is ambiguous or requirements conflict with prior work.
+- `autonomy=supervised` (default): Pause for user confirmation after requirements gathering and before roadmap generation.
+- `autonomy=balanced`: Execute the full pipeline automatically and pause only if milestone scope is ambiguous or requirements conflict with prior work.
 - `autonomy=yolo`: Execute full pipeline, skip optional research step, auto-approve roadmap, but do NOT skip phase-level contract coverage and anchor visibility.
 - `research_mode=explore`: Broader research survey for new milestone, consider alternative approaches, include speculative phases.
 - `research_mode=exploit`: Focused research on direct extensions of prior milestone, lean phase structure.
@@ -137,7 +137,7 @@ Update STATE.md position fields via gpd (ensures state.json sync):
 
 ```bash
 gpd state patch \
-  "--Status" "Defining objectives" \
+  "--Status" "Planning" \
   "--Last Activity" "$(date +%Y-%m-%d)"
 
 gpd state add-decision \
@@ -479,11 +479,11 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Parse JSON for: `roadmapper_model`, `commit_docs`, `autonomy`, `current_milestone`, `current_milestone_name`, `roadmap_exists`, `state_exists`, `planning_exists`, `project_contract`, `project_contract_gate`, `project_contract_validation`, `project_contract_load_info`, `contract_intake`, `effective_reference_intake`, `active_reference_context`, `reference_artifact_files`, `reference_artifacts_content`, `literature_review_files`, `literature_review_count`, `requirements_content`, `roadmap_content`, `state_content`, `project_content`, `milestones_content`, `platform`.
+Parse JSON for: `roadmapper_model`, `commit_docs`, `autonomy`, `current_milestone`, `current_milestone_name`, `roadmap_exists`, `state_exists`, `project_contract`, `project_contract_gate`, `project_contract_validation`, `project_contract_load_info`, `contract_intake`, `effective_reference_intake`, `active_reference_context`, `reference_artifact_files`, `reference_artifacts_content`, `literature_review_files`, `literature_review_count`, `requirements_content`, `roadmap_content`, `state_content`, `project_content`, `milestones_content`, `platform`.
 
 Use the bootstrap init for milestone identity and contract gating. Use this late-stage init for the final handoff and do not reuse stale roadmapping inputs from the survey/objective loop.
 
-@{GPD_INSTALL_DIR}/references/orchestration/runtime-delegation-note.md
+Apply the canonical runtime delegation convention already loaded above.
 
 ```
 task(prompt="First, read {GPD_AGENTS_DIR}/gpd-roadmapper.md for your role and instructions.
@@ -522,6 +522,9 @@ Effective reference intake: {effective_reference_intake}
 Reference artifacts: {reference_artifacts_content}
 </contract_context>
 
+<shallow_mode>false</shallow_mode>
+<!-- Milestones keep the full-detail roadmap so scoped continuations inherit every phase's contract coverage and success criteria up front. -->
+
 <continuation_context>
 This is a fresh continuation handoff for the current milestone roadmap. Carry forward the approved objectives, requirement traceability, prior survey findings, and any unresolved context gaps. Edit the existing roadmap files in place and return a fresh typed `gpd_return` envelope.
 </continuation_context>
@@ -535,10 +538,10 @@ Create research roadmap for milestone v[X.Y]:
 5. Treat `must_read_refs`, `must_include_prior_outputs`, `user_asserted_anchors`, `known_good_baselines`, and `crucial_inputs` as binding milestone context, and surface unresolved `context_gaps`
 6. Derive 2-5 success criteria per phase (concrete, verifiable results)
 7. Validate 100% objective coverage and surface all contract-critical items touched by this milestone
-8. Write files immediately (ROADMAP.md, STATE.md, update REQUIREMENTS.md traceability) while preserving existing `GPD/state.json` fields, especially `project_contract`
+8. Write files immediately (ROADMAP.md and REQUIREMENTS.md traceability). Do not write STATE.md directly; return any proposed state status, position, or decision-log update for the orchestrator to apply with `gpd state` commands after the artifact gate.
 9. Return a typed `gpd_return` envelope with `status` and `files_written`; treat existing files as stale unless the same paths appear in `gpd_return.files_written`
 10. Do not rely on runtime completion text alone
-11. If `gpd_return.status` is `checkpoint`, `blocked`, or `failed`, handle each case separately and do not display or commit until a fresh `SUMMARY.md` proof is available
+11. If `gpd_return.status` is `checkpoint`, `blocked`, or `failed`, handle each case separately and do not display or commit until fresh ROADMAP/REQUIREMENTS proof is available
 12. Route freshness on the canonical `gpd_return` envelope, using both `status` and `files_written`
 
 </instructions>
@@ -553,17 +556,15 @@ write_scope:
   mode: scoped_write
   allowed_paths:
     - GPD/ROADMAP.md
-    - GPD/STATE.md
     - GPD/REQUIREMENTS.md
 expected_artifacts:
   - GPD/ROADMAP.md
-  - GPD/STATE.md
   - GPD/REQUIREMENTS.md
-shared_state_policy: direct
+shared_state_policy: return_only
 </spawn_contract>
 ```
 
-This roadmapper contract is task-local. Do not widen the write scope or reuse it outside this handoff.
+This roadmapper contract is task-local. Do not widen the write scope or reuse it outside this handoff. The roadmapper does not own shared state; apply any accepted STATE.md updates in the main workflow with `gpd state` commands only after the roadmap artifacts pass the freshness gate.
 
 **Handle return:**
 
@@ -577,9 +578,11 @@ This roadmapper contract is task-local. Do not widen the write scope or reuse it
 
 Any roadmapper `checkpoint`, `blocked`, or final `failed` stop must end with `## > Next Up`: primary `gpd:new-milestone [milestone name]`, plus `gpd:suggest-next`.
 
-**Artifact gate:** If the roadmapper reports `gpd_return.status: completed`, verify that `GPD/ROADMAP.md`, `GPD/STATE.md`, and `GPD/REQUIREMENTS.md` are readable and named in `gpd_return.files_written`. If any expected artifact was already present before this handoff, it only counts as fresh output when the same path appears in `gpd_return.files_written`. If any expected artifact is missing from disk or from `gpd_return.files_written`, treat the handoff as incomplete and request a fresh continuation. Do not trust runtime completion text alone.
+**Artifact gate:** If the roadmapper reports `gpd_return.status: completed`, verify that `GPD/ROADMAP.md` and `GPD/REQUIREMENTS.md` are readable and named in `gpd_return.files_written`. If any expected artifact was already present before this handoff, it only counts as fresh output when the same path appears in `gpd_return.files_written`. If any expected artifact is missing from disk or from `gpd_return.files_written`, treat the handoff as incomplete and request a fresh continuation. Do not trust runtime completion text alone.
 
 **One-shot freshness rule:** the only proof of success is a completed typed return naming the updated files. Existing files on disk are stale unless the same paths appear in `gpd_return.files_written` from this run.
+
+**Shared-state update:** Only after the artifact gate passes, apply any accepted state changes from the roadmapper return in the main workflow with `gpd state patch` / `gpd state add-decision`. Do not accept a direct roadmapper edit to `GPD/STATE.md` as success proof.
 
 **If `gpd_return.status: completed`:** Read ROADMAP.md only after the fresh file proof is satisfied, then present the roadmap inline:
 
@@ -611,7 +614,7 @@ Success criteria:
 
 **If "Adjust":** Get notes, then respawn the roadmapper with a revision continuation handoff:
 
-@{GPD_INSTALL_DIR}/references/orchestration/runtime-delegation-note.md
+Apply the canonical runtime delegation convention already loaded above.
 
   ```
   task(prompt="First, read {GPD_AGENTS_DIR}/gpd-roadmapper.md for your role and instructions.
@@ -631,6 +634,9 @@ Success criteria:
   Edit files in place.
   Return a fresh typed `gpd_return` envelope with `status` and `files_written`.
   </continuation>
+
+  <shallow_mode>false</shallow_mode>
+  <!-- Milestones keep the full-detail roadmap so scoped continuations inherit every phase's contract coverage and success criteria up front. -->
   ", subagent_type="gpd-roadmapper", model="{roadmapper_model}", readonly=false, description="Revise roadmap")
   ```
 
@@ -668,13 +674,13 @@ gpd commit "docs: create milestone v[X.Y] roadmap ([N] phases)" --files GPD/ROAD
 
 **[N] phases** | **[X] objectives** | Ready to investigate
 
-## >> Next Up
+## > Next Up
 
 **Phase [N]: [Phase Name]** — [Goal]
 
 `gpd:discuss-phase [N]`
 
-<sub>`/clear` first for fresh context, then run `gpd:discuss-phase [N]`.</sub>
+<sub>Start a fresh context window, then run `gpd:discuss-phase [N]`.</sub>
 
 ---
 

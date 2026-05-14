@@ -110,8 +110,8 @@ class LocalCliBridgeContract:
 
     def render_note(self) -> str:
         return (
-            f"Use {_join_backticked_commands(self.commands)} {self.terminal_phrase} "
-            f"when you want {self.purpose_phrase}."
+            f"Use `{self.named_commands.help}` {self.terminal_phrase} for the broader local CLI surface: "
+            f"{self.purpose_phrase}."
         )
 
 
@@ -173,7 +173,7 @@ class PublicSurfaceContract:
 _LOCAL_CLI_INSTALL_LOCAL_EXAMPLE_COMMAND = "gpd install <runtime> --local"
 _LOCAL_CLI_DOCTOR_LOCAL_COMMAND = "gpd doctor --runtime <runtime> --local"
 _LOCAL_CLI_DOCTOR_GLOBAL_COMMAND = "gpd doctor --runtime <runtime> --global"
-_LOCAL_CLI_VALIDATE_COMMAND_CONTEXT_COMMAND = "gpd validate command-context gpd:<name>"
+_LOCAL_CLI_VALIDATE_COMMAND_CONTEXT_COMMAND = "gpd validate command-context <name>"
 
 
 def _require_object(payload: object, *, label: str) -> dict[str, object]:
@@ -360,17 +360,6 @@ def load_public_surface_contract_schema() -> PublicSurfaceContractSchema:
     )
     _require_schema_matches_code(schema)
     return schema
-
-
-def _join_backticked_commands(commands: tuple[str, ...]) -> str:
-    rendered = tuple(f"`{command}`" for command in commands)
-    if not rendered:
-        raise ValueError("public surface contract requires at least one local CLI command")
-    if len(rendered) == 1:
-        return rendered[0]
-    if len(rendered) == 2:
-        return f"{rendered[0]} and {rendered[1]}"
-    return ", ".join(rendered[:-1]) + f", and {rendered[-1]}"
 
 
 def _require_string(payload: dict[str, object], key: str, *, label: str) -> str:

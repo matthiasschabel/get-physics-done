@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import re
 from pathlib import Path
 
 import pytest
@@ -9,12 +11,19 @@ from pydantic import ValidationError
 
 from gpd.mcp.paper.models import (
     REQUIRED_GPD_ACKNOWLEDGMENT,
+    ArtifactManifest,
     Author,
+    ClaimIndex,
     FigureRef,
     JournalSpec,
     PaperConfig,
     PublicationPathSemantics,
+    ReviewConfidence,
+    ReviewLedger,
+    ReviewRecommendation,
+    ReviewStageKind,
     Section,
+    StageReviewReport,
 )
 
 # ---- Model validation tests ----
@@ -170,6 +179,16 @@ class TestModels:
                 },
                 r"bib_file[\s\S]*stem-safe filename",
             ),
+            (
+                {
+                    "title": "Test",
+                    "authors": [{"name": "Bob"}],
+                    "abstract": "Abstract.",
+                    "sections": [{"heading": "Intro", "content": "Hello."}],
+                    "bib_file": "NUL",
+                },
+                r"bib_file[\s\S]*reserved device filename",
+            ),
         ],
     )
     def test_paper_config_rejects_blank_required_text_and_legacy_bib_stems(
@@ -179,6 +198,17 @@ class TestModels:
     ) -> None:
         with pytest.raises(ValidationError, match=expected_fragment):
             PaperConfig.model_validate(payload)
+
+    @pytest.mark.parametrize("output_filename", ["CON", "nul", "COM1"])
+    def test_paper_config_rejects_reserved_output_filename_stems(self, output_filename: str) -> None:
+        with pytest.raises(ValidationError, match=r"output_filename[\s\S]*reserved device filename"):
+            PaperConfig(
+                title="Test",
+                authors=[Author(name="Bob")],
+                abstract="Abstract.",
+                sections=[Section(heading="Intro", content="Hello.")],
+                output_filename=output_filename,
+            )
 
     @pytest.mark.parametrize(
         ("payload", "expected_fragment"),
@@ -228,16 +258,16 @@ class TestModels:
             (
                 Section,
                 {"heading": "Intro", "content": "Hello.", "label": "sec:intro"},
-                r"label[\s\S]*omit the legacy 'sec:' prefix",
+                r"label[\s\S]*omit the reserved 'sec:' prefix",
             ),
             (
                 FigureRef,
                 {"path": Path("fig.pdf"), "caption": "Cap", "label": "fig:velocity"},
-                r"label[\s\S]*omit the legacy 'fig:' prefix",
+                r"label[\s\S]*omit the reserved 'fig:' prefix",
             ),
         ],
     )
-    def test_paper_models_reject_legacy_label_prefixes(
+    def test_paper_models_reject_reserved_label_prefixes(
         self,
         model_cls: type[Section] | type[FigureRef],
         payload: dict[str, object],
@@ -245,6 +275,84 @@ class TestModels:
     ) -> None:
         with pytest.raises(ValidationError, match=expected_fragment):
             model_cls.model_validate(payload)
+
+    @pytest.mark.parametrize("label", ["intro", "main_result-2", "figure_3", "A1"])
+    def test_paper_models_accept_bare_latex_labels(self, label: str) -> None:
+        assert Section(heading="Intro", content="Hello.", label=label).label == label
+        assert FigureRef(path=Path("fig.pdf"), caption="Cap", label=label).label == label
+
+    @pytest.mark.parametrize(
+        "label",
+        [
+            "has space",
+            "has{brace}",
+            r"has\command",
+            "has:colon",
+            "sec:intro",
+            "Fig:velocity",
+            "with\nnewline",
+            "_starts_with_underscore",
+        ],
+    )
+    def test_paper_models_reject_unsafe_latex_labels(self, label: str) -> None:
+        with pytest.raises(ValidationError, match=r"label[\s\S]*(bare LaTeX-safe|omit the reserved)"):
+            Section(heading="Intro", content="Hello.", label=label)
+        with pytest.raises(ValidationError, match=r"label[\s\S]*(bare LaTeX-safe|omit the reserved)"):
+            FigureRef(path=Path("fig.pdf"), caption="Cap", label=label)
+
+    @pytest.mark.parametrize("output_filename", ["paper", "paper_draft", "main-result-2", "A1"])
+    def test_paper_config_accepts_strict_output_filename_stems(self, output_filename: str) -> None:
+        config = PaperConfig(
+            title="Output",
+            authors=[Author(name="A")],
+            abstract="Abstract.",
+            sections=[Section(title="Intro", content="Hello.")],
+            output_filename=output_filename,
+        )
+
+        assert config.output_filename == output_filename
+
+    @pytest.mark.parametrize(
+        "output_filename",
+        [
+            "",
+            "paper.tex",
+            "paper.pdf",
+            "paper draft",
+            " paper",
+            "paper ",
+            "paper{draft}",
+            "paper/draft",
+            r"paper\draft",
+            "../paper",
+            "paper.draft",
+        ],
+    )
+    def test_paper_config_rejects_unsafe_output_filename_stems(self, output_filename: str) -> None:
+        with pytest.raises(ValidationError, match=r"output_filename[\s\S]*filename stem"):
+            PaperConfig(
+                title="Output",
+                authors=[Author(name="A")],
+                abstract="Abstract.",
+                sections=[Section(title="Intro", content="Hello.")],
+                output_filename=output_filename,
+            )
+
+    def test_artifact_manifest_schema_figure_example_uses_raw_builder_label(self) -> None:
+        schema_path = Path(__file__).resolve().parents[1] / "src/gpd/specs/templates/paper/artifact-manifest-schema.md"
+        schema_text = schema_path.read_text(encoding="utf-8")
+        match = re.search(r"```json\n(?P<payload>.*?)\n```", schema_text, re.DOTALL)
+        assert match is not None
+
+        payload = json.loads(match.group("payload"))
+        manifest = ArtifactManifest.model_validate(payload)
+        figure = next(artifact for artifact in manifest.artifacts if artifact.category == "figure")
+        label = figure.metadata["label"]
+
+        assert label == "benchmark"
+        assert isinstance(label, str)
+        assert not label.startswith("fig:")
+        assert figure.artifact_id == f"figure-{label}"
 
     def test_journal_spec_fields(self):
         spec = JournalSpec(
@@ -263,6 +371,24 @@ class TestModels:
         assert spec.dpi == 300
         assert spec.required_tex_files == []
         assert spec.install_hint == ""
+
+    def test_journal_spec_rejects_extra_keys(self):
+        with pytest.raises(ValidationError, match=r"legacy_field[\s\S]*Extra inputs are not permitted"):
+            JournalSpec.model_validate(
+                {
+                    "key": "test",
+                    "document_class": "article",
+                    "class_options": ["12pt"],
+                    "bib_style": "plain",
+                    "column_width_cm": 8.0,
+                    "double_width_cm": 16.0,
+                    "max_height_cm": 24.0,
+                    "dpi": 300,
+                    "preferred_formats": ["pdf"],
+                    "texlive_package": "latex-base",
+                    "legacy_field": "stale",
+                }
+            )
 
 
 # ---- Journal map tests ----
@@ -493,3 +619,41 @@ def test_publication_path_semantics_derives_project_and_subject_relative_views(t
     assert semantics.manuscript_root_path == "paper"
     assert semantics.manuscript_entrypoint_path == "paper/sections/main.tex"
     assert semantics.subject_relative_entrypoint_path == "sections/main.tex"
+
+
+@pytest.mark.parametrize(
+    ("model_cls", "payload"),
+    [
+        (
+            ClaimIndex,
+            {"version": 1, "manuscript_sha256": "a" * 64, "claims": []},
+        ),
+        (
+            StageReviewReport,
+            {
+                "version": 1,
+                "round": 1,
+                "stage_id": "reader",
+                "stage_kind": ReviewStageKind.reader,
+                "manuscript_sha256": "a" * 64,
+                "claims_reviewed": [],
+                "summary": "Reviewed.",
+                "confidence": ReviewConfidence.high,
+                "recommendation_ceiling": ReviewRecommendation.minor_revision,
+            },
+        ),
+        (
+            ReviewLedger,
+            {"version": 1, "round": 1, "issues": []},
+        ),
+    ],
+)
+def test_review_manuscript_path_models_share_nonempty_normalization(
+    model_cls: type[ClaimIndex] | type[StageReviewReport] | type[ReviewLedger],
+    payload: dict[str, object],
+) -> None:
+    parsed = model_cls.model_validate({**payload, "manuscript_path": "  paper/main.tex  "})
+    assert parsed.manuscript_path == "paper/main.tex"
+
+    with pytest.raises(ValidationError, match=r"manuscript_path[\s\S]*must be non-empty"):
+        model_cls.model_validate({**payload, "manuscript_path": "   "})

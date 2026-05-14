@@ -31,12 +31,12 @@ Keep `project_contract`, `project_contract_load_info`, `project_contract_validat
 **Read mode settings:**
 
 ```bash
-AUTONOMY=$(gpd --raw config get autonomy 2>/dev/null | gpd json get .value --default balanced 2>/dev/null || echo "balanced")
+AUTONOMY=$(gpd --raw config get autonomy 2>/dev/null | gpd json get .value --default supervised 2>/dev/null || echo "supervised")
 ```
 
 **Mode-aware behavior:**
-- `autonomy=supervised`: Pause after each audit criterion for user discussion of gaps.
-- `autonomy=balanced` (default): Complete the full audit and generate a gap-closure plan when needed. Pause only if critical gaps or milestone-scope questions need user judgment.
+- `autonomy=supervised` (default): Pause after each audit criterion for user discussion of gaps.
+- `autonomy=balanced`: Complete the full audit and generate a gap-closure plan when needed. Pause only if critical gaps or milestone-scope questions need user judgment.
 - `autonomy=yolo`: Complete audit, auto-approve milestone if > 80% criteria met.
 
 Run centralized context preflight before continuing:
@@ -84,10 +84,9 @@ Use the canonical phase helpers instead of raw phase-path globbing:
 
 ```bash
 gpd phase list
-gpd show-phase <phase-number>
 ```
 
-For each phase in the milestone, use `gpd show-phase <phase-number>` to surface the canonical `*-VERIFICATION.md` artifact and its verification status, then read the artifact itself only when you need blocker-level detail. Do not `find_files` `GPD/phases/*/*-VERIFICATION.md` by hand.
+For each phase in the milestone, use the runtime-installed command surface `gpd:show-phase <phase-number>` to surface the canonical `*-VERIFICATION.md` artifact and its verification status, then read the artifact itself only when you need blocker-level detail. Do not `find_files` `GPD/phases/*/*-VERIFICATION.md` by hand.
 
 From each `*-VERIFICATION.md`, extract:
 
@@ -104,7 +103,7 @@ If a phase is missing `*-VERIFICATION.md`, flag it as "unverified phase" -- this
 With phase context collected:
 @{GPD_INSTALL_DIR}/references/orchestration/runtime-delegation-note.md
 
-> If subagent spawning is unavailable, execute these steps sequentially in the main context.
+> Apply the canonical runtime delegation convention already loaded above.
 
 ```
 task(
@@ -209,9 +208,7 @@ Resolve referee model:
 ```bash
 REFEREE_MODEL=$(gpd resolve-model gpd-referee)
 ```
-@{GPD_INSTALL_DIR}/references/orchestration/runtime-delegation-note.md
-
-> If subagent spawning is unavailable, execute these steps sequentially in the main context.
+Apply the canonical runtime delegation convention already loaded above.
 
 ```
 task(
@@ -253,7 +250,7 @@ Treat `project_contract` as approved milestone scope only when `project_contract
 
 Write `GPD/v{milestone_version}-MILESTONE-REFEREE-REPORT.md` and the matching `GPD/v{milestone_version}-MILESTONE-REFEREE-REPORT.tex` companion.
 
-Return REVIEW COMPLETE with recommendation and issue counts."
+Return `gpd_return.status: completed` with recommendation and issue counts."
 )
 ```
 
@@ -310,7 +307,7 @@ All requirements covered. Cross-phase consistency verified. Research is complete
 
 gpd:complete-milestone {version}
 
-<sub>/clear first -> fresh context window</sub>
+<sub>Start a fresh context window</sub>
 
 ---
 
@@ -350,7 +347,7 @@ gpd:complete-milestone {version}
 
 gpd:plan-milestone-gaps
 
-<sub>/clear first -> fresh context window</sub>
+<sub>Start a fresh context window</sub>
 
 ---
 
@@ -394,7 +391,7 @@ gpd:complete-milestone {version}
 
 gpd:plan-milestone-gaps
 
-<sub>/clear first -> fresh context window</sub>
+<sub>Start a fresh context window</sub>
 
 ---
 

@@ -1,4 +1,4 @@
-"""Routing regressions for the `plan-phase` checker seam."""
+"""Routing assertions for the `plan-phase` checker seam."""
 
 from __future__ import annotations
 
@@ -38,7 +38,10 @@ def test_plan_phase_fails_closed_on_plan_id_mismatch_before_accepting_checker_su
     assert "`approved_plans` names only readable `*-PLAN.md` artifacts in `FRESH_PLAN_FILES`" in source
     assert "`blocked_plans` is empty" in source
     assert "every approved plan file still exists and matches the approved plan IDs" in source
-    assert "Reject the return if any listed plan ID does not map to a readable `*-PLAN.md` file in `FRESH_PLAN_FILES`." in source
+    assert (
+        "Reject the return if any listed plan ID does not map to a readable `*-PLAN.md` file in `FRESH_PLAN_FILES`."
+        in source
+    )
     assert "send the checker output back through the revision loop as a fail-closed mismatch" in source
 
 
@@ -50,10 +53,51 @@ def test_plan_phase_reloads_each_stage_and_validates_only_fresh_plan_files() -> 
     assert 'gpd --raw init plan-phase "$PHASE" --stage research_routing' in source
     assert 'gpd --raw init plan-phase "$PHASE" --stage planner_authoring' in source
     assert 'gpd --raw init plan-phase "$PHASE" --stage checker_revision' in source
+    assert "PLANNER_RETURN=$(\ntask(" in source
+    assert source.index("PLANNER_RETURN=$(") < source.index(
+        'FRESH_PLAN_FILES=$(echo "$PLANNER_RETURN" | gpd json list .gpd_return.files_written --default "")'
+    )
+    assert 'if [ -z "${FRESH_PLAN_FILES:-}" ]; then' in source
     assert 'FRESH_PLAN_FILES=$(echo "$PLANNER_RETURN" | gpd json list .gpd_return.files_written --default "")' in source
-    assert 'for plan_file in $FRESH_PLAN_FILES;' in source
+    assert 'printf \'%s\\n\' "${PLANNER_RETURN:-$(' in source
+    assert 'FRESH_PLAN_FILES="$FRESH_PLAN_FILES" python3 -c' in source
+    assert 'json.dumps({"gpd_return":{"files_written":os.getenv("FRESH_PLAN_FILES","").split()}})' in source
+    assert "gpd validate handoff-artifacts -" in source
+    assert '--allowed-root "$PHASE_DIR"' in source
+    assert '--expected-glob "${PHASE_DIR}/*-PLAN.md"' in source
+    assert "--required-suffix=-PLAN.md" in source
+    assert '[ -f "$plan_file" ] || continue' not in source
+    assert "ERROR: planner artifact is missing or unreadable" in source
+    assert "for plan_file in $FRESH_PLAN_FILES;" in source
+    assert 'PLAN_PREFLIGHT=$(gpd --raw validate plan-preflight "$plan_file")' in source
+    assert "ERROR: plan-preflight failed for $plan_file" in source
     assert 'PLANS_CONTENT=""' in source
-    assert "Before the checker loop, validate only the fresh plan artifacts named by the planner return:" in source
+    assert (
+        "Before checker/final status, validate only fresh `FRESH_PLAN_FILES` from the planner or manual branch:"
+    ) in source
+
+
+def test_plan_phase_manual_plan_fallback_cannot_skip_fresh_plan_validators() -> None:
+    source = PLAN_PHASE.read_text(encoding="utf-8")
+
+    assert "Main-context plan or any manual bounded authoring branch" in source
+    assert "set `FRESH_PLAN_FILES` to the newly created path(s)" in source
+    assert "No full planner/checker loop is required for this fallback unless requested" in source
+    assert "a failing gate means `status: blocked`, not `planned_ready`/`green`" in source
+    assert "and no `gpd:execute-phase` route" in source
+    assert 'gpd validate plan-contract "$plan_file"' in source
+    assert 'gpd --raw validate plan-preflight "$plan_file"' in source
+    assert (
+        "The `PHASE PLANNED` offer and `gpd:execute-phase` route require the fresh-plan validator gate above." in source
+    )
+
+
+def test_plan_phase_captures_state_sensitive_spawn_returns() -> None:
+    source = PLAN_PHASE.read_text(encoding="utf-8")
+
+    assert "PLANNER_RETURN=$(\ntask(" in source
+    assert "CHECKER_RETURN=$(\ntask(" in source
+    assert source.count("PLANNER_RETURN=$(\ntask(") >= 2
 
 
 def test_plan_phase_researcher_checkpoint_path_is_a_fresh_continuation_handoff() -> None:
@@ -65,12 +109,18 @@ def test_plan_phase_researcher_checkpoint_path_is_a_fresh_continuation_handoff()
     assert 'description="Continue research Phase {phase_number}"' in source
     assert "{phase_dir}/{phase_number}-RESEARCH.md" in source
     assert "{phase_dir}/{phase}-RESEARCH.md" not in source
-    assert "After the continuation returns, rerun the same `gpd_return.files_written` and on-disk artifact gate above before advancing." in source
+    assert (
+        "After the continuation returns, rerun the same `gpd_return.files_written` and on-disk artifact gate above before advancing."
+        in source
+    )
 
 
 def test_plan_phase_wrapper_stays_routing_only() -> None:
     command = (REPO_ROOT / "src/gpd/commands/plan-phase.md").read_text(encoding="utf-8")
 
     assert "@{GPD_INSTALL_DIR}/workflows/plan-phase.md" in command
-    assert "Canonical contract schema and hard validation rules load later at the staged planner and checker handoffs" not in command
+    assert (
+        "Canonical contract schema and hard validation rules load later at the staged planner and checker handoffs"
+        not in command
+    )
     assert "For proof-bearing work, every proof-bearing plan must surface the theorem statement" not in command

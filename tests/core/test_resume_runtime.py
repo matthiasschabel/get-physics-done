@@ -10,8 +10,8 @@ from gpd.core import state as state_module
 from gpd.core.context import init_resume
 from gpd.core.errors import StateError
 from gpd.core.observability import CurrentExecutionState
-from gpd.core.recent_projects import record_recent_project
-from gpd.core.resume_surface import RESUME_COMPATIBILITY_ALIAS_FIELDS
+from gpd.core.recent_projects import load_recent_projects_index, record_recent_project
+from gpd.core.resume_surface import RESUME_BACKEND_ONLY_FIELDS
 from gpd.core.state import (
     parse_state_to_json,
     state_carry_forward_continuation_last_result_id,
@@ -33,7 +33,7 @@ def _write_current_execution(tmp_path: Path, payload: dict[str, object]) -> None
 
 
 def _assert_no_resume_compat_aliases(payload: dict[str, object]) -> None:
-    for key in RESUME_COMPATIBILITY_ALIAS_FIELDS:
+    for key in RESUME_BACKEND_ONLY_FIELDS:
         assert key not in payload
 
 
@@ -54,16 +54,6 @@ def _update_state_session(
 ) -> None:
     state_path = cwd / "GPD" / "state.json"
     state = json.loads(state_path.read_text(encoding="utf-8"))
-    state["session"].update(
-        {
-            "last_date": last_date,
-            "hostname": hostname,
-            "platform": platform,
-            "stopped_at": stopped_at,
-            "resume_file": resume_file,
-            "last_result_id": last_result_id,
-        }
-    )
     state["continuation"]["handoff"].update(
         {
             "recorded_at": last_date,
@@ -130,10 +120,10 @@ def test_state_record_session_persists_machine_identity(
 
     assert result.recorded is True
     assert set(result.updated) >= {"Last session", "Hostname", "Platform", "Stopped at", "Resume file"}
-    assert stored["session"]["hostname"] == "builder-01"
-    assert stored["session"]["platform"] == "Linux 6.1 x86_64"
-    assert reparsed["session"]["hostname"] == "builder-01"
-    assert reparsed["session"]["platform"] == "Linux 6.1 x86_64"
+    assert stored["continuation"]["machine"]["hostname"] == "builder-01"
+    assert stored["continuation"]["machine"]["platform"] == "Linux 6.1 x86_64"
+    assert reparsed["continuation"]["machine"]["hostname"] == "builder-01"
+    assert reparsed["continuation"]["machine"]["platform"] == "Linux 6.1 x86_64"
     assert (
         "## Session Continuity\n\n"
         "**Last session:** " in markdown
@@ -141,7 +131,7 @@ def test_state_record_session_persists_machine_identity(
     assert (
         "**Stopped at:** Phase 03 Plan 2\n"
         "**Resume file:** next-step.md\n"
-        "**Last result ID:** —\n"
+        "**Last result ID:** none\n"
         "**Hostname:** builder-01\n"
         "**Platform:** Linux 6.1 x86_64\n"
     ) in markdown
@@ -166,8 +156,86 @@ def test_state_record_session_normalizes_project_local_absolute_resume_file(
     markdown = (cwd / "GPD" / "STATE.md").read_text(encoding="utf-8")
 
     assert result.recorded is True
-    assert stored["session"]["resume_file"] == "GPD/phases/03-analysis/.continue-here.md"
+    assert stored["continuation"]["handoff"]["resume_file"] == "GPD/phases/03-analysis/.continue-here.md"
     assert "**Resume file:** GPD/phases/03-analysis/.continue-here.md" in markdown
+
+
+def test_state_record_session_clearing_resume_file_clears_stale_last_result_id(
+    tmp_path: Path, state_project_factory, monkeypatch
+) -> None:
+    cwd = state_project_factory(tmp_path)
+    monkeypatch.setattr(
+        state_module,
+        "_current_machine_identity",
+        lambda: {"hostname": "builder-01", "platform": "Linux 6.1 x86_64"},
+    )
+    state_path = cwd / "GPD" / "state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["continuation"]["handoff"].update(
+        {
+            "resume_file": "GPD/phases/03-analysis/.continue-here.md",
+            "last_result_id": "result-stale",
+            "recorded_at": "2026-03-29T12:00:00+00:00",
+            "recorded_by": "state_record_session",
+        }
+    )
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+
+    result = state_record_session(cwd, clear_resume_file=True)
+
+    stored = json.loads(state_path.read_text(encoding="utf-8"))
+    markdown = (cwd / "GPD" / "STATE.md").read_text(encoding="utf-8")
+    assert result.recorded is True
+    assert stored["continuation"]["handoff"]["resume_file"] is None
+    assert stored["continuation"]["handoff"]["last_result_id"] is None
+    assert {"Resume file", "Last result ID"}.issubset(set(result.updated))
+    assert "**Resume file:** none" in markdown
+    assert "**Last result ID:** none" in markdown
+
+
+def test_state_record_session_clearing_resume_file_clears_recent_project_last_result_id(
+    tmp_path: Path, state_project_factory, monkeypatch
+) -> None:
+    cwd = state_project_factory(tmp_path)
+    data_root = tmp_path / "data"
+    monkeypatch.setenv("GPD_DATA_DIR", str(data_root))
+    monkeypatch.setattr(
+        state_module,
+        "_current_machine_identity",
+        lambda: {"hostname": "builder-01", "platform": "Linux 6.1 x86_64"},
+    )
+    resume_path = cwd / "GPD" / "phases" / "03-analysis" / ".continue-here.md"
+    resume_path.parent.mkdir(parents=True, exist_ok=True)
+    resume_path.write_text("resume\n", encoding="utf-8")
+    state_path = cwd / "GPD" / "state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["continuation"]["handoff"].update(
+        {
+            "resume_file": "GPD/phases/03-analysis/.continue-here.md",
+            "last_result_id": "result-stale",
+            "recorded_at": "2026-03-29T12:00:00+00:00",
+            "recorded_by": "state_record_session",
+        }
+    )
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    record_recent_project(
+        cwd,
+        store_root=data_root,
+        session_data={
+            "last_session_at": "2026-03-29T12:00:00+00:00",
+            "resume_file": "GPD/phases/03-analysis/.continue-here.md",
+            "last_result_id": "result-stale",
+            "resume_target_kind": "handoff",
+        },
+    )
+
+    state_record_session(cwd, clear_resume_file=True)
+
+    index = load_recent_projects_index(data_root)
+    row = next(item for item in index.rows if Path(item.project_root) == cwd.resolve())
+    assert row.resume_file is None
+    assert row.resume_target_kind is None
+    assert row.last_result_id is None
 
 
 def test_state_record_session_rejects_nonportable_resume_file(
@@ -214,19 +282,12 @@ def test_state_carry_forward_continuation_last_result_id_updates_canonical_conti
             "verification_records": [],
         }
     ]
-    state["session"].update(
-        {
-            "last_result_id": "result-legacy",
-            "resume_file": "GPD/phases/03-analysis/.continue-here.md",
-            "stopped_at": "Phase 03",
-        }
-    )
     state["continuation"] = {
         "schema_version": 1,
         "handoff": {
             "resume_file": "GPD/phases/03-analysis/.continue-here.md",
             "stopped_at": "Phase 03",
-            "last_result_id": "result-legacy",
+            "last_result_id": "result-recorded",
             "recorded_at": "2026-03-29T12:00:00+00:00",
             "recorded_by": "state_record_session",
         },
@@ -236,7 +297,7 @@ def test_state_carry_forward_continuation_last_result_id_updates_canonical_conti
             "plan": "02",
             "segment_id": "canonical-seg",
             "segment_status": "paused",
-            "last_result_id": "result-legacy",
+            "last_result_id": "result-recorded",
             "updated_at": "2026-03-29T12:00:00+00:00",
             "source_session_id": "sess-1",
             "recorded_by": "derived_execution_head",
@@ -257,7 +318,7 @@ def test_state_carry_forward_continuation_last_result_id_updates_canonical_conti
     assert stored["continuation"]["bounded_segment"]["last_result_id"] == "result-canonical"
     assert stored["continuation"]["handoff"]["recorded_at"] == "2026-03-29T12:00:00+00:00"
     assert stored["continuation"]["handoff"]["recorded_by"] == "state_record_session"
-    assert stored["session"]["last_result_id"] == "result-canonical"
+    assert "session" not in stored
 
 
 def test_state_record_session_rejects_unknown_last_result_id_without_persisting(
@@ -311,19 +372,12 @@ def test_state_record_session_uses_bounded_segment_last_result_id_when_explicit_
             "verification_records": [],
         }
     ]
-    state["session"].update(
-        {
-            "last_result_id": "result-legacy",
-            "resume_file": "GPD/phases/03-analysis/.continue-here.md",
-            "stopped_at": "Phase 03",
-        }
-    )
     state["continuation"] = {
         "schema_version": 1,
         "handoff": {
             "resume_file": "GPD/phases/03-analysis/.continue-here.md",
             "stopped_at": "Phase 03",
-            "last_result_id": "result-legacy",
+            "last_result_id": "result-recorded",
             "recorded_at": "2026-03-29T12:00:00+00:00",
             "recorded_by": "state_record_session",
         },
@@ -353,7 +407,7 @@ def test_state_record_session_uses_bounded_segment_last_result_id_when_explicit_
 
     assert result.recorded is True
     assert "Last result ID" in set(result.updated)
-    assert stored["session"]["last_result_id"] == "result-canonical"
+    assert "session" not in stored
     assert stored["continuation"]["handoff"]["last_result_id"] == "result-canonical"
     assert stored["continuation"]["bounded_segment"]["last_result_id"] == "result-canonical"
     assert "**Last result ID:** result-canonical" in markdown
@@ -409,30 +463,28 @@ def test_init_resume_surfaces_machine_change_and_session_resume_candidate(
             "resume_pointer": "GPD/phases/03-analysis/.continue-here.md",
         }
     ]
-    assert "compat_resume_surface" not in ctx
+    assert "resume_surface" not in ctx
 
 
-def test_init_resume_uses_canonical_continuation_when_legacy_session_conflicts(
+def test_init_resume_uses_canonical_continuation_when_session_alias_conflicts(
     tmp_path: Path, state_project_factory, monkeypatch
 ) -> None:
     cwd = state_project_factory(tmp_path)
     canonical_resume = cwd / "GPD" / "phases" / "03-analysis" / ".continue-here.md"
     canonical_resume.parent.mkdir(parents=True, exist_ok=True)
     canonical_resume.write_text("resume\n", encoding="utf-8")
-    legacy_resume = cwd / "GPD" / "phases" / "03-analysis" / "legacy.md"
-    legacy_resume.write_text("resume\n", encoding="utf-8")
+    stale_resume = cwd / "GPD" / "phases" / "03-analysis" / "canonical.md"
+    stale_resume.write_text("resume\n", encoding="utf-8")
 
     state_path = cwd / "GPD" / "state.json"
     state = json.loads(state_path.read_text(encoding="utf-8"))
-    state["session"].update(
-        {
-            "last_date": "2026-03-02T12:00:00+00:00",
-            "hostname": "legacy-host",
-            "platform": "LegacyOS",
-            "stopped_at": "Legacy stop",
-            "resume_file": "GPD/phases/03-analysis/legacy.md",
-        }
-    )
+    state["session"] = {
+        "last_date": "2026-03-02T12:00:00+00:00",
+        "hostname": "recorded-host",
+        "platform": "StaleOS",
+        "stopped_at": "Stale stop",
+        "resume_file": "GPD/phases/03-analysis/canonical.md",
+    }
     state["continuation"] = {
         "schema_version": 1,
         "handoff": {
@@ -487,7 +539,7 @@ def test_init_resume_uses_canonical_continuation_when_legacy_session_conflicts(
     assert ctx["resume_candidates"][0]["origin"] == "continuation.handoff"
     assert ctx["resume_candidates"][0]["resume_pointer"] == "GPD/phases/03-analysis/.continue-here.md"
     assert ctx["resume_candidates"][0]["last_result_id"] == "result-canonical"
-    assert "compat_resume_surface" not in ctx
+    assert "resume_surface" not in ctx
     canonical_candidate = ctx["resume_candidates"][0]
     hydrated_result = _resolved_resume_result(ctx, canonical_candidate)
     assert hydrated_result is not None
@@ -620,7 +672,121 @@ def test_init_resume_promotes_auto_selected_recent_bounded_segment_over_same_poi
     assert ctx["resume_candidates"][0]["last_result"]["id"] == "result-recent-03"
     assert ctx["active_resume_result"]["id"] == "result-recent-03"
     assert ctx["continuity_handoff_file"] == resume_file
-    assert "compat_resume_surface" not in ctx
+    assert "resume_surface" not in ctx
+
+
+def test_init_resume_drops_stale_recent_bounded_segment_last_result_id(
+    tmp_path: Path, state_project_factory
+) -> None:
+    project_parent = tmp_path / "project-root"
+    project_parent.mkdir()
+    project_root = state_project_factory(project_parent)
+    resume_file = "GPD/phases/03-analysis/.continue-here.md"
+    resume_path = project_root / resume_file
+    resume_path.parent.mkdir(parents=True, exist_ok=True)
+    resume_path.write_text("resume\n", encoding="utf-8")
+    _update_state_session(
+        project_root,
+        hostname="builder-01",
+        platform="Linux 6.1 x86_64",
+        stopped_at="Phase 03",
+        resume_file=resume_file,
+        last_result_id="result-stale",
+    )
+    data_root = tmp_path / "data"
+    record_recent_project(
+        project_root,
+        session_data={
+            "last_date": "2026-03-29T12:00:00+00:00",
+            "stopped_at": "Phase 03",
+            "resume_file": resume_file,
+            "last_result_id": "result-stale",
+            "resume_target_kind": "bounded_segment",
+            "resume_target_recorded_at": "2026-03-29T12:00:00+00:00",
+            "source_kind": "continuation.bounded_segment",
+            "source_segment_id": "seg-recent-03",
+            "source_transition_id": "transition-recent-03",
+            "recovery_phase": "03",
+            "recovery_plan": "01",
+        },
+        store_root=data_root,
+    )
+    workspace = tmp_path / "outside"
+    workspace.mkdir()
+
+    ctx = init_resume(workspace, data_root=data_root)
+
+    assert ctx["project_root_source"] == "recent_project"
+    assert ctx["project_reentry_selected_candidate"]["last_result_id"] == "result-stale"
+    assert ctx["active_bounded_segment"]["resume_file"] == resume_file
+    assert ctx["active_bounded_segment"]["segment_id"] == "seg-recent-03"
+    assert "last_result_id" not in ctx["active_bounded_segment"]
+    assert ctx["resume_candidates"][0]["kind"] == "bounded_segment"
+    assert "last_result_id" not in ctx["resume_candidates"][0]
+    assert ctx.get("active_resume_result") is None
+
+
+def test_init_resume_hydrates_promoted_recent_bounded_segment_without_matching_handoff(
+    tmp_path: Path, state_project_factory
+) -> None:
+    project_parent = tmp_path / "project-root"
+    project_parent.mkdir()
+    project_root = state_project_factory(project_parent)
+    resume_file = "GPD/phases/04-analysis/.continue-here.md"
+    resume_path = project_root / resume_file
+    resume_path.parent.mkdir(parents=True, exist_ok=True)
+    resume_path.write_text("resume\n", encoding="utf-8")
+    state_path = project_root / "GPD" / "state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["continuation"]["handoff"].update(
+        {
+            "recorded_at": None,
+            "stopped_at": None,
+            "resume_file": None,
+            "last_result_id": None,
+            "recorded_by": None,
+        }
+    )
+    state["intermediate_results"] = [
+        {
+            "id": "result-recent-04",
+            "equation": "F = ma",
+            "description": "Recent bounded-segment anchor",
+            "phase": "04",
+            "depends_on": [],
+            "verified": True,
+            "verification_records": [],
+        }
+    ]
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    data_root = tmp_path / "data"
+    record_recent_project(
+        project_root,
+        session_data={
+            "last_date": "2026-03-30T12:00:00+00:00",
+            "stopped_at": "Phase 04",
+            "resume_file": resume_file,
+            "last_result_id": "result-recent-04",
+            "resume_target_kind": "bounded_segment",
+            "resume_target_recorded_at": "2026-03-30T12:00:00+00:00",
+            "source_kind": "continuation.bounded_segment",
+            "source_segment_id": "seg-recent-04",
+            "source_transition_id": "transition-recent-04",
+            "recovery_phase": "04",
+            "recovery_plan": "02",
+        },
+        store_root=data_root,
+    )
+    workspace = tmp_path / "outside"
+    workspace.mkdir()
+
+    ctx = init_resume(workspace, data_root=data_root)
+
+    assert ctx["active_resume_kind"] == "bounded_segment"
+    assert ctx["active_resume_pointer"] == resume_file
+    assert ctx["resume_candidates"][0]["last_result_id"] == "result-recent-04"
+    assert ctx["resume_candidates"][0]["last_result"]["id"] == "result-recent-04"
+    assert ctx["active_resume_result"]["id"] == "result-recent-04"
 
 
 def test_init_resume_prefers_canonical_handoff_over_live_execution_and_keeps_execution_advisory(
@@ -664,7 +830,7 @@ def test_init_resume_prefers_canonical_handoff_over_live_execution_and_keeps_exe
     assert ctx["active_resume_origin"] == "continuation.handoff"
     assert ctx["active_resume_pointer"] == "GPD/phases/03-analysis/alternate-resume.md"
     _assert_no_resume_compat_aliases(ctx)
-    assert "compat_resume_surface" not in ctx
+    assert "resume_surface" not in ctx
     assert ctx["resume_candidates"] == [
         {
             "kind": "continuity_handoff",
@@ -712,7 +878,7 @@ def test_init_resume_keeps_canonical_handoff_primary_across_machine_change(
     assert ctx["active_resume_origin"] == "continuation.handoff"
     assert ctx["active_resume_pointer"] == "GPD/phases/03-analysis/alternate-resume.md"
     _assert_no_resume_compat_aliases(ctx)
-    assert "compat_resume_surface" not in ctx
+    assert "resume_surface" not in ctx
     assert ctx["resume_candidates"] == [
         {
             "kind": "continuity_handoff",
@@ -795,10 +961,10 @@ def test_init_resume_reads_canonical_continuation_from_state_json(
     _assert_no_resume_compat_aliases(ctx)
     assert ctx["session_hostname"] == "builder-01"
     assert ctx["session_platform"] == "Linux 6.1 x86_64"
-    assert "compat_resume_surface" not in ctx
+    assert "resume_surface" not in ctx
 
 
-def test_init_resume_does_not_fall_back_to_legacy_session_when_canonical_continuation_is_corrupt(
+def test_init_resume_does_not_fall_back_to_session_alias_when_canonical_continuation_is_corrupt(
     tmp_path: Path, state_project_factory, monkeypatch
 ) -> None:
     cwd = state_project_factory(tmp_path)
@@ -808,8 +974,8 @@ def test_init_resume_does_not_fall_back_to_legacy_session_when_canonical_continu
         "last_date": "2026-03-29T12:00:00+00:00",
         "hostname": "builder-01",
         "platform": "Linux 6.1 x86_64",
-        "stopped_at": "Legacy session stop",
-        "resume_file": "GPD/phases/03-analysis/legacy-session.md",
+        "stopped_at": "Stale session stop",
+        "resume_file": "GPD/phases/03-analysis/session-handoff.md",
     }
     state["continuation"] = {
         "schema_version": 1,
@@ -821,9 +987,9 @@ def test_init_resume_does_not_fall_back_to_legacy_session_when_canonical_continu
         },
     }
     state_path.write_text(json.dumps(state), encoding="utf-8")
-    legacy_resume = cwd / "GPD" / "phases" / "03-analysis" / "legacy-session.md"
-    legacy_resume.parent.mkdir(parents=True, exist_ok=True)
-    legacy_resume.write_text("resume\n", encoding="utf-8")
+    stale_resume = cwd / "GPD" / "phases" / "03-analysis" / "session-handoff.md"
+    stale_resume.parent.mkdir(parents=True, exist_ok=True)
+    stale_resume.write_text("resume\n", encoding="utf-8")
     monkeypatch.setattr(
         context_module,
         "_current_machine_identity",
@@ -836,10 +1002,10 @@ def test_init_resume_does_not_fall_back_to_legacy_session_when_canonical_continu
     assert ctx["continuity_handoff_file"] is None
     assert ctx["recorded_continuity_handoff_file"] is None
     assert ctx["resume_candidates"] == []
-    assert "compat_resume_surface" not in ctx
+    assert "resume_surface" not in ctx
 
 
-def test_init_resume_ignores_legacy_session_only_identity_without_active_resume_target(
+def test_init_resume_ignores_session_alias_only_identity_without_active_resume_target(
     tmp_path: Path, state_project_factory, monkeypatch
 ) -> None:
     cwd = state_project_factory(tmp_path)
@@ -847,9 +1013,9 @@ def test_init_resume_ignores_legacy_session_only_identity_without_active_resume_
     state = json.loads(state_path.read_text(encoding="utf-8"))
     state["session"] = {
         "last_date": "2026-03-29T12:00:00+00:00",
-        "hostname": "legacy-host",
-        "platform": "LegacyOS",
-        "stopped_at": "Legacy stop",
+        "hostname": "recorded-host",
+        "platform": "StaleOS",
+        "stopped_at": "Stale stop",
         "resume_file": None,
     }
     state_path.write_text(json.dumps(state), encoding="utf-8")
@@ -870,7 +1036,7 @@ def test_init_resume_ignores_legacy_session_only_identity_without_active_resume_
     assert ctx["session_platform"] is None
     assert ctx["session_last_date"] is None
     assert ctx["session_stopped_at"] is None
-    assert "compat_resume_surface" not in ctx
+    assert "resume_surface" not in ctx
 
 
 def test_init_resume_propagates_unexpected_continuation_projection_errors(
@@ -1034,7 +1200,26 @@ def test_init_resume_deduplicates_matching_session_handoff_and_ranks_interrupted
     ]
     assert ctx["resume_candidates"][0]["origin"] == "continuation.handoff"
     assert ctx["resume_candidates"][1]["origin"] == "interrupted_agent_marker"
-    assert "compat_resume_surface" not in ctx
+    assert all("source" not in candidate for candidate in ctx["resume_candidates"])
+    assert "resume_surface" not in ctx
+
+
+def test_resume_candidate_dedupe_uses_canonical_interrupted_agent_kind() -> None:
+    canonical_candidates = [
+        {
+            "kind": "interrupted_agent",
+            "origin": "interrupted_agent_marker",
+            "agent_id": "agent-77",
+            "resume_pointer": "agent-77",
+        }
+    ]
+
+    assert context_module._has_resume_candidate(
+        canonical_candidates,
+        kind="interrupted_agent",
+        agent_id="agent-77",
+    )
+    assert "source" not in canonical_candidates[0]
 
 
 def test_init_resume_normalizes_project_local_absolute_current_execution_resume_file(
@@ -1069,10 +1254,10 @@ def test_init_resume_normalizes_project_local_absolute_current_execution_resume_
     assert ctx["active_resume_kind"] == "bounded_segment"
     assert ctx["active_resume_origin"] == "continuation.bounded_segment"
     assert ctx["resume_candidates"][0]["origin"] == "continuation.bounded_segment"
-    assert "compat_resume_surface" not in ctx
+    assert "resume_surface" not in ctx
 
 
-def test_init_resume_does_not_build_legacy_resume_aliases_before_public_canonicalization(
+def test_init_resume_does_not_build_internal_resume_aliases_before_public_canonicalization(
     tmp_path: Path, state_project_factory, monkeypatch
 ) -> None:
     cwd = state_project_factory(tmp_path)
@@ -1099,7 +1284,7 @@ def test_init_resume_does_not_build_legacy_resume_aliases_before_public_canonica
 
     captured: dict[str, object] = {}
 
-    def _capture_public_payload(payload: dict[str, object], *, compat_fields=RESUME_COMPATIBILITY_ALIAS_FIELDS):
+    def _capture_public_payload(payload: dict[str, object], *, compat_fields=RESUME_BACKEND_ONLY_FIELDS):
         captured["payload"] = dict(payload)
         return dict(payload)
 
@@ -1170,7 +1355,7 @@ def test_init_resume_ignores_nonportable_current_execution_resume_file_and_uses_
             "resume_pointer": "GPD/phases/03-analysis/alternate-resume.md",
         }
     ]
-    assert "compat_resume_surface" not in ctx
+    assert "resume_surface" not in ctx
 
 
 def test_init_resume_surfaces_missing_session_handoff_as_advisory_candidate(
@@ -1215,7 +1400,7 @@ def test_init_resume_surfaces_missing_session_handoff_as_advisory_candidate(
         }
     ]
     _assert_no_resume_compat_aliases(ctx)
-    assert "compat_resume_surface" not in ctx
+    assert "resume_surface" not in ctx
 
 
 def test_init_resume_leaves_missing_result_id_unhydrated(
@@ -1279,7 +1464,7 @@ def test_init_resume_leaves_missing_result_id_unhydrated(
     assert candidate.get("last_result") is None
     assert ctx.get("active_resume_result") is None
     assert _resolved_resume_result(ctx, candidate) is None
-    assert "compat_resume_surface" not in ctx
+    assert "resume_surface" not in ctx
 
 
 def test_init_resume_treats_missing_live_resume_file_as_advisory_only(
@@ -1313,7 +1498,7 @@ def test_init_resume_treats_missing_live_resume_file_as_advisory_only(
     assert ctx["active_resume_kind"] is None
     _assert_no_resume_compat_aliases(ctx)
     assert ctx["resume_candidates"] == []
-    assert "compat_resume_surface" not in ctx
+    assert "resume_surface" not in ctx
 
 
 def test_init_resume_leaves_selected_candidate_absent_for_ambiguous_recent_projects(
@@ -1388,6 +1573,19 @@ def test_init_resume_state_exists_false_when_only_unrecoverable_state_file_is_pr
 
     assert ctx["workspace_state_exists"] is False
     assert ctx["state_exists"] is False
+
+
+def test_init_resume_state_exists_false_when_only_state_backup_is_present(tmp_path: Path) -> None:
+    planning = tmp_path / "GPD"
+    planning.mkdir()
+    (planning / "state.json.bak").write_text(json.dumps(state_module.default_state_dict()), encoding="utf-8")
+
+    ctx = init_resume(tmp_path)
+
+    assert ctx["project_reentry_mode"] == "no-recovery"
+    assert ctx["workspace_state_exists"] is False
+    assert ctx["state_exists"] is False
+    assert ctx["state_json_backup_exists"] is True
 
 
 def test_init_resume_nested_workspace_probe_does_not_create_fake_gpd_dir(

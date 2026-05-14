@@ -271,7 +271,7 @@ gpd commit "docs: create hypothesis branch for {slug}" --files GPD/hypotheses/${
 <step name="completion">
 Present completion summary:
 
-```
+```text
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
  GPD > HYPOTHESIS BRANCH CREATED
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -290,7 +290,7 @@ Present completion summary:
 
    gpd:plan-phase {current_phase}
 
-   <sub>/clear first -> fresh context window</sub>
+   <sub>Start a fresh context window</sub>
 
 3. **Execute and compare** when ready:
 

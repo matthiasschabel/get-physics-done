@@ -8,9 +8,12 @@ from collections.abc import Collection
 from pathlib import Path
 
 from gpd.core.artifact_text import PEER_REVIEW_ARTIFACT_SUFFIXES
-from gpd.core.constants import ProjectLayout
+from gpd.core.constants import PUBLICATION_MANUSCRIPT_DIR_NAME, ProjectLayout
 from gpd.core.manuscript_artifacts import (
     _resolve_manuscript_entrypoint_from_root_resolution as resolve_manuscript_entrypoint_from_root_resolution,
+)
+from gpd.core.manuscript_artifacts import (
+    _supported_manuscript_root_for_target as resolve_supported_manuscript_root_for_target,
 )
 from gpd.core.manuscript_artifacts import resolve_current_manuscript_resolution
 
@@ -19,7 +22,9 @@ PEER_REVIEW_STANDALONE_MODE = "standalone explicit-artifact review"
 PEER_REVIEW_INTERACTIVE_MODE = "interactive intake"
 PEER_REVIEW_INVALID_SUBJECT_MODE = "invalid explicit review target"
 
-_SUPPORTED_MANUSCRIPT_ROOTS = ("paper", "manuscript", "draft")
+_SUPPORTED_MANUSCRIPT_ROOTS_DETAIL = (
+    "`paper/`, `manuscript/`, `draft/`, or `GPD/publication/<subject_slug>[/manuscript/]`"
+)
 
 
 def _format_display_path_from_cwd(target: str | Path | None, *, cwd: Path) -> str:
@@ -51,14 +56,37 @@ def _format_display_path_from_cwd(target: str | Path | None, *, cwd: Path) -> st
     return "." if relative_text in ("", ".") else f"./{relative_text}"
 
 
-def path_is_within_supported_manuscript_root(project_root: Path, target: Path) -> bool:
-    """Return whether *target* lives under a canonical manuscript root in *project_root*."""
+def _supported_manuscript_root_for_target(project_root: Path, target: Path) -> Path | None:
+    """Return the project manuscript root that owns *target*, when supported."""
 
+    return resolve_supported_manuscript_root_for_target(project_root, target)
+
+
+def path_is_within_supported_manuscript_root(project_root: Path, target: Path) -> bool:
+    """Return whether *target* lives under a supported project manuscript root."""
+
+    return _supported_manuscript_root_for_target(project_root, target) is not None
+
+
+def _manuscript_root_needs_supported_metadata(
+    project_root: Path,
+    manuscript_root: Path,
+    *,
+    restrict_to_supported_roots: bool,
+) -> bool:
+    """Return whether an explicit target must obey managed manuscript-root metadata."""
+
+    if restrict_to_supported_roots:
+        return True
+    if ProjectLayout(project_root).project_md.exists():
+        return True
+
+    publication_dir = ProjectLayout(project_root).publication_dir.resolve(strict=False)
     try:
-        relative = target.resolve(strict=False).relative_to(project_root.resolve(strict=False))
+        relative_root = manuscript_root.resolve(strict=False).relative_to(publication_dir)
     except ValueError:
         return False
-    return bool(relative.parts) and relative.parts[0] in _SUPPORTED_MANUSCRIPT_ROOTS
+    return len(relative_root.parts) >= 2 and relative_root.parts[1] == PUBLICATION_MANUSCRIPT_DIR_NAME
 
 
 def resolve_review_manuscript_target(
@@ -97,13 +125,9 @@ def resolve_review_manuscript_target(
         return ", ".join(ordered_suffixes[:-1]) + f", or {ordered_suffixes[-1]} file"
 
     def _supported_root_resolution_for_target(target: Path) -> tuple[Path, object] | tuple[None, None]:
-        try:
-            relative = target.resolve(strict=False).relative_to(project_root)
-        except ValueError:
+        manuscript_root = _supported_manuscript_root_for_target(project_root, target)
+        if manuscript_root is None:
             return None, None
-        if not relative.parts or relative.parts[0] not in _SUPPORTED_MANUSCRIPT_ROOTS:
-            return None, None
-        manuscript_root = project_root / relative.parts[0]
         return manuscript_root, resolve_manuscript_entrypoint_from_root_resolution(
             manuscript_root,
             allow_markdown=allow_markdown,
@@ -119,7 +143,10 @@ def resolve_review_manuscript_target(
         if restrict_to_supported_roots and not target_is_supported_root:
             return (
                 None,
-                "explicit manuscript target must stay under `paper/`, `manuscript/`, or `draft/` inside the current project",
+                (
+                    f"explicit manuscript target must stay under {_SUPPORTED_MANUSCRIPT_ROOTS_DETAIL} "
+                    "inside the current project"
+                ),
             )
         if not target.exists():
             return None, f"missing explicit manuscript target {_format_display_path_from_cwd(target, cwd=detail_cwd)}"
@@ -129,7 +156,15 @@ def resolve_review_manuscript_target(
             if target_suffix in normalized_allowed_suffixes:
                 if target_suffix in {".tex", ".md"}:
                     manuscript_root, root_resolution = _supported_root_resolution_for_target(target)
-                    if manuscript_root is not None and root_resolution is not None:
+                    if (
+                        manuscript_root is not None
+                        and root_resolution is not None
+                        and _manuscript_root_needs_supported_metadata(
+                            project_root,
+                            manuscript_root,
+                            restrict_to_supported_roots=restrict_to_supported_roots,
+                        )
+                    ):
                         if root_resolution.status != "resolved" or root_resolution.manuscript_entrypoint is None:
                             return (
                                 None,
@@ -192,7 +227,10 @@ def resolve_review_manuscript_target(
                     ),
                 )
             if resolution.status == "missing":
-                return None, f"no manuscript entry point found under {_format_display_path_from_cwd(target, cwd=detail_cwd)}"
+                return (
+                    None,
+                    f"no manuscript entry point found under {_format_display_path_from_cwd(target, cwd=detail_cwd)}",
+                )
             return (
                 None,
                 f"{_format_display_path_from_cwd(target, cwd=detail_cwd)} is ambiguous or inconsistent: {resolution.detail}",
@@ -292,7 +330,8 @@ def resolve_peer_review_mode_details(
         return PeerReviewModeResolution(
             resolved_mode=PEER_REVIEW_PROJECT_BACKED_MODE,
             mode_reason=(
-                f"explicit review target {display_subject} stays under `paper/`, `manuscript/`, or `draft/` in the active project"
+                f"explicit review target {display_subject} stays under "
+                f"{_SUPPORTED_MANUSCRIPT_ROOTS_DETAIL} in the active project"
             ),
             project_exists=True,
             subject=normalized_subject,

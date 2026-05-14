@@ -1,4 +1,4 @@
-"""Regression tests for write-paper handoff and artifact-gate semantics."""
+"""Assertions for write-paper handoff and artifact-gate semantics."""
 
 from __future__ import annotations
 
@@ -21,18 +21,20 @@ def test_write_paper_bibliography_completion_requires_typed_status_files_written
     source = WORKFLOW.read_text(encoding="utf-8")
 
     assert "Use `status: completed` when the bibliography task finished" in source
-    assert "A completed return must list `references/references.bib` and `GPD/references-status.json` in `gpd_return.files_written`" in source
-    assert "Treat `${PAPER_DIR}/CITATION-AUDIT.md`, the refreshed `${PAPER_DIR}/BIBLIOGRAPHY-AUDIT.json`, and the bibliographer's typed `gpd_return` envelope as the bibliography success gate" in source
-    assert "does not name the bibliography outputs" in source
+    assert "A completed return must always list `${PAPER_DIR}/CITATION-AUDIT.md` and `GPD/references-status.json` in `gpd_return.files_written`; list `{ACTIVE_BIBLIOGRAPHY_PATH}` only when the bibliography file changed." in source
+    assert "and `{ACTIVE_BIBLIOGRAPHY_PATH}` only if the bibliography file changed" not in source
+    assert "Bibliography: `{ACTIVE_BIBLIOGRAPHY_PATH}` (the resolved active bibliography for this manuscript)" in source
+    assert "The typed return must name `${PAPER_DIR}/CITATION-AUDIT.md` and `GPD/references-status.json`, and must name `{ACTIVE_BIBLIOGRAPHY_PATH}` only when the bibliography changed" in source
+    assert "keep the pass incomplete even if older audit files are still on disk" in source
 
 
 def test_write_paper_response_artifact_completion_requires_typed_status_files_written_and_disk_artifacts() -> None:
     source = WORKFLOW.read_text(encoding="utf-8")
 
     assert "Check the agent's typed `gpd_return.status` first." in source
-    assert "If it returned `status: completed`, verify that `gpd_return.files_written` names both `GPD/AUTHOR-RESPONSE{round_suffix}.md` and `GPD/review/REFEREE_RESPONSE{round_suffix}.md`" in source
+    assert "If it returned `status: completed`, verify that `gpd_return.files_written` names both `${selected_publication_root}/AUTHOR-RESPONSE{round_suffix}.md` and `${selected_review_root}/REFEREE_RESPONSE{round_suffix}.md`" in source
     assert "If it returned `status: checkpoint`, treat that as a fresh continuation handoff rather than completion." in source
-    assert "Treat `GPD/AUTHOR-RESPONSE{round_suffix}.md`, `GPD/review/REFEREE_RESPONSE{round_suffix}.md`, and the writer's typed `gpd_return` envelope as the response success gate." in source
+    assert "Treat `${selected_publication_root}/AUTHOR-RESPONSE{round_suffix}.md`, `${selected_review_root}/REFEREE_RESPONSE{round_suffix}.md`, and the writer's typed `gpd_return` envelope as the response success gate." in source
 
 
 def test_write_paper_bootstrap_contract_is_explicit_about_project_and_bounded_external_lanes() -> None:
@@ -40,7 +42,7 @@ def test_write_paper_bootstrap_contract_is_explicit_about_project_and_bounded_ex
 
     assert "Use `publication_subject*`, `manuscript_*`, and `publication_bootstrap*` from init / strict preflight" in source
     assert "The resolved manuscript root may already be the managed project lane `GPD/publication/{subject_slug}/manuscript`" in source
-    assert "If `publication_bootstrap_mode` is `fresh_external_authoring_bootstrap`" in source
+    assert "For `external_authoring_intake`, use the strict command preflight's managed subject handoff" in source
     assert "`GPD/publication/{subject_slug}/intake/` is intake/provenance state only; it must not participate in manuscript-root discovery" in source
     assert "a resolved `${PAPER_DIR}` under `GPD/publication/{subject_slug}/manuscript` may be either the managed project lane or the bounded external-authoring lane" in source
     assert "do not mine generic folders or widen into arbitrary external-manuscript discovery; the only non-project lane is explicit `--intake`" in source

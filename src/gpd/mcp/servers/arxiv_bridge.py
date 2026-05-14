@@ -51,8 +51,9 @@ from mcp.server.models import InitializationOptions
 from mcp.server.stdio import stdio_server
 
 from gpd.core.arxiv_source_download import (
-    ARXIV_DEFAULT_STORAGE_PATH,
+    default_arxiv_source_storage_path,
     download_arxiv_source_archive,
+    resolve_default_arxiv_storage_path,
 )
 from gpd.mcp.servers import (
     _arxiv_ar5iv,
@@ -60,6 +61,7 @@ from gpd.mcp.servers import (
     _arxiv_gcs,
     _arxiv_retry,
     _arxiv_token_bucket,
+    mutating_tool_annotations,
 )
 from gpd.version import __version__ as GPD_VERSION
 
@@ -81,7 +83,14 @@ UPSTREAM_CORE_TOOL_NAMES = (
     "get_abstract",
 )
 DOWNLOAD_SOURCE_TOOL_NAME = "download_source"
+# Static descriptor fallback. Runtime forwarding is gated by the live upstream
+# tool list whenever the upstream server can provide one.
 ADVERTISED_TOOL_NAMES = (*UPSTREAM_CORE_TOOL_NAMES, DOWNLOAD_SOURCE_TOOL_NAME)
+_DOWNLOAD_SOURCE_TOOL_ANNOTATIONS = mutating_tool_annotations(
+    destructive=True,
+    idempotent=False,
+    open_world=True,
+)
 
 # Backend selector. Read once at module load; value persists for the life
 # of the bridge subprocess (matches the existing `LOG_LEVEL` env pattern
@@ -108,6 +117,7 @@ _DOWNLOAD_SOURCE_SCHEMA: dict[str, object] = {
         "paper_id": {
             "type": "string",
             "minLength": 1,
+            "pattern": r"\S",
             "description": "arXiv paper identifier, for example 2401.12345 or hep-th/9901001.",
         },
         "overwrite": {
@@ -127,6 +137,7 @@ _DOWNLOAD_SOURCE_TOOL = types.Tool(
         "Returns the saved path and metadata for the downloaded archive."
     ),
     inputSchema=_DOWNLOAD_SOURCE_SCHEMA,
+    annotations=_DOWNLOAD_SOURCE_TOOL_ANNOTATIONS,
 )
 
 
@@ -150,19 +161,34 @@ def _resolve_backend(override: str | None = None) -> str:
 class ArxivBridgeConfig:
     """Runtime configuration for the bridge."""
 
-    storage_path: Path = ARXIV_DEFAULT_STORAGE_PATH
+    storage_path: Path = field(default_factory=default_arxiv_source_storage_path)
     backend: str = _BACKEND_DEFAULT
 
 
 def load_settings(
     *,
     storage_path: str | Path | None = None,
+    workspace: str | Path | None = None,
     backend: str | None = None,
 ) -> ArxivBridgeConfig:
-    """Load bridge settings for the upstream server and local source archive storage."""
+    """Load bridge settings for the upstream server and local source archive storage.
+
+    When *storage_path* is not supplied, the storage root is resolved from
+    :func:`gpd.core.arxiv_source_download.resolve_default_arxiv_storage_path`,
+    which honors ``GPD_ARXIV_SOURCE_DIR`` first, then a project-local
+    ``<project_root>/.arxiv-cache`` directory when invoked inside a verified
+    GPD project, and finally falls back to the legacy
+    ``~/.arxiv-mcp-server/papers`` cache so callers running outside any
+    project remain backward-compatible.
+
+    *backend* selects between the full intercept stack (``hybrid``, default)
+    and a straight pass-through to upstream (``arxiv-only``) — the
+    emergency-rollback knob that does not require shipping a new desktop
+    release. Falls back to the ``GPD_ARXIV_BACKEND`` env var when ``None``.
+    """
 
     if storage_path is None:
-        resolved = ARXIV_DEFAULT_STORAGE_PATH
+        resolved = resolve_default_arxiv_storage_path(workspace)
     else:
         resolved = Path(storage_path)
     return ArxivBridgeConfig(
@@ -209,6 +235,8 @@ class ArxivBridge:
         self.config = config
         self._session: ClientSession | None = None
         self._state = _BridgeState()
+        self._upstream_tool_names: set[str] | None = None
+        self._upstream_tool_names_complete = False
 
     @property
     def session(self) -> ClientSession:
@@ -233,6 +261,16 @@ class ArxivBridge:
 
     async def list_tools(self, cursor: str | None = None) -> types.ListToolsResult:
         upstream = await self.session.list_tools(cursor)
+        self._remember_upstream_tools(
+            upstream.tools,
+            reset=cursor in (None, ""),
+            complete=upstream.nextCursor is None,
+        )
+        # Restrict the agent-facing surface to the static UPSTREAM_CORE_TOOL_NAMES
+        # set rather than passing everything upstream advertises through. The
+        # intercept layer (token bucket + retry + ar5iv/GCS fallbacks) is only
+        # wired for these tools; surfacing additional upstream tools would let
+        # the agent call paths that bypass our rate-limit handling.
         filtered = [tool for tool in upstream.tools if tool.name in UPSTREAM_CORE_TOOL_NAMES]
         if cursor in (None, ""):
             filtered.append(_DOWNLOAD_SOURCE_TOOL)
@@ -410,6 +448,50 @@ class ArxivBridge:
             path.write_text(content, encoding="utf-8")
         except OSError as exc:
             logger.warning("cache write failed %s: %s", path, exc)
+
+    # ------------------------------------------------------------------
+    # Upstream tool-name tracking (used by list_tools to populate the cache
+    # so call_tool can validate against the live upstream surface, not just
+    # the static ADVERTISED_TOOL_NAMES tuple).
+    # ------------------------------------------------------------------
+
+    def _remember_upstream_tools(
+        self,
+        tools: list[types.Tool],
+        *,
+        reset: bool,
+        complete: bool,
+    ) -> None:
+        names = {tool.name for tool in tools if tool.name != DOWNLOAD_SOURCE_TOOL_NAME}
+        if reset or self._upstream_tool_names is None:
+            self._upstream_tool_names = names
+            self._upstream_tool_names_complete = complete
+        else:
+            self._upstream_tool_names.update(names)
+            if complete:
+                self._upstream_tool_names_complete = True
+
+    async def _live_upstream_tool_names(self) -> set[str]:
+        if self._upstream_tool_names is not None and self._upstream_tool_names_complete:
+            return set(self._upstream_tool_names)
+
+        names: set[str] = set()
+        cursor: str | None = None
+        seen_cursors: set[str] = set()
+        while True:
+            upstream = await self.session.list_tools(cursor)
+            names.update(tool.name for tool in upstream.tools if tool.name != DOWNLOAD_SOURCE_TOOL_NAME)
+            next_cursor = upstream.nextCursor
+            if next_cursor is None:
+                break
+            if next_cursor in seen_cursors:
+                raise RuntimeError("upstream arXiv list_tools returned a repeated pagination cursor")
+            seen_cursors.add(next_cursor)
+            cursor = next_cursor
+
+        self._upstream_tool_names = names
+        self._upstream_tool_names_complete = True
+        return set(names)
 
     # ------------------------------------------------------------------
     # download_source — local-only, unchanged from previous bridge versions
@@ -653,6 +735,17 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--transport", choices=["stdio"], default="stdio")
     parser.add_argument("--storage-path", default=None)
     parser.add_argument(
+        "--workspace",
+        default=None,
+        help=(
+            "Workspace hint used when --storage-path is not supplied. "
+            "Defaults to the current working directory; the bridge prefers a "
+            "project-local <project_root>/.arxiv-cache when the workspace "
+            "resolves to a verified GPD project, and falls back to "
+            "~/.arxiv-mcp-server/papers otherwise."
+        ),
+    )
+    parser.add_argument(
         "--backend",
         choices=list(_BACKEND_ALLOWED),
         default=None,
@@ -667,7 +760,11 @@ def _parse_args() -> argparse.Namespace:
 
 async def _run() -> None:
     args = _parse_args()
-    config = load_settings(storage_path=args.storage_path, backend=args.backend)
+    config = load_settings(
+        storage_path=args.storage_path,
+        workspace=args.workspace,
+        backend=args.backend,
+    )
     server, _bridge = build_server(config)
     async with stdio_server() as (read_stream, write_stream):
         await server.run(

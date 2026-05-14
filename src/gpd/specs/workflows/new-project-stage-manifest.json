@@ -16,9 +16,22 @@
         "autonomy",
         "research_mode",
         "project_exists",
+        "state_exists",
+        "roadmap_exists",
+        "recoverable_project_exists",
+        "partial_project_exists",
+        "project_recovery_status",
+        "init_progress_exists",
+        "init_progress_status",
+        "init_progress_valid",
+        "init_progress_corrupt",
+        "init_progress_step",
+        "init_progress_description",
+        "init_progress_path",
         "has_research_map",
         "planning_exists",
         "has_research_files",
+        "research_file_samples",
         "has_project_manifest",
         "needs_research_map",
         "has_git",
@@ -92,7 +105,8 @@
         "references/research/questioning.md",
         "references/ui/ui-brand.md",
         "templates/project.md",
-        "templates/requirements.md"
+        "templates/requirements.md",
+        "templates/state.md"
       ],
       "allowed_tools": [
         "file_read",
@@ -102,7 +116,10 @@
         "ask_user"
       ],
       "writes_allowed": [
-        "GPD/state.json"
+        "GPD/state.json",
+        "GPD/STATE.md",
+        "GPD/state.json.bak",
+        "GPD/state.json.lock"
       ],
       "produced_state": [
         "approved project contract",
@@ -138,7 +155,8 @@
       "loaded_authorities": [
         "references/ui/ui-brand.md",
         "templates/project.md",
-        "templates/requirements.md"
+        "templates/requirements.md",
+        "templates/state.md"
       ],
       "conditional_authorities": [],
       "must_not_eager_load": [],
@@ -155,8 +173,11 @@
         "GPD/ROADMAP.md",
         "GPD/STATE.md",
         "GPD/state.json",
+        "GPD/state.json.bak",
+        "GPD/state.json.lock",
         "GPD/config.json",
         "GPD/CONVENTIONS.md",
+        "GPD/init-progress.json",
         "GPD/literature/PRIOR-WORK.md",
         "GPD/literature/METHODS.md",
         "GPD/literature/COMPUTATIONAL.md",

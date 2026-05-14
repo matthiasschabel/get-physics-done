@@ -21,6 +21,7 @@ import pytest
 from typer.testing import CliRunner
 
 from gpd.adapters import get_adapter
+from gpd.adapters.install_utils import MANIFEST_NAME
 from gpd.adapters.runtime_catalog import iter_runtime_descriptors
 from gpd.cli import _format_install_header_lines, _render_install_option_line, app
 from gpd.core.health import CheckStatus, DoctorReport, HealthCheck, HealthSummary
@@ -46,6 +47,8 @@ _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
 def _normalize_cli_output(text: str) -> str:
     return " ".join(_ANSI_ESCAPE_RE.sub("", text).split())
+
+
 _INSTALL_TEST_DESCRIPTORS = iter_runtime_descriptors()
 _PRIMARY_INSTALL_DESCRIPTOR = _INSTALL_TEST_DESCRIPTORS[0]
 _SECONDARY_INSTALL_DESCRIPTOR = _INSTALL_TEST_DESCRIPTORS[1]
@@ -59,6 +62,22 @@ _ENV_OVERRIDE_INSTALL_DESCRIPTOR = next(
         or descriptor.global_config.env_file_var
     )
 )
+
+
+def _descriptors_with_uninstall_counter(tmp_path: Path, counter_name: str) -> tuple[object, ...]:
+    matches: list[object] = []
+    probe_root = tmp_path / "runtime-uninstall-counter-probe"
+    for descriptor in _INSTALL_TEST_DESCRIPTORS:
+        target = probe_root / descriptor.config_dir_name
+        target.mkdir(parents=True, exist_ok=True)
+        result = get_adapter(descriptor.runtime_name).uninstall(target)
+        if counter_name in result:
+            matches.append(descriptor)
+    if not matches:
+        raise AssertionError(f"Expected at least one runtime uninstall result to expose {counter_name!r}")
+    return tuple(matches)
+
+
 def _descriptor_with_selection_alias_fragment(fragment: str):
     matches = [
         descriptor
@@ -92,8 +111,8 @@ def _descriptor_with_spaced_selection_alias() -> tuple[object, str]:
         )
         if alias is not None:
             matches.append((descriptor, alias))
-    if len(matches) != 1:
-        raise AssertionError(f"Expected exactly one runtime descriptor with a spaced alias, got {len(matches)}")
+    if not matches:
+        raise AssertionError("Expected at least one runtime descriptor with a spaced alias")
     return matches[0]
 
 
@@ -195,29 +214,19 @@ def _assert_single_runtime_next_steps(
     suggest_next_command = adapter.format_command("suggest-next")
     pause_work_command = adapter.format_command("pause-work")
     ordered_patterns = (
-        re.escape("Startup checklist"),
-        re.escape(f"Beginner Onboarding Hub: {beginner_onboarding_hub_url()}"),
-        re.escape("First-run order: `help -> start -> tour -> new-project / map-research -> resume-work`"),
+        re.escape("After install"),
+        re.escape(f"Beginner path: {beginner_onboarding_hub_url()}"),
         re.escape(
-            f"1. Open {descriptor.display_name} from your system terminal ({adapter.launch_command})."
+            f"Runtime surface: Run {adapter.help_command} for the command list. "
+            f"First-run order is {beginner_startup_ladder_text()}."
         ),
-        re.escape(f"2. Run {adapter.help_command} for the command list."),
-        re.escape(
-            "3. Run "
-            f"{adapter.format_command('start')} if you're not sure what fits this folder yet. "
-            "Run "
-            f"{adapter.format_command('tour')} if you want a read-only overview of the broader command surface first."
-        ),
-        re.escape(
-            f"4. Then use {adapter.new_project_command} for a new project or "
-            f"{adapter.map_research_command} for existing work."
-        ),
-        re.escape(
-            f"Fast bootstrap: use {adapter.new_project_command} --minimal for the shortest onboarding path."
-        ),
-        re.escape(
-            f"6. When you return later, use {resume_work_command} after reopening the right workspace. "
-        ),
+        re.escape(f"Selected runtime: {descriptor.display_name} ({adapter.launch_command});"),
+        re.escape(f"help {adapter.help_command};"),
+        re.escape(f"start {adapter.format_command('start')};"),
+        re.escape(f"tour {adapter.format_command('tour')};"),
+        re.escape(f"new work {adapter.new_project_command};"),
+        re.escape(f"existing work {adapter.map_research_command}."),
+        re.escape(f"Fast bootstrap: {adapter.new_project_command} --minimal; return later with {resume_work_command}. "),
         re.escape(
             recovery_ladder_note(
                 resume_work_phrase=f"`{resume_work_command}`",
@@ -225,7 +234,7 @@ def _assert_single_runtime_next_steps(
                 pause_work_phrase=f"`{pause_work_command}`",
             )
         ),
-        re.escape("7. Use gpd --help for local diagnostics and later setup."),
+        re.escape("Use gpd --help for local diagnostics and later setup."),
     )
     cursor = 0
     for pattern in ordered_patterns:
@@ -236,9 +245,7 @@ def _assert_single_runtime_next_steps(
     assert beginner_startup_ladder_text() in output
     assert_install_summary_runtime_follow_up_contract(
         output,
-        runtime_help_fragments=(
-            f"Run {adapter.help_command} for the command list.",
-        ),
+        runtime_help_fragments=(f"Run {adapter.help_command} for the command list.",),
     )
 
 
@@ -252,11 +259,11 @@ def _assert_multi_runtime_next_step_line(output: str, descriptor) -> None:
         rf"{re.escape(adapter.format_command('tour'))}.*?"
         rf"{re.escape(adapter.new_project_command)}.*?"
         rf"{re.escape(adapter.map_research_command)}.*?"
-        rf"{re.escape(adapter.format_command('resume-work'))}.*?"
-        rf"Fast bootstrap: use .*? --minimal",
+        rf"{re.escape(adapter.format_command('resume-work'))}",
         re.S,
     )
     assert pattern.search(output), output
+    assert re.search(r"Fast bootstrap: use .*? --minimal", output, re.S), output
 
 
 def _assert_install_summary_recovery_contract(
@@ -302,6 +309,7 @@ def gpd_root(tmp_path: Path) -> Path:
     )
     (root / "hooks" / "statusline.py").write_text("print('ok')\n", encoding="utf-8")
     (root / "hooks" / "check_update.py").write_text("print('ok')\n", encoding="utf-8")
+    (root / "hooks" / "notify.py").write_text("print('ok')\n", encoding="utf-8")
     for subdir in ("references", "templates", "workflows"):
         d = root / "specs" / subdir
         d.mkdir(parents=True)
@@ -396,6 +404,11 @@ def test_install_all_continues_on_failure(tmp_path: Path):
 
     # Should exit with code 1 because some runtimes failed
     assert result.exit_code == 1
+    assert "Install Summary" in result.output
+    assert "Install failures:" in result.output
+    assert "After install" not in result.output
+    assert "Beginner path:" not in result.output
+    assert "Use gpd --help for local diagnostics and later setup." not in result.output
 
 
 def test_install_all_success_exits_0(tmp_path: Path):
@@ -429,7 +442,9 @@ def test_install_banner_uses_display_names(tmp_path: Path):
     ):
         mock_get.return_value = _mock_install_adapter(_PRIMARY_INSTALL_DESCRIPTOR)
 
-        result = runner.invoke(app, ["--cwd", str(tmp_path), "install", _PRIMARY_INSTALL_DESCRIPTOR.runtime_name, "--local"])
+        result = runner.invoke(
+            app, ["--cwd", str(tmp_path), "install", _PRIMARY_INSTALL_DESCRIPTOR.runtime_name, "--local"]
+        )
 
     assert result.exit_code == 0
     assert "GPD v" in result.output
@@ -476,7 +491,9 @@ def test_install_summary_formats_target_relative_to_cwd(tmp_path: Path):
     ):
         mock_get.return_value = _mock_install_adapter(_PRIMARY_INSTALL_DESCRIPTOR)
 
-        result = runner.invoke(app, ["--cwd", str(tmp_path), "install", _PRIMARY_INSTALL_DESCRIPTOR.runtime_name, "--local"])
+        result = runner.invoke(
+            app, ["--cwd", str(tmp_path), "install", _PRIMARY_INSTALL_DESCRIPTOR.runtime_name, "--local"]
+        )
 
     assert result.exit_code == 0
     assert f"./{_PRIMARY_INSTALL_DESCRIPTOR.config_dir_name}" in result.output
@@ -496,7 +513,9 @@ def test_install_summary_surfaces_help_then_new_or_existing_entry_points(tmp_pat
     ):
         mock_get.return_value = _mock_install_adapter(_PRIMARY_INSTALL_DESCRIPTOR)
 
-        result = runner.invoke(app, ["--cwd", str(tmp_path), "install", _PRIMARY_INSTALL_DESCRIPTOR.runtime_name, "--local"])
+        result = runner.invoke(
+            app, ["--cwd", str(tmp_path), "install", _PRIMARY_INSTALL_DESCRIPTOR.runtime_name, "--local"]
+        )
 
     assert result.exit_code == 0
     _assert_single_runtime_next_steps(result.output)
@@ -534,7 +553,7 @@ def test_install_summary_lists_runtime_specific_help_for_multi_runtime_install(t
         result = runner.invoke(app, ["install", *(descriptor.runtime_name for descriptor in descriptors), "--local"])
 
     assert result.exit_code == 0
-    assert "Startup checklist" in result.output
+    assert "After install" in result.output
     assert beginner_startup_ladder_text() in result.output
     for descriptor in descriptors:
         _assert_multi_runtime_next_step_line(result.output, descriptor)
@@ -557,6 +576,24 @@ def test_install_help_surfaces_interactive_batch_and_targeting_guidance() -> Non
     assert "--local" in normalized_output
     assert "--global" in normalized_output
     assert "--target-dir" in normalized_output
+    assert "Override the runtime config directory;" in normalized_output
+    assert "defaults" in normalized_output
+    assert "local scope" in normalized_output
+    assert "runtime's canonical" in normalized_output
+    assert "global config dir" in normalized_output
+
+
+def test_uninstall_help_aligns_target_dir_wording() -> None:
+    result = runner.invoke(app, ["uninstall", "--help"])
+    normalized_output = _normalize_cli_output(result.output)
+
+    assert result.exit_code == 0
+    assert "--target-dir" in normalized_output
+    assert "Override the runtime config directory;" in normalized_output
+    assert "defaults" in normalized_output
+    assert "local scope" in normalized_output
+    assert "runtime's canonical" in normalized_output
+    assert "global config dir" in normalized_output
 
 
 # ─── 4. Uninstall without manifest ──────────────────────────────────────────
@@ -590,11 +627,43 @@ def test_uninstall_empty_target_nothing_to_remove(tmp_path: Path):
 
 def test_uninstall_nonexistent_target_skips(tmp_path: Path):
     """Uninstall when target dir doesn't exist — skip with message."""
+    target = tmp_path / "nonexistent"
     result = runner.invoke(
         app,
-        ["uninstall", _PRIMARY_INSTALL_DESCRIPTOR.runtime_name, "--local", "--target-dir", str(tmp_path / "nonexistent")],
+        ["uninstall", _PRIMARY_INSTALL_DESCRIPTOR.runtime_name, "--local", "--target-dir", str(target), "--yes"],
     )
     assert result.exit_code == 0
+
+
+def test_uninstall_missing_codex_target_still_removes_marker_backed_skills(tmp_path: Path) -> None:
+    """Codex uninstall must delegate to the adapter even when .codex/ is gone."""
+    descriptor = next(
+        descriptor
+        for descriptor in _INSTALL_TEST_DESCRIPTORS
+        if any(prefix.rstrip("/") == "skills" for prefix in descriptor.manifest_file_prefixes)
+    )
+    workspace = tmp_path / "workspace"
+    target = workspace / descriptor.config_dir_name
+    skills_dir = workspace / ".agents" / "skills"
+    managed_skill = skills_dir / "gpd-help"
+    managed_skill.mkdir(parents=True)
+    (managed_skill / "SKILL.md").write_text(
+        "<!-- Managed by Get Physics Done (GPD). -->\n# Help\n",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        ["--raw", "uninstall", descriptor.runtime_name, "--local", "--target-dir", str(target)],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    outcome = payload["uninstalled"][0]
+    assert outcome["runtime"] == descriptor.runtime_name
+    assert outcome["status"] == "removed"
+    assert any("GPD skills" in item for item in outcome["removed"])
+    assert not managed_skill.exists()
 
 
 def test_uninstall_all_continues_after_one_runtime_failure(tmp_path: Path) -> None:
@@ -763,8 +832,8 @@ def test_install_no_args_uses_interactive_defaults(tmp_path: Path):
         mock_adapter = MagicMock()
         mock_adapter.display_name = _PRIMARY_INSTALL_DESCRIPTOR.display_name
         mock_adapter.help_command = _install_adapter().help_command
-        mock_adapter.resolve_target_dir.side_effect = (
-            lambda is_global, cwd=None: tmp_path
+        mock_adapter.resolve_target_dir.side_effect = lambda is_global, cwd=None: (
+            tmp_path
             / (
                 f"{_PRIMARY_INSTALL_DESCRIPTOR.config_dir_name}-global"
                 if is_global
@@ -869,6 +938,169 @@ def test_install_raw_finalize_failure_not_reported_as_installed(tmp_path: Path):
     payload = json.loads(result.output)
     assert payload["installed"] == []
     assert payload["failed"] == [{"runtime": _PRIMARY_INSTALL_DESCRIPTOR.runtime_name, "error": "finalize boom"}]
+
+
+def test_install_raw_finalize_failure_rolls_back_new_cli_target(gpd_root: Path, tmp_path: Path) -> None:
+    """CLI install finalization failure must not leave a fresh target looking installed."""
+    descriptor = _PRIMARY_INSTALL_DESCRIPTOR
+    target = tmp_path / descriptor.config_dir_name
+    real_adapter = get_adapter(descriptor.runtime_name)
+
+    class FinalizeFailingAdapter:
+        def __getattr__(self, name):
+            return getattr(real_adapter, name)
+
+        def install(self, *args, **kwargs):
+            return real_adapter.install(*args, **kwargs)
+
+        def finalize_install(self, install_result, *, force_statusline=False):
+            raise RuntimeError("finalize boom")
+
+    with (
+        patch("gpd.adapters.get_adapter", return_value=FinalizeFailingAdapter()),
+        patch("gpd.version.resolve_install_gpd_root", return_value=gpd_root),
+        patch("gpd.cli._get_cwd", return_value=tmp_path),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "--raw",
+                "install",
+                descriptor.runtime_name,
+                "--target-dir",
+                str(target),
+                "--skip-readiness-check",
+            ],
+        )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["installed"] == []
+    failure = payload["failed"][0]
+    assert failure["runtime"] == descriptor.runtime_name
+    assert "finalize boom" in failure["error"]
+    assert "Rolled back partial install" in failure["error"]
+    assert not target.exists()
+
+
+def test_install_raw_finalize_failure_restores_existing_cli_target(gpd_root: Path, tmp_path: Path) -> None:
+    """CLI finalization failure should restore an existing complete install."""
+    descriptor = _PRIMARY_INSTALL_DESCRIPTOR
+    target = tmp_path / descriptor.config_dir_name
+    real_adapter = get_adapter(descriptor.runtime_name)
+    seed_result = real_adapter.install(gpd_root, target, is_global=False, explicit_target=True)
+    real_adapter.finalize_install(seed_result)
+    manifest_before = (target / MANIFEST_NAME).read_text(encoding="utf-8")
+    settings_before = (target / "settings.json").read_text(encoding="utf-8")
+
+    class FinalizeFailingAdapter:
+        def __getattr__(self, name):
+            return getattr(real_adapter, name)
+
+        def install(self, *args, **kwargs):
+            return real_adapter.install(*args, **kwargs)
+
+        def finalize_install(self, install_result, *, force_statusline=False):
+            raise RuntimeError("finalize boom")
+
+    with (
+        patch("gpd.adapters.get_adapter", return_value=FinalizeFailingAdapter()),
+        patch("gpd.version.resolve_install_gpd_root", return_value=gpd_root),
+        patch("gpd.cli._get_cwd", return_value=tmp_path),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "--raw",
+                "install",
+                descriptor.runtime_name,
+                "--target-dir",
+                str(target),
+                "--skip-readiness-check",
+            ],
+        )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["installed"] == []
+    assert "Rolled back partial install" in payload["failed"][0]["error"]
+    assert (target / MANIFEST_NAME).read_text(encoding="utf-8") == manifest_before
+    assert (target / "settings.json").read_text(encoding="utf-8") == settings_before
+    assert not (target / "gpd-install-incomplete.json").exists()
+
+
+def test_install_raw_finalizes_same_adapter_instance_used_for_install(tmp_path: Path) -> None:
+    """Deferred finalization must keep adapter instance state from install()."""
+    descriptor = _PRIMARY_INSTALL_DESCRIPTOR
+    target = _install_target(tmp_path, descriptor)
+    gpd_root = tmp_path / "gpd-root"
+    instances: list[object] = []
+
+    class SpyAdapter:
+        runtime_name = descriptor.runtime_name
+        display_name = descriptor.display_name
+        config_dir_name = descriptor.config_dir_name
+        help_command = _install_adapter(descriptor).help_command
+
+        def __init__(self) -> None:
+            self.installed = False
+            self.finalized = False
+            instances.append(self)
+
+        def resolve_target_dir(self, is_global, cwd=None):
+            return target
+
+        def install(self, gpd_root_arg, target_dir, *, is_global=False, explicit_target=False):
+            assert gpd_root_arg == gpd_root
+            assert target_dir == target
+            self.installed = True
+            return {"runtime": descriptor.runtime_name, "commands": 0, "agents": 0, "target": str(target)}
+
+        def finalize_install(self, install_result, *, force_statusline=False):
+            if not self.installed:
+                raise AssertionError("finalized a different adapter instance")
+            self.finalized = True
+
+    with (
+        patch("gpd.adapters.get_adapter", side_effect=lambda _runtime: SpyAdapter()),
+        patch("gpd.version.resolve_install_gpd_root", return_value=gpd_root),
+        patch("gpd.cli._get_cwd", return_value=tmp_path),
+    ):
+        result = runner.invoke(
+            app,
+            ["--raw", "install", descriptor.runtime_name, "--local", "--skip-readiness-check"],
+            catch_exceptions=False,
+        )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["failed"] == []
+    assert "__gpd_install_adapter_instance__" not in json.dumps(payload)
+    assert any(getattr(instance, "installed", False) and getattr(instance, "finalized", False) for instance in instances)
+
+
+def test_install_human_reports_failures_after_progress_exits(tmp_path: Path):
+    """Human install failures should remain visible after Rich progress exits."""
+
+    def mock_install_single(runtime_name, *, is_global, target_dir_override=None):
+        raise RuntimeError("install boom")
+
+    mock_adapter = MagicMock()
+    mock_adapter.display_name = _PRIMARY_INSTALL_DESCRIPTOR.display_name
+
+    with (
+        patch("gpd.cli._install_single_runtime", side_effect=mock_install_single),
+        patch("gpd.adapters.get_adapter", return_value=mock_adapter),
+    ):
+        result = runner.invoke(app, ["install", _PRIMARY_INSTALL_DESCRIPTOR.runtime_name, "--local"])
+
+    assert result.exit_code == 1
+    normalized_output = _normalize_cli_output(result.output)
+    assert "Install failures:" in normalized_output
+    assert (
+        f"{_PRIMARY_INSTALL_DESCRIPTOR.display_name} ({_PRIMARY_INSTALL_DESCRIPTOR.runtime_name}): install boom"
+        in normalized_output
+    )
 
 
 @patch("gpd.core.health.run_doctor")
@@ -1019,6 +1251,27 @@ def test_install_preflight_forwards_scope_and_explicit_target_dir(mock_run_docto
     assert kwargs["target_dir"] == target_dir.resolve(strict=False)
 
 
+@patch("gpd.core.health.run_doctor")
+def test_install_skip_readiness_check_reports_skipped_not_passed(mock_run_doctor, tmp_path: Path) -> None:
+    runtime_name = _PRIMARY_INSTALL_DESCRIPTOR.runtime_name
+    target_dir = tmp_path / "target-config"
+
+    def mock_install_single(runtime_name, *, is_global, target_dir_override=None):
+        return {"runtime": runtime_name, "commands": 5, "agents": 3, "target": str(target_dir)}
+
+    with (
+        patch("gpd.cli._install_single_runtime", side_effect=mock_install_single),
+        patch("gpd.adapters.get_adapter") as mock_get,
+    ):
+        mock_get.return_value = _mock_install_adapter(_PRIMARY_INSTALL_DESCRIPTOR)
+        result = runner.invoke(app, ["install", runtime_name, "--local", "--skip-readiness-check"])
+
+    assert result.exit_code == 0
+    mock_run_doctor.assert_not_called()
+    assert "readiness check skipped" in result.output
+    assert "readiness check passed" not in result.output
+
+
 def test_uninstall_raw_outputs_json(tmp_path: Path):
     """--raw flag on uninstall outputs clean JSON."""
     target = _install_target(tmp_path)
@@ -1036,6 +1289,36 @@ def test_uninstall_raw_outputs_json(tmp_path: Path):
     assert payload["uninstalled"][0]["target"] == str(target)
     assert payload["uninstalled"][0]["reason"] == "nothing to remove"
     assert payload["uninstalled"][0]["removed"] == []
+
+
+def test_uninstall_human_reports_managed_mcp_server_removal(gpd_root: Path, tmp_path: Path) -> None:
+    for descriptor in _descriptors_with_uninstall_counter(tmp_path, "mcpServers"):
+        adapter = get_adapter(descriptor.runtime_name)
+        target = tmp_path / "human-uninstall" / descriptor.config_dir_name
+        target.mkdir(parents=True)
+        adapter.install(gpd_root, target, is_global=False)
+
+        result = runner.invoke(app, ["uninstall", descriptor.runtime_name, "--target-dir", str(target), "--yes"])
+
+        assert result.exit_code == 0
+        assert "GPD" in result.output
+        assert "MCP servers" in result.output
+
+
+def test_uninstall_raw_reports_managed_mcp_server_removal(gpd_root: Path, tmp_path: Path) -> None:
+    for descriptor in _descriptors_with_uninstall_counter(tmp_path, "mcpServers"):
+        adapter = get_adapter(descriptor.runtime_name)
+        target = tmp_path / "raw-uninstall" / descriptor.config_dir_name
+        target.mkdir(parents=True)
+        adapter.install(gpd_root, target, is_global=False)
+
+        result = runner.invoke(app, ["--raw", "uninstall", descriptor.runtime_name, "--target-dir", str(target)])
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        outcome = payload["uninstalled"][0]
+        assert any("GPD MCP servers" in item for item in outcome["removed"])
+        assert outcome["mcpServers"] > 0
 
 
 @patch("gpd.core.health.run_doctor")
@@ -1236,7 +1519,7 @@ def test_install_target_dir_uses_canonical_global_path_when_runtime_env_override
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The default global path should not be mistaken for global when env overrides move it."""
+    """Both default and env-overridden global paths should classify as global."""
     from gpd.adapters import get_adapter
     from gpd.adapters.runtime_catalog import resolve_global_config_dir
 
@@ -1254,9 +1537,15 @@ def test_install_target_dir_uses_canonical_global_path_when_runtime_env_override
     canonical_target = resolve_global_config_dir(descriptor, home=home, environ={})
     canonical_target.mkdir(parents=True)
 
-    env_var = descriptor.global_config.env_var or descriptor.global_config.env_dir_var or descriptor.global_config.env_file_var
+    env_var = (
+        descriptor.global_config.env_var
+        or descriptor.global_config.env_dir_var
+        or descriptor.global_config.env_file_var
+    )
     assert env_var is not None
-    env_value = str(override_dir / "config.json") if env_var == descriptor.global_config.env_file_var else str(override_dir)
+    env_value = (
+        str(override_dir / "config.json") if env_var == descriptor.global_config.env_file_var else str(override_dir)
+    )
     monkeypatch.setenv(env_var, env_value)
 
     mock_adapter = MagicMock(
@@ -1291,7 +1580,7 @@ def test_install_target_dir_uses_canonical_global_path_when_runtime_env_override
     assert captured_calls == [
         {
             "runtime": runtime_name,
-            "is_global": False,
+            "is_global": True,
             "target_dir_override": str(canonical_target),
         }
     ]
@@ -1315,7 +1604,11 @@ def test_install_target_dir_uses_env_overridden_global_path_as_global_target(
     runtime_name = _ENV_OVERRIDE_INSTALL_DESCRIPTOR.runtime_name
     adapter = get_adapter(runtime_name)
     descriptor = adapter.runtime_descriptor
-    env_var = descriptor.global_config.env_var or descriptor.global_config.env_dir_var or descriptor.global_config.env_file_var
+    env_var = (
+        descriptor.global_config.env_var
+        or descriptor.global_config.env_dir_var
+        or descriptor.global_config.env_file_var
+    )
     assert env_var is not None
     monkeypatch.setenv(env_var, str(override_dir))
 
@@ -1328,8 +1621,8 @@ def test_install_target_dir_uses_env_overridden_global_path_as_global_target(
         map_research_command=adapter.map_research_command,
     )
     mock_adapter.finalize_install.return_value = None
-    mock_adapter.resolve_target_dir.side_effect = (
-        lambda is_global, cwd=None: override_dir if is_global else workspace / descriptor.config_dir_name
+    mock_adapter.resolve_target_dir.side_effect = lambda is_global, cwd=None: (
+        override_dir if is_global else workspace / descriptor.config_dir_name
     )
     captured_preflight: list[dict[str, object]] = []
 
@@ -1408,7 +1701,9 @@ def test_install_single_runtime_resolves_relative_target_dir_against_cli_cwd(tmp
         patch("gpd.adapters.get_adapter", return_value=SpyAdapter()),
         patch("gpd.cli._get_cwd", return_value=cli_cwd),
     ):
-        _install_single_runtime(_PRIMARY_INSTALL_DESCRIPTOR.runtime_name, is_global=False, target_dir_override="relative-target")
+        _install_single_runtime(
+            _PRIMARY_INSTALL_DESCRIPTOR.runtime_name, is_global=False, target_dir_override="relative-target"
+        )
 
     assert captured_calls == [cli_cwd / "relative-target"]
 
@@ -1535,10 +1830,53 @@ def test_uninstall_resolves_relative_target_dir_against_cli_cwd(tmp_path: Path):
         patch("gpd.adapters.get_adapter", return_value=SpyAdapter()),
         patch("gpd.cli._get_cwd", return_value=cli_cwd),
     ):
-        result = runner.invoke(app, ["uninstall", _PRIMARY_INSTALL_DESCRIPTOR.runtime_name, "--target-dir", "relative-target"])
+        result = runner.invoke(
+            app,
+            ["uninstall", _PRIMARY_INSTALL_DESCRIPTOR.runtime_name, "--target-dir", "relative-target", "--yes"],
+        )
 
     assert result.exit_code == 0
     assert captured_targets == [target]
+
+
+def test_uninstall_target_dir_prompts_with_resolved_path(tmp_path: Path) -> None:
+    target = tmp_path / "installed"
+    target.mkdir()
+    mock_adapter = MagicMock()
+    mock_adapter.display_name = _PRIMARY_INSTALL_DESCRIPTOR.display_name
+    mock_adapter.uninstall.return_value = {"runtime": _PRIMARY_INSTALL_DESCRIPTOR.runtime_name, "removed": ["commands"]}
+
+    with patch("gpd.adapters.get_adapter", return_value=mock_adapter):
+        result = runner.invoke(
+            app,
+            ["uninstall", _PRIMARY_INSTALL_DESCRIPTOR.runtime_name, "--target-dir", str(target)],
+            input="n\n",
+            terminal_width=1000,
+        )
+
+    assert result.exit_code == 0
+    assert str(target) in result.output.replace("\n", "")
+    assert "Cancelled." in result.output
+    mock_adapter.uninstall.assert_not_called()
+
+
+@pytest.mark.parametrize("confirm_flag", ["--yes", "--force"])
+def test_uninstall_target_dir_confirm_flags_skip_prompt(tmp_path: Path, confirm_flag: str) -> None:
+    target = tmp_path / "installed"
+    target.mkdir()
+    mock_adapter = MagicMock()
+    mock_adapter.display_name = _PRIMARY_INSTALL_DESCRIPTOR.display_name
+    mock_adapter.uninstall.return_value = {"runtime": _PRIMARY_INSTALL_DESCRIPTOR.runtime_name, "removed": ["commands"]}
+
+    with patch("gpd.adapters.get_adapter", return_value=mock_adapter):
+        result = runner.invoke(
+            app,
+            ["uninstall", _PRIMARY_INSTALL_DESCRIPTOR.runtime_name, "--target-dir", str(target), confirm_flag],
+        )
+
+    assert result.exit_code == 0
+    assert "Remove GPD from" not in result.output
+    mock_adapter.uninstall.assert_called_once_with(target)
 
 
 def test_uninstall_rejects_target_dir_with_foreign_manifest(tmp_path: Path) -> None:
@@ -1556,7 +1894,11 @@ def test_uninstall_rejects_target_dir_with_foreign_manifest(tmp_path: Path) -> N
         encoding="utf-8",
     )
 
-    result = runner.invoke(app, ["uninstall", runtime_descriptor.runtime_name, "--target-dir", str(target)])
+    result = runner.invoke(
+        app,
+        ["uninstall", runtime_descriptor.runtime_name, "--target-dir", str(target)],
+        input="y\n",
+    )
 
     assert result.exit_code == 1
     foreign_label = _install_adapter(foreign_descriptor).display_name
@@ -1584,6 +1926,7 @@ def test_uninstall_rejects_target_dir_with_foreign_manifest_without_wrapping(tmp
     result = runner.invoke(
         app,
         ["uninstall", runtime_descriptor.runtime_name, "--target-dir", str(target)],
+        input="y\n",
         terminal_width=80,
     )
 
@@ -1600,7 +1943,9 @@ def test_install_interactive_rejects_ambiguous_runtime_name(tmp_path: Path):
     """Substring matches that hit multiple runtimes should fail closed."""
     ambiguous_descriptors = _descriptors_with_selection_alias_fragment("code")
     with (
-        patch("gpd.adapters.list_runtimes", return_value=[descriptor.runtime_name for descriptor in ambiguous_descriptors]),
+        patch(
+            "gpd.adapters.list_runtimes", return_value=[descriptor.runtime_name for descriptor in ambiguous_descriptors]
+        ),
         patch("gpd.adapters.get_adapter") as mock_get,
     ):
         adapters = {
@@ -1636,12 +1981,14 @@ def test_install_interactive_accepts_unique_fuzzy_runtime_name(tmp_path: Path):
 
     with (
         patch("gpd.cli._install_single_runtime", side_effect=mock_install_single),
-        patch("gpd.adapters.list_runtimes", return_value=[descriptor.runtime_name for descriptor in _INSTALL_TEST_DESCRIPTORS]),
+        patch(
+            "gpd.adapters.list_runtimes",
+            return_value=[descriptor.runtime_name for descriptor in _INSTALL_TEST_DESCRIPTORS],
+        ),
         patch("gpd.adapters.get_adapter") as mock_get,
     ):
         adapters = {
-            descriptor.runtime_name: _mock_install_adapter(descriptor)
-            for descriptor in _INSTALL_TEST_DESCRIPTORS
+            descriptor.runtime_name: _mock_install_adapter(descriptor) for descriptor in _INSTALL_TEST_DESCRIPTORS
         }
         mock_get.side_effect = lambda runtime: adapters[runtime]
 
@@ -1847,7 +2194,7 @@ def test_uninstall_accepts_runtime_selection_alias(tmp_path: Path) -> None:
             return {"runtime": target_descriptor.runtime_name, "removed": []}
 
     with patch("gpd.adapters.get_adapter", return_value=SpyAdapter()):
-        result = runner.invoke(app, ["uninstall", selection_alias, "--target-dir", str(target)])
+        result = runner.invoke(app, ["uninstall", selection_alias, "--target-dir", str(target), "--yes"])
 
     assert result.exit_code == 0
     assert captured_targets == [target]

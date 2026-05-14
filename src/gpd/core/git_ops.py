@@ -17,6 +17,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
+from gpd.core.artifact_text import TEXT_LIKE_ARTIFACT_SUFFIXES
 from gpd.core.constants import PLANNING_DIR_NAME
 from gpd.core.errors import ConfigError, ValidationError
 from gpd.core.observability import instrument_gpd_function
@@ -108,23 +109,6 @@ _ASSIGNMENT_NONFINITE_RE = re.compile(
     re.VERBOSE,
 )
 _DERIVATION_ASSERT_TARGET_RE = re.compile(r"(?i)^derivation-(?!state\.).+\.(?:md|py)$")
-_TEXT_VALIDATION_SUFFIXES = frozenset(
-    {
-        ".bib",
-        ".csv",
-        ".ipynb",
-        ".json",
-        ".markdown",
-        ".md",
-        ".py",
-        ".rst",
-        ".tex",
-        ".tsv",
-        ".txt",
-        ".yaml",
-        ".yml",
-    }
-)
 
 
 # ---------------------------------------------------------------------------
@@ -155,6 +139,35 @@ def _staged_files(cwd: Path) -> list[str]:
     return [line.strip() for line in stdout.splitlines() if line.strip()]
 
 
+def _changed_files_for_pathspec(cwd: Path, pathspecs: list[str]) -> list[str]:
+    """Return changed, staged, or untracked regular-file paths under *pathspecs*."""
+    if not pathspecs:
+        return []
+
+    changed: list[str] = []
+    seen: set[str] = set()
+
+    def _append_from_stdout(stdout: str) -> None:
+        for line in stdout.splitlines():
+            file_path = line.strip()
+            if not file_path or file_path in seen:
+                continue
+            seen.add(file_path)
+            changed.append(file_path)
+
+    commands = (
+        ["diff", "--name-only", "--diff-filter=ACMR", "--", *pathspecs],
+        ["diff", "--cached", "--name-only", "--diff-filter=ACMR", "--", *pathspecs],
+        ["ls-files", "--others", "--exclude-standard", "--", *pathspecs],
+    )
+    for args in commands:
+        rc, stdout, _stderr = _exec_git(cwd, args)
+        if rc == 0 and stdout:
+            _append_from_stdout(stdout)
+
+    return changed
+
+
 def _expand_check_inputs(cwd: Path, files: list[str]) -> list[str]:
     """Resolve staged-file defaults and expand directory inputs recursively."""
     inputs = files or _staged_files(cwd)
@@ -183,21 +196,28 @@ def _expand_check_inputs(cwd: Path, files: list[str]) -> list[str]:
 
 def _is_derivation_assert_target(file_path: str) -> bool:
     """Return whether a file is a derivation artifact subject to ASSERT gating."""
-    return bool(_DERIVATION_ASSERT_TARGET_RE.fullmatch(Path(file_path).name))
+    return _is_gpd_phase_path(file_path) and bool(
+        _DERIVATION_ASSERT_TARGET_RE.fullmatch(Path(file_path).name)
+    )
+
+
+def _is_gpd_phase_path(file_path: str) -> bool:
+    """Return whether *file_path* is under the canonical GPD/phases tree."""
+    parts = tuple(part.lower() for part in Path(file_path).parts)
+    return len(parts) >= 3 and parts[0] == PLANNING_DIR_NAME.lower() and parts[1] == "phases"
 
 
 def _is_phase_verification_target(file_path: str) -> bool:
     """Return whether a file is a phase verification artifact subject to ASSERT gating."""
-    path = Path(file_path)
-    parts = {part.lower() for part in path.parts}
-    if "phases" not in parts:
+    if not _is_gpd_phase_path(file_path):
         return False
+    path = Path(file_path)
     name = path.name.lower()
     return name == "verification.md" or name.endswith("-verification.md")
 
 
 def _supports_assert_convention_validation(file_path: str) -> bool:
-    """Return whether a text artifact can carry ASSERT_CONVENTION directives."""
+    """Return whether a file type supports ASSERT_CONVENTION parsing."""
     return Path(file_path).suffix.lower() in {".md", ".markdown", ".tex", ".py"}
 
 
@@ -206,14 +226,9 @@ def _requires_assert_convention_check(file_path: str) -> bool:
     return _is_derivation_assert_target(file_path) or _is_phase_verification_target(file_path)
 
 
-def _supports_assert_convention_validation(file_path: str) -> bool:
-    """Return whether a file type supports ASSERT_CONVENTION parsing."""
-    return Path(file_path).suffix.lower() in {".md", ".markdown", ".py", ".tex"}
-
-
 def _requires_utf8_text_validation(file_path: str) -> bool:
     """Return whether a file should be decoded as UTF-8 and text-validated."""
-    return Path(file_path).suffix.lower() in _TEXT_VALIDATION_SUFFIXES
+    return Path(file_path).suffix.lower() in TEXT_LIKE_ARTIFACT_SUFFIXES
 
 
 def _has_assert_convention_marker(content: str) -> bool:
@@ -224,10 +239,10 @@ def _has_assert_convention_marker(content: str) -> bool:
 def _load_active_convention_lock(cwd: Path) -> tuple[object | None, bool]:
     """Load the project convention lock if it has any active values."""
     from gpd.core.conventions import ConventionLock, is_bogus_value
-    from gpd.core.state import load_state_json
+    from gpd.core.state import load_state_json_readonly
 
     try:
-        state = load_state_json(cwd) or {}
+        state = load_state_json_readonly(cwd) or {}
     except Exception:
         return None, False
 
@@ -453,6 +468,17 @@ def _check_assert_conventions(
     detail.assert_convention_valid = True
 
 
+def _project_relative_file_path(cwd: Path, full_path: Path, original_path: str) -> str:
+    """Return a project-relative POSIX path when an absolute input lives inside *cwd*."""
+    if not Path(original_path).is_absolute():
+        return Path(original_path).as_posix()
+
+    try:
+        return full_path.resolve(strict=False).relative_to(cwd.resolve(strict=False)).as_posix()
+    except ValueError:
+        return Path(original_path).as_posix()
+
+
 def _check_single_file(
     cwd: Path,
     file_path: str,
@@ -464,6 +490,7 @@ def _check_single_file(
     """Run pre-commit checks on a single file."""
     detail = FileCheckDetail(file=file_path)
     full_path = Path(file_path) if Path(file_path).is_absolute() else cwd / file_path
+    project_file_path = _project_relative_file_path(cwd, full_path, file_path)
 
     if not full_path.exists():
         detail.exists = False
@@ -509,15 +536,16 @@ def _check_single_file(
     elif _text_contains_nonfinite_value(content):
         _mark_nonfinite(detail)
 
-    if _requires_assert_convention_check(file_path) or (
-        _supports_assert_convention_validation(file_path) and _has_assert_convention_marker(content)
+    require_assertions = _requires_assert_convention_check(project_file_path)
+    if require_assertions or (
+        _supports_assert_convention_validation(project_file_path) and _has_assert_convention_marker(content)
     ):
         _check_assert_conventions(
             content,
             detail,
             file_path=file_path,
             convention_lock=convention_lock,
-            require_assertions=_requires_assert_convention_check(file_path),
+            require_assertions=require_assertions,
         )
 
     return detail
@@ -616,7 +644,8 @@ def cmd_commit(
 
     # Determine files to stage
     files_to_stage: list[str]
-    if files:
+    explicit_file_args = bool(files)
+    if explicit_file_args:
         files_to_stage = list(files)
     else:
         files_to_stage = [f"{PLANNING_DIR_NAME}/"]
@@ -643,7 +672,8 @@ def cmd_commit(
             reason="commit_docs_disabled",
         )
 
-    pre_commit = cmd_pre_commit_check(cwd, files_to_stage)
+    files_to_validate = files_to_stage if explicit_file_args else _changed_files_for_pathspec(cwd, files_to_stage)
+    pre_commit = cmd_pre_commit_check(cwd, files_to_validate)
     if not pre_commit.passed:
         warning_summary = "; ".join(dict.fromkeys(pre_commit.warnings)) or "validation failed"
         return CommitResult(
@@ -666,8 +696,12 @@ def cmd_commit(
             reason="git_add_failed",
         )
 
-    # Check if there's anything to commit
-    rc, stdout, stderr = _exec_git(cwd, ["diff", "--cached", "--quiet"])
+    # Check whether the intended pathspec has staged changes. The index may
+    # already contain unrelated staged paths that this command must preserve.
+    rc, stdout, stderr = _exec_git(
+        cwd,
+        ["diff", "--cached", "--quiet", "--", *files_to_stage],
+    )
     if rc == 0:
         # Nothing staged — no changes to commit
         return CommitResult(
@@ -686,8 +720,8 @@ def cmd_commit(
             reason="git_diff_failed",
         )
 
-    # Commit
-    rc, stdout, stderr = _exec_git(cwd, ["commit", "-m", message])
+    # Commit only the intended pathspec, preserving unrelated staged paths.
+    rc, stdout, stderr = _exec_git(cwd, ["commit", "-m", message, "--", *files_to_stage])
     if rc != 0:
         return CommitResult(
             committed=False,

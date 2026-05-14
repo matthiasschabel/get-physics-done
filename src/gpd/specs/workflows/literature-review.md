@@ -1,8 +1,7 @@
 <purpose>
 Conduct a systematic literature review for a physics research topic. Map the intellectual landscape: foundational works, methodological approaches, key results, controversies, and open questions. Produce LITERATURE-REVIEW.md consumed by planning and paper-writing workflows.
 
-Also emit a machine-readable `GPD/literature/{slug}-CITATION-SOURCES.json` sidecar containing strict `CitationSource` objects keyed by stable `reference_id` values so paper-writing can reuse the discovered references without manual transcription.
-include `bibtex_key` only when it is already known and verified. Extra keys are rejected by the downstream parser.
+Also emit a machine-readable `GPD/literature/{slug}-CITATION-SOURCES.json` sidecar containing strict `CitationSource` objects keyed by stable `reference_id` values so paper-writing can reuse discovered references without manual transcription. For portability, include `bibtex_key` only when it is already known and verified; audit-only fields such as `verification_status`, `canonical_identifiers`, and `verification_sources` belong in the matching `GPD/literature/{slug}-CITATION-AUDIT.md`, not in the sidecar.
 
 Called from gpd:literature-review command.
 
@@ -18,30 +17,11 @@ A physics literature review is not a bibliography. It is a structured map of who
 <source_hierarchy>
 **MANDATORY: Authoritative sources BEFORE general search**
 
-1. **Textbooks and monographs** -- For established results, standard methods, and field context
-
-   - Use specific textbooks by subfield (Peskin & Schroeder for QFT, Sakurai for QM, Jackson for E&M, Landau & Lifshitz series, etc.)
-   - These define conventions and standard results
-
-2. **Review articles** -- For field overviews and method surveys
-
-   - Rev. Mod. Phys., Physics Reports, Annual Reviews of Physics
-   - Recent reviews (last 5 years) for current state-of-the-art
-
-3. **Seminal papers** -- Original derivations of key results
-
-   - Identify the papers everyone in the field cites
-   - Read the actual papers, not just the citations
-
-4. **Recent arXiv preprints** -- For cutting-edge developments
-
-   - arXiv categories: hep-th, hep-ph, hep-lat, cond-mat._, quant-ph, gr-qc, astro-ph._, nucl-th, etc.
-   - Sort by relevance and citation count
-
-5. **Conference proceedings** -- For very recent results and community direction
-
-   - Lattice, ICHEP, APS meetings, etc.
-
+1. **Textbooks and monographs** -- established results, standard methods, conventions, and field context.
+2. **Review articles** -- field overviews/method surveys, especially recent reviews.
+3. **Seminal papers** -- original derivations; read the papers, not just citations.
+4. **Recent arXiv preprints** -- cutting-edge developments in relevant physics categories, sorted by relevance/citation count.
+5. **Conference proceedings** -- very recent results and community direction.
 6. **web_search** -- Last resort for community discussions, code repos, numerical benchmarks
 
 </source_hierarchy>
@@ -85,7 +65,7 @@ Do not use `reference_artifact_files` or `reference_artifacts_content` yet. Keep
 **Read mode settings:**
 
 ```bash
-AUTONOMY=$(gpd --raw config get autonomy 2>/dev/null | gpd json get .value --default balanced 2>/dev/null || echo "balanced")
+AUTONOMY=$(gpd --raw config get autonomy 2>/dev/null | gpd json get .value --default supervised 2>/dev/null || echo "supervised")
 RESEARCH_MODE=$(gpd --raw config get research_mode 2>/dev/null | gpd json get .value --default balanced 2>/dev/null || echo "balanced")
 ```
 
@@ -94,8 +74,8 @@ RESEARCH_MODE=$(gpd --raw config get research_mode 2>/dev/null | gpd json get .v
 - `research_mode=exploit`: Focused review (8-12 papers), direct relevance only, extract key results and methods.
 - `research_mode=balanced` (default): Use the standard review depth for this workflow and keep the default anchor and contract coverage unless the topic needs broader or narrower review.
 - `research_mode=adaptive`: Start with 15 papers, expand if citation network reveals critical gaps.
-- `autonomy=supervised`: Pause after each review round for user feedback on scope and direction.
-- `autonomy=balanced` (default): Complete the full review pipeline automatically. Pause only if the literature reveals scope ambiguity, contradictory evidence, or a change in recommendation.
+- `autonomy=supervised` (default): Pause after each review round for user feedback on scope and direction.
+- `autonomy=balanced`: Complete the full review pipeline automatically. Pause only if the literature reveals scope ambiguity, contradictory evidence, or a change in recommendation.
 - `autonomy=yolo`: Complete the review pipeline without pausing, but do NOT drop contract-critical anchors or user-mandated references.
 
 - **If `state_exists` is true:** Extract `convention_lock` for notation context (helps identify which conventions are used in papers being reviewed). Extract active research topic, phase context, and any contract-critical references from `active_reference_context`.
@@ -357,6 +337,10 @@ Scoped reference artifacts: {reference_artifacts_content}
 Write `GPD/literature/{slug}-REVIEW.md` and `GPD/literature/{slug}-CITATION-SOURCES.json`.
 </output>
 
+<citation_sidecar_contract>
+`GPD/literature/{slug}-CITATION-SOURCES.json` is a JSON array of strict `CitationSource` objects with stable `reference_id`; `year` is a string; Extra keys are rejected by the downstream parser; audit-only fields stay in `GPD/literature/{slug}-CITATION-AUDIT.md`. Compact shape: `[{"source_type":"paper","reference_id":"ref-main","bibtex_key":"Ref2026","title":"Fixture Reference","authors":["Ada Example"],"year": "2026","journal":"Journal of Fixture Physics"}]`.
+</citation_sidecar_contract>
+
 <spawn_contract>
 write_scope:
   mode: scoped_write
@@ -428,7 +412,7 @@ task(
   subagent_type="gpd-bibliographer",
   model="{biblio_model}",
   readonly=false,
-  prompt="First, read {GPD_AGENTS_DIR}/gpd-bibliographer.md for your role and instructions.\\n\\nVerify all citations in the literature review.\\n\\nMode: Audit bibliography\\n\\nReview file: GPD/literature/{slug}-REVIEW.md\\n\\nFor every reference listed in the Full Reference List and cited in the body:\\n1. Run the hallucination detection protocol (Steps 1-5) against INSPIRE, ADS, arXiv\\n2. Cross-check metadata (title, authors, year, journal, identifiers)\\n3. Flag any hallucinated or inaccurate citations\\n4. Correct metadata errors where possible\\n\\nWrite results to GPD/literature/{slug}-CITATION-AUDIT.md\\n\\nReturn a typed `gpd_return` envelope. Use `status: completed` when the bibliography task finished, even if the human-readable heading is `## CITATION ISSUES FOUND`; use `status: checkpoint` only when researcher input is required to continue."
+  prompt="First, read {GPD_AGENTS_DIR}/gpd-bibliographer.md for your role and instructions.\\n\\nVerify all citations in the literature review.\\n\\nMode: Audit bibliography\\n\\nReview file: GPD/literature/{slug}-REVIEW.md\\n\\nFor every reference listed in the Full Reference List and cited in the body:\\n1. Run the hallucination detection protocol (Steps 1-5) against INSPIRE, ADS, arXiv\\n2. Cross-check metadata (title, authors, year, journal, identifiers)\\n3. Flag any hallucinated or inaccurate citations\\n4. Correct metadata errors where possible\\n\\nWrite results to GPD/literature/{slug}-CITATION-AUDIT.md\\n\\nReturn a typed `gpd_return` envelope. Use `status: completed` when the bibliography task finished, even if the human-readable heading is `## CITATION ISSUES FOUND`; use `status: checkpoint` only when researcher input is required to continue. A completed return must list `GPD/literature/{slug}-CITATION-AUDIT.md` in `gpd_return.files_written`."
 )
 ```
 
@@ -450,11 +434,13 @@ shared_state_policy: return_only
 - Fix or remove hallucinated citations from the review document
 - Update corrected metadata in the reference list
 - Refresh `GPD/literature/{slug}-CITATION-SOURCES.json` so the sidecar stays aligned with the corrected review and reference keys.
+- Re-run or refresh `GPD/literature/{slug}-CITATION-AUDIT.md` if citation fixes changed the review or sidecar.
 - Note unresolvable citations in the return summary
 
-**If BIBLIOGRAPHY UPDATED:**
+**If the bibliographer reports `gpd_return.status: completed`:**
 
-- All citations verified, proceed to return results
+- Verify `GPD/literature/{slug}-CITATION-AUDIT.md` is readable, current for the review/sidecar pair, and named in `gpd_return.files_written`.
+- Proceed only after the fresh citation-audit gate passes. A `BIBLIOGRAPHY UPDATED` heading or success prose alone is not enough.
   </step>
 
 <step name="return_results">
@@ -474,9 +460,10 @@ On completion:
 
 - Verify `GPD/literature/{slug}-REVIEW.md` exists on disk
 - Verify `GPD/literature/{slug}-CITATION-SOURCES.json` exists on disk and remains aligned with the review's Full Reference List
-- Return `gpd_return.status: completed` only when the review is named in `gpd_return.files_written` and the sidecar is present, readable, and aligned on disk
+- Verify `GPD/literature/{slug}-CITATION-AUDIT.md` is fresh for the current review and sidecar
+- Return `gpd_return.status: completed` only when the review, citation sidecar, and citation audit are named in `gpd_return.files_written` and present/readable on disk
 - Include `papers_reviewed`, `field_assessment`, and citation verification details as needed
-- If either artifact is missing, malformed, or stale, return `gpd_return.status: blocked` or `failed` instead of `completed`
+- If any required artifact is missing, malformed, or stale, return `gpd_return.status: blocked` or `failed` instead of `completed`
 
 On checkpoint:
 

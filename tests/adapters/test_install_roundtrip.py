@@ -45,6 +45,7 @@ from tests.adapters.projection_test_utils import (
     assert_compact_staged_command_shim,
     assert_no_unresolved_include_markers,
     assert_protocol_bundle_jit_shape,
+    assert_runtime_bridge_targets_active_runtime,
     first_runnable_shell_command,
     has_compact_non_native_shim,
     has_help_bridge_shim_sentinel,
@@ -68,6 +69,11 @@ COMMANDS_DIR = REPO_GPD_ROOT / "commands"
 WORKFLOWS_DIR = REPO_GPD_ROOT / "specs" / "workflows"
 RUNTIME_ALIAS_MAP = build_canonical_alias_map(adapter.tool_name_map for adapter in iter_adapters())
 FULL_RUNTIME_MATRIX = tuple(descriptor.runtime_name for descriptor in iter_runtime_descriptors())
+FLAT_COMMAND_RUNTIME_MATRIX = tuple(
+    descriptor.runtime_name
+    for descriptor in iter_runtime_descriptors()
+    if descriptor.managed_install_surface.flat_command_globs
+)
 _SHARED_INSTALL = get_shared_install_metadata()
 _INSTALL_CACHE: dict[tuple[str, tuple[str, ...]], Path] = {}
 STAGED_COMMAND_PROJECTION_CASES = iter_staged_command_projection_cases(
@@ -428,6 +434,18 @@ def _read_runtime_command_prompt(tmp_path: Path, target: Path, runtime: str, com
     raise AssertionError(f"Unsupported runtime {runtime}")
 
 
+def _flat_generated_command_manifest_policy(runtime: str):
+    descriptor = get_runtime_descriptor(runtime)
+    policies = tuple(
+        policy
+        for policy in descriptor.manifest_metadata_list_policies
+        if policy.item_prefix == "gpd-" and policy.item_suffix == ".md"
+    )
+
+    assert len(policies) == 1, f"{runtime} should catalog exactly one flat generated-command manifest policy"
+    return policies[0]
+
+
 @cache
 def _installed_command_names() -> tuple[str, ...]:
     return tuple(sorted(path.stem for path in (REPO_GPD_ROOT / "commands").glob("*.md")))
@@ -522,13 +540,16 @@ def test_installed_peer_review_prompt_keeps_publication_lane_boundary(
         )
         return
 
-    assert (
-        "Use centralized preflight's selected publication/review roots for GPD-authored review artifacts."
-        in peer_review
-    )
-    assert (
-        "Keep the manuscript and manuscript-local publication manifests rooted at the resolved manuscript directory."
-        in peer_review
+    assert_prompt_contracts(
+        peer_review,
+        semantic_anchor(
+            "installed peer-review keeps centralized publication and review roots visible",
+            ("selected publication/review roots", "GPD-authored review artifacts"),
+        ),
+        semantic_anchor(
+            "installed peer-review keeps manuscript-local artifact boundary visible",
+            ("manuscript-local publication manifests", "resolved manuscript directory"),
+        ),
     )
 
 
@@ -765,6 +786,50 @@ def test_installed_command_surfaces_have_no_unresolved_install_shape(
         assert_no_unresolved_include_markers(prompt, label=label)
         offenders = [marker for marker in UNRESOLVED_INSTALL_SHAPE_MARKERS if marker in prompt]
         assert offenders == [], f"{label} contains unresolved install shape markers: {offenders}"
+
+
+@pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)
+def test_installed_command_surfaces_only_embed_active_runtime_bridge(
+    real_installed_repo_factory,
+    runtime: str,
+) -> None:
+    target = real_installed_repo_factory(runtime)
+    smoke_commands = tuple(dict.fromkeys((*INSTALLED_PROJECTION_SMOKE_COMMANDS, *INSTALLED_SHELL_SMOKE_COMMANDS)))
+
+    for command_name in smoke_commands:
+        prompt = _read_runtime_command_prompt(target.parent, target, runtime, command_name)
+        assert_runtime_bridge_targets_active_runtime(
+            prompt,
+            runtime=runtime,
+            label=f"{runtime}:{command_name}:{_installed_command_kind(runtime)}",
+        )
+
+
+@pytest.mark.parametrize("runtime", FLAT_COMMAND_RUNTIME_MATRIX)
+def test_installed_flat_command_manifest_metadata_is_catalog_driven_and_matches_command_files(
+    real_installed_repo_factory,
+    runtime: str,
+) -> None:
+    target = real_installed_repo_factory(runtime)
+    policy = _flat_generated_command_manifest_policy(runtime)
+    manifest = json.loads((target / "gpd-file-manifest.json").read_text(encoding="utf-8"))
+    generated = manifest.get(policy.key)
+    expected_generated = tuple(sorted(f"gpd-{command_name}.md" for command_name in _installed_command_names()))
+
+    assert isinstance(generated, list), f"{runtime} manifest should include list metadata {policy.key!r}"
+    assert all(isinstance(item, str) for item in generated)
+    assert tuple(generated) == expected_generated
+    assert {f"command/{file_name}" for file_name in generated} <= set(manifest["files"])
+    assert all((target / "command" / file_name).is_file() for file_name in generated)
+
+    foreign_flat_metadata_keys = {
+        other_policy.key
+        for descriptor in iter_runtime_descriptors()
+        if descriptor.runtime_name != runtime and descriptor.managed_install_surface.flat_command_globs
+        for other_policy in descriptor.manifest_metadata_list_policies
+        if other_policy.item_prefix == "gpd-" and other_policy.item_suffix == ".md"
+    }
+    assert foreign_flat_metadata_keys.isdisjoint(manifest)
 
 
 @pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)

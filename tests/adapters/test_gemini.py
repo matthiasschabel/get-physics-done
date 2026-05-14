@@ -464,12 +464,18 @@ class TestGeminiShellFenceClassification:
         (
             ("gpd status\n", "runnable-bridge"),
             ("/runtime/gpd-cli status\n", "runnable-bridge"),
+            ('gpd status "$ARGUMENTS"\n', "runnable-bridge"),
+            ("gpd status ${PROFILE}\n", "runnable-bridge"),
             ("git init\n", "policy-static"),
+            ("test -d GPD\n", "policy-static"),
             ("git status --porcelain\n", "terminal-example"),
             ("mkdir -p exports\n", "terminal-example"),
             ("gpd status || true\n", "pseudocode"),
             ("VALUE=$(gpd status)\n", "pseudocode"),
             ("git show {branch}:GPD/STATE.md\n", "pseudocode"),
+            ("mkdir -p GPD/{phase}\n", "pseudocode"),
+            ("mkdir -p GPD/[phase name]\n", "pseudocode"),
+            ("HEALTH_ERR=$(mktemp)\n", "pseudocode"),
             ("\n# comment only\n", "non-runnable"),
         ),
     )

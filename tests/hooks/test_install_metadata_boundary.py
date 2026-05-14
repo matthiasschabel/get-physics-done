@@ -205,6 +205,22 @@ def test_assess_install_target_fails_closed_for_opencode_flat_command_in_claude_
     assert assessment.has_managed_markers is True
 
 
+def test_assess_install_target_fails_closed_for_manifestless_copilot_flat_command(
+    tmp_path: Path,
+) -> None:
+    copilot_policy = get_managed_install_surface_policy("copilot-cli")
+    config_dir = tmp_path / ".copilot"
+    command_path = _materialize_test_path_for_glob(config_dir, copilot_policy.flat_command_globs[0])
+
+    assessment = assess_install_target(config_dir, expected_runtime="copilot-cli")
+
+    assert command_path.relative_to(config_dir).as_posix() == "command/gpd-probe.md"
+    assert assessment.state == "untrusted_manifest"
+    assert assessment.manifest_state == "missing"
+    assert assessment.manifest_runtime is None
+    assert assessment.has_managed_markers is True
+
+
 def test_expected_runtime_marker_scan_preserves_foreign_manifest_safety(tmp_path: Path) -> None:
     descriptors = iter_runtime_descriptors()
     flat_descriptor = next(
@@ -872,3 +888,4 @@ def test_install_metadata_uses_catalog_manifest_metadata_policies() -> None:
     assert "codex_skills_dir" not in source
     assert "codex_generated_skill_dirs" not in source
     assert "opencode_generated_command_files" not in source
+    assert "copilot_generated_command_files" not in source

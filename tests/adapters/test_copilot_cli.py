@@ -15,6 +15,7 @@ from gpd.adapters.copilot_cli import (
     copy_flattened_commands,
 )
 from gpd.adapters.install_utils import MANIFEST_NAME, build_runtime_cli_bridge_command
+from gpd.adapters.runtime_catalog import get_manifest_metadata_list_policy_key
 
 
 @pytest.fixture()
@@ -177,6 +178,21 @@ class TestCopyFlattenedCommands:
         assert not (dest / "gpd-old-command.md").exists()
         assert (dest / "custom-command.md").exists()
 
+    def test_cleans_old_files_from_manifest_files_fallback(self, gpd_root: Path, tmp_path: Path) -> None:
+        dest = tmp_path / "command"
+        dest.mkdir()
+        (dest / "gpd-old-command.md").write_text("stale", encoding="utf-8")
+        (dest / "custom-command.md").write_text("keep", encoding="utf-8")
+        (tmp_path / MANIFEST_NAME).write_text(
+            json.dumps({"files": {"command/gpd-old-command.md": "old-hash"}}),
+            encoding="utf-8",
+        )
+
+        copy_flattened_commands(gpd_root / "commands", dest, "gpd", "/prefix/", workflow_target_dir=tmp_path)
+
+        assert not (dest / "gpd-old-command.md").exists()
+        assert (dest / "custom-command.md").exists()
+
     def test_nonexistent_src_returns_zero(self, tmp_path: Path) -> None:
         dest = tmp_path / "command"
         dest.mkdir()
@@ -215,7 +231,9 @@ class TestCopyAgentsAsAgentFiles:
 
 
 class TestInstall:
-    def test_install_creates_flattened_commands(self, adapter: CopilotCliAdapter, gpd_root: Path, tmp_path: Path) -> None:
+    def test_install_creates_flattened_commands(
+        self, adapter: CopilotCliAdapter, gpd_root: Path, tmp_path: Path
+    ) -> None:
         target = tmp_path / ".copilot"
         target.mkdir()
         adapter.install(gpd_root, target)
@@ -254,6 +272,27 @@ class TestInstall:
         config = json.loads(config_path.read_text(encoding="utf-8"))
         assert isinstance(config, dict)
 
+    def test_install_manifest_uses_catalog_generated_command_key(
+        self,
+        adapter: CopilotCliAdapter,
+        gpd_root: Path,
+        tmp_path: Path,
+    ) -> None:
+        target = tmp_path / ".copilot"
+        target.mkdir()
+        adapter.install(gpd_root, target)
+
+        metadata_key = get_manifest_metadata_list_policy_key(
+            "copilot-cli",
+            value_kind="path_segment",
+            item_prefix="gpd-",
+            item_suffix=".md",
+        )
+        manifest = json.loads((target / MANIFEST_NAME).read_text(encoding="utf-8"))
+        command_names = sorted(entry.name for entry in (target / "command").glob("gpd-*.md"))
+
+        assert manifest[metadata_key] == command_names
+
     def test_install_completeness_requires_copilot_json(
         self,
         adapter: CopilotCliAdapter,
@@ -288,6 +327,33 @@ class TestInstall:
         assert adapter.has_complete_install(target) is False
         assert "command/gpd-*.md" in missing
         assert any(item.startswith("command/") for item in missing)
+
+    def test_install_completeness_uses_manifest_files_fallback(
+        self,
+        adapter: CopilotCliAdapter,
+        gpd_root: Path,
+        tmp_path: Path,
+    ) -> None:
+        target = tmp_path / ".copilot"
+        target.mkdir()
+        adapter.install(gpd_root, target)
+
+        metadata_key = get_manifest_metadata_list_policy_key(
+            "copilot-cli",
+            value_kind="path_segment",
+            item_prefix="gpd-",
+            item_suffix=".md",
+        )
+        manifest_path = target / MANIFEST_NAME
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest.pop(metadata_key)
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        (target / "command").rename(tmp_path / "command-missing")
+
+        missing = adapter.missing_install_artifacts(target)
+
+        assert "command/gpd-help.md" in missing
+        assert "command/gpd-*.md" in missing
 
     def test_install_fails_closed_for_malformed_copilot_json(
         self,

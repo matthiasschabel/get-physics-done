@@ -40,6 +40,7 @@ from tests.adapters.projection_test_utils import (
     assert_compact_workflow_reference_shim,
     assert_no_unresolved_include_markers,
     assert_protocol_bundle_jit_shape,
+    assert_runtime_bridge_targets_active_runtime,
     assert_runtime_note_tag_count,
     assert_runtime_note_tags_not_repeated,
     first_runnable_shell_commands,
@@ -208,6 +209,16 @@ PUBLIC_NEXT_UP_FORBIDDEN_PROJECTION_FRAGMENTS = (
     "--raw stage field-access",
     "gpd verify phase",
     "gpd:verify-phase",
+)
+RUNTIME_BRIDGE_ACCEPTANCE_COMMANDS = tuple(
+    dict.fromkeys(
+        (
+            *STAGED_INIT_TARGET_COMMANDS,
+            "health",
+            "progress",
+            "update",
+        )
+    )
 )
 
 
@@ -749,6 +760,26 @@ def test_staged_init_target_non_native_command_shims_use_exact_runtime_bridge(
     assert has_staged_shim_sentinel(projected)
     assert _expected_target_init_command(command_name, bridge) in first_runnable_shell_commands(projected)
     assert f"gpd --raw init {command_name}" not in "\n".join(shell_fence_bodies(projected))
+
+
+@pytest.mark.parametrize("command_name", RUNTIME_BRIDGE_ACCEPTANCE_COMMANDS)
+@pytest.mark.parametrize("runtime", RUNTIMES)
+def test_runtime_projected_command_surfaces_only_embed_active_runtime_bridge(
+    command_name: str,
+    runtime: str,
+    tmp_path: Path,
+) -> None:
+    descriptor = get_runtime_descriptor(runtime)
+    target_dir = tmp_path / descriptor.config_dir_name
+    projected = _project_command_for_runtime(command_name, runtime, target_dir)
+    require_bridge = command_name in STAGED_INIT_TARGET_COMMANDS and not descriptor.native_include_support
+
+    assert_runtime_bridge_targets_active_runtime(
+        projected,
+        runtime=runtime,
+        label=f"{runtime} {command_name}",
+        require_bridge=require_bridge,
+    )
 
 
 @pytest.mark.parametrize(

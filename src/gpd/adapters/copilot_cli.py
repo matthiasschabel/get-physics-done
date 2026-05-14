@@ -27,19 +27,23 @@ from pathlib import Path
 
 from gpd.adapters.base import RuntimeAdapter
 from gpd.adapters.command_projection import render_projected_command_shell_fences
+from gpd.adapters.flat_command_surface import (
+    FlatCommandRenderContext,
+    FlatCommandSurfacePolicy,
+    load_tracked_generated_command_files,
+    missing_flat_command_artifacts,
+)
+from gpd.adapters.flat_command_surface import (
+    copy_flattened_commands as _copy_flattened_commands,
+)
 from gpd.adapters.install_utils import (
     CACHE_DIR_NAME,
     MANIFEST_NAME,
     PATCHES_DIR_NAME,
     UPDATE_CACHE_FILENAME,
-    _default_install_target,
-    _normalize_install_scope_flag,
-    compact_staged_command_shim_for_runtime,
     compile_markdown_for_runtime,
     compute_path_prefix,
     convert_tool_references_in_body,
-    file_hash,
-    generate_manifest,
     hook_python_interpreter,
     install_gpd_content,
     managed_hook_paths,
@@ -50,7 +54,10 @@ from gpd.adapters.install_utils import (
     rewrite_gpd_cli_invocations_to_runtime_bridge,
     split_markdown_frontmatter,
 )
-from gpd.adapters.runtime_catalog import get_runtime_descriptor, paths_equal
+from gpd.adapters.install_utils import (
+    write_manifest as _shared_write_manifest,
+)
+from gpd.adapters.runtime_catalog import get_manifest_metadata_list_policy_key, get_runtime_descriptor
 from gpd.adapters.tool_names import build_runtime_alias_map, reference_translation_map, translate_for_runtime
 from gpd.command_labels import rewrite_runtime_command_surfaces_to_public, validated_public_command_prefix
 from gpd.mcp import managed_integrations as _managed_integrations
@@ -82,7 +89,25 @@ _TOOL_ALIAS_MAP = build_runtime_alias_map(_TOOL_NAME_MAP)
 _TOOL_REFERENCE_MAP = reference_translation_map(_TOOL_NAME_MAP, alias_map=_TOOL_ALIAS_MAP)
 
 _GPD_SLASH_COMMAND_RE = re.compile(r"(?<![A-Za-z0-9/_.-])/gpd:(?P<command>[A-Za-z][A-Za-z0-9-]*)\b")
-_MANIFEST_COPILOT_GENERATED_COMMAND_FILES_KEY = "copilot_generated_command_files"
+
+
+def _manifest_copilot_generated_command_files_key() -> str:
+    """Return the catalog-owned manifest key for generated Copilot commands."""
+    return get_manifest_metadata_list_policy_key(
+        "copilot-cli",
+        value_kind="path_segment",
+        item_prefix="gpd-",
+        item_suffix=".md",
+    )
+
+
+def _copilot_flat_command_policy() -> FlatCommandSurfacePolicy:
+    """Return Copilot CLI's flat command surface policy."""
+    return FlatCommandSurfacePolicy(
+        runtime="copilot-cli",
+        manifest_metadata_key=_manifest_copilot_generated_command_files_key(),
+    )
+
 
 # ---------------------------------------------------------------------------
 # Tool name conversion
@@ -240,73 +265,29 @@ def copy_flattened_commands(
 
     Returns the count of files written.
     """
-    if not src_dir.exists():
-        return 0
+    return _copy_flattened_commands(
+        src_dir,
+        dest_dir,
+        _copilot_flat_command_policy(),
+        path_prefix=path_prefix,
+        workflow_target_dir=workflow_target_dir,
+        gpd_src_root=gpd_src_root,
+        install_scope=install_scope,
+        bridge_command=bridge_command,
+        explicit_target=explicit_target,
+        managed_command_files=managed_command_files,
+        prefix=prefix,
+        render_command=_render_copilot_flat_command,
+    )
 
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    manifest_root = workflow_target_dir or dest_dir.parent
-    tracked_command_files = set(_load_manifest_copilot_generated_command_files(manifest_root))
-    # Remove only previously generated command files before copying new ones.
-    if tracked_command_files:
-        for name in tracked_command_files:
-            command_path = dest_dir / name
-            if command_path.is_file():
-                command_path.unlink()
 
-    count = 0
-    for entry in sorted(src_dir.iterdir()):
-        if entry.is_dir():
-            count += copy_flattened_commands(
-                entry,
-                dest_dir,
-                f"{prefix}-{entry.name}",
-                path_prefix,
-                workflow_target_dir,
-                gpd_src_root,
-                install_scope,
-                bridge_command,
-                explicit_target=explicit_target,
-                managed_command_files=managed_command_files,
-            )
-        elif entry.name.endswith(".md"):
-            base_name = entry.stem
-            dest_name = f"{prefix}-{base_name}.md"
-            dest_path = dest_dir / dest_name
-            command_name = dest_name.removesuffix(".md").removeprefix("gpd-")
-
-            source_content = entry.read_text(encoding="utf-8")
-            content = (
-                compact_staged_command_shim_for_runtime(
-                    source_content,
-                    runtime="copilot-cli",
-                    command_name=command_name,
-                    src_root=gpd_src_root,
-                    path_prefix=path_prefix,
-                    bridge_command=bridge_command,
-                )
-                or source_content
-            )
-            content = compile_markdown_for_runtime(
-                content,
-                runtime="copilot-cli",
-                path_prefix=path_prefix,
-                install_scope=install_scope,
-                src_root=gpd_src_root,
-                workflow_target_dir=workflow_target_dir,
-                explicit_target=explicit_target,
-            )
-            content = _render_copilot_command_markdown(
-                content,
-                path_prefix=path_prefix,
-                bridge_command=bridge_command,
-            )
-
-            dest_path.write_text(content, encoding="utf-8")
-            if managed_command_files is not None and dest_name.startswith("gpd-"):
-                managed_command_files.add(dest_name)
-            count += 1
-
-    return count
+def _render_copilot_flat_command(content: str, context: FlatCommandRenderContext) -> str:
+    """Render one flattened Copilot command through the adapter-owned markdown policy."""
+    return _render_copilot_command_markdown(
+        content,
+        path_prefix=context.path_prefix,
+        bridge_command=context.bridge_command,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -502,59 +483,16 @@ def _cleanup_copilot_config(config_dir: Path) -> list[str]:
 
 def _load_manifest_copilot_generated_command_files(target_dir: Path) -> tuple[str, ...]:
     """Return tracked Copilot CLI command filenames from the local manifest metadata."""
-    manifest_path = target_dir / MANIFEST_NAME
-    if not manifest_path.exists():
-        return ()
-
-    try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return ()
-
-    if not isinstance(manifest, dict):
-        return ()
-
-    command_files = manifest.get(_MANIFEST_COPILOT_GENERATED_COMMAND_FILES_KEY)
-    if not isinstance(command_files, list):
-        return ()
-
-    tracked: list[str] = []
-    for entry in command_files:
-        if isinstance(entry, str) and entry.startswith("gpd-") and entry.endswith(".md"):
-            tracked.append(entry)
-    return tuple(dict.fromkeys(tracked))
+    return load_tracked_generated_command_files(
+        target_dir,
+        _copilot_flat_command_policy(),
+        include_manifest_files_fallback=False,
+    )
 
 
 def _load_manifest_copilot_command_files(target_dir: Path) -> tuple[str, ...]:
     """Return tracked Copilot CLI command filenames, falling back to manifest files entries."""
-    generated_command_files = _load_manifest_copilot_generated_command_files(target_dir)
-    if generated_command_files:
-        return generated_command_files
-
-    manifest_path = target_dir / MANIFEST_NAME
-    if not manifest_path.exists():
-        return ()
-
-    try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return ()
-
-    if not isinstance(manifest, dict):
-        return ()
-
-    manifest_files = manifest.get("files")
-    if not isinstance(manifest_files, dict):
-        return ()
-
-    tracked: list[str] = []
-    for rel_path in manifest_files:
-        if not isinstance(rel_path, str) or not rel_path.startswith("command/"):
-            continue
-        name = rel_path.removeprefix("command/")
-        if name.startswith("gpd-") and name.endswith(".md"):
-            tracked.append(name)
-    return tuple(dict.fromkeys(tracked))
+    return load_tracked_generated_command_files(target_dir, _copilot_flat_command_policy())
 
 
 def write_manifest(
@@ -566,39 +504,24 @@ def write_manifest(
     explicit_target: bool | None = None,
     managed_command_file_names: tuple[str, ...] | None = None,
 ) -> dict:
-    """Write file manifest after installation for future modification detection.
-
-    Copilot CLI-specific: scans ``command/gpd-*.md`` (flat) instead of
-    ``commands/gpd/`` (nested).
-    """
-    from datetime import UTC, datetime
-
-    gpd_dir = config_dir / "get-physics-done"
+    """Write Copilot CLI's manifest through the shared flat-command writer."""
     command_dir = config_dir / "command"
-    agents_dir = config_dir / "agents"
-    hooks_dir = config_dir / "hooks"
+    if managed_command_file_names is None:
+        managed_command_file_names = (
+            tuple(
+                sorted(
+                    entry.name
+                    for entry in command_dir.iterdir()
+                    if entry.is_file() and entry.name.startswith("gpd-") and entry.suffix == ".md"
+                )
+            )
+            if command_dir.exists()
+            else ()
+        )
 
-    manifest: dict = {
-        "version": version,
-        "timestamp": datetime.now(UTC).isoformat(),
-        "files": {},
-    }
-    if isinstance(runtime, str) and runtime.strip():
-        manifest["runtime"] = runtime.strip()
-    normalized_scope = _normalize_install_scope_flag(install_scope)
-    if normalized_scope == "--local":
-        manifest["install_scope"] = "local"
-    elif normalized_scope == "--global":
-        manifest["install_scope"] = "global"
-    manifest["install_target_dir"] = str(config_dir)
-    if explicit_target is not None:
-        manifest["explicit_target"] = bool(explicit_target)
-    elif isinstance(runtime, str) and runtime.strip() and normalized_scope in {"--local", "--global"}:
-        default_target = _default_install_target(runtime.strip(), normalized_scope)
-        if default_target is not None:
-            manifest["explicit_target"] = not paths_equal(config_dir, default_target)
+    manifest_metadata: dict[str, object] = {}
     if managed_command_file_names:
-        manifest[_MANIFEST_COPILOT_GENERATED_COMMAND_FILES_KEY] = sorted(
+        manifest_metadata[_manifest_copilot_generated_command_files_key()] = sorted(
             {
                 name
                 for name in managed_command_file_names
@@ -606,40 +529,18 @@ def write_manifest(
             }
         )
 
-    # get-physics-done/ files
-    gpd_hashes = generate_manifest(gpd_dir)
-    for rel, h in gpd_hashes.items():
-        manifest["files"]["get-physics-done/" + rel] = h
-
-    # command/gpd-*.md files (flat structure)
-    command_names = managed_command_file_names
-    if command_names is None:
-        command_names = tuple(
-            sorted(
-                f.name
-                for f in command_dir.iterdir()
-                if f.name.startswith("gpd-") and f.name.endswith(".md")
-            )
-        ) if command_dir.exists() else ()
-    for name in command_names:
-        command_path = command_dir / name
-        if command_path.is_file():
-            manifest["files"]["command/" + name] = file_hash(command_path)
-
-    # agents/gpd-*.md files
-    if agents_dir.exists():
-        for f in sorted(agents_dir.iterdir()):
-            if f.name.startswith("gpd-") and f.name.endswith(".md"):
-                manifest["files"]["agents/" + f.name] = file_hash(f)
-
-    # hooks/ files
-    if hooks_dir.exists():
-        for rel, h in generate_manifest(hooks_dir).items():
-            manifest["files"]["hooks/" + rel] = h
-
-    manifest_path = config_dir / MANIFEST_NAME
-    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-    return manifest
+    return _shared_write_manifest(
+        config_dir,
+        version,
+        runtime=runtime or "copilot-cli",
+        flat_command_file_names=managed_command_file_names,
+        include_nested_commands=False,
+        include_hooks=False,
+        agent_suffixes=(".md",),
+        metadata=manifest_metadata or None,
+        install_scope=install_scope,
+        explicit_target=explicit_target,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -789,29 +690,7 @@ class CopilotCliAdapter(RuntimeAdapter):
     def missing_install_artifacts(self, target_dir: Path) -> tuple[str, ...]:
         """Return missing Copilot CLI install artifacts, including the command surface."""
         missing = list(super().missing_install_artifacts(target_dir))
-        command_dir = target_dir / "command"
-        tracked_command_files = _load_manifest_copilot_generated_command_files(target_dir)
-
-        if not tracked_command_files:
-            missing.append("command/gpd-*.md")
-            return tuple(dict.fromkeys(missing))
-
-        missing_command_files: list[str] = []
-        for name in tracked_command_files:
-            command_path = command_dir / name
-            try:
-                if not command_path.is_file():
-                    missing_command_files.append(f"command/{name}")
-            except OSError:
-                missing_command_files.append(f"command/{name}")
-
-        if not command_dir.is_dir():
-            missing_command_files.append("command/gpd-*.md")
-
-        if missing_command_files and "command/gpd-*.md" not in missing_command_files:
-            missing_command_files.append("command/gpd-*.md")
-
-        missing.extend(missing_command_files)
+        missing.extend(missing_flat_command_artifacts(target_dir, _copilot_flat_command_policy()))
         return tuple(dict.fromkeys(missing))
 
     def _install_commands(self, gpd_root: Path, target_dir: Path, path_prefix: str, failures: list[str]) -> int:
@@ -833,6 +712,8 @@ class CopilotCliAdapter(RuntimeAdapter):
             managed_command_files=generated_command_files,
         )
         self._generated_command_files = tuple(sorted(generated_command_files))
+        if count <= 0 or not self._generated_command_files:
+            failures.append("command/gpd-*.md")
         return count
 
     def _install_content(self, gpd_root: Path, target_dir: Path, path_prefix: str, failures: list[str]) -> None:

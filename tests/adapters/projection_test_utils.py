@@ -30,6 +30,7 @@ __all__ = [
     "ProjectedSection",
     "ProjectedText",
     "RUNTIME_BRIDGE_COMMAND_RE",
+    "RUNTIME_BRIDGE_RUNTIME_RE",
     "RUNTIME_NOTE_TAGS",
     "STAGED_SHIM_CONTRACT_FRAGMENTS",
     "STAGED_SHIM_SENTINELS",
@@ -41,6 +42,7 @@ __all__ = [
     "assert_compact_workflow_reference_shim",
     "assert_no_unresolved_include_markers",
     "assert_protocol_bundle_jit_shape",
+    "assert_runtime_bridge_targets_active_runtime",
     "assert_runtime_note_tag_count",
     "assert_runtime_note_tags_not_repeated",
     "compact_tag_block",
@@ -58,6 +60,7 @@ __all__ = [
     "raw_include_count",
     "runnable_shell_lines",
     "runtime_bridge_command",
+    "runtime_bridge_runtimes",
     "shell_fence_bodies",
     "shell_fences",
     "staged_command_has_protocol_bundle_fields",
@@ -74,6 +77,7 @@ RUNTIME_BRIDGE_COMMAND_RE = re.compile(
     r"(?:[^ \n`]+)\s+-m gpd\.runtime_cli\s+--runtime\s+[a-z-]+"
     r"\s+--config-dir\s+[^ \n`]+(?:\s+--install-scope\s+local)?"
 )
+RUNTIME_BRIDGE_RUNTIME_RE = re.compile(r"(?:[^ \n`]+)\s+-m gpd\.runtime_cli\s+--runtime\s+(?P<runtime>[a-z0-9-]+)\b")
 NORMALIZED_RUNTIME_BRIDGE_MARKER = "<runtime-bridge>"
 STAGED_SHIM_SENTINELS = (COMPACT_STAGED_COMMAND_SHIM_SENTINEL, "## Compact Staged Command Shim")
 HELP_BRIDGE_SHIM_SENTINELS = (COMPACT_HELP_BRIDGE_SHIM_SENTINEL, "CLI-owned compact help surface")
@@ -258,6 +262,28 @@ def runtime_bridge_command(
 
 def normalized_runtime_bridge_text(text: str) -> str:
     return RUNTIME_BRIDGE_COMMAND_RE.sub(NORMALIZED_RUNTIME_BRIDGE_MARKER, text)
+
+
+def runtime_bridge_runtimes(text: str) -> tuple[str, ...]:
+    return tuple(match.group("runtime") for match in RUNTIME_BRIDGE_RUNTIME_RE.finditer(text))
+
+
+def assert_runtime_bridge_targets_active_runtime(
+    text: str,
+    *,
+    runtime: str,
+    label: str,
+    require_bridge: bool = False,
+) -> None:
+    bridge_runtimes = runtime_bridge_runtimes(text)
+    foreign_runtimes = sorted({bridge_runtime for bridge_runtime in bridge_runtimes if bridge_runtime != runtime})
+
+    assert not foreign_runtimes, (
+        f"{label} embeds runtime bridge command(s) for the wrong runtime: "
+        f"foreign={foreign_runtimes!r}, observed={bridge_runtimes!r}"
+    )
+    if require_bridge:
+        assert runtime in bridge_runtimes, f"{label} should embed an active {runtime!r} runtime bridge command"
 
 
 def normalized_runtime_projection_char_count(metric: prompt_diagnostics.RuntimeProjectionMetric) -> int:

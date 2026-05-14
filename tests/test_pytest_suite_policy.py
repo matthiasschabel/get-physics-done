@@ -37,6 +37,18 @@ PHASE8_LARGE_TEST_FILE_LOC_BUDGETS = {
     "tests/core/test_prompt_wiring.py": 7_200,
     "tests/core/test_context.py": 5_500,
 }
+PHASE6_CROSS_RUNTIME_ACCEPTANCE_TEST_RELPATHS = (
+    "adapters/test_runtime_projected_prompt_parity.py",
+    "adapters/test_runtime_projected_command_requirement_coverage.py",
+    "adapters/test_install_roundtrip.py",
+    "core/test_phase7_live_like.py",
+    "core/test_prompt_exactness_budget.py",
+    "test_pytest_suite_policy.py",
+)
+PHASE6_CROSS_RUNTIME_ACCEPTANCE_SUPPORT_RELPATHS = (
+    "adapters/projection_test_utils.py",
+    "adapters/projection_budget_support.py",
+)
 
 
 def _read(relpath: str) -> str:
@@ -306,6 +318,20 @@ def test_adapter_hotspot_metadata_tracks_catalog_runtime_adapter_tests() -> None
     assert runtime_adapter_test_files <= set(CI_HOT_TEST_FILE_WEIGHT_MULTIPLIERS)
     assert all(CI_HOT_TEST_FILE_SPLITS[rel_path] >= 2 for rel_path in runtime_adapter_test_files)
     assert all(CI_HOT_TEST_FILE_WEIGHT_MULTIPLIERS[rel_path] > 1.0 for rel_path in runtime_adapter_test_files)
+
+
+def test_phase6_cross_runtime_acceptance_surfaces_remain_ci_visible() -> None:
+    live_test_relpaths = set(all_test_relpaths(tests_root=TESTS_ROOT))
+    missing_tests = sorted(set(PHASE6_CROSS_RUNTIME_ACCEPTANCE_TEST_RELPATHS) - live_test_relpaths)
+    missing_support = sorted(
+        relpath for relpath in PHASE6_CROSS_RUNTIME_ACCEPTANCE_SUPPORT_RELPATHS if not (TESTS_ROOT / relpath).is_file()
+    )
+
+    assert not missing_tests
+    assert not missing_support
+    assert {category_for_test_relpath(relpath) for relpath in PHASE6_CROSS_RUNTIME_ACCEPTANCE_TEST_RELPATHS} <= set(
+        CI_CATEGORY_SHARD_COUNTS
+    )
 
 
 def _assert_ci_shards_cover_inventory_without_overlap_or_empty_shards(

@@ -26,7 +26,7 @@
       "provider_launch_allowed": false,
       "network_allowed": false,
       "raw_artifacts_allowed": false,
-      "expected_state_status_class": "ready_for_verification",
+      "expected_state_status_class": "phase_ready_for_verification",
       "expected_next_action_class": "runtime_verify_work",
       "mutation_allowed": true
     },

@@ -73,75 +73,30 @@ If cleanup exits nonzero, print the helper JSON and stop. Preserve tags for bloc
 </step>
 
 <step name="offer_next">
-Never end with only "ready to plan/continue" prose. After successful closeout, choose one matching variant, one primary `NextCommand`, populate `stage_stop.next_runtime_command`, and emit a `## > Next Up` block with exactly one `Primary:` line. Do not print raw staged-init or field-access commands.
+Never end with only "ready to plan/continue" prose. After successful closeout,
+refresh the lifecycle route and emit the code-owned next-up projection. Do not
+print raw staged-init, field-access, readiness, or cleanup commands as public
+next actions.
 
-Render the variants below from the refreshed closeout payload using the shared renderer shape (`Primary:`, `Primary local transition:`, `**After this completes:**`, and `Secondary ...` lines). Load `next_up_rendering_recovery` only if the fixed `stage_stop` / `## > Next Up` variants cannot be rendered from the payload.
-
-If the next phase has no context, choose `gpd:discuss-phase {PHASE_NUMBER_PLUS_ONE}` / `gpd:discuss-phase {X+1}` and list `gpd:plan-phase {PHASE_NUMBER_PLUS_ONE}` / `gpd:plan-phase {X+1}` as the direct-plan alternative. If the next phase already has context, choose `gpd:plan-phase {PHASE_NUMBER_PLUS_ONE}`. Always list `gpd:suggest-next` as the recovery/confirmation command.
-
-If the next phase has no context:
-
-```yaml
-stage_stop:
-  workflow: execute-phase
-  stage: closeout
-  status: completed
-  reason: next_phase_needs_context
-  checkpoint: none
-  user_decision_needed: false
-  next_runtime_command: "gpd:discuss-phase {PHASE_NUMBER_PLUS_ONE}"
-  also_available:
-    - "gpd:plan-phase {PHASE_NUMBER_PLUS_ONE}"
-    - "gpd:suggest-next"
+```bash
+POST_CLOSEOUT_ROUTE=$(gpd --raw phase closeout-readiness "${phase_number}" --require-verification || true)
 ```
 
-## > Next Up
+The post-closeout helper may exit nonzero because the phase is already closed;
+that is acceptable only when it prints a parseable route payload. Prefer
+`lifecycle_next_up.rendered_markdown`, then `next_up.rendered_markdown`; pair it
+with the matching `lifecycle_next_up.stage_stop_*` or `next_up.stage_stop_*`
+projection. Emit the rendered `## > Next Up` block exactly as supplied by the
+payload's shared renderer shape (`Primary:`, `Primary local transition:`,
+`**After this completes:**`, and `Secondary ...` lines).
 
-Primary: `gpd:discuss-phase {PHASE_NUMBER_PLUS_ONE}`
-Secondary runtime: `gpd:plan-phase {PHASE_NUMBER_PLUS_ONE}`
-Secondary runtime: `gpd:suggest-next`
-
-If the next phase already has context:
-
-```yaml
-stage_stop:
-  workflow: execute-phase
-  stage: closeout
-  status: completed
-  reason: next_phase_context_ready
-  checkpoint: none
-  user_decision_needed: false
-  next_runtime_command: "gpd:plan-phase {PHASE_NUMBER_PLUS_ONE}"
-  also_available:
-    - "gpd:discuss-phase {PHASE_NUMBER_PLUS_ONE}"
-    - "gpd:suggest-next"
-```
-
-## > Next Up
-
-Primary: `gpd:plan-phase {PHASE_NUMBER_PLUS_ONE}`
-Secondary runtime: `gpd:discuss-phase {PHASE_NUMBER_PLUS_ONE}`
-Secondary runtime: `gpd:suggest-next`
-
-If the final phase is closed, route audit first; archive later with `gpd:complete-milestone`.
-
-```yaml
-stage_stop:
-  workflow: execute-phase
-  stage: closeout
-  status: completed
-  reason: milestone_ready_for_audit
-  checkpoint: none
-  user_decision_needed: false
-  next_runtime_command: "gpd:audit-milestone"
-  also_available:
-    - "gpd:suggest-next"
-```
-
-## > Next Up
-
-Primary: `gpd:audit-milestone`
-Secondary runtime: `gpd:suggest-next`
+The prompt must not decide whether the next runtime command is
+`gpd:discuss-phase`, `gpd:plan-phase`, milestone audit, milestone archive, or
+new milestone. Those route variants belong to the lifecycle route payload. Load
+`next_up_rendering_recovery` only if a parseable payload contains route fields
+but no rendered projection. If the route payload, rendered markdown, or matching
+stage-stop projection is absent, surface the helper JSON instead of
+hand-rendering a route.
 </step>
 
 </process>

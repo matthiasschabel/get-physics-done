@@ -324,7 +324,8 @@ def test_execute_phase_late_authorities_live_in_owning_stages() -> None:
     assert "{GPD_INSTALL_DIR}/workflows/verify-phase.md" in verification_handoff
     assert "{GPD_INSTALL_DIR}/workflows/verify-phase.md" in gap_reverification
     assert "{GPD_INSTALL_DIR}/templates/recovery-plan.md" in aggregate
-    assert "gpd:complete-milestone" in closeout
+    assert "lifecycle_next_up.rendered_markdown" in closeout
+    assert "The prompt must not decide whether the next runtime command is" in closeout
 
 
 def test_execute_phase_closeout_names_readiness_before_safe_local_transition() -> None:
@@ -339,7 +340,26 @@ def test_execute_phase_closeout_names_readiness_before_safe_local_transition() -
     assert "The completion helper owns the roadmap/state transition and rechecks lifecycle readiness" in closeout
     assert "Primary local transition" in closeout
     assert "shared renderer shape" in closeout
-    assert "Secondary runtime:" in closeout
+    assert "Read-only readiness and checkpoint cleanup are local helper context" in closeout
+
+
+def test_execute_phase_closeout_delegates_post_transition_routes_to_lifecycle_payload() -> None:
+    closeout = _stage_text("closeout.md")
+    offer_next = closeout[closeout.index('<step name="offer_next">') : closeout.index("</step>", closeout.index('<step name="offer_next">'))]
+
+    assert "POST_CLOSEOUT_ROUTE=$(gpd --raw phase closeout-readiness" in offer_next
+    assert "lifecycle_next_up.rendered_markdown" in offer_next
+    assert "next_up.rendered_markdown" in offer_next
+    assert "lifecycle_next_up.stage_stop_*" in offer_next
+    assert "next_up.stage_stop_*" in offer_next
+    assert "surface the helper JSON instead of\nhand-rendering a route" in offer_next
+    assert "The prompt must not decide" in offer_next
+    assert "If the next phase has no context" not in offer_next
+    assert "If the next phase already has context" not in offer_next
+    assert 'next_runtime_command: "gpd:audit-milestone"' not in offer_next
+    assert "Primary: `gpd:discuss-phase" not in offer_next
+    assert "Primary: `gpd:plan-phase" not in offer_next
+    assert "Primary: `gpd:audit-milestone`" not in offer_next
 
 
 def test_execute_phase_owned_stop_examples_use_stage_stop_and_one_primary() -> None:
@@ -347,7 +367,6 @@ def test_execute_phase_owned_stop_examples_use_stage_stop_and_one_primary() -> N
     verification_handoff = _stage_text("verification-handoff.md")
     gap_reverification = _stage_text("gap-reverification.md")
     consistency_check = _stage_text("consistency-check.md")
-    closeout = _stage_text("closeout.md")
 
     assert "stage: checkpoint_resume" in checkpoint
     assert 'next_runtime_command: "gpd:resume-work"' in checkpoint
@@ -355,11 +374,8 @@ def test_execute_phase_owned_stop_examples_use_stage_stop_and_one_primary() -> N
     assert 'next_runtime_command: "gpd:plan-phase {PHASE_NUMBER} --gaps"' in verification_handoff
     assert "stage: gap_reverification" in gap_reverification
     assert "stage_stop.next_runtime_command" in consistency_check
-    assert "stage: closeout" in closeout
-    assert 'next_runtime_command: "gpd:audit-milestone"' in closeout
-    assert "**Also available:**" not in closeout
 
-    for block in _next_up_blocks(checkpoint + "\n" + verification_handoff + "\n" + consistency_check + "\n" + closeout):
+    for block in _next_up_blocks(checkpoint + "\n" + verification_handoff + "\n" + consistency_check):
         assert block.count("Primary:") == 1
         assert "gpd --raw init" not in block
         assert "field-access" not in block

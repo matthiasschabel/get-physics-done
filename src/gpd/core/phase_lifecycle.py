@@ -26,7 +26,7 @@ from gpd.core.next_command_rendering import (
     render_next_up_block,
 )
 from gpd.core.phases import PhaseAmbiguityError, find_phase, roadmap_analyze
-from gpd.core.state import load_state_json_readonly
+from gpd.core.state import load_state_json_readonly, state_status_class
 from gpd.core.utils import (
     compare_phase_numbers,
     is_phase_complete,
@@ -94,6 +94,14 @@ class LifecycleNextUp(BaseModel):
     primary_label: str
     after_this_completes: NextCommand | None = None
     secondary: list[NextCommand] = Field(default_factory=list)
+    transition_owner: str
+    current_blocking_gate: str = "none"
+    primary_runtime_command: NextCommand | None = None
+    local_transition_command: NextCommand | None = None
+    after_local_runtime_command: NextCommand | None = None
+    secondary_runtime_commands: list[NextCommand] = Field(default_factory=list)
+    secondary_local_commands: list[NextCommand] = Field(default_factory=list)
+    next_phase_context_class: str = "not_applicable"
     blockers: list[str] = Field(default_factory=list)
     rendered_markdown: str
     stage_stop_next_runtime_command: str | None = None
@@ -136,6 +144,12 @@ class LifecycleNextUp(BaseModel):
             primary_label="Primary local transition",
             after_this_completes=after_this_completes,
             secondary=secondary,
+            transition_owner=OWNER_LOCAL_TRANSITION,
+            current_blocking_gate="none",
+            primary_runtime_command=after_this_completes,
+            local_transition_command=primary,
+            after_local_runtime_command=after_this_completes,
+            secondary_local_commands=secondary,
             rendered_markdown=rendered.markdown,
             stage_stop_next_runtime_command=rendered.stage_stop_next_runtime_command,
             stage_stop_also_available=list(rendered.stage_stop_also_available),
@@ -149,6 +163,7 @@ class LifecycleNextUp(BaseModel):
         blockers: list[str],
         action: str | None,
         status_class: CanonicalLifecycleClass | None = None,
+        current_blocking_gate: str | None = None,
     ) -> Self:
         primary = _blocked_next_command(phase=phase, blockers=blockers, blocked_action=action)
         rendered = render_next_up_block(primary=primary)
@@ -158,6 +173,9 @@ class LifecycleNextUp(BaseModel):
             phase=phase,
             primary=primary,
             primary_label="Primary",
+            transition_owner=OWNER_RUNTIME,
+            current_blocking_gate=current_blocking_gate or _blocked_gate(blockers=blockers, action=primary.action),
+            primary_runtime_command=primary,
             blockers=list(blockers),
             rendered_markdown=rendered.markdown,
             stage_stop_next_runtime_command=rendered.stage_stop_next_runtime_command,
@@ -172,25 +190,42 @@ class LifecycleNextUp(BaseModel):
         next_phase: str | None,
         status_class: CanonicalLifecycleClass,
         milestone_version: str | None = None,
+        next_phase_context_class: str = "planned",
     ) -> Self:
+        secondary: list[NextCommand] = []
         if next_phase is not None:
-            primary = _runtime_next_command(action="plan-phase", phase=next_phase)
+            if next_phase_context_class == "missing_context":
+                primary = _runtime_next_command(action="discuss-phase", phase=next_phase)
+                secondary.append(_runtime_next_command(action="plan-phase", phase=next_phase))
+            else:
+                primary = _runtime_next_command(action="plan-phase", phase=next_phase)
+                secondary.append(_runtime_next_command(action="discuss-phase", phase=next_phase))
+            secondary.append(_runtime_next_command(action="suggest-next"))
             status_class = "closed_ready_next_phase"
         elif status_class == "closed_ready_for_milestone_archive":
             primary = _runtime_next_command_with_argument(action="complete-milestone", argument=milestone_version)
+            next_phase_context_class = "not_applicable"
         elif status_class == "archived_ready_for_next_milestone":
             primary = _runtime_next_command(action="new-milestone")
+            next_phase_context_class = "not_applicable"
         else:
             primary = _runtime_next_command(action="audit-milestone")
             status_class = "closed_needs_milestone_audit"
+            next_phase_context_class = "not_applicable"
 
-        rendered = render_next_up_block(primary=primary)
+        rendered = render_next_up_block(primary=primary, secondary=secondary)
         return cls(
             status="closed",
             status_class=status_class,
             phase=phase,
             primary=primary,
             primary_label="Primary",
+            secondary=secondary,
+            transition_owner=OWNER_RUNTIME,
+            current_blocking_gate="none",
+            primary_runtime_command=primary,
+            secondary_runtime_commands=secondary,
+            next_phase_context_class=next_phase_context_class if next_phase is not None else "not_applicable",
             rendered_markdown=rendered.markdown,
             stage_stop_next_runtime_command=rendered.stage_stop_next_runtime_command,
             stage_stop_also_available=list(rendered.stage_stop_also_available),
@@ -198,53 +233,77 @@ class LifecycleNextUp(BaseModel):
 
     @model_validator(mode="after")
     def _validate_lifecycle_invariants(self) -> Self:
+        runtime_commands = [command.command for command in self.secondary_runtime_commands]
+        if (
+            (self.primary_runtime_command and self.primary_runtime_command.owner != OWNER_RUNTIME)
+            or any(command.owner != OWNER_RUNTIME for command in self.secondary_runtime_commands)
+            or any(command.owner == OWNER_RUNTIME for command in self.secondary_local_commands)
+            or self.stage_stop_also_available != runtime_commands
+        ):
+            raise ValueError("lifecycle route command ownership/projection mismatch")
+
         if self.status == "ready":
-            if self.primary.owner != OWNER_LOCAL_TRANSITION or self.primary.action != "phase-complete":
-                raise ValueError("ready lifecycle next-up requires a phase-complete local transition primary")
-            if self.after_this_completes is None or self.after_this_completes.owner != OWNER_RUNTIME:
-                raise ValueError("ready lifecycle next-up requires an after-this-completes runtime route")
-            if self.stage_stop_next_runtime_command != self.after_this_completes.command:
-                raise ValueError("ready lifecycle stage-stop route must match after-this-completes")
-            if self.primary.requires_user_initiated_runtime_command:
-                raise ValueError("local transition primary must not require a user-initiated runtime command")
-            if any(command.owner != OWNER_LOCAL_HELPER for command in self.secondary):
-                raise ValueError("ready lifecycle secondary commands must be local helpers")
+            if (
+                self.transition_owner != OWNER_LOCAL_TRANSITION
+                or self.primary.owner != OWNER_LOCAL_TRANSITION
+                or self.primary.action != "phase-complete"
+                or self.local_transition_command != self.primary
+                or self.after_this_completes is None
+                or self.after_this_completes.owner != OWNER_RUNTIME
+                or self.after_local_runtime_command != self.after_this_completes
+                or self.primary_runtime_command != self.after_local_runtime_command
+                or self.stage_stop_next_runtime_command != self.after_this_completes.command
+                or self.primary.requires_user_initiated_runtime_command
+                or any(command.owner != OWNER_LOCAL_HELPER for command in self.secondary)
+            ):
+                raise ValueError("ready lifecycle route invariant failed")
         elif self.status == "blocked":
-            if self.primary.owner != OWNER_RUNTIME:
-                raise ValueError("blocked lifecycle next-up requires a runtime primary")
-            if self.primary.action not in {"execute-phase", "verify-work", "resume-work"}:
-                raise ValueError("blocked lifecycle primary action is not a closeout recovery route")
-            if self.after_this_completes is not None:
-                raise ValueError("blocked lifecycle next-up cannot have after-this-completes")
-            if not self.blockers:
-                raise ValueError("blocked lifecycle next-up requires blockers")
+            if (
+                self.transition_owner != OWNER_RUNTIME
+                or self.primary.owner != OWNER_RUNTIME
+                or self.primary_runtime_command != self.primary
+                or self.primary.action not in {"execute-phase", "verify-work", "resume-work"}
+                or self.after_this_completes is not None
+                or self.local_transition_command is not None
+                or self.after_local_runtime_command is not None
+                or not self.blockers
+                or self.current_blocking_gate == "none"
+            ):
+                raise ValueError("blocked lifecycle route invariant failed")
         elif self.status == "closed":
-            if self.primary.owner != OWNER_RUNTIME:
-                raise ValueError("closed lifecycle next-up requires a runtime primary")
-            if self.primary.action not in {
-                "plan-phase",
-                "audit-milestone",
-                "complete-milestone",
-                "new-milestone",
-            }:
-                raise ValueError("closed lifecycle primary action is not a closed-phase route")
-            if self.after_this_completes is not None:
-                raise ValueError("closed lifecycle next-up cannot have after-this-completes")
-            if "gpd phase complete" in self.rendered_markdown:
-                raise ValueError("closed lifecycle next-up must not repeat local phase closeout")
+            closed_actions = {"discuss-phase", "plan-phase", "audit-milestone", "complete-milestone", "new-milestone"}
+            if (
+                self.transition_owner != OWNER_RUNTIME
+                or self.primary.owner != OWNER_RUNTIME
+                or self.primary_runtime_command != self.primary
+                or self.primary.action not in closed_actions
+                or self.after_this_completes is not None
+                or self.local_transition_command is not None
+                or self.after_local_runtime_command is not None
+                or "gpd phase complete" in self.rendered_markdown
+            ):
+                raise ValueError("closed lifecycle route invariant failed")
         return self
 
-    @field_serializer("primary", "after_this_completes", when_used="json")
+    @field_serializer(
+        "primary",
+        "after_this_completes",
+        "primary_runtime_command",
+        "local_transition_command",
+        "after_local_runtime_command",
+        when_used="json",
+    )
     def _serialize_next_command(self, value: NextCommand | None) -> dict[str, object] | None:
         return value.as_dict() if value is not None else None
 
-    @field_serializer("secondary", when_used="json")
+    @field_serializer("secondary", "secondary_runtime_commands", "secondary_local_commands", when_used="json")
     def _serialize_secondary_commands(self, value: list[NextCommand]) -> list[dict[str, object]]:
         return [command.as_dict() for command in value]
 
-    def as_legacy_next_up_dict(self, *, hint_source: str = _NEXT_UP_HINT_SOURCE) -> dict[str, object]:
-        """Return the legacy ``next_up`` JSON shape generated from canonical fields."""
+    def to_route_payload(self) -> dict[str, object]:
+        return self.model_dump(mode="json", exclude={"primary", "primary_label", "after_this_completes", "secondary"})
 
+    def to_legacy_payload(self, *, hint_source: str = _NEXT_UP_HINT_SOURCE) -> dict[str, object]:
         primary_hint = _hint_from_next_command(
             self.primary,
             role=ROLE_PRIMARY,
@@ -296,10 +355,11 @@ class LifecycleNextUp(BaseModel):
             payload["blockers"] = list(self.blockers)
         return payload
 
-    def to_compat_dict(self, *, hint_source: str = _NEXT_UP_HINT_SOURCE) -> dict[str, object]:
-        """Alias for consumers using the explorer-proposed method name."""
+    def as_legacy_next_up_dict(self, *, hint_source: str = _NEXT_UP_HINT_SOURCE) -> dict[str, object]:
+        return self.to_legacy_payload(hint_source=hint_source)
 
-        return self.as_legacy_next_up_dict(hint_source=hint_source)
+    def to_compat_dict(self, *, hint_source: str = _NEXT_UP_HINT_SOURCE) -> dict[str, object]:
+        return self.to_legacy_payload(hint_source=hint_source)
 
 
 class PhaseCloseoutReadiness(BaseModel):
@@ -583,10 +643,23 @@ def _runtime_next_command_with_argument(
 
 
 def _blocked_status_class(action: str | None) -> CanonicalLifecycleClass:
+    if action in {"execute-phase", "verify-work"}:
+        return "needs_execution" if action == "execute-phase" else "needs_verification"
+    return "blocked_closeout"
+
+
+def _blocked_gate(*, blockers: list[str], action: str | None) -> str:
     if action == "execute-phase":
-        return "needs_execution"
+        return "summaries_incomplete"
+    if action == "resume-work":
+        return "active_bounded_segment"
     if action == "verify-work":
-        return "needs_verification"
+        blocker_text = "\n".join(blockers).lower()
+        if "proof-redteam" in blocker_text or "proof-bearing" in blocker_text:
+            return "proof_redteam_required"
+        if "verification report missing" in blocker_text:
+            return "verification_missing"
+        return "verification_not_passed"
     return "blocked_closeout"
 
 
@@ -661,6 +734,7 @@ def _next_up_payload(
     cleanup_command: str | None,
     blockers: list[str],
     blocked_action: str | None = None,
+    current_blocking_gate: str | None = None,
 ) -> LifecycleNextUp:
     if ready and closeout_command is not None:
         return LifecycleNextUp.ready_local_transition(
@@ -673,6 +747,7 @@ def _next_up_payload(
         phase=phase,
         blockers=blockers,
         action=blocked_action,
+        current_blocking_gate=current_blocking_gate,
     )
 
 
@@ -712,13 +787,13 @@ def _phase_closure(
 
     state_current_phase, state_status = _state_position(project_root)
     normalized_state_phase = phase_normalize(state_current_phase) if state_current_phase else None
-    state_status_lower = state_status.lower() if state_status else ""
+    status_class = state_status_class(state_status)
     state_advanced = (
         normalized_state_phase is not None
         and compare_phase_numbers(normalized_state_phase, normalized_phase) > 0
-        and state_status_lower in {"ready to plan", "complete", "milestone complete"}
+        and status_class in {"ready_to_plan", "complete", "milestone_complete"}
     )
-    state_milestone_closed = normalized_state_phase is None and state_status_lower == "milestone complete"
+    state_milestone_closed = normalized_state_phase is None and status_class == "milestone_complete"
     return (
         roadmap_complete or state_advanced or state_milestone_closed,
         roadmap_complete,
@@ -764,9 +839,28 @@ def _milestone_archive_exists(project_root: Path, version: str | None) -> bool:
 def _closed_milestone_status_class(project_root: Path, version: str | None) -> CanonicalLifecycleClass:
     if _milestone_archive_exists(project_root, version):
         return "archived_ready_for_next_milestone"
-    if _milestone_audit_status(project_root, version) == "passed":
-        return "closed_ready_for_milestone_archive"
-    return "closed_needs_milestone_audit"
+    return (
+        "closed_ready_for_milestone_archive"
+        if _milestone_audit_status(project_root, version) == "passed"
+        else "closed_needs_milestone_audit"
+    )
+
+
+def _next_phase_context_class(project_root: Path, next_phase: str | None) -> str:
+    if next_phase is None:
+        return "not_applicable"
+    normalized_next_phase = phase_normalize(next_phase)
+    for roadmap_phase in roadmap_analyze(project_root).phases:
+        if phase_normalize(roadmap_phase.number) != normalized_next_phase:
+            continue
+        if roadmap_phase.plan_count > 0 or roadmap_phase.disk_status in {"planned", "partial", "complete"}:
+            return "planned"
+        if roadmap_phase.has_research or roadmap_phase.disk_status == "researched":
+            return "has_research"
+        if roadmap_phase.has_context or roadmap_phase.disk_status == "discussed":
+            return "has_context"
+        return "missing_context"
+    return "missing_context"
 
 
 def _closed_next_up(
@@ -781,6 +875,7 @@ def _closed_next_up(
             phase=phase,
             next_phase=next_phase,
             status_class="closed_ready_next_phase",
+            next_phase_context_class=_next_phase_context_class(project_root, next_phase),
         )
 
     version = _milestone_version(project_root)
@@ -805,7 +900,7 @@ def _decision_from_closeout(
     command = lifecycle_next_up.primary.command
 
     if phase_closed:
-        milestone_complete = (state_status or "").lower() == "milestone complete" or next_phase is None
+        milestone_complete = state_status_class(state_status) == "milestone_complete" or next_phase is None
         decision: LifecycleDecisionKind = (
             "closed_milestone_complete" if milestone_complete else "closed_ready_next_phase"
         )
@@ -839,8 +934,9 @@ def _missing_project_decision(
         closeout_command=None,
         cleanup_command=None,
         blockers=blockers,
+        current_blocking_gate="project_missing",
     )
-    next_up_payload = next_up.as_legacy_next_up_dict()
+    next_up_payload = next_up.to_legacy_payload()
     closeout = PhaseCloseoutReadiness(
         phase=phase,
         ready=False,
@@ -879,8 +975,9 @@ def _missing_phase_decision(
         closeout_command=None,
         cleanup_command=None,
         blockers=blockers,
+        current_blocking_gate="phase_missing",
     )
-    next_up_payload = next_up.as_legacy_next_up_dict()
+    next_up_payload = next_up.to_legacy_payload()
     closeout = PhaseCloseoutReadiness(
         phase=phase,
         ready=False,
@@ -1017,9 +1114,9 @@ def phase_lifecycle_decision(
             project_root=project_root,
             phase=phase_info.phase_number,
             next_phase=next_phase,
-            milestone_complete=(state_status or "").lower() == "milestone complete" or next_phase is None,
+            milestone_complete=state_status_class(state_status) == "milestone_complete" or next_phase is None,
         )
-    next_up_payload = next_up.as_legacy_next_up_dict()
+    next_up_payload = next_up.to_legacy_payload()
 
     closeout = PhaseCloseoutReadiness(
         phase=phase_info.phase_number,

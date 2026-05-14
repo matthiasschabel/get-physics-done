@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -834,6 +835,31 @@ def test_complete_unverified_suggests_verify(tmp_path: Path) -> None:
     assert verify.next_command.reason == verify.reason
 
 
+def _runtime_lifecycle_command(action: str, phase: str, *, reason: str = "typed lifecycle route") -> NextCommand:
+    return NextCommand(
+        label=f"gpd:{action} {phase}",
+        action=action,
+        owner=NEXT_COMMAND_OWNER_RUNTIME,
+        phase=phase,
+        reason=reason,
+        kind=KIND_RUNTIME_COMMAND_LABEL,
+        requires_user_initiated_runtime_command=True,
+        fresh_context_recommended=True,
+    )
+
+
+def _legacy_runtime_next_up(action: str, phase: str) -> dict[str, object]:
+    command = f"gpd:{action} {phase}"
+    typed = _runtime_lifecycle_command(action, phase, reason="stale legacy route").as_dict()
+    return {
+        "status": "closed",
+        "primary": command,
+        "commands": [typed],
+        "primary_command": typed,
+        "rendered_markdown": f"## > Next Up\nPrimary: `{command}`",
+    }
+
+
 @pytest.mark.parametrize("runtime", _RUNTIME_NAMES)
 def test_typed_lifecycle_runtime_verify_work_uses_active_runtime_command_class(
     tmp_path: Path,
@@ -954,6 +980,123 @@ def test_lifecycle_next_up_object_wins_over_stale_legacy_primary(
     assert verify.next_command is not None
     assert verify.next_command.owner == "runtime"
     assert verify.next_command.action == "verify-work"
+
+
+@pytest.mark.parametrize(
+    ("canonical_action", "stale_action", "phase2_has_research", "expected_command"),
+    [
+        pytest.param("discuss-phase", "plan-phase", True, "gpd:discuss-phase 02", id="missing-context-discuss"),
+        pytest.param("plan-phase", "discuss-phase", False, "gpd init plan-phase 02", id="context-ready-plan"),
+    ],
+)
+def test_canonical_closed_next_phase_route_wins_over_stale_legacy_payload(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    canonical_action: str,
+    stale_action: str,
+    phase2_has_research: bool,
+    expected_command: str,
+) -> None:
+    """Closed next-phase route should trust canonical fields over stale legacy/rendered fields."""
+    root = _setup_project(tmp_path)
+    _create_roadmap_with_phases(root, [("1", "Setup"), ("2", "Core")], completed={"1"})
+    _create_phase(root, "01-setup", plans=1, summaries=1, verification=True)
+    _create_phase(root, "02-core", research=phase2_has_research)
+
+    decision = SimpleNamespace(
+        decision="closed_ready_next_phase",
+        blocks_downstream=False,
+        phase="01",
+        primary_action=stale_action,
+        reason=f"typed lifecycle {canonical_action} route",
+        lifecycle_next_up=SimpleNamespace(
+            transition_owner="runtime",
+            primary_runtime_command=_runtime_lifecycle_command(canonical_action, "02"),
+            primary=_runtime_lifecycle_command(stale_action, "02", reason="stale primary property"),
+        ),
+        next_up=_legacy_runtime_next_up(stale_action, "02"),
+    )
+
+    def _typed_decision(cwd: Path, phase: str, *, require_verification: bool = True) -> object:
+        del cwd, phase, require_verification
+        return decision
+
+    monkeypatch.setattr("gpd.core.phase_lifecycle.phase_lifecycle_decision", _typed_decision)
+
+    result = suggest_next(root)
+
+    actions = [suggestion.action for suggestion in result.suggestions]
+    assert canonical_action in actions
+    assert stale_action not in actions
+    suggestion = next(item for item in result.suggestions if item.action == canonical_action)
+    assert suggestion.command == expected_command
+    assert suggestion.next_command is not None
+    assert suggestion.next_command.action == canonical_action
+    assert suggestion.next_command.owner == "runtime"
+
+
+def test_canonical_local_transition_route_wins_over_stale_runtime_legacy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A canonical local transition remains local and is not replaced by stale runtime legacy data."""
+    root = _setup_project(tmp_path)
+    _create_roadmap_with_phases(root, [("1", "Setup"), ("2", "Core")])
+    _create_phase(root, "01-setup", plans=1, summaries=1, verification=True)
+
+    after_local = NextCommand(
+        label="gpd:suggest-next",
+        action="suggest-next",
+        owner=NEXT_COMMAND_OWNER_RUNTIME,
+        reason="after local closeout",
+        kind=KIND_RUNTIME_COMMAND_LABEL,
+        requires_user_initiated_runtime_command=True,
+        fresh_context_recommended=True,
+    )
+    local_transition = NextCommand(
+        label="gpd phase complete 01",
+        action="phase-complete",
+        owner="local_transition",
+        phase="01",
+        reason="typed local transition",
+        kind="local_cli_transition_command",
+        requires_user_initiated_runtime_command=False,
+        fresh_context_recommended=False,
+    )
+
+    decision = SimpleNamespace(
+        decision="ready_for_closeout",
+        blocks_downstream=True,
+        phase="01",
+        primary_action="verify-work",
+        reason="typed lifecycle local transition",
+        lifecycle_next_up=SimpleNamespace(
+            transition_owner="local_transition",
+            local_transition_command=local_transition,
+            primary_runtime_command=after_local,
+            after_local_runtime_command=after_local,
+            primary=_runtime_lifecycle_command("verify-work", "01", reason="stale primary property"),
+        ),
+        next_up=_legacy_runtime_next_up("verify-work", "01"),
+    )
+
+    def _typed_decision(cwd: Path, phase: str, *, require_verification: bool = True) -> object:
+        del cwd, phase, require_verification
+        return decision
+
+    monkeypatch.setattr("gpd.core.phase_lifecycle.phase_lifecycle_decision", _typed_decision)
+
+    result = suggest_next(root)
+
+    actions = [suggestion.action for suggestion in result.suggestions]
+    assert "phase-complete" in actions
+    assert "verify-work" not in actions
+    assert "suggest-next" not in actions
+    transition = next(suggestion for suggestion in result.suggestions if suggestion.action == "phase-complete")
+    assert transition.command == "gpd phase complete 01"
+    assert transition.next_command is not None
+    assert transition.next_command.owner == "local_transition"
+    assert transition.next_command.requires_user_initiated_runtime_command is False
 
 
 def test_lifecycle_structural_verify_phase_without_typed_primary_fails_closed(

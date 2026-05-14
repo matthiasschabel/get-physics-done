@@ -100,11 +100,10 @@ Use the JSON result, especially:
 - `warnings`
 
 If the command exits nonzero or `ready` is false, do not mutate lifecycle state.
-Present the blockers and route to the helper-provided `next_up` command. Missing
-or non-passing verification routes to `gpd:verify-work {phase}`. Active bounded
-segments route to `gpd:resume-work`. Incomplete summaries route back to
-`gpd:execute-phase {phase}` unless the researcher explicitly chooses a separate
-scope-change workflow.
+Present the blockers and route to the helper-provided `next_up` projection.
+Use `lifecycle_next_up.rendered_markdown` or `next_up.rendered_markdown` and the
+matching stage-stop fields when present. If route fields are absent, surface the
+helper JSON rather than inventing a runtime command.
 
 **Incomplete-plan safety rail**
 
@@ -219,20 +218,18 @@ Run pre-commit validation or project-specific tests for the files actually
 changed. Commit only the transition/project-evolution changes that occurred in
 this workflow.
 
-If `TRANSITION.is_last_phase` is true, route milestone closeout:
+After the local transition and any project-evolution work, refresh the
+code-owned lifecycle route:
 
-## > Next Up
+```bash
+POST_TRANSITION_ROUTE=$(gpd --raw phase closeout-readiness "${phase_number}" --require-verification || true)
+```
 
-Primary: `gpd:complete-milestone {milestone_version}`
-
-If `TRANSITION.next_phase` exists:
-
-## > Next Up
-
-Primary: `gpd:plan-phase {next_phase}`
-
-If the next phase lacks context, run `gpd:discuss-phase {next_phase}` before
-planning. If context already exists, proceed to `gpd:plan-phase {next_phase}`.
+The helper may exit nonzero after the phase is already closed. Treat that as
+displayable only when it returns parseable route JSON. Emit
+`lifecycle_next_up.rendered_markdown` or `next_up.rendered_markdown` plus the
+matching `stage_stop` projection. Do not choose the next phase, milestone audit,
+milestone archive, or new-milestone command in this prompt.
 
 </step>
 
@@ -254,13 +251,8 @@ Completed:
 - State updated: {state_updated}
 - Project evolution: {brief summary or "none"}
 
-## > Next Up
-
-Primary: `gpd:plan-phase {next_phase}`
+{rendered next-up block from the refreshed lifecycle route payload}
 ```
-
-For milestone completion, replace the primary line with
-`gpd:complete-milestone {milestone_version}`.
 
 </output>
 

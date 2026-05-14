@@ -26,6 +26,12 @@ class _StableCliRunner(CliRunner):
 
 RUNNER = _StableCliRunner()
 _RUNTIME_NAMES = tuple(descriptor.runtime_name for descriptor in iter_runtime_descriptors())
+_FORBIDDEN_NEXT_UP_RELOAD_FRAGMENTS = (
+    "gpd --raw init",
+    "--raw init",
+    "gpd --raw stage field-access",
+    "--raw stage field-access",
+)
 
 
 def _write_phase_project(
@@ -138,6 +144,18 @@ def _write_passed_verification(report_path: Path) -> None:
         "PASS: lifecycle contract evidence is complete.\n",
         encoding="utf-8",
     )
+
+
+def _mark_closed_to_next_phase(root: Path, *, next_phase: str = "03") -> None:
+    state_path = root / "GPD" / "state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["position"]["current_phase"] = next_phase
+    state["position"]["current_phase_name"] = "Synthesis"
+    state["position"]["current_plan"] = None
+    state["position"]["total_plans_in_phase"] = None
+    state["position"]["status"] = "Ready to plan"
+    state_path.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+    (root / "GPD" / "STATE.md").write_text(generate_state_markdown(state), encoding="utf-8")
 
 
 def _snapshot_closeout_surfaces(root: Path) -> dict[Path, str | None]:
@@ -707,6 +725,94 @@ def test_record_verification_manual_status_override_requires_admin_flag(tmp_path
     assert admin_payload["recorded"] is True
     assert admin_payload["status"] == "Verified"
     assert not any(path.name.endswith("VERIFICATION.md") for path in phase_dir.iterdir())
+
+
+def test_closeout_readiness_raw_closed_phase_missing_next_context_routes_to_discuss(tmp_path: Path) -> None:
+    phase_dir = _write_phase_project(tmp_path, status="Verified")
+    _write_passed_verification(phase_dir / "02-VERIFICATION.md")
+    _mark_closed_to_next_phase(tmp_path)
+    before_readiness = _snapshot_closeout_surfaces(tmp_path)
+
+    result = RUNNER.invoke(
+        app,
+        [
+            "--raw",
+            "--cwd",
+            str(tmp_path),
+            "phase",
+            "closeout-readiness",
+            "02",
+            "--require-verification",
+        ],
+    )
+
+    assert result.exit_code == 1, result.output
+    payload = json.loads(result.output)
+    assert payload["ready"] is False
+    assert payload["read_only"] is True
+    assert payload["mutated"] is False
+    assert "next_up" in payload
+    route = payload["lifecycle_route"]
+    assert route["status"] == "closed"
+    assert route["status_class"] == "closed_ready_next_phase"
+    assert route["transition_owner"] == "runtime"
+    assert route["next_phase"] == "03"
+    assert route["next_phase_context_class"] == "missing_context"
+    assert route["primary_runtime_command"]["command"] == "gpd:discuss-phase 03"
+    assert route["primary_runtime_command_text"] == "gpd:discuss-phase 03"
+    assert route["stage_stop_next_runtime_command"] == "gpd:discuss-phase 03"
+    assert payload["lifecycle_next_up"]["primary"]["command"] == "gpd:discuss-phase 03"
+    assert payload["next_up"]["primary_command"]["command"] == "gpd:discuss-phase 03"
+    assert payload["next_up"]["stage_stop_next_runtime_command"] == route["stage_stop_next_runtime_command"]
+    assert all(fragment not in route["rendered_markdown"] for fragment in _FORBIDDEN_NEXT_UP_RELOAD_FRAGMENTS)
+    assert all(
+        fragment not in payload["next_up"]["rendered_markdown"] for fragment in _FORBIDDEN_NEXT_UP_RELOAD_FRAGMENTS
+    )
+    _assert_closeout_surfaces_unchanged(before_readiness)
+
+
+def test_closeout_readiness_raw_closed_phase_with_next_context_routes_to_plan(tmp_path: Path) -> None:
+    phase_dir = _write_phase_project(tmp_path, status="Verified")
+    _write_passed_verification(phase_dir / "02-VERIFICATION.md")
+    next_phase_dir = tmp_path / "GPD" / "phases" / "03-synthesis"
+    next_phase_dir.mkdir(parents=True)
+    (next_phase_dir / "03-CONTEXT.md").write_text("# Phase 03 Context\n", encoding="utf-8")
+    _mark_closed_to_next_phase(tmp_path)
+    before_readiness = _snapshot_closeout_surfaces(tmp_path)
+
+    result = RUNNER.invoke(
+        app,
+        [
+            "--raw",
+            "--cwd",
+            str(tmp_path),
+            "phase",
+            "closeout-readiness",
+            "02",
+            "--require-verification",
+        ],
+    )
+
+    assert result.exit_code == 1, result.output
+    payload = json.loads(result.output)
+    assert "next_up" in payload
+    route = payload["lifecycle_route"]
+    assert route["status"] == "closed"
+    assert route["status_class"] == "closed_ready_next_phase"
+    assert route["transition_owner"] == "runtime"
+    assert route["next_phase"] == "03"
+    assert route["next_phase_context_class"] == "has_context"
+    assert route["primary_runtime_command"]["command"] == "gpd:plan-phase 03"
+    assert route["primary_runtime_command_text"] == "gpd:plan-phase 03"
+    assert route["stage_stop_next_runtime_command"] == "gpd:plan-phase 03"
+    assert payload["lifecycle_next_up"]["primary"]["command"] == "gpd:plan-phase 03"
+    assert payload["next_up"]["primary_command"]["command"] == "gpd:plan-phase 03"
+    assert payload["next_up"]["stage_stop_next_runtime_command"] == route["stage_stop_next_runtime_command"]
+    assert all(fragment not in route["rendered_markdown"] for fragment in _FORBIDDEN_NEXT_UP_RELOAD_FRAGMENTS)
+    assert all(
+        fragment not in payload["next_up"]["rendered_markdown"] for fragment in _FORBIDDEN_NEXT_UP_RELOAD_FRAGMENTS
+    )
+    _assert_closeout_surfaces_unchanged(before_readiness)
 
 
 def test_full_lifecycle_chain_checks_closeout_readiness_before_phase_complete(tmp_path: Path) -> None:

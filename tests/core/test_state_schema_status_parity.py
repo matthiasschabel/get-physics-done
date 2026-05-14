@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from gpd.core.state import VALID_STATUSES, ResearchState
+from gpd.core.state import VALID_STATUSES, ResearchState, state_status_class
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -50,6 +50,38 @@ def test_state_schema_status_values_match_core_state() -> None:
     match = re.search(r"VALID_STATUSES list \((?P<count>\d+) values\)", text)
     assert match is not None
     assert int(match.group("count")) == len(VALID_STATUSES)
+
+
+def test_state_status_class_matches_core_status_vocabulary() -> None:
+    assert {state_status_class(status) for status in VALID_STATUSES} == {
+        "not_started",
+        "planning",
+        "researching",
+        "ready_to_execute",
+        "executing",
+        "paused",
+        "phase_ready_for_verification",
+        "verifying",
+        "verified",
+        "complete",
+        "blocked",
+        "ready_to_plan",
+        "milestone_complete",
+    }
+
+
+def test_state_status_class_is_read_only_and_tolerates_display_variants() -> None:
+    assert state_status_class(None) == "unset"
+    assert state_status_class("") == "unset"
+    assert state_status_class("none") == "unset"
+    assert state_status_class("no") == "unset"
+    assert state_status_class("not set") == "unset"
+    assert state_status_class("[not set]") == "unset"
+    assert state_status_class("\u2014") == "unset"
+    assert state_status_class("Phase complete \u2014 ready for verification") == "phase_ready_for_verification"
+    assert state_status_class("Phase complete - ready for verification") == "phase_ready_for_verification"
+    assert state_status_class("Phase complete -- ready for verification") == "phase_ready_for_verification"
+    assert state_status_class("definitely not a persisted status") == "unknown"
 
 
 def test_state_schema_top_level_fields_match_research_state_model() -> None:

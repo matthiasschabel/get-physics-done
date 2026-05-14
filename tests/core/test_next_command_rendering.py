@@ -41,6 +41,39 @@ def test_runtime_primary_renders_shared_next_up_block_and_stage_stop_projection(
     assert rendered.stage_stop_also_available == ()
 
 
+@pytest.mark.parametrize(
+    ("primary_command", "primary_action", "secondary_command", "secondary_action"),
+    (
+        ("gpd:discuss-phase 03", "discuss-phase", "gpd:plan-phase 03", "plan-phase"),
+        ("gpd:plan-phase 03", "plan-phase", "gpd:discuss-phase 03", "discuss-phase"),
+    ),
+)
+def test_closed_next_phase_runtime_routes_render_one_primary_without_raw_reload(
+    primary_command: str,
+    primary_action: str,
+    secondary_command: str,
+    secondary_action: str,
+) -> None:
+    primary = _classified(primary_command, action=primary_action, phase="03")
+    secondary = (
+        _classified(secondary_command, action=secondary_action, phase="03"),
+        _classified("gpd:suggest-next", action="suggest-next"),
+    )
+
+    rendered = render_next_up_block(primary=primary, secondary=secondary)
+
+    assert rendered.markdown.count("Primary:") == 1
+    assert rendered.markdown.splitlines() == [
+        "## > Next Up",
+        f"Primary: `{primary_command}`",
+        f"Secondary runtime: `{secondary_command}`",
+        "Secondary runtime: `gpd:suggest-next`",
+    ]
+    _assert_text_excludes(rendered.markdown, ("gpd --raw init", "gpd --raw stage field-access"))
+    assert rendered.stage_stop_next_runtime_command == primary_command
+    assert rendered.stage_stop_also_available == (secondary_command, "gpd:suggest-next")
+
+
 def test_local_transition_primary_renders_after_runtime_route_and_secondary_commands() -> None:
     primary = _classified("gpd phase complete 02", action="phase-complete", phase="02")
     after = _classified("gpd:plan-phase 03", action="plan-phase", phase="03")

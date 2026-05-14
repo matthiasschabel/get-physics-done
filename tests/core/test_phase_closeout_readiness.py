@@ -31,6 +31,42 @@ _FORBIDDEN_NEXT_UP_RELOAD_FRAGMENTS = (
 )
 
 
+def _command_text(command: object | None) -> str | None:
+    if command is None:
+        return None
+    return command.command
+
+
+def _command_texts(commands: object) -> tuple[str, ...]:
+    return tuple(command.command for command in commands)
+
+
+def _assert_route(
+    route: object,
+    *,
+    status_class: str,
+    transition_owner: str,
+    current_blocking_gate: str | None,
+    primary_runtime_command: str | None,
+    local_transition_command: str | None,
+    after_local_runtime_command: str | None,
+    secondary_runtime_commands: tuple[str, ...] = (),
+    secondary_local_commands: tuple[str, ...] = (),
+) -> None:
+    assert route.status_class == status_class
+    assert route.transition_owner == transition_owner
+    assert route.current_blocking_gate == current_blocking_gate
+    assert _command_text(route.primary_runtime_command) == primary_runtime_command
+    assert _command_text(route.local_transition_command) == local_transition_command
+    assert _command_text(route.after_local_runtime_command) == after_local_runtime_command
+    assert _command_texts(route.secondary_runtime_commands) == secondary_runtime_commands
+    assert _command_texts(route.secondary_local_commands) == secondary_local_commands
+
+
+def _assert_legacy_projection(payload: dict[str, object], route: object) -> None:
+    assert payload == route.to_legacy_payload()
+
+
 def _write_phase_project(
     root: Path,
     *,
@@ -99,41 +135,29 @@ def test_closeout_readiness_all_summaries_and_passed_verification_is_ready(tmp_p
         result.cleanup_command
         == "gpd --raw phase checkpoint cleanup --phase 02 --namespace phase --policy successful-closeout"
     )
-    assert result.next_up["status"] == "ready"
-    assert result.lifecycle_next_up is not None
-    assert result.lifecycle_next_up.status_class == "ready_for_local_closeout"
-    assert result.next_up == result.lifecycle_next_up.as_legacy_next_up_dict()
-    assert result.next_up["primary"] == "gpd phase complete 02"
-    assert result.next_up["primary_owner"] == "local_transition"
-    commands = result.next_up["commands"]
-    assert isinstance(commands, list)
-    assert commands[0]["command"] == "gpd phase complete 02"
-    assert commands[0]["owner"] == "local_transition"
-    assert commands[0]["role"] == "primary"
-    assert commands[0]["requires_user_initiated_runtime_command"] is False
-    assert result.next_up["primary_command"]["owner"] == "local_transition"
-    assert result.next_up["primary_command"]["command"] == "gpd phase complete 02"
-    assert result.next_up["after_this_completes"]["owner"] == "runtime"
-    assert result.next_up["after_this_completes"]["command"] == "gpd:suggest-next"
-    assert result.next_up["stage_stop_next_runtime_command"] == "gpd:suggest-next"
-    assert result.next_up["stage_stop_also_available"] == []
-    secondary = result.next_up["secondary"]
-    assert isinstance(secondary, list)
-    assert secondary[0]["command"] == result.cleanup_command
-    assert secondary[0]["owner"] == "local_helper"
-    assert secondary[0]["role"] == "secondary"
-    secondary_commands = result.next_up["secondary_commands"]
-    assert isinstance(secondary_commands, list)
-    assert secondary_commands[0]["command"] == result.cleanup_command
-    assert secondary_commands[0]["owner"] == "local_helper"
-    rendered = result.next_up["rendered_markdown"]
+    route = result.lifecycle_next_up
+    assert route is not None
+    _assert_route(
+        route,
+        status_class="ready_for_local_closeout",
+        transition_owner="local_transition",
+        current_blocking_gate="none",
+        primary_runtime_command="gpd:suggest-next",
+        local_transition_command="gpd phase complete 02",
+        after_local_runtime_command="gpd:suggest-next",
+        secondary_local_commands=(
+            "gpd --raw phase checkpoint cleanup --phase 02 --namespace phase --policy successful-closeout",
+        ),
+    )
+    assert route.stage_stop_next_runtime_command == _command_text(route.after_local_runtime_command)
+    rendered = route.rendered_markdown
     assert rendered.startswith("## > Next Up\nPrimary local transition:")
     assert "**After this completes:** `gpd:suggest-next`" in rendered
     assert "Secondary local helper:" in rendered
     assert all(fragment not in rendered for fragment in _FORBIDDEN_NEXT_UP_RELOAD_FRAGMENTS)
+    _assert_legacy_projection(result.next_up, route)
     assert result.closeout_command_hint is not None
     assert result.closeout_command_hint["owner"] == "local_transition"
-    assert result.closeout_command_hint == result.next_up["commands"][0]
     assert result.cleanup_command_hint is not None
     assert result.cleanup_command_hint["owner"] == "local_helper"
     assert (tmp_path / "GPD" / "ROADMAP.md").read_text(encoding="utf-8") == before_roadmap
@@ -150,12 +174,19 @@ def test_closeout_readiness_missing_summary_blocks_closeout(tmp_path: Path) -> N
     assert result.all_plans_complete is False
     assert "02-02-PLAN.md" in result.incomplete_plans
     assert any("summaries incomplete" in blocker for blocker in result.blockers)
-    assert result.next_up["primary"] == "gpd:execute-phase 02"
-    assert result.lifecycle_next_up is not None
-    assert result.lifecycle_next_up.status_class == "needs_execution"
-    assert result.next_up["primary_command"]["action"] == "execute-phase"
-    assert result.next_up["primary_command"]["owner"] == "runtime"
-    assert result.next_up["stage_stop_next_runtime_command"] == "gpd:execute-phase 02"
+    route = result.lifecycle_next_up
+    assert route is not None
+    _assert_route(
+        route,
+        status_class="needs_execution",
+        transition_owner="runtime",
+        current_blocking_gate="summaries_incomplete",
+        primary_runtime_command="gpd:execute-phase 02",
+        local_transition_command=None,
+        after_local_runtime_command=None,
+    )
+    assert route.primary.action == "execute-phase"
+    assert route.stage_stop_next_runtime_command == _command_text(route.primary_runtime_command)
 
 
 def test_closeout_readiness_missing_verification_blocks_required_closeout(tmp_path: Path) -> None:
@@ -167,18 +198,20 @@ def test_closeout_readiness_missing_verification_blocks_required_closeout(tmp_pa
     assert result.ready is False
     assert result.verification_routing_status == "missing"
     assert "canonical verification report missing" in result.blockers
-    assert result.next_up["primary"] == "gpd:verify-work 02"
-    assert result.next_up["primary_owner"] == "runtime"
-    assert result.lifecycle_next_up is not None
-    assert result.lifecycle_next_up.status_class == "needs_verification"
-    commands = result.next_up["commands"]
-    assert isinstance(commands, list)
-    assert commands[0]["owner"] == "runtime"
-    assert commands[0]["role"] == "primary"
-    assert result.next_up["primary_command"]["action"] == "verify-work"
-    assert result.next_up["primary_command"]["owner"] == "runtime"
-    assert result.next_up["stage_stop_next_runtime_command"] == "gpd:verify-work 02"
-    assert result.next_up["rendered_markdown"] == "## > Next Up\nPrimary: `gpd:verify-work 02`"
+    route = result.lifecycle_next_up
+    assert route is not None
+    _assert_route(
+        route,
+        status_class="needs_verification",
+        transition_owner="runtime",
+        current_blocking_gate="verification_missing",
+        primary_runtime_command="gpd:verify-work 02",
+        local_transition_command=None,
+        after_local_runtime_command=None,
+    )
+    assert route.primary.action == "verify-work"
+    assert route.stage_stop_next_runtime_command == _command_text(route.primary_runtime_command)
+    assert route.rendered_markdown == "## > Next Up\nPrimary: `gpd:verify-work 02`"
 
 
 @pytest.mark.parametrize("status", ["gaps_found", "human_needed", "expert_needed"])
@@ -193,10 +226,19 @@ def test_closeout_readiness_non_passing_verification_blocks_required_closeout(
     assert result.ready is False
     assert result.verification_status == status
     assert any("must have top-level frontmatter status 'passed'" in blocker for blocker in result.blockers)
-    assert result.next_up["primary"] == "gpd:verify-work 02"
-    assert result.next_up["primary_command"]["action"] == "verify-work"
-    assert result.next_up["primary_command"]["owner"] == "runtime"
-    assert result.next_up["stage_stop_next_runtime_command"] == "gpd:verify-work 02"
+    route = result.lifecycle_next_up
+    assert route is not None
+    _assert_route(
+        route,
+        status_class="needs_verification",
+        transition_owner="runtime",
+        current_blocking_gate="verification_not_passed",
+        primary_runtime_command="gpd:verify-work 02",
+        local_transition_command=None,
+        after_local_runtime_command=None,
+    )
+    assert route.primary.action == "verify-work"
+    assert route.stage_stop_next_runtime_command == _command_text(route.primary_runtime_command)
 
 
 def test_closeout_readiness_malformed_verification_blocks_closeout(tmp_path: Path) -> None:
@@ -240,13 +282,19 @@ def test_closeout_readiness_active_bounded_segment_blocks_closeout(tmp_path: Pat
     assert result.ready is False
     assert result.active_bounded_segment is True
     assert any("active bounded segment" in blocker for blocker in result.blockers)
-    assert result.next_up["primary"] == "gpd:resume-work"
-    assert result.next_up["primary_owner"] == "runtime"
-    assert result.lifecycle_next_up is not None
-    assert result.lifecycle_next_up.status_class == "blocked_closeout"
-    assert result.next_up["primary_command"]["action"] == "resume-work"
-    assert result.next_up["primary_command"]["owner"] == "runtime"
-    assert result.next_up["stage_stop_next_runtime_command"] == "gpd:resume-work"
+    route = result.lifecycle_next_up
+    assert route is not None
+    _assert_route(
+        route,
+        status_class="blocked_closeout",
+        transition_owner="runtime",
+        current_blocking_gate="active_bounded_segment",
+        primary_runtime_command="gpd:resume-work",
+        local_transition_command=None,
+        after_local_runtime_command=None,
+    )
+    assert route.primary.action == "resume-work"
+    assert route.stage_stop_next_runtime_command == _command_text(route.primary_runtime_command)
 
 
 def test_closeout_readiness_preserves_checkpoint_tags_when_recovery_artifacts_exist(tmp_path: Path) -> None:
@@ -257,11 +305,18 @@ def test_closeout_readiness_preserves_checkpoint_tags_when_recovery_artifacts_ex
     assert result.ready is True
     assert result.preserve_checkpoint_tags is True
     assert result.cleanup_command is None
-    assert result.next_up["primary_owner"] == "local_transition"
-    assert result.next_up["secondary"] == []
-    assert result.next_up["secondary_commands"] == []
-    assert result.next_up["after_this_completes"]["command"] == "gpd:suggest-next"
     assert result.recovery_artifacts == ["GPD/phases/02-analysis/RECOVERY-02.md"]
+    route = result.lifecycle_next_up
+    assert route is not None
+    _assert_route(
+        route,
+        status_class="ready_for_local_closeout",
+        transition_owner="local_transition",
+        current_blocking_gate="none",
+        primary_runtime_command="gpd:suggest-next",
+        local_transition_command="gpd phase complete 02",
+        after_local_runtime_command="gpd:suggest-next",
+    )
 
 
 def test_closeout_readiness_blocks_proof_bearing_work_without_passed_proof_redteam(tmp_path: Path) -> None:
@@ -273,9 +328,19 @@ def test_closeout_readiness_blocks_proof_bearing_work_without_passed_proof_redte
     assert result.proof_redteam_required is True
     assert result.proof_redteam_ready is False
     assert "proof-bearing work requires a passed proof-redteam artifact" in result.blockers
-    assert result.next_up["primary"] == "gpd:verify-work 02"
-    assert result.next_up["primary_command"]["action"] == "verify-work"
-    assert result.next_up["stage_stop_next_runtime_command"] == "gpd:verify-work 02"
+    route = result.lifecycle_next_up
+    assert route is not None
+    _assert_route(
+        route,
+        status_class="needs_verification",
+        transition_owner="runtime",
+        current_blocking_gate="proof_redteam_required",
+        primary_runtime_command="gpd:verify-work 02",
+        local_transition_command=None,
+        after_local_runtime_command=None,
+    )
+    assert route.primary.action == "verify-work"
+    assert route.stage_stop_next_runtime_command == _command_text(route.primary_runtime_command)
 
 
 def test_closeout_readiness_blocks_non_passed_proof_redteam_artifact(tmp_path: Path) -> None:

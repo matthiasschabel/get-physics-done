@@ -523,16 +523,55 @@ def _call_lifecycle_value(value: object) -> object:
         return value
 
 
-def _lifecycle_next_up_payload(decision: object) -> object | None:
-    lifecycle_next_up = _lifecycle_value(decision, "lifecycle_next_up")
-    if lifecycle_next_up is not None:
-        return lifecycle_next_up
-    return _lifecycle_value(decision, "next_up")
+def _typed_route_command_candidate(route: object, *names: str) -> object | None:
+    for name in names:
+        candidate = _call_lifecycle_value(_lifecycle_value(route, name))
+        if _is_typed_lifecycle_command_payload(candidate):
+            return candidate
+    return None
+
+
+def _canonical_lifecycle_primary_command_payload(route: object) -> object | None:
+    transition_owner = (
+        str(_lifecycle_value(route, "transition_owner", "primary_owner") or "")
+        .strip()
+        .lower()
+        .replace("-", "_")
+    )
+    local_transition = _typed_route_command_candidate(route, "local_transition_command")
+    if transition_owner == "local_transition" and local_transition is not None:
+        return local_transition
+
+    runtime_primary = _typed_route_command_candidate(route, "primary_runtime_command")
+    if runtime_primary is not None:
+        return runtime_primary
+
+    after_local_runtime = _typed_route_command_candidate(route, "after_local_runtime_command")
+    if transition_owner == "local_transition" and after_local_runtime is not None:
+        return after_local_runtime
+    if local_transition is not None:
+        return local_transition
+    return None
+
+
+def _canonical_lifecycle_primary_command_payload_from_decision(decision: object) -> object | None:
+    for route in (_lifecycle_value(decision, "lifecycle_next_up"), _lifecycle_value(decision, "next_up")):
+        if route is None:
+            continue
+        candidate = _canonical_lifecycle_primary_command_payload(route)
+        if candidate is not None:
+            return candidate
+    return None
 
 
 def _lifecycle_primary_command_payload(decision: object) -> object | None:
-    lifecycle_next_up = _lifecycle_next_up_payload(decision)
+    typed_lifecycle_next_up = _lifecycle_value(decision, "lifecycle_next_up")
+    lifecycle_next_up = typed_lifecycle_next_up or _lifecycle_value(decision, "next_up")
     if lifecycle_next_up is not None:
+        canonical_candidate = _canonical_lifecycle_primary_command_payload(lifecycle_next_up)
+        if canonical_candidate is not None:
+            return canonical_candidate
+
         for key in ("primary_next_command", "primary_command", "primary", "next_command", "typed_next_command"):
             candidate = _call_lifecycle_value(_lifecycle_value(lifecycle_next_up, key))
             if _is_typed_lifecycle_command_payload(candidate):
@@ -733,8 +772,20 @@ def _coerce_shared_phase_lifecycle_suggestion(
     decision_kind = (
         str(_lifecycle_value(decision, "decision", "lifecycle_state") or "").strip().lower().replace("-", "_")
     )
-    if decision_kind in {"closed_ready_next_phase", "closed_milestone_complete"}:
+    status = _lifecycle_value(decision, "status", "state", "decision", "lifecycle_state")
+    phase_number = str(_lifecycle_value(decision, "phase", "phase_number") or phase.number)
+    closed_next_phase = decision_kind == "closed_ready_next_phase"
+    primary_payload = (
+        _canonical_lifecycle_primary_command_payload_from_decision(decision)
+        if closed_next_phase
+        else _lifecycle_primary_command_payload(decision)
+    )
+    if decision_kind == "closed_milestone_complete":
         return None
+    if closed_next_phase:
+        primary_action = _normalize_lifecycle_action(_payload_value(primary_payload, "action"), status)
+        if primary_action not in {"discuss-phase", "plan-phase"}:
+            return None
 
     ready_for_next = _lifecycle_value(
         decision,
@@ -745,7 +796,7 @@ def _coerce_shared_phase_lifecycle_suggestion(
         "after_closeout",
         "phase_closed",
     )
-    if ready_for_next is True:
+    if ready_for_next is True and not closed_next_phase:
         return None
 
     blocks_downstream = _lifecycle_value(
@@ -755,12 +806,9 @@ def _coerce_shared_phase_lifecycle_suggestion(
         "blocks_next_phase",
         "blocks_downstream_suggestions",
     )
-    if blocks_downstream is False:
+    if blocks_downstream is False and not closed_next_phase:
         return None
 
-    status = _lifecycle_value(decision, "status", "state", "decision", "lifecycle_state")
-    phase_number = str(_lifecycle_value(decision, "phase", "phase_number") or phase.number)
-    primary_payload = _lifecycle_primary_command_payload(decision)
     if primary_payload is None:
         logger.debug("suggest: lifecycle decision for phase %s had no typed primary next-up", phase_number)
         return _SHARED_LIFECYCLE_BLOCKS_WITHOUT_SUGGESTION
@@ -819,7 +867,7 @@ def _coerce_shared_phase_lifecycle_suggestion(
         priority=priority,
         reason=reason,
         command=command,
-        phase=phase_number,
+        phase=next_command.phase or phase_number,
         next_command=next_command,
     )
 
@@ -1630,6 +1678,14 @@ def suggest_next(cwd: Path, *, limit: int = 5) -> SuggestResult:
             state=state,
             format_command=format_command,
         )
+        if isinstance(pending_lifecycle, _PhaseLifecycleSuggestion) and pending_lifecycle.action in {
+            "discuss-phase",
+            "plan-phase",
+        }:
+            target_phase = _phase_normalize(pending_lifecycle.phase)
+            if any(_phase_normalize(candidate.number) == target_phase and candidate.status == "complete"
+                   for candidate in phase_analysis):
+                continue
         if pending_lifecycle is _SHARED_LIFECYCLE_BLOCKS_WITHOUT_SUGGESTION:
             lifecycle_blocks_downstream = True
             break

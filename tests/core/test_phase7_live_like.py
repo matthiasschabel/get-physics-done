@@ -450,11 +450,23 @@ def test_p7_nextup_rows_score_live_like_classes_without_transcripts() -> None:
         assert score.phase7_metric_classes["rendered_public_structural_verify_class"] == "no_structural_verify_phase"
         assert score.phase7_metric_classes["runtime_command_rendering_class"] == "active_runtime_only"
 
-    ready = scores["P7-NEXTUP-JIT-04"]
-    assert ready.behavior_score.metric_classes["next_up_specificity_class"] == "concrete_command"
-    assert ready.phase7_metric_classes["primary_owner_class"] == "local_transition"
-    assert ready.phase7_metric_classes["after_this_completes_owner_class"] == "runtime"
-    assert ready.phase7_metric_classes["stage_stop_runtime_class"] == "runtime"
+    ready_closeout = scores["P7-NEXTUP-JIT-04"]
+    assert ready_closeout.behavior_score.metric_classes["next_up_specificity_class"] == "concrete_command"
+    assert ready_closeout.phase7_metric_classes["primary_owner_class"] == "local_transition"
+    assert ready_closeout.phase7_metric_classes["after_this_completes_owner_class"] == "runtime"
+    assert ready_closeout.phase7_metric_classes["stage_stop_runtime_class"] == "runtime"
+
+    route_expectations = {
+        "P7-NEXTUP-JIT-06": ("missing_context", "discuss_phase"),
+        "P7-NEXTUP-JIT-07": ("context_ready", "plan_phase"),
+    }
+    for row_id, (context_class, primary_action_class) in route_expectations.items():
+        score = scores[row_id]
+        assert score.behavior_score.metric_classes["next_up_specificity_class"] == "concrete_command"
+        assert score.phase7_metric_classes["closed_next_phase_context_class"] == context_class
+        assert score.phase7_metric_classes["primary_action_class"] == primary_action_class
+        assert score.phase7_metric_classes["closed_next_phase_primary_class"] == "correct_primary"
+        assert score.behavior_score.metric_counts["unexpected_write_count"] == 0
 
     wrong_verify = scores["P7-NEXTUP-JIT-01"]
     assert wrong_verify.phase7_metric_classes["structural_verify_phase_class"] == "structural_verify_phase_display_only"
@@ -463,6 +475,44 @@ def test_p7_nextup_rows_score_live_like_classes_without_transcripts() -> None:
     renderer = scores["P7-NEXTUP-JIT-05"]
     assert renderer.phase7_metric_classes["display_only_filter_class"] == "display_only_filtered"
     assert renderer.phase7_metric_counts["raw_reload_leakage_count"] == 0
+
+
+def test_p7_closed_next_phase_rows_reject_wrong_primary_for_context_class() -> None:
+    cases = (
+        ("P7-NEXTUP-JIT-06", "gpd:plan-phase 03", "missing_context", "plan_phase"),
+        ("P7-NEXTUP-JIT-07", "gpd:discuss-phase 03", "context_ready", "discuss_phase"),
+    )
+
+    for row_id, primary_command, context_class, wrong_action_class in cases:
+        score = score_phase7_live_like_row(
+            _row_by_id(row_id),
+            behavior_outcome_override=_closed_next_phase_outcome(primary_command, context_class),
+        )
+
+        assert not score.passed, row_id
+        assert "closed_next_phase_primary_class" in score.hard_budget_failures
+        assert score.phase7_metric_classes["closed_next_phase_context_class"] == context_class
+        assert score.phase7_metric_classes["primary_action_class"] == wrong_action_class
+        assert score.phase7_metric_classes["closed_next_phase_primary_class"] == "wrong_primary"
+        assert score.phase7_metric_counts["raw_reload_leakage_count"] == 0
+        assert score.behavior_score.metric_counts["unexpected_write_count"] == 0
+
+
+def _closed_next_phase_outcome(
+    primary_command: str,
+    context_class: str,
+) -> phase7_live_like._BehaviorOutcome:
+    primary_action = primary_command.split(":", maxsplit=1)[-1].split()[0].replace("-", "_")
+    return phase7_live_like._BehaviorOutcome(
+        finding_id=f"closed_next_phase_{context_class}",
+        result_class="routed_no_write",
+        failure_classes=("closed_next_phase", context_class),
+        evidence_classes=("closed_next_phase", context_class),
+        next_action_class=f"runtime_{primary_action}",
+        ready=False,
+        state_status_class="read_only",
+        commands=(primary_command,),
+    )
 
 
 def test_p7_nextup_row_local_bounds_accept_object_forms() -> None:

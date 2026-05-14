@@ -13,7 +13,7 @@ from gpd.core.command_run_hints import build_command_run_hint
 from gpd.core.commands import cmd_apply_return_updates
 from gpd.core.handoff_artifacts import validate_handoff_artifacts_markdown
 from gpd.core.return_repair_classifier import classify_gpd_return_repair
-from gpd.core.state import default_state_dict, generate_state_markdown
+from gpd.core.state import default_state_dict, generate_state_markdown, state_status_class
 from tests.helpers.phase4_persona.matrix import (
     PHASE4_PERSONA_SCHEMA_VERSION,
     PersonaMatrixRow,
@@ -115,7 +115,7 @@ _EXECUTION_ROWS = (
         expected_accepted=True,
         expected_mutated=True,
         mutation_allowed=True,
-        expected_state_status_class="ready_for_verification",
+        expected_state_status_class="phase_ready_for_verification",
         expected_next_action_class="runtime_verify_work",
         source_owners=("src/gpd/core/child_return_application.py", "src/gpd/core/state.py"),
     ),
@@ -233,7 +233,9 @@ _EXECUTION_ROWS = (
 
 def execution_replay_rows() -> tuple[ExecutionReplayRow, ...]:
     canonical_rows = _canonical_rows_by_exact_contract()
-    return tuple(_with_split_stage_source_owners(_with_canonical_metadata(row, canonical_rows)) for row in _EXECUTION_ROWS)
+    return tuple(
+        _with_split_stage_source_owners(_with_canonical_metadata(row, canonical_rows)) for row in _EXECUTION_ROWS
+    )
 
 
 def _canonical_rows_by_exact_contract() -> dict[tuple[str, str, str, str], PersonaMatrixRow]:
@@ -297,9 +299,7 @@ def _with_canonical_metadata(
 
 def _with_split_stage_source_owners(row: ExecutionReplayRow) -> ExecutionReplayRow:
     split_stage_owners = tuple(
-        owner
-        for owner in _SPLIT_STAGE_SOURCE_OWNERS_BY_SCENARIO.get(row.scenario, ())
-        if (REPO_ROOT / owner).is_file()
+        owner for owner in _SPLIT_STAGE_SOURCE_OWNERS_BY_SCENARIO.get(row.scenario, ()) if (REPO_ROOT / owner).is_file()
     )
     if not split_stage_owners:
         return row
@@ -402,7 +402,9 @@ def score_execution_replay_row(row: ExecutionReplayRow, root: Path) -> Execution
         case "prose_success_no_return":
             return _score_apply_return_failure(row, root, "# Result\n\nDone. Verified. Ready to continue.\n")
         case "multiple_gpd_returns":
-            return _score_apply_return_failure(row, root, _return_block([SUMMARY_PATH]) + "\n" + _blocked_return_block())
+            return _score_apply_return_failure(
+                row, root, _return_block([SUMMARY_PATH]) + "\n" + _blocked_return_block()
+            )
         case "unfenced_raw_return_candidate":
             return _score_unfenced_raw_return_candidate(row)
         case "empty_files_written_required_artifact":
@@ -485,12 +487,7 @@ def _completed_plan_return(files_written: list[str]) -> str:
     return _return_block(
         files_written,
         next_actions=[f"gpd:verify-work {PHASE}"],
-        extra=(
-            f'  phase: "{PHASE}"\n'
-            f'  plan: "{PLAN}"\n'
-            "  state_updates:\n"
-            "    advance_plan: true\n"
-        ),
+        extra=(f'  phase: "{PHASE}"\n  plan: "{PLAN}"\n  state_updates:\n    advance_plan: true\n'),
     )
 
 
@@ -499,10 +496,7 @@ def _blocked_return_block() -> str:
         [],
         status="blocked",
         issues=["conflicting return"],
-        extra=(
-            "  blockers:\n"
-            "    - conflicting return\n"
-        ),
+        extra=("  blockers:\n    - conflicting return\n"),
     )
 
 
@@ -517,7 +511,7 @@ def _score_valid_final_plan_ready_to_execute(row: ExecutionReplayRow, root: Path
     assert result.passed is True
     assert result.mutated is True
     assert "advance_plan:last_plan" in result.applied_state_operations
-    assert state_status == "ready_for_verification"
+    assert state_status == "phase_ready_for_verification"
 
     return ExecutionReplayOutcome(
         row_id=row.row_id,
@@ -632,14 +626,7 @@ def _score_empty_files_written(row: ExecutionReplayRow, root: Path) -> Execution
 
 def _score_omitted_files_written_field(row: ExecutionReplayRow, root: Path) -> ExecutionReplayOutcome:
     _write_phase_project(root, status="Ready to execute")
-    content = (
-        "```yaml\n"
-        "gpd_return:\n"
-        "  status: completed\n"
-        "  issues: []\n"
-        "  next_actions: []\n"
-        "```\n"
-    )
+    content = "```yaml\ngpd_return:\n  status: completed\n  issues: []\n  next_actions: []\n```\n"
 
     result = validate_handoff_artifacts_markdown(
         root,
@@ -780,12 +767,7 @@ def _score_intermediate_plan_cannot_complete_phase(row: ExecutionReplayRow, root
     report.write_text(
         _return_block(
             [f"{PHASE_DIR}/{PHASE}-01-SUMMARY.md"],
-            extra=(
-                f'  phase: "{PHASE}"\n'
-                '  plan: "01"\n'
-                "  state_updates:\n"
-                "    complete_phase: true\n"
-            ),
+            extra=(f'  phase: "{PHASE}"\n  plan: "01"\n  state_updates:\n    complete_phase: true\n'),
         ),
         encoding="utf-8",
     )
@@ -851,7 +833,4 @@ def _artifact_outcome(
 
 def _state_status_class(root: Path) -> str:
     state = json.loads((root / "GPD" / "state.json").read_text(encoding="utf-8"))
-    status = str(state["position"]["status"])
-    if status == "Phase complete \u2014 ready for verification":
-        return "ready_for_verification"
-    return status.strip().lower().replace(" ", "_").replace("-", "_")
+    return state_status_class(state["position"].get("status"))

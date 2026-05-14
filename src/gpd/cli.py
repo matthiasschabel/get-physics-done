@@ -1759,14 +1759,17 @@ def phase_closeout_readiness_cmd(
     ),
 ) -> None:
     """Check whether a phase is ready for closeout without mutating state."""
-    from gpd.core.phase_closeout import phase_closeout_readiness
+    from gpd.core.phase_closeout import phase_closeout_readiness, phase_closeout_readiness_payload
 
     result = phase_closeout_readiness(
         _read_only_project_scoped_cwd(),
         phase_num,
         require_verification=require_verification,
     )
-    _output(result)
+    if _raw:
+        _emit_raw_json(phase_closeout_readiness_payload(result))
+    else:
+        _output(result)
     if not result.ready:
         raise typer.Exit(code=1)
 

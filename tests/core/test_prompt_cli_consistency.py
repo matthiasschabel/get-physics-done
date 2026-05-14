@@ -933,10 +933,15 @@ def test_new_milestone_roadmapper_stage_parse_and_artifact_words_match_payload()
 
 def test_progress_route_d_includes_required_milestone_version_argument() -> None:
     workflow = (WORKFLOWS_DIR / "progress.md").read_text(encoding="utf-8")
-    route_d = workflow[workflow.index("**Route D: Milestone complete**") :]
 
-    assert "`gpd:complete-milestone {milestone_version}`" in route_d
-    assert "`gpd:complete-milestone`\n" not in route_d
+    route_step = _extract_between(workflow, '<step name="route">', "</step>")
+
+    assert "SUGGEST=$(gpd --raw suggest)" in route_step
+    assert "milestone completion" in route_step
+    assert "Do not choose" in route_step
+    assert "**Route D: Milestone complete**" not in workflow
+    assert "`gpd:complete-milestone {milestone_version}`" not in workflow
+    assert "`gpd:complete-milestone`\n" not in workflow
 
 
 def test_command_prompts_declare_valid_context_modes() -> None:
@@ -1325,21 +1330,25 @@ def test_execute_phase_closeout_always_surfaces_concrete_next_commands() -> None
     _assert_normalized_fragments(
         offer_next,
         (
-            "stage_stop.next_runtime_command",
-            "one matching variant",
-            "exactly one `Primary:` line",
-            "gpd:discuss-phase {PHASE_NUMBER_PLUS_ONE}",
-            "gpd:plan-phase {PHASE_NUMBER_PLUS_ONE}",
-            "gpd:suggest-next",
-            "Primary: `gpd:discuss-phase {PHASE_NUMBER_PLUS_ONE}`",
-            "Primary: `gpd:plan-phase {PHASE_NUMBER_PLUS_ONE}`",
-            "gpd:complete-milestone",
-            "Secondary runtime: `gpd:suggest-next`",
+            "refresh the lifecycle route",
+            "lifecycle_next_up.rendered_markdown",
+            "next_up.rendered_markdown",
+            "lifecycle_next_up.stage_stop_*",
+            "next_up.stage_stop_*",
+            "shared renderer shape",
+            "The prompt must not decide",
+            "surface the helper JSON instead of hand-rendering a route",
         ),
     )
     _assert_normalized_absent(
         offer_next,
         (
+            "one matching variant",
+            "gpd:discuss-phase {PHASE_NUMBER_PLUS_ONE}",
+            "gpd:plan-phase {PHASE_NUMBER_PLUS_ONE}",
+            "Primary: `gpd:discuss-phase {PHASE_NUMBER_PLUS_ONE}`",
+            "Primary: `gpd:plan-phase {PHASE_NUMBER_PLUS_ONE}`",
+            "Primary: `gpd:audit-milestone`",
             "Primary: `gpd:discuss-phase {X+1}` if context is missing",
             "If context is missing:",
             "If context exists:",
@@ -1388,14 +1397,20 @@ def test_continuation_format_covers_stop_and_checkpoint_routes() -> None:
     )
 
     assert "## Stop And Checkpoint Rules" in continuation
+    _assert_normalized_fragments(
+        continuation,
+        (
+            "stage-stop envelope",
+            "lifecycle route",
+            "typed suggestion payload",
+            "rendered next-up markdown",
+            "stage_stop.next_runtime_command",
+            "must not choose lifecycle routes itself",
+        ),
+    )
     for command in (
         "`gpd:resume-work`",
         "`gpd:new-project --minimal @file.md`",
-        "`gpd:discuss-phase N`",
-        "`gpd:plan-phase N --gaps`",
-        "`gpd:execute-phase N --gaps-only`",
-        "`gpd:verify-work N`",
-        "`gpd:validate-conventions`",
         "`gpd:suggest-next`",
     ):
         assert command in continuation

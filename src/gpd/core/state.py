@@ -20,6 +20,7 @@ import socket
 from contextlib import nullcontext
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -138,6 +139,7 @@ __all__ = [
     "save_state_json",
     "save_state_json_locked",
     "state_add_blocker",
+    "state_status_class",
     "state_add_decision",
     "state_advance_plan",
     "state_compact",
@@ -1453,6 +1455,54 @@ VALID_STATUSES: list[str] = [
     "Ready to plan",
     "Milestone complete",
 ]
+
+StateStatusClass = Literal[
+    "unset",
+    "not_started",
+    "planning",
+    "researching",
+    "ready_to_execute",
+    "executing",
+    "paused",
+    "phase_ready_for_verification",
+    "verifying",
+    "verified",
+    "complete",
+    "blocked",
+    "ready_to_plan",
+    "milestone_complete",
+    "unknown",
+]
+
+_STATE_STATUS_CLASS_BY_KEY: dict[str, StateStatusClass] = {
+    "not started": "not_started",
+    "planning": "planning",
+    "researching": "researching",
+    "ready to execute": "ready_to_execute",
+    "executing": "executing",
+    "paused": "paused",
+    "phase complete ready for verification": "phase_ready_for_verification",
+    "verifying": "verifying",
+    "verified": "verified",
+    "complete": "complete",
+    "blocked": "blocked",
+    "ready to plan": "ready_to_plan",
+    "milestone complete": "milestone_complete",
+}
+
+
+def state_status_class(status: object) -> StateStatusClass:
+    """Classify a persisted state status string without rewriting it."""
+
+    if status is None:
+        return "unset"
+    text = str(status).strip()
+    if not text or text == "\u2014" or text.casefold() in {"none", "no", "not set", "[not set]"}:
+        return "unset"
+    key = text.casefold().replace("\u2014", " ").replace("--", " ").replace("-", " ")
+    key = " ".join(key.split())
+    return _STATE_STATUS_CLASS_BY_KEY.get(key, "unknown")
+
 
 # Valid state transitions: maps lowercase status -> list of valid next statuses.
 # None means any transition is valid (recovery states like Paused/Blocked).

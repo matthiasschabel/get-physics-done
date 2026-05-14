@@ -10,6 +10,7 @@ from typing import Protocol
 from gpd.adapters import get_adapter
 from gpd.adapters.runtime_catalog import iter_runtime_descriptors
 from gpd.core.phase_closeout import PhaseCloseoutReadiness, phase_closeout_readiness
+from gpd.core.phase_lifecycle import phase_lifecycle_decision
 from gpd.core.phases import phase_complete
 from gpd.core.proof_redteam import build_proof_redteam_skeleton
 from gpd.core.state import (
@@ -17,6 +18,7 @@ from gpd.core.state import (
     generate_state_markdown,
     load_state_json_readonly,
     state_record_verification,
+    state_status_class,
 )
 from gpd.core.suggest import suggest_next
 from tests.helpers.phase4_persona.matrix import (
@@ -513,16 +515,7 @@ def _read_position_status(root: Path) -> str | None:
 
 
 def _status_class(status: str | None) -> str | None:
-    if status is None:
-        return None
-    normalized = status.strip().lower()
-    if normalized == "verified":
-        return "verified"
-    if normalized == "blocked":
-        return "blocked"
-    if normalized == PHASE_READY_STATUS.lower():
-        return "phase_ready_for_verification"
-    return normalized.replace(" ", "_").replace("-", "_")
+    return state_status_class(status)
 
 
 def _next_action_class(command: str | None) -> str | None:
@@ -965,12 +958,17 @@ def _score_closed_phase_allows_next_phase_discussion(root: Path) -> CompletionRe
         )
 
     before = _snapshot_tree(root / "GPD")
-    suggestion_result = suggest_next(root)
-    local_closeout = _local_closeout_suggestion(suggestion_result)
-    next_phase_discussion = _next_phase_discussion_suggestion(suggestion_result)
+    decision = phase_lifecycle_decision(root, PHASE)
+    next_up = decision.lifecycle_next_up
+    route = next_up.to_route_payload() if next_up is not None else {}
+    primary_runtime = route.get("primary_runtime_command")
     mutated = _snapshot_tree(root / "GPD") != before
 
-    if next_phase_discussion is not None and local_closeout is None:
+    if (
+        isinstance(primary_runtime, dict)
+        and primary_runtime.get("action") == "discuss-phase"
+        and primary_runtime.get("phase") == "03"
+    ):
         return CompletionReplayOutcome(
             finding_id="closed_phase_next_phase_discussion_allowed",
             result_class="next_phase_discussion_allowed",
@@ -978,27 +976,21 @@ def _score_closed_phase_allows_next_phase_discussion(root: Path) -> CompletionRe
             mutated=mutated,
             state_status_class=_status_class(_read_position_status(root)),
             next_action_class="discuss_phase",
-            commands=(next_phase_discussion.command,),
+            commands=(str(primary_runtime.get("command")),),
         )
 
-    commands = tuple(
-        suggestion.command
-        for suggestion in (local_closeout, suggestion_result.top_action, next_phase_discussion)
-        if suggestion is not None and suggestion.command
-    )
-    stale_local_closeout = ("stale_local_closeout",) if local_closeout else ()
+    command = str(primary_runtime.get("command")) if isinstance(primary_runtime, dict) else None
     return CompletionReplayOutcome(
         finding_id="closed_phase_next_phase_discussion_missing",
         result_class="next_phase_discussion_blocked",
         failure_classes=(
             "closed_phase",
             "next_phase_discussion_missing",
-            *stale_local_closeout,
         ),
         mutated=mutated,
         state_status_class=_status_class(_read_position_status(root)),
         next_action_class="unknown",
-        commands=commands,
+        commands=(command,) if command else (),
     )
 
 

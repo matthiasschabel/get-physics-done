@@ -6,6 +6,13 @@ from functools import lru_cache
 from pathlib import Path
 
 from gpd.core.prompt_diagnostics import build_prompt_surface_report, report_to_dict
+from tests.assertion_taxonomy_support import (
+    assert_prompt_contracts,
+    fragment_count,
+    machine_exact,
+    semantic_anchor,
+    semantic_concept,
+)
 from tests.prompt_metrics_support import measure_prompt_surface
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -43,6 +50,23 @@ EXECUTE_PHASE_STAGE_FILES = (
     "gap-reverification.md",
     "consistency-check.md",
     "closeout.md",
+)
+COMMAND_REQUIRED_MACHINE_FRAGMENTS = (
+    "@{GPD_INSTALL_DIR}/workflows/execute-phase/phase-bootstrap.md",
+    "<arguments>",
+)
+COMMAND_FORBIDDEN_MACHINE_FRAGMENTS = (
+    "@{GPD_INSTALL_DIR}/workflows/execute-phase.md",
+    "<inline_guidance>",
+    "@{GPD_INSTALL_DIR}/references/ui/ui-brand.md",
+    "@{GPD_INSTALL_DIR}/templates/summary.md",
+    "@{GPD_INSTALL_DIR}/templates/contract-results-schema.md",
+    "staged_loading.eager_authorities",
+)
+COMMAND_STAGE_GUIDANCE_FRAGMENTS = (
+    "Read the included bootstrap authority first.",
+    "Later stage loading and field",
+    "manifest-owned by the staged workflow",
 )
 
 
@@ -83,18 +107,13 @@ def test_execute_phase_command_stays_thin_and_only_eagerly_loads_bootstrap_autho
     )
 
     assert metrics.raw_include_count == 1
-    assert "@{GPD_INSTALL_DIR}/workflows/execute-phase/phase-bootstrap.md" in command_text
-    assert "@{GPD_INSTALL_DIR}/workflows/execute-phase.md" not in command_text
     assert metrics.expanded_char_count <= EXECUTE_PHASE_FIRST_TURN_CHAR_BUDGET
-    assert "<arguments>" in command_text
-    assert "<inline_guidance>" not in command_text
-    assert "@{GPD_INSTALL_DIR}/references/ui/ui-brand.md" not in command_text
-    assert "@{GPD_INSTALL_DIR}/templates/summary.md" not in command_text
-    assert "@{GPD_INSTALL_DIR}/templates/contract-results-schema.md" not in command_text
-    assert "Read the included bootstrap authority first." in command_text
-    assert "Later stage loading and field" in command_text
-    assert "manifest-owned by the staged workflow" in command_text
-    assert "staged_loading.eager_authorities" not in command_text
+    assert_prompt_contracts(
+        command_text,
+        machine_exact("execute phase required command fragments", COMMAND_REQUIRED_MACHINE_FRAGMENTS),
+        machine_exact("execute phase forbidden eager fragments", COMMAND_FORBIDDEN_MACHINE_FRAGMENTS, mode="absent"),
+        semantic_anchor("execute phase staged command guidance", COMMAND_STAGE_GUIDANCE_FRAGMENTS),
+    )
 
 
 def test_execute_phase_stage_eager_budgets_stay_below_phase4_caps() -> None:
@@ -172,10 +191,18 @@ def test_execute_phase_workflow_refreshes_stage_context_in_order() -> None:
     assert "`gap_closure`" in next(
         line for line in workflow_text.splitlines() if line.startswith("Parse JSON for `phase`, `plans[]`")
     )
-    assert "If `$GAPS_ONLY` is true, also skip non-gap_closure plans." in workflow_text
-    assert "Gap-only execution uses `gpd:execute-phase {PHASE_NUMBER} --gaps-only` after gap plans exist." in workflow_text
     assert "`execute-plan.md` owns plan-local execution." in workflow_text
-    assert "This stage owns only phase-wide routing and wave risk." in workflow_text
+    assert_prompt_contracts(
+        workflow_text,
+        semantic_anchor(
+            "execute phase gap-only and routing ownership guidance",
+            (
+                "If `$GAPS_ONLY` is true, also skip non-gap_closure plans.",
+                "Gap-only execution uses `gpd:execute-phase {PHASE_NUMBER} --gaps-only` after gap plans exist.",
+                "This stage owns only phase-wide routing and wave risk.",
+            ),
+        ),
+    )
     assert "# task(subagent_type=\"gpd-notation-coordinator\"" not in workflow_text
     assert "# task(subagent_type=\"gpd-experiment-designer\"" not in workflow_text
 
@@ -183,8 +210,28 @@ def test_execute_phase_workflow_refreshes_stage_context_in_order() -> None:
 def test_execute_phase_single_sources_runtime_delegation_boilerplate() -> None:
     workflow_text = _combined_stage_text()
 
-    assert workflow_text.count("@{GPD_INSTALL_DIR}/references/orchestration/runtime-delegation-note.md") == 1
-    assert "Canonical runtime delegation convention for every `task()` block in this workflow:" in workflow_text
-    assert "Spawn a subagent for the task below. Adapt the `task()` call to your runtime's agent spawning mechanism." not in workflow_text
-    assert "The shared note owns runtime-neutral task construction and handoff conventions." in workflow_text
-    assert workflow_text.count("Canonical runtime delegation convention for every `task()` block in this workflow:") == 1
+    assert_prompt_contracts(
+        workflow_text,
+        fragment_count(
+            "runtime delegation note include",
+            "@{GPD_INSTALL_DIR}/references/orchestration/runtime-delegation-note.md",
+            expected_count=1,
+        ),
+        fragment_count(
+            "runtime delegation convention heading",
+            "Canonical runtime delegation convention for every `task()` block in this workflow:",
+            expected_count=1,
+        ),
+        semantic_anchor(
+            "runtime delegation shared note ownership",
+            "The shared note owns runtime-neutral task construction and handoff conventions.",
+        ),
+        *semantic_concept(
+            "old inline runtime delegation boilerplate",
+            forbidden=(
+                "Spawn a subagent for the task below. Adapt the `task()` call to your runtime's agent spawning "
+                "mechanism.",
+            ),
+            match="exact",
+        ),
+    )

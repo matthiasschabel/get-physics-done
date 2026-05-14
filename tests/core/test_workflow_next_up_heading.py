@@ -18,14 +18,12 @@ STAGE_STOP_STRICT_NEXT_UP_PATHS = (
     WORKFLOWS_DIR / "execute-phase/gap-reverification.md",
     WORKFLOWS_DIR / "execute-phase/wave-dispatch.md",
     WORKFLOWS_DIR / "execute-phase/executor-dispatch.md",
-    WORKFLOWS_DIR / "execute-phase/closeout.md",
     WORKFLOWS_DIR / "autonomous/blocked-recovery.md",
     WORKFLOWS_DIR / "autonomous/plan-execute-child-cycle.md",
     WORKFLOWS_DIR / "verify-work/session-router.md",
 )
 WORKER4_RENDERER_STRICT_NEXT_UP_PATHS = (
     REFERENCES_DIR / "orchestration/stage-stop-envelope.md",
-    WORKFLOWS_DIR / "execute-phase/closeout.md",
     WORKFLOWS_DIR / "resume-work/resume-routing.md",
     WORKFLOWS_DIR / "verify-work/session-router.md",
     WORKFLOWS_DIR / "verify-work/gap-repair.md",

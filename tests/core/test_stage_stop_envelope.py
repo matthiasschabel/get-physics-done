@@ -36,7 +36,6 @@ STAGE_STOP_VISIBLE_NEXT_UP_PATHS = (
     SESSION_ROUTER_PATH,
     GAP_REPAIR_PATH,
     RESUME_ROUTING_PATH,
-    CLOSEOUT_PATH,
 )
 
 PRIMARY_COMMAND_RE = re.compile(r"(?m)^[ \t]*Primary(?P<label> local transition)?: `(?P<command>[^`]+)`$")
@@ -184,13 +183,19 @@ def test_closeout_uses_readiness_payload_renderer_contract() -> None:
     assert "gpd next-up render" not in text
     assert ".next_up.rendered_markdown" in text
     assert "next_up.stage_stop_*" in text
-    assert "surface the helper JSON instead of hand-rendering" in text
+    assert "surface the helper JSON instead of" in text
+    assert "hand-rendering" in text
+    assert "lifecycle_next_up.rendered_markdown" in text
+    assert "The prompt must not decide" in text
+    assert "Primary: `gpd:discuss-phase" not in text
+    assert "Primary: `gpd:plan-phase" not in text
+    assert "Primary: `gpd:audit-milestone`" not in text
+    assert _stage_stop_blocks(CLOSEOUT_PATH) == []
 
 
 def test_stage_stop_owned_yaml_blocks_use_public_runtime_secondaries() -> None:
     owner_paths = _stage_stop_owner_paths()
     assert STAGE_STOP_PATH in owner_paths
-    assert CLOSEOUT_PATH in owner_paths
     assert CHECKPOINT_RESUME_PATH in owner_paths
     assert VERIFICATION_HANDOFF_PATH in owner_paths
     assert GAP_REVERIFICATION_PATH in owner_paths

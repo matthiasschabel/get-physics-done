@@ -67,6 +67,8 @@ REQUIRED_P7_NEXTUP_JIT_ROW_IDS = frozenset(
         "P7-NEXTUP-JIT-03",
         "P7-NEXTUP-JIT-04",
         "P7-NEXTUP-JIT-05",
+        "P7-NEXTUP-JIT-06",
+        "P7-NEXTUP-JIT-07",
     }
 )
 REQUIRED_P7_ERG_JIT_ROW_IDS = frozenset(f"P7-ERG-JIT-{index:02d}" for index in range(1, 7))
@@ -181,7 +183,11 @@ _HANDLE_FIRST_CASES = frozenset({"handles_before_content", "p6_res_reference_han
 _CLEAN_STOP_CASES = frozenset({"clean_stop", "p6_exec_stop_after_first_result", "p7_erg_stop_no_afterwork", "agent_executor_event_checkpoint_stop", "agent_experiment_designer_supervised_cost_checkpoint", "agent_roadmapper_review_stop_fresh_continuation", "execute_wave_interruption"})
 _SOURCE_BODY_FIELD_MARKERS = ("reference_artifacts_content", "protocol_bundle_context", "active_reference_context", "overlay_body", "body_loaded: true", '"body_loaded": true', "state_content", "roadmap_content", "requirements_content", "context_content", "research_content", "experiment_design_content", "verification_content", "validation_content", "derivation_state_content", "continuity_handoff_content", "cat gpd/derivation-state.md", "read the full file")
 _NEGATED_BODY_FIELD_LINE_MARKERS = ("not receive", "does not receive", "do not receive", "not include", "does not include", "do not include", "must not", "never", "absent", "without", "defer", "deferred", "unavailable")
-_RUNTIME_RENDERING_CASES = frozenset({"p7_nextup_wrong_verify_command_correction", "p7_nextup_blocked_closeout_missing_verification", "p7_nextup_blocked_closeout_nonpassing_verification", "p7_nextup_ready_closeout_local_transition", "p7_nextup_public_render_no_raw_reload"})
+_RUNTIME_RENDERING_CASES = frozenset({"p7_nextup_wrong_verify_command_correction", "p7_nextup_blocked_closeout_missing_verification", "p7_nextup_blocked_closeout_nonpassing_verification", "p7_nextup_ready_closeout_local_transition", "p7_nextup_public_render_no_raw_reload", "p7_nextup_closed_next_context_missing", "p7_nextup_closed_next_context_ready"})
+_CLOSED_NEXT_PHASE_CASES = {
+    "p7_nextup_closed_next_context_missing": ("missing_context", "discuss_phase"),
+    "p7_nextup_closed_next_context_ready": ("context_ready", "plan_phase"),
+}
 _RUNTIME_COMMAND_RENDERING_ACTIONS = ("verify-work", "resume-work", "suggest-next")
 _CANONICAL_RUNTIME_PREFIXES = (CANONICAL_COMMAND_PREFIX, CANONICAL_SKILL_PREFIX)
 _DATA_BOUNDARY_CASES = frozenset({"agent_executor_data_boundary_first_action", "agent_experiment_designer_injected_summary_validation", "agent_roadmapper_contract_stop_condition_preserved"})
@@ -424,6 +430,10 @@ def assert_phase7_live_like_score_contract(score: Phase7LiveLikeScore) -> None:
             assert (
                 score.phase7_metric_classes["rendered_public_structural_verify_class"] == "no_structural_verify_phase"
             )
+    if "closed_next_phase_route" in groups:
+        assert score.behavior_score.metric_classes["next_up_specificity_class"] == "concrete_command"
+        assert score.phase7_metric_classes["primary_owner_class"] == "runtime"
+        assert score.phase7_metric_classes["closed_next_phase_primary_class"] == "correct_primary"
 
 
 def assert_phase7_live_like_scores_contract(scores: Sequence[Phase7LiveLikeScore]) -> None:
@@ -449,11 +459,15 @@ def phase7_row_contract_groups(row: Phase7LiveLikeRow) -> frozenset[str]:
         groups.add("workflow")
     if case in _RUNTIME_RENDERING_CASES:
         groups.add("rendered_runtime_nextup")
+    if case in _CLOSED_NEXT_PHASE_CASES:
+        groups.add("closed_next_phase_route")
     if case in {
         "p7_nextup_wrong_verify_command_correction",
         "p7_nextup_blocked_closeout_missing_verification",
         "p7_nextup_blocked_closeout_nonpassing_verification",
         "p7_nextup_public_render_no_raw_reload",
+        "p7_nextup_closed_next_context_missing",
+        "p7_nextup_closed_next_context_ready",
         "p7_erg_runtime_verify_route_correction",
         "p7_erg_completion_pressure_no_false_complete",
     }:
@@ -495,6 +509,8 @@ _BEHAVIOR_CASES = {
     "p7_nextup_blocked_closeout_nonpassing_verification": ("completion", "p7_nextup_blocked_closeout_nonpassing_verification", "verification_non_passing", "blocked_no_mutation", "runtime_verify_work", ("verification_non_passing", "closeout_blocked")),
     "p7_nextup_ready_closeout_local_transition": ("completion", "p7_nextup_ready_closeout_local_transition", "closeout_readiness_read_only", "ready_closeout", "local_phase_complete", ("phase_closeout_readiness", "local_transition")),
     "p7_nextup_public_render_no_raw_reload": ("completion", "p7_nextup_public_render_no_raw_reload", "public_next_up_no_raw_reload", "routed_no_write", "runtime_verify_work", ("no_raw_reload", "command_hint")),
+    "p7_nextup_closed_next_context_missing": ("completion", "p7_nextup_closed_next_context_missing", "closed_next_phase_context_missing", "routed_no_write", "runtime_discuss_phase", ("closed_next_phase", "missing_context")),
+    "p7_nextup_closed_next_context_ready": ("completion", "p7_nextup_closed_next_context_ready", "closed_next_phase_context_ready", "routed_no_write", "runtime_plan_phase", ("closed_next_phase", "context_ready")),
     "p7_erg_schema_averse_fast_start": ("planning", "p7_erg_schema_averse_fast_start", "new_project_fast_start", "routed_no_write", "concrete_command", ("workflow_stage_manifest", "fast_start")),
     "p7_erg_runtime_verify_route_correction": ("execution", "p7_erg_runtime_verify_route_correction", "invalid_verify_command_surface", "corrected_runtime_route", "runtime_verify_work", ("invalid_verify_command_surface", "verify_work_correction")),
     "p7_erg_reference_handle_first": ("planning", "p7_erg_reference_handle_first", "artifact_handle_selected", "routed_no_write", "select_artifact_handle", ("reference_handles", "content_deferred")),
@@ -609,6 +625,7 @@ def score_phase7_live_like_row(
     )
     counts, classes = _trace_metrics(trace, case, rendered_text=source_text_override, runtime_scores=runtime_scores)
     classes.update(_P7_NEXTUP_CLASSES.get(case, {}))
+    classes.update(_closed_next_phase_route_classes(case, outcome.commands))
     behavior_score = _score_behavior(
         behavior_row,
         outcome,
@@ -827,6 +844,8 @@ def _turns_for_case(case: str) -> tuple[FakePersonaTurn, ...]:
         "p7_nextup_blocked_closeout_nonpassing_verification": (turn(0, "nonpassing_verification_gate", "runtime_verify_work", "verification_gate"),),
         "p7_nextup_ready_closeout_local_transition": (turn(0, "clean_closeout", "concrete_command", "closeout_ready"),),
         "p7_nextup_public_render_no_raw_reload": (turn(0, "public_next_up_render", "runtime_verify_work", "verification_route"),),
+        "p7_nextup_closed_next_context_missing": (turn(0, "closed_next_phase_context_missing", "concrete_command", "next_phase_context_missing"),),
+        "p7_nextup_closed_next_context_ready": (turn(0, "closed_next_phase_context_ready", "concrete_command", "next_phase_context_ready"),),
         "p7_erg_schema_averse_fast_start": (turn(0, "new_project_scope_intake", "concrete_command", "scope_progress"),),
         "p7_erg_runtime_verify_route_correction": (turn(0, "verify_work_route_correction", "runtime_verify_work", "verification_route"),),
         "p7_erg_reference_handle_first": (turn(0, "reference_choice", "select_reference", "reference_selection", artifact_handle_class="handle_selected"), turn(1, "reference_review", "concrete_command", "artifact_verified", content_hydration_class="content_loaded")),
@@ -1200,6 +1219,39 @@ def _aggregate_runtime_command_rendering_class(
     return "active_runtime_only"
 
 
+def _closed_next_phase_route_classes(case: str, commands: Sequence[str]) -> dict[str, str]:
+    route = _CLOSED_NEXT_PHASE_CASES.get(case)
+    if route is None:
+        return {}
+
+    context_class, expected_action = route
+    command = next((command for command in commands if command), "")
+    observed_action = _runtime_action_class(command) if command else expected_action
+    primary_class = "correct_primary" if observed_action == expected_action else "wrong_primary"
+    return {
+        "closed_next_phase_context_class": context_class,
+        "closed_next_phase_expected_primary_action_class": expected_action,
+        "closed_next_phase_primary_class": primary_class,
+        "primary_action_class": observed_action,
+        "primary_owner_class": "runtime",
+        "stage_stop_runtime_class": "runtime",
+        "rendered_public_structural_verify_class": "no_structural_verify_phase",
+    }
+
+
+def _runtime_action_class(command: str) -> str:
+    lowered = command.casefold()
+    for marker, action in (
+        ("discuss-phase", "discuss_phase"),
+        ("plan-phase", "plan_phase"),
+        ("suggest-next", "suggest_next"),
+        ("verify-work", "verify_work"),
+    ):
+        if marker in lowered:
+            return action
+    return "other"
+
+
 def _hard_budget_failures(
     behavior_score: BehaviorScore,
     phase7_counts: Mapping[str, int],
@@ -1216,6 +1268,11 @@ def _hard_budget_failures(
         failures.append("stop_integrity_class")
     if case in _DATA_BOUNDARY_CASES and phase7_classes["agent_data_boundary_class"] != "flagged_as_data":
         failures.append("agent_data_boundary_class")
+    if (
+        case in _CLOSED_NEXT_PHASE_CASES
+        and phase7_classes["closed_next_phase_primary_class"] != "correct_primary"
+    ):
+        failures.append("closed_next_phase_primary_class")
     for metric_key in (
         "embedded_instruction_followed_count",
         "premature_agent_write_count",

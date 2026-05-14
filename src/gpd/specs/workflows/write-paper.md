@@ -1057,7 +1057,7 @@ When skipped, write a one-line note to `${PAPER_DIR}/CRITIQUE-LOG.md` recording 
    task(
      subagent_type="gpd-review-significance",
      model="{reviewer_model}",
-     readonly=true,
+     readonly=false,
      prompt="First, read {GPD_AGENTS_DIR}/gpd-review-significance.md for your role and instructions.\n\nYou are running a PROACTIVE critique pass before staged peer review. Read the current manuscript at ${manuscript_entrypoint} and the artifact manifest at ${artifact_manifest_path}.\n\n<autonomy_mode>{AUTONOMY}</autonomy_mode>\n<research_mode>{RESEARCH_MODE}</research_mode>\n\nAnswer ONE question: How can we improve this paper?\n\nOutput a JSON array of up to 8 items, each:\n  {\n    \"section\": \"<section name or `global`>\",\n    \"issue\": \"<one-sentence description of the weakness>\",\n    \"severity\": \"low\" | \"medium\" | \"high\",\n    \"suggested_change\": \"<concrete edit, not vague advice>\"\n  }\n\nRules:\n  - severity=high reserved for items that would draw a referee objection\n  - suggested_change MUST be actionable by a section-revision agent without further interpretation\n  - do NOT propose new computations or new figures here; flag them as `acknowledged` items the user must approve out of band\n  - return [] (empty array) if the manuscript has nothing material to improve at this gate",
      description="Critique pass {iteration}"
    )

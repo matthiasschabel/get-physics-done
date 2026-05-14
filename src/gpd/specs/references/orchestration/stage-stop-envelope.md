@@ -67,6 +67,8 @@ Blocked, checkpoint, failed, and post-completion runtime stops keep
 `next_runtime_command` as the primary runtime route. A ready local transition
 may render `Primary local transition: ...`, but the next runtime command after
 that transition must be rendered separately under `**After this completes:**`.
+Do not use `**After this completes:**` after a runtime primary; repair retry
+routes belong under `Secondary runtime:` or a display-only note.
 
 ## Render Rule
 
@@ -127,5 +129,6 @@ instructions.
 | Verification gaps | `blocked` | `verification_gap` | `gpd:plan-phase N --gaps` |
 | Successful next phase with context | `completed` | `none` | `gpd:plan-phase N` |
 | Successful next phase without context | `completed` | `none` | `gpd:discuss-phase N` |
-| Milestone complete | `completed` | `none` | `gpd:complete-milestone` |
+| Milestone ready for audit | `completed` | `none` | `gpd:audit-milestone` |
+| Milestone audit passed | `completed` | `none` | `gpd:complete-milestone` |
 | Failed stop with no clear route | `failed` | `none` | `gpd:suggest-next` |

@@ -32,6 +32,13 @@ SafeChildHandoffValidatorId = Literal[
     "paper-section-readable",
 ]
 
+AcceptanceState = Literal[
+    "failed",
+    "status_routed",
+    "read_only_passed_needs_applicator",
+    "accepted",
+]
+
 SAFE_CHILD_HANDOFF_VALIDATORS: frozenset[str] = frozenset(
     (
         "readable",
@@ -386,6 +393,7 @@ class ChildHandoffValidationResult(BaseModel):
     read_only_passed: bool = False
     requires_applicator_pass: bool = False
     acceptance_complete: bool = False
+    acceptance_state: AcceptanceState
     applicator_required_unrun: bool = False
     gate_id: str
     return_profile: str
@@ -413,6 +421,7 @@ class ChildHandoffValidationResult(BaseModel):
 
 
 __all__ = [
+    "AcceptanceState",
     "AggregateChildGateTuple",
     "SAFE_CHILD_HANDOFF_VALIDATORS",
     "ChildGateApplicator",
@@ -631,6 +640,12 @@ def validate_child_handoff(
     failure_classes = _failure_classes(failures)
     passed = read_only_passed and not applicator_required_unrun
     acceptance_complete = read_only_passed and not applicator_required_unrun
+    acceptance_state = _acceptance_state(
+        status_routed=False,
+        read_only_passed=read_only_passed,
+        applicator_required_unrun=applicator_required_unrun,
+        passed=passed,
+    )
     warnings = [*artifact_result.warnings, *validator_warnings]
     if gate_tuple.applicator.command != "none":
         warnings.append(
@@ -643,6 +658,7 @@ def validate_child_handoff(
         read_only_passed=read_only_passed,
         requires_applicator_pass=requires_applicator_pass,
         acceptance_complete=acceptance_complete,
+        acceptance_state=acceptance_state,
         applicator_required_unrun=applicator_required_unrun,
         gate_id=gate_tuple.id,
         return_profile=gate_tuple.return_profile,
@@ -769,6 +785,7 @@ def _valid_non_required_status_route_result(
         read_only_passed=False,
         requires_applicator_pass=requires_applicator_pass,
         acceptance_complete=False,
+        acceptance_state="status_routed",
         applicator_required_unrun=False,
         gate_id=gate.id,
         return_profile=gate.return_profile,
@@ -794,6 +811,22 @@ def _valid_non_required_status_route_result(
         applicator_ran=False,
         artifact_result=artifact_result,
     )
+
+
+def _acceptance_state(
+    *,
+    status_routed: bool,
+    read_only_passed: bool,
+    applicator_required_unrun: bool,
+    passed: bool,
+) -> AcceptanceState:
+    if status_routed:
+        return "status_routed"
+    if read_only_passed and applicator_required_unrun:
+        return "read_only_passed_needs_applicator"
+    if passed:
+        return "accepted"
+    return "failed"
 
 
 def _candidate_yaml_payloads(content: str) -> tuple[str, ...]:

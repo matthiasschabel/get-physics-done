@@ -354,7 +354,7 @@ def test_execute_phase_owned_stop_examples_use_stage_stop_and_one_primary() -> N
     assert "stage: gap_reverification" in gap_reverification
     assert "stage_stop.next_runtime_command" in consistency_check
     assert "stage: closeout" in closeout
-    assert 'next_runtime_command: "gpd:complete-milestone"' in closeout
+    assert 'next_runtime_command: "gpd:audit-milestone"' in closeout
     assert "**Also available:**" not in closeout
 
     for block in _next_up_blocks(checkpoint + "\n" + verification_handoff + "\n" + consistency_check + "\n" + closeout):

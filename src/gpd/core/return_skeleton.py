@@ -135,7 +135,7 @@ def build_gpd_return_skeleton(
     }
 
     for field_name in profile.default_render_fields_by_status[normalized_status]:
-        if field_name in REQUIRED_RETURN_FIELDS or field_name == "continuation_update":
+        if field_name in REQUIRED_RETURN_FIELDS or field_name in {"continuation_update", _CHECKPOINT_INTENT_FIELD}:
             continue
         envelope[field_name] = _default_value_for_field(field_name, phase=normalized_phase, plan=normalized_plan)
 
@@ -149,6 +149,7 @@ def build_gpd_return_skeleton(
 
     warnings: list[str] = []
     applicator_ready = False
+    default_checkpoint_intent = normalized_status == "checkpoint" and not include_applicator_fields
     if include_applicator_fields and include_checkpoint_intent:
         raise ValueError("choose either checkpoint_intent or checkpoint applicator fields, not both")
 
@@ -165,19 +166,22 @@ def build_gpd_return_skeleton(
             applicator_ready = True
         else:
             warnings.append("Applicator continuation fields are generated only for checkpoint skeletons.")
-    elif include_checkpoint_intent:
+    elif include_checkpoint_intent or default_checkpoint_intent:
         if normalized_status != "checkpoint":
             raise ValueError("checkpoint_intent skeletons require status 'checkpoint'")
         if not _contract_supports_checkpoint_intent():
             raise ValueError(_CHECKPOINT_INTENT_UNAVAILABLE)
-        envelope[_CHECKPOINT_INTENT_FIELD] = _checkpoint_intent_payload(
-            checkpoint_reason=checkpoint_reason,
-            checkpoint_waiting_reason=checkpoint_waiting_reason,
-            phase=normalized_phase,
-            plan=normalized_plan,
+        envelope.setdefault(
+            _CHECKPOINT_INTENT_FIELD,
+            _checkpoint_intent_payload(
+                checkpoint_reason=checkpoint_reason,
+                checkpoint_waiting_reason=checkpoint_waiting_reason,
+                phase=normalized_phase,
+                plan=normalized_plan,
+            ),
         )
         warnings.append(
-            "Checkpoint intent is child-authored pause intent; durable resume context must be supplied to the applicator."
+            "checkpoint_intent is child-authored pause intent; durable resume context must be supplied to the applicator."
         )
     elif normalized_status == "checkpoint":
         warnings.append(
@@ -428,6 +432,7 @@ def _authoring_rules() -> list[str]:
     return [
         "Keep concrete artifact paths, allowed writes, validators, and failure routes in the workflow callsite.",
         "Use only fields accepted by the canonical gpd_return contract.",
+        "For checkpoint child returns, use checkpoint_intent; local/main context supplies durable resume_file context before application.",
         "Treat role profiles as rendering hints, not as schema authority.",
     ]
 
@@ -453,7 +458,8 @@ def _profile(
         profile_id=profile_id,
         agent_names=agent_names,
         role_fields_by_status={
-            status: _filter_fields_for_status(role_fields, status) for status in RETURN_STATUS_ORDER
+            status: _filter_fields_for_status(_with_status_role_additions(role_fields, status), status)
+            for status in RETURN_STATUS_ORDER
         },
         default_render_fields_by_status={
             status: _filter_fields_for_status(_with_status_default_additions(default_render_fields, status), status)
@@ -473,10 +479,19 @@ def _filter_fields_for_status(fields: Iterable[str], status: str) -> tuple[str, 
     return tuple(field_name for field_name in _dedupe(fields) if return_field_allowed_for_status(field_name, status))
 
 
-def _with_status_default_additions(fields: tuple[str, ...], status: str) -> tuple[str, ...]:
-    if return_field_allowed_for_status("blockers", status):
-        return _dedupe((*fields, "blockers"))
+def _with_status_role_additions(fields: tuple[str, ...], status: str) -> tuple[str, ...]:
+    if status == "checkpoint":
+        return _dedupe((*fields, _CHECKPOINT_INTENT_FIELD))
     return fields
+
+
+def _with_status_default_additions(fields: tuple[str, ...], status: str) -> tuple[str, ...]:
+    result = fields
+    if return_field_allowed_for_status("blockers", status):
+        result = _dedupe((*result, "blockers"))
+    if status == "checkpoint":
+        result = _dedupe((*result, _CHECKPOINT_INTENT_FIELD))
+    return result
 
 
 def _dedupe(values: Iterable[str]) -> tuple[str, ...]:

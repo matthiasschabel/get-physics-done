@@ -59,6 +59,16 @@ def test_classifies_plain_prose_without_candidate_as_missing_block() -> None:
     assert result.mutates is False
 
 
+def test_classifies_prose_only_success_claim_as_missing_block() -> None:
+    result = classify_gpd_return_repair("# Result\n\nCompleted successfully; no further action needed.\n")
+
+    assert result.primary_class == "missing_block"
+    assert result.recovery_route == "retry_child"
+    assert result.original_errors == ["No gpd_return YAML block found"]
+    assert result.safe_to_apply is False
+    assert result.mutated is False
+
+
 @pytest.mark.parametrize(
     "content",
     [
@@ -263,6 +273,29 @@ def test_classifies_multiple_canonical_blocks_as_ambiguous() -> None:
     assert result.accepted_for_success is False
 
 
+def test_direct_complete_phase_state_update_is_valid_schema_but_read_only_classification() -> None:
+    result = classify_gpd_return_repair(
+        _wrap_return_block(
+            "  status: completed\n"
+            "  files_written: [GPD/phases/02-analysis/02-01-SUMMARY.md]\n"
+            "  issues: []\n"
+            "  next_actions: [gpd:verify-work 02]\n"
+            '  phase: "02"\n'
+            '  plan: "01"\n'
+            "  state_updates:\n"
+            "    complete_phase: true\n"
+        )
+    )
+
+    assert result.primary_class == "valid"
+    assert result.valid is True
+    assert result.accepted_for_success is True
+    assert result.fields["state_updates"] == {"complete_phase": True}
+    assert result.original_errors == []
+    assert result.mutated is False
+    assert result.mutates is False
+
+
 @pytest.mark.parametrize(
     ("error", "content", "repair_class", "failure_class", "repairable"),
     [
@@ -298,6 +331,13 @@ def test_classifies_multiple_canonical_blocks_as_ambiguous() -> None:
             "status 'blocked' does not allow gpd_return field 'state_updates'",
             None,
             "status_field_forbidden",
+            "return_malformed_blocking",
+            False,
+        ),
+        (
+            "continuation_update.bounded_segment: updated_at and recorded_by are applicator-owned bounded_segment fields; omit them from child returns",
+            None,
+            "applicator_owned_metadata",
             "return_malformed_blocking",
             False,
         ),

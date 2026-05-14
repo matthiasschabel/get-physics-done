@@ -6,11 +6,13 @@ import json
 import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import get_args
 
 from typer.testing import CliRunner
 
 from gpd.cli import app
 from gpd.core.child_handoff import (
+    AcceptanceState,
     ChildGateApplicator,
     ChildGateArtifact,
     ChildGateFreshness,
@@ -70,6 +72,15 @@ def _gate_markdown(gate: ChildGateTuple) -> str:
     return render_child_gate_markdown(gate)
 
 
+def test_child_handoff_acceptance_state_values_are_explicit_contract() -> None:
+    assert get_args(AcceptanceState) == (
+        "failed",
+        "status_routed",
+        "read_only_passed_needs_applicator",
+        "accepted",
+    )
+
+
 def test_child_handoff_accepts_valid_readable_artifact(tmp_path: Path) -> None:
     plan_path = tmp_path / "GPD" / "phases" / "01-test" / "01-01-PLAN.md"
     plan_path.parent.mkdir(parents=True)
@@ -91,6 +102,7 @@ def test_child_handoff_accepts_valid_readable_artifact(tmp_path: Path) -> None:
     assert result.read_only_passed is True
     assert result.requires_applicator_pass is False
     assert result.acceptance_complete is True
+    assert result.acceptance_state == "accepted"
     assert result.applicator_required_unrun is False
     assert result.primary_failure_class is None
     assert result.failure_classes == []
@@ -110,6 +122,7 @@ def test_child_handoff_classifies_missing_return_without_mutation(tmp_path: Path
     assert result.failures[0].code == "missing_gpd_return_block"
     assert result.read_only_passed is False
     assert result.acceptance_complete is False
+    assert result.acceptance_state == "failed"
     assert result.selected_route == "retry_once"
 
 
@@ -125,6 +138,7 @@ def test_child_handoff_classifies_malformed_return_without_mutation(tmp_path: Pa
     assert result.mutates is False
     assert result.primary_failure_class == HandoffFailureClass.RETURN_MALFORMED_REPAIRABLE
     assert result.failure_classes == [HandoffFailureClass.RETURN_MALFORMED_REPAIRABLE]
+    assert result.acceptance_state == "failed"
     assert result.selected_route == "repair_prompt_once"
 
 
@@ -143,6 +157,7 @@ def test_child_handoff_classifies_missing_artifact_without_mutation(tmp_path: Pa
     assert result.mutates is False
     assert result.primary_failure_class == HandoffFailureClass.ARTIFACT_MISSING
     assert result.failure_classes == [HandoffFailureClass.ARTIFACT_MISSING]
+    assert result.acceptance_state == "failed"
     assert result.selected_route == "retry_once"
 
 
@@ -166,6 +181,7 @@ def test_child_handoff_classifies_stale_artifact_without_mutation(tmp_path: Path
     assert result.primary_failure_class == HandoffFailureClass.ARTIFACT_STALE
     assert result.failure_classes == [HandoffFailureClass.ARTIFACT_STALE]
     assert result.failures[0].code == "artifact_stale"
+    assert result.acceptance_state == "failed"
     assert result.selected_route == "retry_once"
 
 
@@ -192,6 +208,7 @@ def test_child_handoff_fails_closed_when_tuple_freshness_requires_missing_cutoff
     assert result.mutates is False
     assert result.read_only_passed is False
     assert result.acceptance_complete is False
+    assert result.acceptance_state == "failed"
     assert result.primary_failure_class == HandoffFailureClass.ARTIFACT_STALE
     assert result.failures[0].code == "freshness_requires_fresh_after"
     assert result.selected_route == "retry_once"
@@ -213,6 +230,7 @@ def test_child_handoff_classifies_outside_root_artifact_without_mutation(tmp_pat
     assert result.mutates is False
     assert result.primary_failure_class == HandoffFailureClass.ARTIFACT_ROOT_BLOCKED
     assert result.failure_classes == [HandoffFailureClass.ARTIFACT_ROOT_BLOCKED]
+    assert result.acceptance_state == "failed"
 
 
 def test_child_handoff_rejects_files_written_outside_write_allowlist(tmp_path: Path) -> None:
@@ -238,6 +256,7 @@ def test_child_handoff_rejects_files_written_outside_write_allowlist(tmp_path: P
     assert result.primary_failure_class == HandoffFailureClass.ARTIFACT_ROOT_BLOCKED
     assert result.failures[0].code == "outside_write_allowlist"
     assert result.failures[0].path == "GPD/extra.md"
+    assert result.acceptance_state == "failed"
     assert result.selected_route == "fail_closed"
 
 
@@ -257,6 +276,7 @@ def test_child_handoff_classifies_absolute_project_path_as_repairable_without_mu
     assert result.mutates is False
     assert result.primary_failure_class == HandoffFailureClass.ARTIFACT_PATH_REPAIRABLE
     assert result.failure_classes == [HandoffFailureClass.ARTIFACT_PATH_REPAIRABLE]
+    assert result.acceptance_state == "failed"
     assert result.selected_route == "repair_path_once"
 
 
@@ -277,6 +297,7 @@ def test_child_handoff_classifies_validator_failure_without_mutation(tmp_path: P
     assert result.primary_failure_class == HandoffFailureClass.VALIDATOR_FAILED
     assert result.failure_classes == [HandoffFailureClass.VALIDATOR_FAILED]
     assert result.validator_results[0].passed is False
+    assert result.acceptance_state == "failed"
     assert result.selected_route == "revision_loop"
 
 
@@ -298,6 +319,7 @@ def test_child_handoff_rejects_unknown_validator_text_without_execution(tmp_path
     assert marker.exists() is False
     assert result.primary_failure_class == HandoffFailureClass.VALIDATOR_FAILED
     assert result.failures[0].code == "unsupported_validator"
+    assert result.acceptance_state == "failed"
 
 
 def test_child_handoff_routes_valid_non_required_statuses_without_artifact_acceptance(tmp_path: Path) -> None:
@@ -333,6 +355,7 @@ def test_child_handoff_routes_valid_non_required_statuses_without_artifact_accep
         assert result.failures == []
         assert result.checked_files == []
         assert result.status == status
+        assert result.acceptance_state == "status_routed"
         assert result.status_route_used is True
         assert result.status_route_reason is not None
         assert "valid but does not satisfy required success status 'completed'" in result.status_route_reason
@@ -365,6 +388,8 @@ def test_child_handoff_reports_applicator_required_read_only_acceptance_gap(tmp_
     assert result.read_only_passed is True
     assert result.requires_applicator_pass is True
     assert result.acceptance_complete is False
+    assert result.acceptance_state == "read_only_passed_needs_applicator"
+    assert result.acceptance_state != "accepted"
     assert result.applicator_required_unrun is True
     assert result.applicator_ran is False
     assert result.primary_failure_class == HandoffFailureClass.APPLICATOR_FAILED
@@ -408,6 +433,7 @@ def test_validate_child_handoff_cli_accepts_combined_stdin(tmp_path: Path) -> No
     assert payload["mutates"] is False
     assert payload["read_only_passed"] is True
     assert payload["acceptance_complete"] is True
+    assert payload["acceptance_state"] == "accepted"
     assert payload["validator_results"][0]["passed"] is True
     assert payload["selected_route"] == "accept_success"
 
@@ -447,5 +473,6 @@ def test_validate_child_handoff_cli_exits_nonzero_when_applicator_required(tmp_p
     assert payload["passed"] is False
     assert payload["read_only_passed"] is True
     assert payload["acceptance_complete"] is False
+    assert payload["acceptance_state"] == "read_only_passed_needs_applicator"
     assert payload["applicator_required_unrun"] is True
     assert payload["primary_failure_class"] == "applicator_failed"

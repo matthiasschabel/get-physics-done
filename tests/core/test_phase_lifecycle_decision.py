@@ -89,6 +89,13 @@ def test_lifecycle_decision_ready_closeout_matches_closeout_readiness_and_stays_
     assert decision.primary_owner == "local_transition"
     assert decision.closeout_readiness == closeout
     assert decision.next_up == closeout.next_up
+    assert decision.lifecycle_class == "ready_for_local_closeout"
+    assert decision.lifecycle_next_up is not None
+    assert closeout.lifecycle_next_up is not None
+    assert decision.lifecycle_next_up.primary.command == decision.primary_command
+    assert decision.lifecycle_next_up.primary.owner == decision.primary_owner
+    assert decision.next_up == decision.lifecycle_next_up.as_legacy_next_up_dict()
+    assert closeout.next_up == closeout.lifecycle_next_up.as_legacy_next_up_dict()
     assert decision.next_up["commands"][0]["owner"] == "local_transition"
     assert decision.next_up["commands"][0]["requires_user_initiated_runtime_command"] is False
     assert decision.next_up["primary_command"]["owner"] == "local_transition"
@@ -118,6 +125,9 @@ def test_lifecycle_decision_counts_only_matching_summaries(tmp_path: Path) -> No
     assert "02-02-PLAN.md" in decision.closeout_readiness.incomplete_plans
     assert any("phase summaries incomplete: 1/2" in blocker for blocker in decision.closeout_blockers)
     assert decision.primary_command == "gpd:execute-phase 02"
+    assert decision.lifecycle_class == "needs_execution"
+    assert decision.lifecycle_next_up is not None
+    assert decision.lifecycle_next_up.primary.action == "execute-phase"
     assert decision.next_up["primary"] == "gpd:execute-phase 02"
     assert decision.next_up["primary_command"]["action"] == "execute-phase"
     assert decision.next_up["primary_command"]["owner"] == "runtime"
@@ -134,6 +144,9 @@ def test_lifecycle_decision_missing_verification_routes_to_runtime_verify_work(t
     assert decision.verification_routing_status == "missing"
     assert decision.primary_command == "gpd:verify-work 02"
     assert decision.primary_owner == "runtime"
+    assert decision.lifecycle_class == "needs_verification"
+    assert decision.lifecycle_next_up is not None
+    assert decision.lifecycle_next_up.primary.action == "verify-work"
     assert decision.next_up["primary"] == "gpd:verify-work 02"
     assert decision.next_up["commands"][0]["owner"] == "runtime"
     assert decision.next_up["primary_command"]["action"] == "verify-work"
@@ -148,6 +161,7 @@ def test_lifecycle_decision_proof_redteam_blocker_uses_runtime_verify_work(tmp_p
     decision = phase_lifecycle_decision(tmp_path, "02")
 
     assert decision.decision == "blocked_closeout"
+    assert decision.lifecycle_class == "needs_verification"
     assert decision.closeout_readiness.proof_redteam_required is True
     assert decision.closeout_readiness.proof_redteam_ready is False
     assert "proof-bearing work requires a passed proof-redteam artifact" in decision.closeout_blockers
@@ -162,6 +176,7 @@ def test_lifecycle_decision_active_bounded_segment_blocks_with_resume_next_up(tm
     decision = phase_lifecycle_decision(tmp_path, "02")
 
     assert decision.decision == "blocked_closeout"
+    assert decision.lifecycle_class == "blocked_closeout"
     assert decision.closeout_readiness.active_bounded_segment is True
     assert any("active bounded segment" in blocker for blocker in decision.closeout_blockers)
     assert decision.primary_command == "gpd:resume-work"
@@ -195,12 +210,15 @@ def test_lifecycle_decision_closed_phase_advances_to_next_phase_action(tmp_path:
     decision = phase_lifecycle_decision(tmp_path, "02")
 
     assert decision.decision == "closed_ready_next_phase"
+    assert decision.lifecycle_class == "closed_ready_next_phase"
     assert decision.phase_closed is True
     assert decision.roadmap_complete is True
     assert decision.next_phase == "03"
     assert decision.closeout_ready is False
     assert decision.primary_command == "gpd:plan-phase 03"
     assert decision.primary_owner == "runtime"
+    assert decision.lifecycle_next_up is not None
+    assert decision.lifecycle_next_up.primary.command == "gpd:plan-phase 03"
     assert decision.closeout_readiness.next_up["primary"] == "gpd:plan-phase 03"
     assert decision.next_up["primary_command"]["action"] == "plan-phase"
     assert decision.next_up["primary_command"]["owner"] == "runtime"
@@ -219,6 +237,7 @@ def test_lifecycle_decision_closed_milestone_routes_runtime_audit_not_stale_tran
     decision = phase_lifecycle_decision(tmp_path, "02")
 
     assert decision.decision == "closed_milestone_complete"
+    assert decision.lifecycle_class == "closed_needs_milestone_audit"
     assert decision.phase_closed is True
     assert decision.primary_command == "gpd:audit-milestone"
     assert decision.primary_owner == "runtime"
@@ -226,3 +245,28 @@ def test_lifecycle_decision_closed_milestone_routes_runtime_audit_not_stale_tran
     assert decision.next_up["stage_stop_next_runtime_command"] == "gpd:audit-milestone"
     assert decision.next_up["rendered_markdown"] == "## > Next Up\nPrimary: `gpd:audit-milestone`"
     assert "gpd phase complete 02" not in decision.next_up["rendered_markdown"]
+
+
+def test_lifecycle_decision_closed_milestone_routes_archive_only_after_passed_audit(tmp_path: Path) -> None:
+    _write_phase_project(
+        tmp_path,
+        state_current_phase=None,
+        state_status="milestone complete",
+        roadmap_closed=True,
+    )
+    (tmp_path / "GPD" / "v1.0-MILESTONE-AUDIT.md").write_text(
+        "---\nstatus: passed\n---\n\n# Audit\n",
+        encoding="utf-8",
+    )
+
+    decision = phase_lifecycle_decision(tmp_path, "02")
+
+    assert decision.decision == "closed_milestone_complete"
+    assert decision.lifecycle_class == "closed_ready_for_milestone_archive"
+    assert decision.phase_closed is True
+    assert decision.primary_action == "complete-milestone"
+    assert decision.primary_command == "gpd:complete-milestone v1.0"
+    assert decision.primary_owner == "runtime"
+    assert decision.next_up["stage_stop_next_runtime_command"] == "gpd:complete-milestone v1.0"
+    assert decision.next_up["rendered_markdown"] == "## > Next Up\nPrimary: `gpd:complete-milestone v1.0`"
+    assert "gpd:audit-milestone" not in decision.next_up["rendered_markdown"]

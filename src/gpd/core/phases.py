@@ -251,13 +251,27 @@ def _decision_value(decision: object, field: str, default: object = None) -> obj
 def _ensure_phase_closeout_allows_mutation(cwd: Path, phase_num: str) -> None:
     decision = _phase_lifecycle_decision(cwd, phase_num, require_verification=True)
     closeout = _decision_value(decision, "closeout_readiness", None) or decision
-    ready = bool(_decision_value(closeout, "ready", _decision_value(decision, "closeout_ready", False)))
-    mutation_allowed = bool(_decision_value(closeout, "mutation_allowed", ready))
-    if ready and mutation_allowed:
+    closeout_ready = bool(_decision_value(closeout, "ready", False))
+    decision_ready = bool(_decision_value(decision, "closeout_ready", closeout_ready))
+    mutation_allowed = bool(_decision_value(closeout, "mutation_allowed", closeout_ready))
+    decision_kind = str(_decision_value(decision, "decision", "") or "").strip().lower().replace("-", "_")
+    phase_closed = bool(_decision_value(decision, "phase_closed", False))
+    decision_allows_closeout = decision_kind in {"", "ready_for_closeout", "ready_for_local_closeout"}
+    if decision_ready and closeout_ready and mutation_allowed and decision_allows_closeout and not phase_closed:
         return
 
-    raw_blockers = _decision_value(closeout, "blockers", _decision_value(decision, "closeout_blockers", [])) or []
+    raw_blockers: list[object] = []
+    for source, field in ((closeout, "blockers"), (decision, "closeout_blockers")):
+        source_blockers = _decision_value(source, field, []) or []
+        if isinstance(source_blockers, list):
+            raw_blockers.extend(source_blockers)
     blockers = [str(blocker) for blocker in raw_blockers if str(blocker).strip()]
+    if phase_closed:
+        blockers.append("phase already closed; no closeout mutation needed")
+    if decision_kind and not decision_allows_closeout:
+        blockers.append(f"lifecycle decision is {decision_kind!r}; expected 'ready_for_closeout'")
+    if not decision_ready and closeout_ready:
+        blockers.append("top-level lifecycle readiness is not green")
     if not blockers:
         routing_status = _decision_value(
             closeout,

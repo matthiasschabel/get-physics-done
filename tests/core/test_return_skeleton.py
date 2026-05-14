@@ -35,6 +35,15 @@ from gpd.core.return_skeleton import (
 )
 from gpd.core.state import default_state_dict, generate_state_markdown
 
+DURABLE_CHECKPOINT_CONTEXT_FIELDS = {
+    "last_result_id",
+    "recorded_at",
+    "recorded_by",
+    "resume_file",
+    "source_session_id",
+    "updated_at",
+}
+
 
 def test_return_profiles_cover_core_roles() -> None:
     assert set(GPD_RETURN_ROLE_PROFILES) == {
@@ -81,6 +90,9 @@ def test_return_profile_status_fields_obey_status_contract() -> None:
     executor = GPD_RETURN_ROLE_PROFILES["executor"]
     assert "blockers" not in executor.role_fields_by_status["completed"]
     assert "blockers" in executor.role_fields_by_status["checkpoint"]
+    assert "checkpoint_intent" not in executor.role_fields_by_status["completed"]
+    assert "checkpoint_intent" in executor.role_fields_by_status["checkpoint"]
+    assert "checkpoint_intent" in executor.default_render_fields_by_status["checkpoint"]
     assert "checkpoint_intent" not in return_fields_allowed_for_status("completed")
     assert "checkpoint_intent" in return_fields_allowed_for_status("checkpoint")
 
@@ -171,6 +183,13 @@ def test_return_skeleton_validates_for_each_role_status(role: str, status: str) 
     payload_text = json.dumps(skeleton.model_dump(mode="json"), sort_keys=True)
     for field_name in APPLICATOR_OWNED_METADATA_FIELDS:
         assert field_name not in payload_text
+    if status == "checkpoint":
+        assert "checkpoint_intent" in result.fields
+        assert "continuation_update" not in result.fields
+        assert result.fields["checkpoint_intent"]["checkpoint_reason"] == "checkpoint"
+        assert skeleton.applicator_ready is False
+        for field_name in DURABLE_CHECKPOINT_CONTEXT_FIELDS:
+            assert field_name not in json.dumps(result.fields, sort_keys=True)
 
 
 def test_return_skeleton_renders_yaml_markdown_and_json_payload() -> None:
@@ -221,6 +240,41 @@ def test_return_skeleton_cli_reads_files_from_stdin(tmp_path: Path) -> None:
     assert validate_gpd_return_markdown(payload["markdown"]).passed is True
 
 
+def test_return_skeleton_cli_defaults_checkpoint_to_child_checkpoint_intent(tmp_path: Path) -> None:
+    result = CliRunner().invoke(
+        app,
+        [
+            "--raw",
+            "--cwd",
+            str(tmp_path),
+            "return",
+            "skeleton",
+            "--role",
+            "executor",
+            "--status",
+            "checkpoint",
+            "--phase",
+            "01",
+            "--plan",
+            "02",
+        ],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    envelope = payload["envelope"]
+    assert envelope["checkpoint_intent"] == {
+        "checkpoint_reason": "checkpoint",
+        "waiting_reason": "Parent/applicator resume context required.",
+        "phase": "01",
+        "plan": "02",
+    }
+    assert "continuation_update" not in envelope
+    assert payload["applicator_ready"] is False
+    assert "gpd apply-return-updates <return-file.md>" not in payload["validation_commands"]
+
+
 def test_checker_checkpoint_skeleton_contains_partial_approval_fields() -> None:
     skeleton = build_gpd_return_skeleton(role="checker", status="checkpoint")
 
@@ -228,6 +282,7 @@ def test_checker_checkpoint_skeleton_contains_partial_approval_fields() -> None:
     assert skeleton.envelope["blocked_plans"] == []
     assert skeleton.envelope["revision_round"] == 1
     assert "blockers" in skeleton.envelope
+    assert skeleton.envelope["checkpoint_intent"]["checkpoint_reason"] == "checkpoint"
     assert any("checkpoint_intent" in warning for warning in skeleton.warnings)
 
 
@@ -295,6 +350,31 @@ def test_checkpoint_applicator_fields_require_explicit_resume_file(tmp_path: Pat
     }
     assert skeleton.applicator_ready is True
     assert "gpd apply-return-updates <return-file.md>" in skeleton.validation_commands
+
+
+def test_default_checkpoint_skeleton_is_child_pause_intent_not_applicator_context() -> None:
+    skeleton = build_gpd_return_skeleton(
+        role="executor",
+        status="checkpoint",
+        checkpoint_reason="pre_fanout",
+        checkpoint_waiting_reason="Review the first result before dependent fanout.",
+        phase="01",
+        plan="02",
+    )
+
+    assert skeleton.envelope["checkpoint_intent"] == {
+        "checkpoint_reason": "pre_fanout",
+        "waiting_reason": "Review the first result before dependent fanout.",
+        "phase": "01",
+        "plan": "02",
+    }
+    assert "continuation_update" not in skeleton.envelope
+    assert skeleton.applicator_ready is False
+    assert "gpd apply-return-updates <return-file.md>" not in skeleton.validation_commands
+    payload_text = json.dumps(skeleton.envelope, sort_keys=True)
+    for field_name in DURABLE_CHECKPOINT_CONTEXT_FIELDS:
+        assert field_name not in payload_text
+    assert any("durable resume context must be supplied to the applicator" in warning for warning in skeleton.warnings)
 
 
 def test_checkpoint_intent_skeleton_uses_child_owned_fields_when_contract_allows() -> None:

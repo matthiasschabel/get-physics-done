@@ -10,6 +10,8 @@ from gpd.core.phase_lifecycle import (
     OWNER_RUNTIME,
     ROLE_PRIMARY,
     ROLE_SECONDARY,
+    CanonicalLifecycleClass,
+    LifecycleNextUp,
     PhaseCloseoutReadiness,
     phase_lifecycle_decision,
 )
@@ -31,6 +33,8 @@ def phase_closeout_readiness(
 
 
 __all__ = [
+    "CanonicalLifecycleClass",
+    "LifecycleNextUp",
     "OWNER_LOCAL_HELPER",
     "OWNER_LOCAL_TRANSITION",
     "OWNER_RUNTIME",

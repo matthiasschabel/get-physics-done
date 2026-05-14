@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import os
+import textwrap
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from gpd.cli import app
@@ -33,6 +35,20 @@ def _blocked_return_with_state_updates() -> str:
         "  next_actions: []\n"
         "  state_updates:\n"
         "    phase: 1\n"
+        "```\n"
+    )
+
+
+def _raw_checkpoint_return_with_extra_yaml(extra_yaml: str) -> str:
+    indented_extra_yaml = textwrap.indent(textwrap.dedent(extra_yaml).lstrip("\n"), "  ")
+    return (
+        "```yaml\n"
+        "gpd_return:\n"
+        "  status: checkpoint\n"
+        "  files_written: []\n"
+        "  issues: []\n"
+        "  next_actions: []\n"
+        f"{indented_extra_yaml}"
         "```\n"
     )
 
@@ -85,6 +101,50 @@ def test_handoff_artifact_validator_rejects_raw_files_only_json_envelope(tmp_pat
     assert "No gpd_return YAML block found" in result.errors
 
 
+def test_handoff_artifact_validator_classifies_prose_only_success_as_missing_return(tmp_path: Path) -> None:
+    result = validate_handoff_artifacts_markdown(
+        tmp_path,
+        "# Result\n\nCompleted successfully. The requested artifact is ready.\n",
+        allowed_roots=["GPD/phases/01-test"],
+        required_suffixes=["-PLAN.md"],
+        require_files_written=True,
+    )
+
+    assert result.passed is False
+    assert result.status is None
+    assert result.files_written == []
+    assert result.checked_files == []
+    assert result.primary_failure_class == HandoffFailureClass.RETURN_MISSING
+    assert result.failure_classes == [HandoffFailureClass.RETURN_MISSING]
+    assert result.failures[0].code == "missing_gpd_return_block"
+    assert "No gpd_return YAML block found" in result.errors
+
+
+def test_handoff_artifact_validator_preserves_missing_route_for_unfenced_return_candidate(tmp_path: Path) -> None:
+    result = validate_handoff_artifacts_markdown(
+        tmp_path,
+        (
+            "gpd_return:\n"
+            "  status: completed\n"
+            "  files_written: [GPD/phases/01-test/01-01-PLAN.md]\n"
+            "  issues: []\n"
+            "  next_actions: []\n"
+        ),
+        allowed_roots=["GPD/phases/01-test"],
+        required_suffixes=["-PLAN.md"],
+        require_files_written=True,
+    )
+
+    assert result.passed is False
+    assert result.status is None
+    assert result.files_written == []
+    assert result.checked_files == []
+    assert result.primary_failure_class == HandoffFailureClass.RETURN_MISSING
+    assert result.failure_classes == [HandoffFailureClass.RETURN_MISSING]
+    assert result.failures[0].code == "missing_gpd_return_block"
+    assert "No gpd_return YAML block found" in result.errors
+
+
 def test_handoff_artifact_validator_rejects_fenced_files_only_envelope(tmp_path: Path) -> None:
     result = validate_handoff_artifacts_markdown(
         tmp_path,
@@ -114,6 +174,82 @@ def test_handoff_artifact_validator_classifies_status_disallowed_update_as_malfo
     assert result.failure_classes == [HandoffFailureClass.RETURN_MALFORMED_BLOCKING]
     assert result.failures[0].code == "status_disallowed_field"
     assert "status 'blocked' does not allow gpd_return field(s): state_updates" in result.errors
+
+
+@pytest.mark.parametrize(
+    ("extra_yaml", "expected_fragments"),
+    [
+        (
+            """
+            continuation_update:
+              handoff:
+                resume_file: GPD/phases/01-test/.continue-here.md
+                stopped_at: Paused for review
+                recorded_by: execute-plan
+            """,
+            ("recorded_by", "applicator-owned"),
+        ),
+        (
+            """
+            continuation_update:
+              bounded_segment:
+                resume_file: GPD/phases/01-test/.continue-here.md
+                segment_status: paused
+                updated_at: 2026-05-08T12:00:00Z
+            """,
+            ("updated_at", "applicator-owned"),
+        ),
+    ],
+)
+def test_handoff_artifact_validator_classifies_applicator_owned_metadata_as_blocking(
+    tmp_path: Path,
+    extra_yaml: str,
+    expected_fragments: tuple[str, str],
+) -> None:
+    result = validate_handoff_artifacts_markdown(
+        tmp_path,
+        _raw_checkpoint_return_with_extra_yaml(extra_yaml),
+    )
+
+    assert result.passed is False
+    assert result.primary_failure_class == HandoffFailureClass.RETURN_MALFORMED_BLOCKING
+    assert result.failure_classes == [HandoffFailureClass.RETURN_MALFORMED_BLOCKING]
+    assert result.failures[0].code == "applicator_owned_metadata"
+    assert result.failures[0].repairable is False
+    assert all(fragment in result.errors[0] for fragment in expected_fragments)
+
+
+def test_handoff_artifact_validator_leaves_direct_complete_phase_state_update_to_applicator(
+    tmp_path: Path,
+) -> None:
+    summary_path = tmp_path / "GPD" / "phases" / "02-analysis" / "02-01-SUMMARY.md"
+    summary_path.parent.mkdir(parents=True)
+    summary_path.write_text("# Summary\n", encoding="utf-8")
+
+    result = validate_handoff_artifacts_markdown(
+        tmp_path,
+        _return_block(
+            ["GPD/phases/02-analysis/02-01-SUMMARY.md"],
+            extra_fields={
+                "phase": "02",
+                "plan": "01",
+                "state_updates": {"complete_phase": True},
+            },
+        ),
+        expected_artifacts=["GPD/phases/02-analysis/02-01-SUMMARY.md"],
+        allowed_roots=["GPD/phases/02-analysis"],
+        required_suffixes=["-SUMMARY.md"],
+        require_files_written=True,
+        require_status="completed",
+    )
+
+    assert result.passed is True
+    assert result.mutated is False
+    assert result.mutates is False
+    assert result.primary_failure_class is None
+    assert result.failure_classes == []
+    assert result.errors == []
+    assert result.checked_files == ["GPD/phases/02-analysis/02-01-SUMMARY.md"]
 
 
 def test_handoff_artifact_validator_accepts_fresh_in_scope_expected_plan(tmp_path: Path) -> None:

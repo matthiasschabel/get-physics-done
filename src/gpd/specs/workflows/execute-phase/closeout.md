@@ -21,14 +21,7 @@ fi
 
 Use `gpd --raw stage field-access execute-phase --stage closeout --style instruction` before reading `CLOSEOUT_INIT`.
 
-Before any roadmap/state transition, run the helper below and route from its JSON. Prerequisites are summarized here, but the helper is authority:
-
-- canonical verification report exists and has status `passed`
-- proof-bearing work has fresh passed proof-redteam artifacts
-- `consistency_check` passed its child gate
-- no bounded execution segment is active
-
-Then run the read-only readiness helper:
+Before any roadmap/state transition, run the read-only helper below and route from its JSON. It is the authority for verification, proof-redteam, consistency, bounded-segment, and closeout readiness.
 
 ```bash
 CLOSEOUT_READINESS=$(gpd --raw phase closeout-readiness "${phase_number}" --require-verification)
@@ -45,7 +38,7 @@ The readiness helper is read-only. On any blocker, stop and surface its next act
 ```bash
 CLOSEOUT_READY=$(echo "$CLOSEOUT_READINESS" | gpd json get .ready --default false)
 if [ "$CLOSEOUT_READY" != "true" ]; then
-  echo "$CLOSEOUT_READINESS" | gpd next-up render --from-closeout-readiness
+  echo "$CLOSEOUT_READINESS" | gpd json get .next_up.rendered_markdown --default "$CLOSEOUT_READINESS"
   exit 0
 fi
 ```
@@ -54,9 +47,8 @@ Readiness next-action ownership:
 
 - Blocked closeout keeps a public runtime primary, such as `gpd:verify-work ${phase_number}`, `gpd:resume-work`, or `gpd:execute-phase ${phase_number}`.
 - Ready closeout labels `gpd phase complete "${phase_number}"` as `Primary local transition`, not a runtime workflow.
-- Prompt-visible ready closeout names the read-only readiness helper before the safe mutation: `gpd --raw phase closeout-readiness {PHASE_NUMBER} --require-verification`, then `gpd phase complete {PHASE_NUMBER}`.
-- `closeout_command_hint` is the local transition; `cleanup_command_hint` is only a secondary local helper.
-- Checkpoint cleanup never appears in `stage_stop.next_runtime_command` or `stage_stop.also_available`.
+- Read-only readiness and checkpoint cleanup are local helper context, not `stage_stop` runtime commands.
+- If `next_up.rendered_markdown` or matching `next_up.stage_stop_*` fields are absent, surface the helper JSON instead of hand-rendering.
 </step>
 
 <step name="ready_success_complete_phase">
@@ -83,7 +75,7 @@ If cleanup exits nonzero, print the helper JSON and stop. Preserve tags for bloc
 <step name="offer_next">
 Never end with only "ready to plan/continue" prose. After successful closeout, choose one matching variant, one primary `NextCommand`, populate `stage_stop.next_runtime_command`, and emit a `## > Next Up` block with exactly one `Primary:` line. Do not print raw staged-init or field-access commands.
 
-Render the variants below from the refreshed closeout payload using the shared renderer shape (`Primary:`, `Primary local transition:`, `**After this completes:**`, and `Secondary ...` lines) without reading `references/ui/ui-brand.md` or `references/orchestration/continuous-execution.md` on the normal path. Load the `next_up_rendering_recovery` conditional authority pack only if the fixed `stage_stop` / `## > Next Up` variants cannot be rendered from the closeout payload.
+Render the variants below from the refreshed closeout payload using the shared renderer shape (`Primary:`, `Primary local transition:`, `**After this completes:**`, and `Secondary ...` lines). Load `next_up_rendering_recovery` only if the fixed `stage_stop` / `## > Next Up` variants cannot be rendered from the payload.
 
 If the next phase has no context, choose `gpd:discuss-phase {PHASE_NUMBER_PLUS_ONE}` / `gpd:discuss-phase {X+1}` and list `gpd:plan-phase {PHASE_NUMBER_PLUS_ONE}` / `gpd:plan-phase {X+1}` as the direct-plan alternative. If the next phase already has context, choose `gpd:plan-phase {PHASE_NUMBER_PLUS_ONE}`. Always list `gpd:suggest-next` as the recovery/confirmation command.
 
@@ -131,24 +123,24 @@ Primary: `gpd:plan-phase {PHASE_NUMBER_PLUS_ONE}`
 Secondary runtime: `gpd:discuss-phase {PHASE_NUMBER_PLUS_ONE}`
 Secondary runtime: `gpd:suggest-next`
 
-If the milestone is complete:
+If the final phase is closed, route audit first; archive later with `gpd:complete-milestone`.
 
 ```yaml
 stage_stop:
   workflow: execute-phase
   stage: closeout
   status: completed
-  reason: milestone_complete
+  reason: milestone_ready_for_audit
   checkpoint: none
   user_decision_needed: false
-  next_runtime_command: "gpd:complete-milestone"
+  next_runtime_command: "gpd:audit-milestone"
   also_available:
     - "gpd:suggest-next"
 ```
 
 ## > Next Up
 
-Primary: `gpd:complete-milestone`
+Primary: `gpd:audit-milestone`
 Secondary runtime: `gpd:suggest-next`
 </step>
 

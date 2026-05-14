@@ -158,15 +158,14 @@ End with `## > Next Up`:
 - Always include `gpd:suggest-next` as the recovery/confirmation command
 - Include `<sub>Start a fresh context window, then run the primary command above.</sub>`
 
-## > Next Up
+Local preflight before rendering the ready local transition:
+`gpd --raw phase closeout-readiness {PHASE_NUMBER} --require-verification`
 
-**Read-only readiness:**
-- `gpd --raw phase closeout-readiness {PHASE_NUMBER} --require-verification` -- confirm the local transition is allowed
+## > Next Up
 
 Primary local transition: `gpd phase complete {PHASE_NUMBER}`
 
-**After this completes:**
-- `gpd:suggest-next` -- route to the next runtime workflow
+**After this completes:** `gpd:suggest-next`
 
 <sub>Start a fresh context window, then run the primary command above.</sub>
 </step>

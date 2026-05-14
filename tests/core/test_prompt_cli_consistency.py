@@ -1356,7 +1356,7 @@ def test_execute_phase_closeout_prompt_orders_readiness_before_safe_mutation() -
     _assert_normalized_fragments(
         workflow,
         (
-            "read-only readiness helper before the safe mutation",
+            "Before any roadmap/state transition, run the read-only helper",
             "rechecks lifecycle readiness before mutating",
             "Primary local transition",
         ),

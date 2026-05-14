@@ -195,7 +195,8 @@ Based on user selection, route to appropriate workflow:
 
   **{phase}-{plan}: [Plan Name]** -- [objective from PLAN.md]
 
-  Primary runtime: `gpd:execute-phase {phase}`
+  Primary: `gpd:execute-phase {phase}`
+  Secondary runtime: `gpd:suggest-next`
 
   <sub>Start a fresh context window, then run `gpd:execute-phase {phase}`</sub>
 
@@ -211,15 +212,11 @@ Based on user selection, route to appropriate workflow:
 
   **Phase [N]: [Name]** -- [Goal from ROADMAP.md]
 
-  Primary runtime: `gpd:plan-phase [phase-number]`
+  Primary: `gpd:plan-phase [phase-number]`
+  Secondary runtime: `gpd:discuss-phase [N]`
+  Secondary runtime: `gpd:research-phase [N]`
 
   <sub>Start a fresh context window, then run `gpd:plan-phase [phase-number]`</sub>
-
-  ---
-
-  **Also available:**
-  - `gpd:discuss-phase [N]` -- gather context first
-  - `gpd:research-phase [N]` -- investigate unknowns
 
   ---
   ```

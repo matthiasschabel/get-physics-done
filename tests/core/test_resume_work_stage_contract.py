@@ -257,8 +257,11 @@ def test_resume_routing_next_up_examples_have_one_primary() -> None:
 
     assert blocks
     for block in blocks:
-        assert len(re.findall(r"^\s*Primary\s+\w+:", block, flags=re.M)) == 1
-        assert "Primary runtime:" in block
+        assert len(re.findall(r"^\s*Primary:", block, flags=re.M)) == 1
+        assert "Primary runtime:" not in block
+        assert "**Also available:**" not in block
+        assert "**After this completes:**" not in block
+        assert "Secondary runtime:" in block
         assert "`gpd:execute-phase" in block or "`gpd:plan-phase" in block
 
 

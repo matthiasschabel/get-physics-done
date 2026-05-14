@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 
 from gpd.command_labels import canonical_command_label
 from gpd.core.command_run_hints import (
@@ -23,7 +23,6 @@ from gpd.core.command_run_hints import (
 )
 from gpd.core.constants import ProjectLayout
 from gpd.core.next_command_rendering import (
-    RenderedNextUpBlock,
     render_next_up_block,
 )
 from gpd.core.phases import PhaseAmbiguityError, find_phase, roadmap_analyze
@@ -63,6 +62,244 @@ LifecycleDecisionKind = Literal[
     "closed_ready_next_phase",
     "closed_milestone_complete",
 ]
+CanonicalLifecycleClass = Literal[
+    "needs_execution",
+    "needs_verification",
+    "ready_for_local_closeout",
+    "blocked_closeout",
+    "closed_ready_next_phase",
+    "closed_needs_milestone_audit",
+    "closed_ready_for_milestone_archive",
+    "archived_ready_for_next_milestone",
+]
+LifecycleNextUpStatus = Literal["ready", "blocked", "closed"]
+
+
+def _runtime_label_for_action(action: str, *, argument: str | None = None) -> str:
+    label = canonical_command_label(action)
+    return f"{label} {argument}" if argument else label
+
+
+class LifecycleNextUp(BaseModel):
+    """Canonical lifecycle-owned next-up object with legacy JSON projection."""
+
+    model_config = ConfigDict(validate_assignment=True, extra="forbid", arbitrary_types_allowed=True)
+
+    schema_version: int = 1
+    source: str = "phase-lifecycle"
+    status: LifecycleNextUpStatus
+    status_class: CanonicalLifecycleClass
+    phase: str
+    primary: NextCommand
+    primary_label: str
+    after_this_completes: NextCommand | None = None
+    secondary: list[NextCommand] = Field(default_factory=list)
+    blockers: list[str] = Field(default_factory=list)
+    rendered_markdown: str
+    stage_stop_next_runtime_command: str | None = None
+    stage_stop_also_available: list[str] = Field(default_factory=list)
+
+    @property
+    def primary_owner(self) -> str:
+        return self.primary.owner
+
+    @property
+    def primary_command_text(self) -> str:
+        return self.primary.command
+
+    @classmethod
+    def ready_local_transition(
+        cls,
+        *,
+        phase: str,
+        closeout_command: str,
+        cleanup_command: str | None,
+    ) -> Self:
+        primary = _local_transition_next_command(command=closeout_command, action="phase-complete", phase=phase)
+        after_this_completes = _runtime_next_command(
+            action="suggest-next",
+            reason="choose the next safe workflow route after the local phase transition completes",
+        )
+        secondary: list[NextCommand] = []
+        if cleanup_command is not None:
+            secondary.append(_cleanup_next_command(command=cleanup_command, phase=phase))
+        rendered = render_next_up_block(
+            primary=primary,
+            after_this_completes=after_this_completes,
+            secondary=secondary,
+        )
+        return cls(
+            status="ready",
+            status_class="ready_for_local_closeout",
+            phase=phase,
+            primary=primary,
+            primary_label="Primary local transition",
+            after_this_completes=after_this_completes,
+            secondary=secondary,
+            rendered_markdown=rendered.markdown,
+            stage_stop_next_runtime_command=rendered.stage_stop_next_runtime_command,
+            stage_stop_also_available=list(rendered.stage_stop_also_available),
+        )
+
+    @classmethod
+    def blocked_runtime(
+        cls,
+        *,
+        phase: str,
+        blockers: list[str],
+        action: str | None,
+        status_class: CanonicalLifecycleClass | None = None,
+    ) -> Self:
+        primary = _blocked_next_command(phase=phase, blockers=blockers, blocked_action=action)
+        rendered = render_next_up_block(primary=primary)
+        return cls(
+            status="blocked",
+            status_class=status_class or _blocked_status_class(primary.action),
+            phase=phase,
+            primary=primary,
+            primary_label="Primary",
+            blockers=list(blockers),
+            rendered_markdown=rendered.markdown,
+            stage_stop_next_runtime_command=rendered.stage_stop_next_runtime_command,
+            stage_stop_also_available=list(rendered.stage_stop_also_available),
+        )
+
+    @classmethod
+    def closed_runtime(
+        cls,
+        *,
+        phase: str,
+        next_phase: str | None,
+        status_class: CanonicalLifecycleClass,
+        milestone_version: str | None = None,
+    ) -> Self:
+        if next_phase is not None:
+            primary = _runtime_next_command(action="plan-phase", phase=next_phase)
+            status_class = "closed_ready_next_phase"
+        elif status_class == "closed_ready_for_milestone_archive":
+            primary = _runtime_next_command_with_argument(action="complete-milestone", argument=milestone_version)
+        elif status_class == "archived_ready_for_next_milestone":
+            primary = _runtime_next_command(action="new-milestone")
+        else:
+            primary = _runtime_next_command(action="audit-milestone")
+            status_class = "closed_needs_milestone_audit"
+
+        rendered = render_next_up_block(primary=primary)
+        return cls(
+            status="closed",
+            status_class=status_class,
+            phase=phase,
+            primary=primary,
+            primary_label="Primary",
+            rendered_markdown=rendered.markdown,
+            stage_stop_next_runtime_command=rendered.stage_stop_next_runtime_command,
+            stage_stop_also_available=list(rendered.stage_stop_also_available),
+        )
+
+    @model_validator(mode="after")
+    def _validate_lifecycle_invariants(self) -> Self:
+        if self.status == "ready":
+            if self.primary.owner != OWNER_LOCAL_TRANSITION or self.primary.action != "phase-complete":
+                raise ValueError("ready lifecycle next-up requires a phase-complete local transition primary")
+            if self.after_this_completes is None or self.after_this_completes.owner != OWNER_RUNTIME:
+                raise ValueError("ready lifecycle next-up requires an after-this-completes runtime route")
+            if self.stage_stop_next_runtime_command != self.after_this_completes.command:
+                raise ValueError("ready lifecycle stage-stop route must match after-this-completes")
+            if self.primary.requires_user_initiated_runtime_command:
+                raise ValueError("local transition primary must not require a user-initiated runtime command")
+            if any(command.owner != OWNER_LOCAL_HELPER for command in self.secondary):
+                raise ValueError("ready lifecycle secondary commands must be local helpers")
+        elif self.status == "blocked":
+            if self.primary.owner != OWNER_RUNTIME:
+                raise ValueError("blocked lifecycle next-up requires a runtime primary")
+            if self.primary.action not in {"execute-phase", "verify-work", "resume-work"}:
+                raise ValueError("blocked lifecycle primary action is not a closeout recovery route")
+            if self.after_this_completes is not None:
+                raise ValueError("blocked lifecycle next-up cannot have after-this-completes")
+            if not self.blockers:
+                raise ValueError("blocked lifecycle next-up requires blockers")
+        elif self.status == "closed":
+            if self.primary.owner != OWNER_RUNTIME:
+                raise ValueError("closed lifecycle next-up requires a runtime primary")
+            if self.primary.action not in {
+                "plan-phase",
+                "audit-milestone",
+                "complete-milestone",
+                "new-milestone",
+            }:
+                raise ValueError("closed lifecycle primary action is not a closed-phase route")
+            if self.after_this_completes is not None:
+                raise ValueError("closed lifecycle next-up cannot have after-this-completes")
+            if "gpd phase complete" in self.rendered_markdown:
+                raise ValueError("closed lifecycle next-up must not repeat local phase closeout")
+        return self
+
+    @field_serializer("primary", "after_this_completes", when_used="json")
+    def _serialize_next_command(self, value: NextCommand | None) -> dict[str, object] | None:
+        return value.as_dict() if value is not None else None
+
+    @field_serializer("secondary", when_used="json")
+    def _serialize_secondary_commands(self, value: list[NextCommand]) -> list[dict[str, object]]:
+        return [command.as_dict() for command in value]
+
+    def as_legacy_next_up_dict(self, *, hint_source: str = _NEXT_UP_HINT_SOURCE) -> dict[str, object]:
+        """Return the legacy ``next_up`` JSON shape generated from canonical fields."""
+
+        primary_hint = _hint_from_next_command(
+            self.primary,
+            role=ROLE_PRIMARY,
+            owner=self.primary.owner,
+            source=hint_source,
+        )
+        secondary_hints = [
+            hint
+            for command in self.secondary
+            if (
+                hint := _hint_from_next_command(
+                    command,
+                    role=ROLE_SECONDARY,
+                    owner=command.owner,
+                    source=hint_source,
+                )
+            )
+            is not None
+        ]
+        commands = [hint for hint in (primary_hint, *secondary_hints) if hint is not None]
+        primary_command = _typed_command_payload(self.primary, role=ROLE_PRIMARY)
+        secondary_commands = [_typed_command_payload(command, role=ROLE_SECONDARY) for command in self.secondary]
+
+        payload: dict[str, object] = {
+            "schema_version": self.schema_version,
+            "source": self.source,
+            "phase": self.phase,
+            "status": self.status,
+            "status_class": self.status_class,
+            "lifecycle_class": self.status_class,
+            "primary": self.primary.command,
+            "primary_owner": self.primary.owner,
+            "primary_label": self.primary_label,
+            "commands": commands,
+            "primary_command": primary_command,
+            "primary_next_command": dict(primary_command),
+            "secondary": secondary_hints,
+            "secondary_commands": secondary_commands,
+            "secondary_next_commands": [dict(command) for command in secondary_commands],
+            "rendered_markdown": self.rendered_markdown,
+            "stage_stop_next_runtime_command": self.stage_stop_next_runtime_command,
+            "stage_stop_also_available": list(self.stage_stop_also_available),
+        }
+        if self.after_this_completes is not None:
+            after = _typed_command_payload(self.after_this_completes)
+            payload["after_this_completes"] = after
+            payload["after_this_completes_next_command"] = dict(after)
+        if self.blockers or self.status == "blocked":
+            payload["blockers"] = list(self.blockers)
+        return payload
+
+    def to_compat_dict(self, *, hint_source: str = _NEXT_UP_HINT_SOURCE) -> dict[str, object]:
+        """Alias for consumers using the explorer-proposed method name."""
+
+        return self.as_legacy_next_up_dict(hint_source=hint_source)
 
 
 class PhaseCloseoutReadiness(BaseModel):
@@ -98,6 +335,7 @@ class PhaseCloseoutReadiness(BaseModel):
     cleanup_command: str | None = None
     closeout_command_hint: dict[str, object] | None = None
     cleanup_command_hint: dict[str, object] | None = None
+    lifecycle_next_up: LifecycleNextUp | None = None
     next_up: dict[str, object] = Field(default_factory=dict)
 
 
@@ -124,9 +362,11 @@ class PhaseLifecycleDecision(BaseModel):
     phase_closed: bool = False
     next_phase: str | None = None
     decision: LifecycleDecisionKind
+    lifecycle_class: CanonicalLifecycleClass
     primary_action: str | None = None
     primary_owner: str | None = None
     primary_command: str | None = None
+    lifecycle_next_up: LifecycleNextUp | None = None
     next_up: dict[str, object] = Field(default_factory=dict)
     closeout_readiness: PhaseCloseoutReadiness
 
@@ -253,10 +493,11 @@ def _hint_from_next_command(
     *,
     role: str | None = None,
     owner: str | None = None,
+    source: str = _NEXT_UP_HINT_SOURCE,
 ) -> dict[str, object] | None:
     if next_command is None:
         return None
-    payload = next_command.as_run_hint(source=_NEXT_UP_HINT_SOURCE)
+    payload = next_command.as_run_hint(source=source)
     return _with_role(payload, role=role, owner=owner)
 
 
@@ -298,8 +539,7 @@ def _hint(
 
 
 def _runtime_command_label(action: str, *, phase: str | None = None) -> str:
-    label = canonical_command_label(action)
-    return f"{label} {phase}" if phase else label
+    return _runtime_label_for_action(action, argument=phase)
 
 
 def _runtime_next_command(*, action: str, phase: str | None = None, reason: str | None = None) -> NextCommand:
@@ -318,6 +558,36 @@ def _runtime_next_command(*, action: str, phase: str | None = None, reason: str 
         fresh_context_recommended=True,
         notes=("user_initiated_runtime_command_required",),
     )
+
+
+def _runtime_next_command_with_argument(
+    *,
+    action: str,
+    argument: str | None = None,
+    reason: str | None = None,
+) -> NextCommand:
+    label = _runtime_label_for_action(action, argument=argument)
+    classified = classify_next_command(command=label, action=action, reason=reason)
+    if classified is not None and classified.owner == OWNER_RUNTIME and classified.kind == KIND_RUNTIME_COMMAND_LABEL:
+        return classified
+    return NextCommand(
+        label=label,
+        action=action,
+        owner=OWNER_RUNTIME,
+        reason=reason,
+        kind=KIND_RUNTIME_COMMAND_LABEL,
+        requires_user_initiated_runtime_command=True,
+        fresh_context_recommended=True,
+        notes=("user_initiated_runtime_command_required",),
+    )
+
+
+def _blocked_status_class(action: str | None) -> CanonicalLifecycleClass:
+    if action == "execute-phase":
+        return "needs_execution"
+    if action == "verify-work":
+        return "needs_verification"
+    return "blocked_closeout"
 
 
 def _local_transition_next_command(*, command: str, action: str, phase: str) -> NextCommand:
@@ -346,14 +616,6 @@ def _cleanup_next_command(*, command: str, phase: str) -> NextCommand:
         kind=KIND_LOCAL_CLI_HELPER_COMMAND,
         notes=("display_copy_safe", "not_executed"),
     )
-
-
-def _rendered_payload_fields(rendered: RenderedNextUpBlock) -> dict[str, object]:
-    return {
-        "rendered_markdown": rendered.markdown,
-        "stage_stop_next_runtime_command": rendered.stage_stop_next_runtime_command,
-        "stage_stop_also_available": list(rendered.stage_stop_also_available),
-    }
 
 
 def _blocked_next_command(*, phase: str, blockers: list[str], blocked_action: str | None) -> NextCommand:
@@ -399,58 +661,19 @@ def _next_up_payload(
     cleanup_command: str | None,
     blockers: list[str],
     blocked_action: str | None = None,
-) -> dict[str, object]:
+) -> LifecycleNextUp:
     if ready and closeout_command is not None:
-        primary_command = _local_transition_next_command(command=closeout_command, action="phase-complete", phase=phase)
-        after_this_completes = _runtime_next_command(
-            action="suggest-next",
-            reason="choose the next safe workflow route after the local phase transition completes",
+        return LifecycleNextUp.ready_local_transition(
+            phase=phase,
+            closeout_command=closeout_command,
+            cleanup_command=cleanup_command,
         )
-        secondary_next_commands: list[NextCommand] = []
-        if cleanup_command is not None:
-            secondary_next_commands.append(_cleanup_next_command(command=cleanup_command, phase=phase))
-        rendered = render_next_up_block(
-            primary=primary_command,
-            after_this_completes=after_this_completes,
-            secondary=secondary_next_commands,
-        )
-        primary_hint = _hint_from_next_command(primary_command, role=ROLE_PRIMARY, owner=OWNER_LOCAL_TRANSITION)
-        secondary_commands: list[dict[str, object]] = []
-        for secondary_command in secondary_next_commands:
-            cleanup_hint = _hint_from_next_command(secondary_command, role=ROLE_SECONDARY, owner=OWNER_LOCAL_HELPER)
-            if cleanup_hint is not None:
-                secondary_commands.append(cleanup_hint)
-        commands = [hint for hint in (primary_hint, *secondary_commands) if hint is not None]
-        return {
-            "status": "ready",
-            "primary": closeout_command,
-            "primary_owner": OWNER_LOCAL_TRANSITION,
-            "primary_label": "Primary local transition",
-            "secondary": secondary_commands,
-            "commands": commands,
-            "primary_command": _typed_command_payload(primary_command, role=ROLE_PRIMARY),
-            "after_this_completes": _typed_command_payload(after_this_completes),
-            "secondary_commands": [
-                _typed_command_payload(command, role=ROLE_SECONDARY) for command in secondary_next_commands
-            ],
-            **_rendered_payload_fields(rendered),
-        }
 
-    primary_command = _blocked_next_command(phase=phase, blockers=blockers, blocked_action=blocked_action)
-    rendered = render_next_up_block(primary=primary_command)
-    primary = primary_command.command
-
-    return {
-        "status": "blocked",
-        "primary": primary,
-        "primary_owner": OWNER_RUNTIME,
-        "primary_label": "Primary",
-        "commands": [_hint_from_next_command(primary_command, role=ROLE_PRIMARY, owner=OWNER_RUNTIME)],
-        "primary_command": _typed_command_payload(primary_command, role=ROLE_PRIMARY),
-        "secondary_commands": [],
-        "blockers": blockers,
-        **_rendered_payload_fields(rendered),
-    }
+    return LifecycleNextUp.blocked_runtime(
+        phase=phase,
+        blockers=blockers,
+        action=blocked_action,
+    )
 
 
 def _state_position(project_root: Path) -> tuple[str | None, str | None]:
@@ -505,89 +728,102 @@ def _phase_closure(
     )
 
 
+def _milestone_version(project_root: Path) -> str | None:
+    try:
+        from gpd.core.phases import get_milestone_info
+
+        version = str(get_milestone_info(project_root).version).strip()
+    except Exception:  # noqa: BLE001 - lifecycle routing should degrade to audit-first
+        return None
+    return version or None
+
+
+def _milestone_audit_status(project_root: Path, version: str | None) -> str | None:
+    if not version:
+        return None
+    audit_path = ProjectLayout(project_root).gpd / f"{version}-MILESTONE-AUDIT.md"
+    if not audit_path.exists():
+        return None
+    try:
+        from gpd.core.frontmatter import extract_frontmatter
+
+        frontmatter, _body = extract_frontmatter(audit_path.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 - malformed audit should not skip the audit-first route
+        return None
+    status = frontmatter.get("status") if isinstance(frontmatter, dict) else None
+    return str(status).strip().lower() if status is not None else None
+
+
+def _milestone_archive_exists(project_root: Path, version: str | None) -> bool:
+    if not version:
+        return False
+    archive_dir = ProjectLayout(project_root).gpd / "milestones"
+    return (archive_dir / f"{version}-ROADMAP.md").exists() or (archive_dir / f"{version}-REQUIREMENTS.md").exists()
+
+
+def _closed_milestone_status_class(project_root: Path, version: str | None) -> CanonicalLifecycleClass:
+    if _milestone_archive_exists(project_root, version):
+        return "archived_ready_for_next_milestone"
+    if _milestone_audit_status(project_root, version) == "passed":
+        return "closed_ready_for_milestone_archive"
+    return "closed_needs_milestone_audit"
+
+
 def _closed_next_up(
     *,
+    project_root: Path,
     phase: str,
     next_phase: str | None,
     milestone_complete: bool,
-) -> tuple[dict[str, object], str | None, str | None, str | None]:
-    if milestone_complete or next_phase is None:
-        action = "audit-milestone"
-        primary_command = _runtime_next_command(action=action)
-    else:
-        action = "plan-phase"
-        primary_command = _runtime_next_command(action=action, phase=next_phase)
-    rendered = render_next_up_block(primary=primary_command)
-    primary = primary_command.command
+) -> LifecycleNextUp:
+    if not milestone_complete and next_phase is not None:
+        return LifecycleNextUp.closed_runtime(
+            phase=phase,
+            next_phase=next_phase,
+            status_class="closed_ready_next_phase",
+        )
 
-    next_up = {
-        "status": "closed",
-        "primary": primary,
-        "primary_owner": OWNER_RUNTIME,
-        "primary_label": "Primary",
-        "commands": [_hint_from_next_command(primary_command, role=ROLE_PRIMARY, owner=OWNER_RUNTIME)],
-        "primary_command": _typed_command_payload(primary_command, role=ROLE_PRIMARY),
-        "secondary_commands": [],
-        **_rendered_payload_fields(rendered),
-    }
-    return next_up, action, OWNER_RUNTIME, primary
+    version = _milestone_version(project_root)
+    return LifecycleNextUp.closed_runtime(
+        phase=phase,
+        next_phase=None,
+        status_class=_closed_milestone_status_class(project_root, version),
+        milestone_version=version,
+    )
 
 
 def _decision_from_closeout(
     *,
     closeout: PhaseCloseoutReadiness,
+    lifecycle_next_up: LifecycleNextUp,
     phase_closed: bool,
     next_phase: str | None,
     state_status: str | None,
-) -> tuple[LifecycleDecisionKind, dict[str, object], str | None, str | None, str | None]:
+) -> tuple[LifecycleDecisionKind, CanonicalLifecycleClass, str | None, str | None, str | None]:
+    action = lifecycle_next_up.primary.action
+    owner = lifecycle_next_up.primary.owner
+    command = lifecycle_next_up.primary.command
+
     if phase_closed:
         milestone_complete = (state_status or "").lower() == "milestone complete" or next_phase is None
-        next_up, action, owner, command = _closed_next_up(
-            phase=closeout.phase,
-            next_phase=next_phase,
-            milestone_complete=milestone_complete,
-        )
         decision: LifecycleDecisionKind = (
             "closed_milestone_complete" if milestone_complete else "closed_ready_next_phase"
         )
-        return decision, next_up, action, owner, command
+        return decision, lifecycle_next_up.status_class, action, owner, command
 
     if not closeout.all_plans_complete:
-        return (
-            "needs_execution",
-            closeout.next_up,
-            "execute-phase",
-            OWNER_RUNTIME,
-            f"gpd:execute-phase {closeout.phase}",
-        )
+        return "needs_execution", lifecycle_next_up.status_class, action, owner, command
 
     if closeout.active_bounded_segment:
-        return "blocked_closeout", closeout.next_up, "resume-work", OWNER_RUNTIME, "gpd:resume-work"
+        return "blocked_closeout", lifecycle_next_up.status_class, action, owner, command
 
     if any("verification" in blocker for blocker in closeout.blockers):
-        return "needs_verification", closeout.next_up, "verify-work", OWNER_RUNTIME, f"gpd:verify-work {closeout.phase}"
+        return "needs_verification", lifecycle_next_up.status_class, action, owner, command
 
     if closeout.ready:
-        return (
-            "ready_for_closeout",
-            closeout.next_up,
-            "phase-complete",
-            OWNER_LOCAL_TRANSITION,
-            closeout.closeout_command,
-        )
+        return "ready_for_closeout", lifecycle_next_up.status_class, action, owner, command
 
-    primary = closeout.next_up.get("primary") if isinstance(closeout.next_up, dict) else None
-    owner = closeout.next_up.get("primary_owner") if isinstance(closeout.next_up, dict) else None
-    primary_text = str(primary) if primary is not None else None
-    owner_text = str(owner) if owner is not None else None
-    action = None
-    if primary_text == "gpd:resume-work":
-        action = "resume-work"
-    elif primary_text and primary_text.startswith("gpd:verify-work"):
-        action = "verify-work"
-    elif primary_text and primary_text.startswith("gpd:execute-phase"):
-        action = "execute-phase"
-    return "blocked_closeout", closeout.next_up, action, owner_text, primary_text
+    return "blocked_closeout", lifecycle_next_up.status_class, action, owner, command
 
 
 def _missing_project_decision(
@@ -604,6 +840,7 @@ def _missing_project_decision(
         cleanup_command=None,
         blockers=blockers,
     )
+    next_up_payload = next_up.as_legacy_next_up_dict()
     closeout = PhaseCloseoutReadiness(
         phase=phase,
         ready=False,
@@ -612,16 +849,19 @@ def _missing_project_decision(
         require_verification=require_verification,
         preserve_checkpoint_tags=True,
         blockers=blockers,
-        next_up=next_up,
+        lifecycle_next_up=next_up,
+        next_up=next_up_payload,
     )
     return PhaseLifecycleDecision(
         phase=phase,
         project_root=project_root.as_posix(),
         decision="blocked_closeout",
-        primary_action="execute-phase",
-        primary_owner=OWNER_RUNTIME,
-        primary_command=f"gpd:execute-phase {phase}",
-        next_up=next_up,
+        lifecycle_class=next_up.status_class,
+        primary_action=next_up.primary.action,
+        primary_owner=next_up.primary.owner,
+        primary_command=next_up.primary.command,
+        lifecycle_next_up=next_up,
+        next_up=next_up_payload,
         closeout_readiness=closeout,
     )
 
@@ -640,6 +880,7 @@ def _missing_phase_decision(
         cleanup_command=None,
         blockers=blockers,
     )
+    next_up_payload = next_up.as_legacy_next_up_dict()
     closeout = PhaseCloseoutReadiness(
         phase=phase,
         ready=False,
@@ -648,16 +889,19 @@ def _missing_phase_decision(
         require_verification=require_verification,
         preserve_checkpoint_tags=True,
         blockers=blockers,
-        next_up=next_up,
+        lifecycle_next_up=next_up,
+        next_up=next_up_payload,
     )
     return PhaseLifecycleDecision(
         phase=phase,
         project_root=project_root.as_posix(),
         decision="blocked_closeout",
-        primary_action="execute-phase",
-        primary_owner=OWNER_RUNTIME,
-        primary_command=f"gpd:execute-phase {phase}",
-        next_up=next_up,
+        lifecycle_class=next_up.status_class,
+        primary_action=next_up.primary.action,
+        primary_owner=next_up.primary.owner,
+        primary_command=next_up.primary.command,
+        lifecycle_next_up=next_up,
+        next_up=next_up_payload,
         closeout_readiness=closeout,
     )
 
@@ -769,11 +1013,13 @@ def phase_lifecycle_decision(
         ),
     )
     if phase_closed:
-        next_up, _closed_action, _closed_owner, _closed_command = _closed_next_up(
+        next_up = _closed_next_up(
+            project_root=project_root,
             phase=phase_info.phase_number,
             next_phase=next_phase,
             milestone_complete=(state_status or "").lower() == "milestone complete" or next_phase is None,
         )
+    next_up_payload = next_up.as_legacy_next_up_dict()
 
     closeout = PhaseCloseoutReadiness(
         phase=phase_info.phase_number,
@@ -814,10 +1060,12 @@ def phase_lifecycle_decision(
             owner=OWNER_LOCAL_HELPER,
             role=ROLE_SECONDARY,
         ),
-        next_up=next_up,
+        lifecycle_next_up=next_up,
+        next_up=next_up_payload,
     )
-    decision, decision_next_up, primary_action, primary_owner, primary_command = _decision_from_closeout(
+    decision, lifecycle_class, primary_action, primary_owner, primary_command = _decision_from_closeout(
         closeout=closeout,
+        lifecycle_next_up=next_up,
         phase_closed=phase_closed,
         next_phase=next_phase,
         state_status=state_status,
@@ -842,15 +1090,19 @@ def phase_lifecycle_decision(
         phase_closed=phase_closed,
         next_phase=next_phase,
         decision=decision,
+        lifecycle_class=lifecycle_class,
         primary_action=primary_action,
         primary_owner=primary_owner,
         primary_command=primary_command,
-        next_up=decision_next_up,
+        lifecycle_next_up=next_up,
+        next_up=next_up_payload,
         closeout_readiness=closeout,
     )
 
 
 __all__ = [
+    "CanonicalLifecycleClass",
+    "LifecycleNextUp",
     "OWNER_LOCAL_HELPER",
     "OWNER_LOCAL_TRANSITION",
     "OWNER_RUNTIME",

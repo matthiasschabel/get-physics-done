@@ -63,6 +63,34 @@ def test_accepts_nested_state_and_continuation_payloads() -> None:
     assert result.fields["continuation_update"]["bounded_segment"]["segment_id"] == "seg-01"
 
 
+def test_accepts_checkpoint_intent_as_child_authored_pause_intent() -> None:
+    content = render_gpd_return_block(
+        [],
+        status="checkpoint",
+        next_actions=["gpd:resume-work"],
+        extra_fields={
+            "phase": "01",
+            "plan": "02",
+            "checkpoint_intent": {
+                "checkpoint_reason": "pre_fanout",
+                "waiting_reason": "Review the first result before dependent fanout.",
+                "waiting_for_review": True,
+            },
+        },
+    )
+
+    result = validate_gpd_return_markdown(content)
+
+    assert result.passed is True
+    assert result.fields["checkpoint_intent"] == {
+        "checkpoint_reason": "pre_fanout",
+        "waiting_reason": "Review the first result before dependent fanout.",
+        "waiting_for_review": True,
+    }
+    assert "continuation_update" not in result.fields
+    assert "resume_file" not in str(result.fields["checkpoint_intent"])
+
+
 def test_accepts_typed_checker_plan_lists() -> None:
     content = render_gpd_return_block(
         [],
@@ -292,6 +320,35 @@ def test_rejects_applicator_owned_bounded_segment_metadata_inside_child_return()
     assert any(
         "updated_at" in error and "recorded_by" in error and "applicator-owned" in error for error in result.errors
     )
+
+
+def test_rejects_applicator_owned_checkpoint_intent_metadata_inside_child_return() -> None:
+    applicator_owned_fields = {
+        "last_result_id": "result-01",
+        "recorded_by": "execute-plan",
+        "resume_file": "GPD/phases/01-test-phase/.continue-here.md",
+        "source_session_id": "session-01",
+        "updated_at": "2026-04-08T12:00:00Z",
+    }
+
+    for field_name, field_value in applicator_owned_fields.items():
+        content = _wrap_return_block(
+            "  status: checkpoint\n"
+            "  files_written: []\n"
+            "  issues: []\n"
+            "  next_actions: [gpd:resume-work]\n"
+            "  checkpoint_intent:\n"
+            "    checkpoint_reason: pre_fanout\n"
+            "    waiting_reason: Review the first result before dependent fanout.\n"
+            f'    {field_name}: "{field_value}"\n'
+        )
+
+        result = validate_gpd_return_markdown(content)
+
+        assert result.passed is False
+        assert any(
+            field_name in error and "applicator-owned checkpoint_intent" in error for error in result.errors
+        )
 
 
 def test_rejects_scalar_where_continuation_update_requires_mapping() -> None:

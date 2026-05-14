@@ -10,6 +10,12 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from gpd.core.return_contract import VALID_RETURN_STATUSES, validate_gpd_return_markdown
+from gpd.core.return_repair_classifier import (
+    REPAIRABLE_RETURN_CLASSES,
+    ReturnRepairClass,
+    return_failure_class_from_repair_class,
+    return_repair_class_from_validation_error,
+)
 
 
 class HandoffFailureClass(StrEnum):
@@ -482,50 +488,55 @@ def _build_result(
 def _classify_return_validation_errors(errors: list[str]) -> list[HandoffFailure]:
     failures: list[HandoffFailure] = []
     for message in errors:
-        if message == "No gpd_return YAML block found":
-            failures.append(_failure(HandoffFailureClass.RETURN_MISSING, "missing_gpd_return_block", message))
-            continue
-
-        failure_class = HandoffFailureClass.RETURN_MALFORMED_REPAIRABLE
-        code = "malformed_return"
-        repairable = True
-
-        if message.startswith("Multiple gpd_return YAML blocks found:"):
-            failure_class = HandoffFailureClass.RETURN_MALFORMED_BLOCKING
-            code = "ambiguous_multiple_returns"
-            repairable = False
-        elif message.startswith("Missing required field:"):
-            code = "missing_required_field"
-        elif message.startswith("gpd_return YAML parse error:"):
-            code = "yaml_parse_error"
-        elif "canonical lowercase spelling" in message:
-            code = "status_case_drift"
-        elif "Invalid status" in message:
-            code = "invalid_status"
-        elif "Unknown gpd_return top-level field" in message:
-            code = "unknown_top_level_field"
-        elif "must be a list" in message or "Input should be a valid list" in message:
-            code = "invalid_list_field"
-        elif "must be a string" in message or "Input should be a valid string" in message:
-            code = "invalid_string_field"
-        elif "must be a mapping" in message or "Input should be a valid dictionary" in message:
-            code = "invalid_mapping_field"
-        elif "not a number" in message or "Input should be a valid integer" in message:
-            code = "invalid_number_field"
-
-        if "does not allow gpd_return field(s)" in message:
-            failure_class = HandoffFailureClass.RETURN_MALFORMED_BLOCKING
-            code = "status_disallowed_field"
-            repairable = False
-        elif "applicator-owned" in message:
-            failure_class = HandoffFailureClass.RETURN_MALFORMED_BLOCKING
-            code = "applicator_owned_metadata"
-            repairable = False
-        elif "continuation_update" in message:
-            failure_class = HandoffFailureClass.RETURN_MALFORMED_BLOCKING
-            code = "invalid_continuation_update"
-            repairable = False
-
-        failures.append(_failure(failure_class, code, message, repairable=repairable))
+        repair_class = return_repair_class_from_validation_error(message)
+        failure_class = HandoffFailureClass(return_failure_class_from_repair_class(repair_class))
+        failures.append(
+            _failure(
+                failure_class,
+                _handoff_return_code(repair_class, message),
+                message,
+                repairable=repair_class in REPAIRABLE_RETURN_CLASSES,
+            )
+        )
 
     return failures
+
+
+_HANDOFF_RETURN_CODE_BY_REPAIR_CLASS: dict[ReturnRepairClass, str] = {
+    "missing_block": "missing_gpd_return_block",
+    "unfenced_candidate": "missing_gpd_return_block",
+    "wrong_fence_language": "malformed_return",
+    "yaml_parse_error": "yaml_parse_error",
+    "top_level_shape_error": "yaml_parse_error",
+    "missing_required_fields": "missing_required_field",
+    "invalid_status": "invalid_status",
+    "scalar_list_drift": "invalid_list_field",
+    "field_shape_error": "malformed_return",
+    "unknown_field": "unknown_top_level_field",
+    "status_field_forbidden": "status_disallowed_field",
+    "transport_payload_in_return": "invalid_continuation_update",
+    "applicator_owned_metadata": "applicator_owned_metadata",
+    "continuation_schema_error": "invalid_continuation_update",
+    "valid_non_completed": "required_status_mismatch",
+    "ambiguous_multiple_returns": "ambiguous_multiple_returns",
+}
+
+
+def _handoff_return_code(repair_class: ReturnRepairClass, message: str) -> str:
+    if repair_class == "invalid_status" and "canonical lowercase spelling" in message:
+        return "status_case_drift"
+    if repair_class == "field_shape_error":
+        return _field_shape_handoff_return_code(message)
+    return _HANDOFF_RETURN_CODE_BY_REPAIR_CLASS[repair_class]
+
+
+def _field_shape_handoff_return_code(message: str) -> str:
+    if "must be a list" in message or "Input should be a valid list" in message:
+        return "invalid_list_field"
+    if "must be a string" in message or "Input should be a valid string" in message:
+        return "invalid_string_field"
+    if "must be a mapping" in message or "Input should be a valid dictionary" in message:
+        return "invalid_mapping_field"
+    if "not a number" in message or "Input should be a valid integer" in message:
+        return "invalid_number_field"
+    return "malformed_return"

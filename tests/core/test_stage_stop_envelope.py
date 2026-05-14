@@ -13,6 +13,8 @@ WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
 REFERENCES_DIR = REPO_ROOT / "src/gpd/specs/references"
 STAGE_STOP_PATH = REPO_ROOT / "src/gpd/specs/references/orchestration/stage-stop-envelope.md"
 CLOSEOUT_PATH = REPO_ROOT / "src/gpd/specs/workflows/execute-phase/closeout.md"
+RESUME_ROUTING_PATH = REPO_ROOT / "src/gpd/specs/workflows/resume-work/resume-routing.md"
+GAP_REPAIR_PATH = REPO_ROOT / "src/gpd/specs/workflows/verify-work/gap-repair.md"
 CHECKPOINT_RESUME_PATH = REPO_ROOT / "src/gpd/specs/workflows/execute-phase/checkpoint-resume.md"
 VERIFICATION_HANDOFF_PATH = REPO_ROOT / "src/gpd/specs/workflows/execute-phase/verification-handoff.md"
 GAP_REVERIFICATION_PATH = REPO_ROOT / "src/gpd/specs/workflows/execute-phase/gap-reverification.md"
@@ -32,10 +34,13 @@ STAGE_STOP_VISIBLE_NEXT_UP_PATHS = (
     BLOCKED_RECOVERY_PATH,
     PLAN_EXECUTE_CHILD_CYCLE_PATH,
     SESSION_ROUTER_PATH,
+    GAP_REPAIR_PATH,
+    RESUME_ROUTING_PATH,
     CLOSEOUT_PATH,
 )
 
 PRIMARY_COMMAND_RE = re.compile(r"(?m)^[ \t]*Primary(?P<label> local transition)?: `(?P<command>[^`]+)`$")
+AFTER_COMMAND_RE = re.compile(r"(?m)^[ \t]*\*\*After this completes:\*\* `(?P<command>[^`]+)`$")
 PUBLIC_RUNTIME_COMMAND_RE = re.compile(r"^gpd:[^\s`]+(?:\s+.*)?$")
 LOCAL_TRANSITION_COMMAND_RE = re.compile(r"^gpd phase complete\b")
 FORBIDDEN_RUNTIME_FIELD_FRAGMENTS = (
@@ -108,8 +113,11 @@ def _assert_primary_line_shape(block: str) -> None:
     command = matches[0].group("command")
     if label == " local transition":
         assert LOCAL_TRANSITION_COMMAND_RE.match(command), command
-        assert "**After this completes:**" in block
+        after_matches = list(AFTER_COMMAND_RE.finditer(block))
+        assert len(after_matches) == 1, block
+        _assert_public_runtime_command(after_matches[0].group("command"))
         return
+    assert "**After this completes:**" not in block
     _assert_public_runtime_command(command)
 
 
@@ -168,6 +176,15 @@ def test_stage_stop_reference_next_up_blocks_have_one_owned_primary() -> None:
     for block in markdown_blocks:
         _assert_primary_line_shape(block)
         assert all(fragment not in block for fragment in forbidden_fragments)
+
+
+def test_closeout_uses_readiness_payload_renderer_contract() -> None:
+    text = CLOSEOUT_PATH.read_text(encoding="utf-8")
+
+    assert "gpd next-up render" not in text
+    assert ".next_up.rendered_markdown" in text
+    assert "next_up.stage_stop_*" in text
+    assert "surface the helper JSON instead of hand-rendering" in text
 
 
 def test_stage_stop_owned_yaml_blocks_use_public_runtime_secondaries() -> None:

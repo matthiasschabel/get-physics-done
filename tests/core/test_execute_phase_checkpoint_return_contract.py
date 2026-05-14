@@ -104,6 +104,7 @@ def test_checkpoint_status_routes_to_resume_without_artifact_acceptance(tmp_path
 
     assert result.passed is False
     assert result.status == "checkpoint"
+    assert result.acceptance_state == "status_routed"
     assert result.status_route_used is True
     assert result.selected_route == "checkpoint_resume"
     assert result.checked_files == []
@@ -137,6 +138,8 @@ def test_completed_summary_read_only_gate_requires_canonical_applicator_pass(tmp
 
     assert result.read_only_passed is True
     assert result.requires_applicator_pass is True
+    assert result.acceptance_state == "read_only_passed_needs_applicator"
+    assert result.acceptance_state != "accepted"
     assert result.applicator_required_unrun is True
     assert result.passed is False
     assert result.applicator_command == "gpd --raw apply-return-updates ${SUMMARY_FILE}"

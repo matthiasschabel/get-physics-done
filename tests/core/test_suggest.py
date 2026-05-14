@@ -11,6 +11,7 @@ import pytest
 from gpd.adapters import get_adapter, list_runtimes
 from gpd.adapters.runtime_catalog import get_runtime_descriptor
 from gpd.core import suggest as suggest_module
+from gpd.core.command_run_hints import KIND_RUNTIME_COMMAND_LABEL, NEXT_COMMAND_OWNER_RUNTIME, NextCommand
 from gpd.core.constants import ENV_DATA_DIR, ENV_GPD_ACTIVE_RUNTIME
 from gpd.core.conventions import KNOWN_CONVENTIONS
 from gpd.core.proof_review import resolve_manuscript_proof_review_status
@@ -892,6 +893,104 @@ def test_typed_lifecycle_runtime_verify_work_uses_active_runtime_command_class(
     assert verify.next_command.requires_user_initiated_runtime_command is True
 
 
+def test_lifecycle_next_up_object_wins_over_stale_legacy_primary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When Worker 1's typed object is present, suggest must not trust stale legacy strings."""
+    root = _setup_project(tmp_path)
+    _create_roadmap(root)
+    _create_phase(root, "01-setup", plans=1, summaries=1)
+
+    class _LifecycleNextUp:
+        primary = NextCommand(
+            label="gpd:verify-work 01",
+            action="verify-work",
+            owner=NEXT_COMMAND_OWNER_RUNTIME,
+            phase="01",
+            reason="typed lifecycle object",
+            kind=KIND_RUNTIME_COMMAND_LABEL,
+            requires_user_initiated_runtime_command=True,
+            fresh_context_recommended=True,
+        )
+
+    class _Decision:
+        decision = "needs_verification"
+        blocks_downstream = True
+        phase = "01"
+        primary_action = "phase-complete"
+        reason = "typed lifecycle object"
+        lifecycle_next_up = _LifecycleNextUp()
+        next_up = {
+            "status": "ready",
+            "primary": "gpd phase complete 01",
+            "primary_command": {
+                "schema_version": 1,
+                "label": "gpd phase complete 01",
+                "command": "gpd phase complete 01",
+                "action": "phase-complete",
+                "phase": "01",
+                "owner": "local_transition",
+                "kind": "local_cli_transition_command",
+                "execution": "not_executed",
+                "requires_user_initiated_runtime_command": False,
+                "fresh_context_recommended": False,
+                "notes": ["stale_legacy_payload"],
+            },
+        }
+
+    def _typed_decision(cwd: Path, phase: str, *, require_verification: bool = True) -> object:
+        del cwd, phase, require_verification
+        return _Decision()
+
+    monkeypatch.setattr("gpd.core.phase_lifecycle.phase_lifecycle_decision", _typed_decision)
+
+    result = suggest_next(root)
+
+    actions = [suggestion.action for suggestion in result.suggestions]
+    assert "verify-work" in actions
+    assert "phase-complete" not in actions
+    verify = next(suggestion for suggestion in result.suggestions if suggestion.action == "verify-work")
+    assert verify.command == "gpd:verify-work 01"
+    assert verify.next_command is not None
+    assert verify.next_command.owner == "runtime"
+    assert verify.next_command.action == "verify-work"
+
+
+def test_lifecycle_structural_verify_phase_without_typed_primary_fails_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A loose `gpd verify phase` string must not become a synthesized lifecycle route."""
+    root = _setup_project(tmp_path)
+    _create_roadmap_with_phases(root, [("1", "Setup"), ("2", "Core")])
+    _create_phase(root, "01-setup", plans=1, summaries=1)
+    _create_phase(root, "02-core", research=True)
+
+    def _loose_decision(cwd: Path, phase: str, *, require_verification: bool = True) -> dict[str, object]:
+        del cwd, require_verification
+        return {
+            "decision": "needs_verification",
+            "blocks_downstream": True,
+            "phase": phase,
+            "primary_action": "verify-work",
+            "next_up": {
+                "status": "blocked",
+                "primary": f"gpd verify phase {phase}",
+            },
+        }
+
+    monkeypatch.setattr("gpd.core.phase_lifecycle.phase_lifecycle_decision", _loose_decision)
+
+    result = suggest_next(root)
+
+    actions = [suggestion.action for suggestion in result.suggestions]
+    assert "verify-work" not in actions
+    assert "phase-complete" not in actions
+    assert "plan-phase" not in actions
+    assert "discuss-phase" not in actions
+    assert all("gpd verify phase" not in suggestion.command for suggestion in result.suggestions)
+
+
 def test_complete_unverified_runtime_install_exposes_next_command_decision(tmp_path: Path) -> None:
     """Installed runtime labels should be preserved while exposing command ownership."""
     runtime = _RUNTIME_NAMES[0]
@@ -1059,6 +1158,22 @@ def test_all_complete_suggests_audit(tmp_path: Path) -> None:
     actions = [s.action for s in result.suggestions]
     assert "audit-milestone" in actions
     assert "write-paper" in actions  # all verified too
+    assert "phase-complete" not in actions
+    assert all("gpd phase complete" not in suggestion.command for suggestion in result.suggestions)
+
+
+def test_closed_final_phase_routes_audit_without_repeat_closeout(tmp_path: Path) -> None:
+    """A closed final phase must not offer the local closeout command again."""
+    root = _setup_project(tmp_path)
+    _create_roadmap_with_phases(root, [("1", "Setup")], completed={"1"})
+    _create_phase(root, "01-setup", plans=1, summaries=1, verification=True)
+
+    result = suggest_next(root)
+
+    actions = [suggestion.action for suggestion in result.suggestions]
+    assert "audit-milestone" in actions
+    assert "phase-complete" not in actions
+    assert all("gpd phase complete" not in suggestion.command for suggestion in result.suggestions)
 
 
 def test_roadmap_only_phase_blocks_milestone_audit(tmp_path: Path) -> None:

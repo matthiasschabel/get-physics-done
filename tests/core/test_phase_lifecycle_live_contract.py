@@ -787,6 +787,8 @@ def test_full_lifecycle_chain_checks_closeout_readiness_before_phase_complete(tm
     assert decision.next_up["primary_command"]["owner"] == "local_transition"
     assert decision.next_up["after_this_completes"]["owner"] == "runtime"
     assert decision.next_up["after_this_completes"]["command"] == "gpd:suggest-next"
+    assert decision.next_up["stage_stop_next_runtime_command"] == "gpd:suggest-next"
+    assert "gpd phase complete" not in decision.next_up["stage_stop_next_runtime_command"]
 
     complete_result = RUNNER.invoke(
         app,

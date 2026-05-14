@@ -380,6 +380,7 @@ def _build_next_command_decision(
 
 
 _SHARED_LIFECYCLE_UNAVAILABLE = object()
+_SHARED_LIFECYCLE_BLOCKS_WITHOUT_SUGGESTION = object()
 
 
 def _lifecycle_value(decision: object, *names: str) -> object | None:
@@ -508,12 +509,44 @@ def _is_typed_lifecycle_command_payload(value: object) -> bool:
     mapping = _mapping_from_value(value)
     if mapping is None:
         return False
-    return any(key in mapping for key in ("owner", "kind", "next_command", "label", "command", "action"))
+    if "next_command" in mapping:
+        return True
+    return "owner" in mapping and "kind" in mapping and any(key in mapping for key in ("label", "command", "action"))
+
+
+def _call_lifecycle_value(value: object) -> object:
+    if not callable(value):
+        return value
+    try:
+        return value()
+    except TypeError:
+        return value
+
+
+def _lifecycle_next_up_payload(decision: object) -> object | None:
+    lifecycle_next_up = _lifecycle_value(decision, "lifecycle_next_up")
+    if lifecycle_next_up is not None:
+        return lifecycle_next_up
+    return _lifecycle_value(decision, "next_up")
 
 
 def _lifecycle_primary_command_payload(decision: object) -> object | None:
+    lifecycle_next_up = _lifecycle_next_up_payload(decision)
+    if lifecycle_next_up is not None:
+        for key in ("primary_next_command", "primary_command", "primary", "next_command", "typed_next_command"):
+            candidate = _call_lifecycle_value(_lifecycle_value(lifecycle_next_up, key))
+            if _is_typed_lifecycle_command_payload(candidate):
+                return candidate
+
+        next_up_mapping = _mapping_from_value(lifecycle_next_up)
+        if next_up_mapping is not None:
+            for key in ("primary_next_command", "primary_command", "primary", "next_command", "typed_next_command"):
+                candidate = _call_lifecycle_value(next_up_mapping.get(key))
+                if _is_typed_lifecycle_command_payload(candidate) and not isinstance(candidate, str):
+                    return candidate
+
     for key in ("primary_next_command", "next_command", "typed_next_command"):
-        candidate = _lifecycle_value(decision, key)
+        candidate = _call_lifecycle_value(_lifecycle_value(decision, key))
         if _is_typed_lifecycle_command_payload(candidate):
             return candidate
 
@@ -693,11 +726,13 @@ def _coerce_shared_phase_lifecycle_suggestion(
     *,
     phase: _PhaseAnalysis,
     format_command,
-) -> _PhaseLifecycleSuggestion | None:
+) -> _PhaseLifecycleSuggestion | None | object:
     if decision is None:
         return None
 
-    decision_kind = str(_lifecycle_value(decision, "decision", "lifecycle_state") or "").strip().lower()
+    decision_kind = (
+        str(_lifecycle_value(decision, "decision", "lifecycle_state") or "").strip().lower().replace("-", "_")
+    )
     if decision_kind in {"closed_ready_next_phase", "closed_milestone_complete"}:
         return None
 
@@ -724,7 +759,12 @@ def _coerce_shared_phase_lifecycle_suggestion(
         return None
 
     status = _lifecycle_value(decision, "status", "state", "decision", "lifecycle_state")
+    phase_number = str(_lifecycle_value(decision, "phase", "phase_number") or phase.number)
     primary_payload = _lifecycle_primary_command_payload(decision)
+    if primary_payload is None:
+        logger.debug("suggest: lifecycle decision for phase %s had no typed primary next-up", phase_number)
+        return _SHARED_LIFECYCLE_BLOCKS_WITHOUT_SUGGESTION
+
     primary_payload_action = _payload_value(primary_payload, "action") if primary_payload is not None else None
     action = _normalize_lifecycle_action(
         _lifecycle_value(decision, "action", "next_action", "recommended_action", "primary_action")
@@ -732,22 +772,8 @@ def _coerce_shared_phase_lifecycle_suggestion(
         status,
     )
     if action is None:
-        return None
-
-    phase_number = str(_lifecycle_value(decision, "phase", "phase_number") or phase.number)
-    if action in {"verify-work", "execute-phase", "plan-phase", "discuss-phase"}:
-        command = f"{format_command(action)} {phase_number}"
-    elif action == "resume-work":
-        command = format_command("resume-work")
-    else:
-        command = _command_label_from_value(
-            _lifecycle_value(decision, "command", "primary_command", "next_command", "primary")
-        )
-        if command is None:
-            if action == "phase-complete":
-                command = f"gpd phase complete {phase_number}"
-            else:
-                return None
+        logger.debug("suggest: lifecycle decision for phase %s had no primary action", phase_number)
+        return _SHARED_LIFECYCLE_BLOCKS_WITHOUT_SUGGESTION
 
     priority_value = _lifecycle_value(decision, "priority")
     try:
@@ -780,10 +806,13 @@ def _coerce_shared_phase_lifecycle_suggestion(
         fallback_reason=reason,
         format_command=format_command,
     )
-    if next_command is not None:
-        command = next_command.command
-        if next_command.action:
-            action = next_command.action
+    if next_command is None or next_command.owner == "display_only":
+        logger.debug("suggest: lifecycle decision for phase %s had no executable typed primary", phase_number)
+        return _SHARED_LIFECYCLE_BLOCKS_WITHOUT_SUGGESTION
+
+    command = next_command.command
+    if next_command.action:
+        action = next_command.action
 
     return _PhaseLifecycleSuggestion(
         action=action,
@@ -932,7 +961,7 @@ def _pending_phase_lifecycle_suggestion(
     *,
     state: dict[str, object] | None,
     format_command,
-) -> _PhaseLifecycleSuggestion | None:
+) -> _PhaseLifecycleSuggestion | None | object:
     shared = _shared_phase_lifecycle_suggestion(cwd, phase, format_command=format_command)
     if shared is not _SHARED_LIFECYCLE_UNAVAILABLE:
         return shared
@@ -1590,19 +1619,24 @@ def suggest_next(cwd: Path, *, limit: int = 5) -> SuggestResult:
         )
 
     # 5b. Complete phases must pass lifecycle gates before downstream routing.
-    lifecycle_suggestion = next(
-        (
-            suggestion
-            for phase in phase_analysis
-            if phase.status == "complete"
-            for suggestion in (
-                _pending_phase_lifecycle_suggestion(cwd, phase, state=state, format_command=format_command),
-            )
-            if suggestion is not None
-        ),
-        None,
-    )
-    lifecycle_blocks_downstream = lifecycle_suggestion is not None
+    lifecycle_suggestion: _PhaseLifecycleSuggestion | None = None
+    lifecycle_blocks_downstream = False
+    for phase in phase_analysis:
+        if phase.status != "complete":
+            continue
+        pending_lifecycle = _pending_phase_lifecycle_suggestion(
+            cwd,
+            phase,
+            state=state,
+            format_command=format_command,
+        )
+        if pending_lifecycle is _SHARED_LIFECYCLE_BLOCKS_WITHOUT_SUGGESTION:
+            lifecycle_blocks_downstream = True
+            break
+        if pending_lifecycle is not None:
+            lifecycle_suggestion = pending_lifecycle
+            lifecycle_blocks_downstream = True
+            break
     if lifecycle_suggestion is not None:
         suggestions.append(
             _MutableRecommendation(

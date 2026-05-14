@@ -72,6 +72,7 @@ stage_stop: {workflow: verify-work, stage: session_router, status: blocked, reas
 
 ## > Next Up
 Primary: `gpd:verify-work <phase>`
+Secondary runtime: `gpd:suggest-next`
 
 ## Phase Argument Errors
 
@@ -116,8 +117,8 @@ Use `gpd:new-project` as `next_runtime_command` only when the surfaced gate says
 
 ## > Next Up
 Primary: `gpd:sync-state`
-
-**After this completes:** `gpd:verify-work ${PHASE_ARG}`
+Secondary runtime: `gpd:verify-work ${PHASE_ARG}`
+Secondary runtime: `gpd:suggest-next`
 
 ## Continue Routing
 

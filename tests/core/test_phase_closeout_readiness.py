@@ -100,6 +100,9 @@ def test_closeout_readiness_all_summaries_and_passed_verification_is_ready(tmp_p
         == "gpd --raw phase checkpoint cleanup --phase 02 --namespace phase --policy successful-closeout"
     )
     assert result.next_up["status"] == "ready"
+    assert result.lifecycle_next_up is not None
+    assert result.lifecycle_next_up.status_class == "ready_for_local_closeout"
+    assert result.next_up == result.lifecycle_next_up.as_legacy_next_up_dict()
     assert result.next_up["primary"] == "gpd phase complete 02"
     assert result.next_up["primary_owner"] == "local_transition"
     commands = result.next_up["commands"]
@@ -130,6 +133,7 @@ def test_closeout_readiness_all_summaries_and_passed_verification_is_ready(tmp_p
     assert all(fragment not in rendered for fragment in _FORBIDDEN_NEXT_UP_RELOAD_FRAGMENTS)
     assert result.closeout_command_hint is not None
     assert result.closeout_command_hint["owner"] == "local_transition"
+    assert result.closeout_command_hint == result.next_up["commands"][0]
     assert result.cleanup_command_hint is not None
     assert result.cleanup_command_hint["owner"] == "local_helper"
     assert (tmp_path / "GPD" / "ROADMAP.md").read_text(encoding="utf-8") == before_roadmap
@@ -147,6 +151,8 @@ def test_closeout_readiness_missing_summary_blocks_closeout(tmp_path: Path) -> N
     assert "02-02-PLAN.md" in result.incomplete_plans
     assert any("summaries incomplete" in blocker for blocker in result.blockers)
     assert result.next_up["primary"] == "gpd:execute-phase 02"
+    assert result.lifecycle_next_up is not None
+    assert result.lifecycle_next_up.status_class == "needs_execution"
     assert result.next_up["primary_command"]["action"] == "execute-phase"
     assert result.next_up["primary_command"]["owner"] == "runtime"
     assert result.next_up["stage_stop_next_runtime_command"] == "gpd:execute-phase 02"
@@ -163,6 +169,8 @@ def test_closeout_readiness_missing_verification_blocks_required_closeout(tmp_pa
     assert "canonical verification report missing" in result.blockers
     assert result.next_up["primary"] == "gpd:verify-work 02"
     assert result.next_up["primary_owner"] == "runtime"
+    assert result.lifecycle_next_up is not None
+    assert result.lifecycle_next_up.status_class == "needs_verification"
     commands = result.next_up["commands"]
     assert isinstance(commands, list)
     assert commands[0]["owner"] == "runtime"
@@ -234,6 +242,8 @@ def test_closeout_readiness_active_bounded_segment_blocks_closeout(tmp_path: Pat
     assert any("active bounded segment" in blocker for blocker in result.blockers)
     assert result.next_up["primary"] == "gpd:resume-work"
     assert result.next_up["primary_owner"] == "runtime"
+    assert result.lifecycle_next_up is not None
+    assert result.lifecycle_next_up.status_class == "blocked_closeout"
     assert result.next_up["primary_command"]["action"] == "resume-work"
     assert result.next_up["primary_command"]["owner"] == "runtime"
     assert result.next_up["stage_stop_next_runtime_command"] == "gpd:resume-work"
@@ -326,9 +336,7 @@ def test_execute_phase_closeout_spec_is_readiness_transition_only() -> None:
     }
 
     assert "does not spawn verifiers, close gaps, run consistency checks, or decide scientific status" in workflow
-    assert "Prerequisites are summarized here, but the helper is authority" in workflow
-    assert "canonical verification report exists and has status `passed`" in workflow
-    assert "`consistency_check` passed its child gate" in workflow
+    assert "It is the authority for verification, proof-redteam, consistency, bounded-segment, and closeout readiness" in workflow
     assert "gpd --raw phase closeout-readiness" in workflow
     assert "--require-verification" in workflow
     assert 'gpd phase complete "${phase_number}"' in workflow

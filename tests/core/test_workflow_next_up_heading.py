@@ -23,7 +23,18 @@ STAGE_STOP_STRICT_NEXT_UP_PATHS = (
     WORKFLOWS_DIR / "autonomous/plan-execute-child-cycle.md",
     WORKFLOWS_DIR / "verify-work/session-router.md",
 )
+WORKER4_RENDERER_STRICT_NEXT_UP_PATHS = (
+    REFERENCES_DIR / "orchestration/stage-stop-envelope.md",
+    WORKFLOWS_DIR / "execute-phase/closeout.md",
+    WORKFLOWS_DIR / "resume-work/resume-routing.md",
+    WORKFLOWS_DIR / "verify-work/session-router.md",
+    WORKFLOWS_DIR / "verify-work/gap-repair.md",
+)
 PRIMARY_COMMAND_RE = re.compile(r"(?m)^[ \t]*Primary(?P<label> local transition)?: `(?P<command>[^`]+)`$")
+SECONDARY_COMMAND_RE = re.compile(
+    r"(?m)^[ \t]*Secondary (?P<label>runtime|local helper|local finalizer|local transition): `(?P<command>[^`]+)`$"
+)
+AFTER_COMMAND_RE = re.compile(r"(?m)^[ \t]*\*\*After this completes:\*\* `(?P<command>[^`]+)`$")
 PUBLIC_RUNTIME_COMMAND_RE = re.compile(r"^gpd:[^\s`]+(?:\s+.*)?$")
 LOCAL_TRANSITION_COMMAND_RE = re.compile(r"^gpd phase complete\b")
 
@@ -81,6 +92,44 @@ def _primary_line_error(block: str) -> str | None:
 
     if not PUBLIC_RUNTIME_COMMAND_RE.match(command):
         return f"invalid runtime primary: {command}"
+    return None
+
+
+def _renderer_shape_error(block: str) -> str | None:
+    if "Primary runtime:" in block:
+        return "legacy Primary runtime label"
+    if "**Also available:**" in block:
+        return "legacy Also available block inside Next Up"
+
+    primary_error = _primary_line_error(block)
+    if primary_error is not None:
+        return primary_error
+
+    has_local_transition_primary = "Primary local transition:" in block
+    after_matches = list(AFTER_COMMAND_RE.finditer(block))
+    if "**After this completes:**" in block:
+        if not has_local_transition_primary:
+            return "After this completes used without a local transition primary"
+        if len(after_matches) != 1:
+            return "After this completes must be one inline runtime command"
+        after_command = after_matches[0].group("command")
+        if not PUBLIC_RUNTIME_COMMAND_RE.match(after_command):
+            return f"invalid After this completes runtime command: {after_command}"
+
+    for line in block.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("Secondary "):
+            continue
+        match = SECONDARY_COMMAND_RE.match(line)
+        if match is None:
+            return f"invalid secondary renderer label: {stripped}"
+        label = match.group("label")
+        command = match.group("command")
+        if label == "runtime" and not PUBLIC_RUNTIME_COMMAND_RE.match(command):
+            return f"invalid secondary runtime command: {command}"
+        if label == "local transition" and not LOCAL_TRANSITION_COMMAND_RE.match(command):
+            return f"invalid secondary local transition command: {command}"
+
     return None
 
 
@@ -150,6 +199,20 @@ def test_stage_stop_owned_next_up_primary_lines_are_command_only() -> None:
         assert blocks, path
         for line_number, block in blocks:
             error = _primary_line_error(block)
+            if error is not None:
+                offenders.append(f"{path.relative_to(REPO_ROOT)}:{line_number}:{error}")
+
+    assert offenders == []
+
+
+def test_worker4_next_up_examples_use_renderer_shape() -> None:
+    offenders: list[str] = []
+
+    for path in WORKER4_RENDERER_STRICT_NEXT_UP_PATHS:
+        blocks = _next_up_blocks(path)
+        assert blocks, path
+        for line_number, block in blocks:
+            error = _renderer_shape_error(block)
             if error is not None:
                 offenders.append(f"{path.relative_to(REPO_ROOT)}:{line_number}:{error}")
 

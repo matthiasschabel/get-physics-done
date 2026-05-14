@@ -79,7 +79,12 @@ def _new_project_init_progress_context(cwd: Path) -> dict[str, object]:
 
     step = payload.get("step")
     description = payload.get("description")
-    normalized_step = step.strip() if isinstance(step, str) else ""
+    if isinstance(step, str):
+        normalized_step = step.strip()
+    elif isinstance(step, (int, float)) and not isinstance(step, bool):
+        normalized_step = str(step)
+    else:
+        normalized_step = ""
     normalized_description = description.strip() if isinstance(description, str) else ""
     if not normalized_step:
         result["init_progress_status"] = "corrupt_init_progress"

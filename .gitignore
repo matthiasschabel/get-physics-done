@@ -38,6 +38,7 @@ GPD/state.json.lock
 .agents/
 .claude/
 .codex/
+.copilot/
 .gemini/
 .opencode/
 .playwright-mcp/

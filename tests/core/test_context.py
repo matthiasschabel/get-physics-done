@@ -5169,6 +5169,19 @@ class TestInitPhaseOp:
     ) -> None:
         _setup_project(tmp_path)
         _create_phase_dir(tmp_path, "01-test")
+        install_fake_stage_manifest(
+            monkeypatch,
+            workflow_id="research-phase",
+            stages={
+                "research_handoff": [
+                    "active_reference_context",
+                    "reference_artifacts_content",
+                    "state_load_source",
+                    "derived_convention_lock",
+                    "current_execution",
+                ]
+            },
+        )
         calls: list[str] = []
 
         def reference_context(
@@ -5180,8 +5193,8 @@ class TestInitPhaseOp:
             **_kwargs: object,
         ) -> dict[str, object]:
             calls.append("reference")
-            assert include_artifact_content is False
-            assert include_active_reference_context is False
+            assert include_artifact_content is True
+            assert include_active_reference_context is True
             assert include_protocol_context is False
             return {
                 **{
@@ -5222,13 +5235,14 @@ class TestInitPhaseOp:
 
         result = init_phase_op(tmp_path, phase="1", stage="research_handoff")
 
-        assert calls == ["reference", "execution"]
-        assert "active_reference_context" not in result
-        assert "reference_artifacts_content" not in result
+        assert calls == ["reference", "structured_state", "state_memory", "execution"]
+        assert result["active_reference_context"] == "reference context"
+        assert result["reference_artifacts_content"] == "reference artifacts"
         assert "protocol_bundle_context" not in result
-        assert result["active_references"] == "reference::active_references"
-        assert result["protocol_bundle_load_manifest"] == "reference::protocol_bundle_load_manifest"
-        assert "derived_convention_lock" not in result
+        assert "active_references" not in result
+        assert "protocol_bundle_load_manifest" not in result
+        assert result["state_load_source"] == "structured_state::state_load_source"
+        assert result["derived_convention_lock"] == {"metric_signature": "mostly-plus"}
         assert result["current_execution"] == {"phase": "01", "segment_status": "running"}
 
     def test_init_research_phase_alias_uses_the_same_stage_manifest_contract(

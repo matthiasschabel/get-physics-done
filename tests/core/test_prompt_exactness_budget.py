@@ -13,7 +13,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 EXACTNESS_TOTAL_BUDGETS = {
     "brittle_prose_assertions": 720,
-    "exact_assertion_count": 5_450,
+    "exact_assertion_count": 5_460,
 }
 HIGH_SEVERITY_BASELINES: dict[str, dict[str, int]] = {}
 

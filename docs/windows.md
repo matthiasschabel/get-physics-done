@@ -1,6 +1,6 @@
 # GPD on Windows
 
-GPD adds structured physics-research commands to Claude Code, Codex, Gemini CLI, or OpenCode.
+GPD adds structured physics-research commands to Claude Code, Codex, Gemini CLI, GitHub Copilot CLI, or OpenCode.
 
 In these docs, "runtime" means the AI terminal app you talk to.
 
@@ -14,7 +14,7 @@ Back to the onboarding hub: [GPD Onboarding Hub](./README.md).
 - Node.js 20 or newer
 - Python 3.11 or newer with `venv`
 - One supported runtime that already starts from Terminal:
-  Claude Code, Codex, Gemini CLI, or OpenCode
+  Claude Code, Codex, Gemini CLI, GitHub Copilot CLI, or OpenCode
 
 ## Open a terminal
 
@@ -79,6 +79,7 @@ Before installing GPD, confirm that your runtime starts from Terminal:
 - Claude Code: `claude --version`
 - Codex: `codex --help`
 - Gemini CLI: `gemini --help`
+- GitHub Copilot CLI: `gh copilot --help`
 - OpenCode: `opencode --help`
 
 Then use the matching runtime guide:
@@ -86,6 +87,7 @@ Then use the matching runtime guide:
 <!-- gpd-public-surface:runtime-doc-links:start -->
 - [Claude Code quickstart](./claude-code.md)
 - [Codex quickstart](./codex.md)
+- [GitHub Copilot CLI quickstart](./github-copilot-cli.md)
 - [Gemini CLI quickstart](./gemini-cli.md)
 - [OpenCode quickstart](./opencode.md)
 <!-- gpd-public-surface:runtime-doc-links:end -->
@@ -99,6 +101,7 @@ Most beginners should install GPD into one runtime at a time and use `--local`.
 | --- | --- |
 | Claude Code | `npx -y get-physics-done --claude --local` |
 | Codex | `npx -y get-physics-done --codex --local` |
+| GitHub Copilot CLI | `npx -y get-physics-done --copilot --local` |
 | Gemini CLI | `npx -y get-physics-done --gemini --local` |
 | OpenCode | `npx -y get-physics-done --opencode --local` |
 <!-- gpd-public-surface:os-install-matrix:end -->
@@ -118,6 +121,7 @@ gpd --help
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Claude Code | `--claude` | `/gpd:help` | `/gpd:start` | `/gpd:tour` | `/gpd:new-project --minimal` | `/gpd:map-research` | `/gpd:resume-work` |
 | Codex | `--codex` | `$gpd-help` | `$gpd-start` | `$gpd-tour` | `$gpd-new-project --minimal` | `$gpd-map-research` | `$gpd-resume-work` |
+| GitHub Copilot CLI | `--copilot` | `/gpd-help` | `/gpd-start` | `/gpd-tour` | `/gpd-new-project --minimal` | `/gpd-map-research` | `/gpd-resume-work` |
 | Gemini CLI | `--gemini` | `/gpd:help` | `/gpd:start` | `/gpd:tour` | `/gpd:new-project --minimal` | `/gpd:map-research` | `/gpd:resume-work` |
 | OpenCode | `--opencode` | `/gpd-help` | `/gpd-start` | `/gpd-tour` | `/gpd-new-project --minimal` | `/gpd-map-research` | `/gpd-resume-work` |
 <!-- gpd-public-surface:supported-runtimes-table:end -->
@@ -129,7 +133,7 @@ If that works, the install is in good shape. If you are not sure what fits this 
 Use the exact command for your runtime:
 
 <!-- gpd-public-surface:os-next-steps-table:start -->
-| What you want to do | Claude Code / Gemini CLI | Codex | OpenCode |
+| What you want to do | Claude Code / Gemini CLI | Codex | GitHub Copilot CLI / OpenCode |
 | --- | --- | --- | --- |
 | Not sure which path fits this folder | `/gpd:start` | `$gpd-start` | `/gpd-start` |
 | Want a guided overview | `/gpd:tour` | `$gpd-tour` | `/gpd-tour` |

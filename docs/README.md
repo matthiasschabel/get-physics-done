@@ -70,14 +70,14 @@ GPD favors scientific rigor and explicit uncertainty. Treat preferred answers as
 You will use two different places: your normal terminal and your runtime.
 
 <!-- gpd-public-surface:terminal-runtime-bridge:start -->
-Use your normal terminal for installs, local `gpd ...` diagnostics, and runtime launchers such as `claude`, `codex`, `gemini`, `opencode`.
+Use your normal terminal for installs, local `gpd ...` diagnostics, and runtime launchers such as `claude`, `codex`, `gh copilot`, `gemini`, `opencode`.
 Use the opened runtime for the installed GPD command ladder (`help -> start -> tour -> new-project / map-research -> resume-work`); start with `/gpd:help`, `$gpd-help`, `/gpd-help`.
 <!-- gpd-public-surface:terminal-runtime-bridge:end -->
 
 <details>
 <summary>Common beginner terms</summary>
 
-- **Runtime**: the AI terminal app you talk to, such as Claude Code, Codex, Gemini CLI, or OpenCode.
+- **Runtime**: the AI terminal app you talk to, such as Claude Code, Codex, Gemini CLI, GitHub Copilot CLI, or OpenCode.
 - **API credits**: paid model usage from the provider behind your runtime.
 - **`--local`**: install GPD for just this project or folder.
 - **`gpd resume`**: the terminal-side recovery step.
@@ -150,6 +150,16 @@ Use this if you want GPD inside Gemini CLI. Inside the runtime, GPD commands use
 
 - Install: `npx -y get-physics-done --gemini --local`
 - [Gemini CLI quickstart](./gemini-cli.md)
+
+</details>
+
+<details>
+<summary>GitHub Copilot CLI</summary>
+
+Use this if you want GPD inside GitHub Copilot CLI. Inside the runtime, GPD commands use `/gpd-...`.
+
+- Install: `npx -y get-physics-done --copilot --local`
+- [GitHub Copilot CLI quickstart](./github-copilot-cli.md)
 
 </details>
 

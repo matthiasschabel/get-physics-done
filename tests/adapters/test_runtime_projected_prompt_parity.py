@@ -86,16 +86,19 @@ COMPACT_WORKFLOW_COMMANDS = (
 ADDITIONAL_COMPACT_WORKFLOW_REFERENCE_COMMAND_PROJECTION_BUDGETS = {
     "export": {
         "codex": {"chars": 5_400, "lines": 105},
+        "copilot-cli": {"chars": 5_100, "lines": 100},
         "gemini": {"chars": 4_900, "lines": 90},
         "opencode": {"chars": 5_200, "lines": 100},
     },
     "explain": {
         "codex": {"chars": 6_150, "lines": 130},
+        "copilot-cli": {"chars": 6_600, "lines": 145},
         "gemini": {"chars": 6_950, "lines": 130},
         "opencode": {"chars": 6_550, "lines": 145},
     },
     "list-phase-assumptions": {
         "codex": {"chars": 7_900, "lines": 155},
+        "copilot-cli": {"chars": 7_700, "lines": 160},
         "gemini": {"chars": 7_400, "lines": 140},
         "opencode": {"chars": 7_850, "lines": 160},
     },
@@ -108,24 +111,28 @@ STAGED_INIT_COMMAND_PROJECTION_RATCHET_BUDGETS = {
     "plan-phase": {
         "claude-code": 4_500,
         "codex": 6_650,
+        "copilot-cli": 6_600,
         "gemini": 7_150,
         "opencode": 6_650,
     },
     "execute-phase": {
         "claude-code": 3_450,
         "codex": 5_900,
+        "copilot-cli": 5_800,
         "gemini": 6_400,
         "opencode": 5_850,
     },
     "new-project": {
         "claude-code": 7_300,
         "codex": 9_050,
+        "copilot-cli": 8_800,
         "gemini": 9_550,
         "opencode": 8_950,
     },
     "write-paper": {
         "claude-code": 12_950,
         "codex": 11_850,
+        "copilot-cli": 15_100,
         "gemini": 12_300,
         "opencode": 15_250,
     },
@@ -236,6 +243,13 @@ def _contract_bearing_command_surfaces() -> dict[str, tuple[str, ...]]:
 def _runtime_expected_fragments(fragments: tuple[str, ...], *, runtime: str) -> tuple[str, ...]:
     if runtime == "codex":
         return tuple(fragment.replace("`gpd:suggest-next`", "`$gpd-suggest-next`") for fragment in fragments)
+    if runtime == "copilot-cli":
+        import re as _re
+
+        def _rewrite(text: str) -> str:
+            return _re.sub(r"(?<![A-Za-z0-9_./:$-])/?gpd:([a-z][a-z0-9-]*)\b", r"/gpd-\1", text)
+
+        return tuple(_rewrite(fragment) for fragment in fragments)
     if runtime == "opencode":
         # OpenCode adapter rewrites bare `gpd:X` to `gpd-X` in body text;
         # translate expected fragments accordingly.

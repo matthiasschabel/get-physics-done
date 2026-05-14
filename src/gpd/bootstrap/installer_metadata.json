@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "source_hashes": {
-    "src/gpd/adapters/runtime_catalog.json": "cc18de289fae5d414c620268d1a30d9ed734c6bdf0eefbca8da4ed836e674ac5",
+    "src/gpd/adapters/runtime_catalog.json": "29f622a462e296a651675a290807d1c58e18d6508a938841c9ed5db2c8e92fcc",
     "src/gpd/adapters/runtime_catalog_schema.json": "0a824919b3c614b1e9be163b535201353baf1a63e507bfd6c8814b6566fb1cee",
     "src/gpd/core/public_surface_contract.json": "833665c9a43ce0979fd9061edaa22e732042a2847de23129a98116799f149042",
     "src/gpd/core/public_surface_contract_schema.json": "f9605ba3d6c49fce9bc3fd9a3748f0d5eb4ed242d60e4751376de615bbdfbe07"
@@ -118,6 +118,32 @@
         "env_file_var": "OPENCODE_CONFIG",
         "xdg_subdir": "opencode",
         "home_subpath": ".config/opencode"
+      }
+    },
+    {
+      "runtime_name": "copilot-cli",
+      "display_name": "GitHub Copilot CLI",
+      "priority": 50,
+      "config_dir_name": ".copilot",
+      "install_flag": "--copilot",
+      "launch_command": "gh copilot",
+      "selection_flags": [
+        "--copilot",
+        "--copilot-cli"
+      ],
+      "selection_aliases": [
+        "copilot",
+        "copilot cli",
+        "copilot-cli",
+        "github copilot"
+      ],
+      "command_prefix": "/gpd-",
+      "public_command_surface_prefix": "/gpd-",
+      "installer_help_example_scope": null,
+      "global_config": {
+        "strategy": "env_or_home",
+        "env_var": "COPILOT_CONFIG_DIR",
+        "home_subpath": ".copilot"
       }
     }
   ],

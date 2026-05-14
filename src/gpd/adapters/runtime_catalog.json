@@ -204,5 +204,34 @@
       "xdg_subdir": "opencode",
       "home_subpath": ".config/opencode"
     }
+  },
+  {
+    "runtime_name": "copilot-cli",
+    "display_name": "GitHub Copilot CLI",
+    "priority": 50,
+    "config_dir_name": ".copilot",
+    "install_flag": "--copilot",
+    "launch_command": "gh copilot",
+    "adapter_module": "gpd.adapters.copilot_cli",
+    "adapter_class": "CopilotCliAdapter",
+    "command_prefix": "/gpd-",
+    "native_include_support": false,
+    "activation_env_vars": ["COPILOT_CLI_SESSION"],
+    "selection_flags": ["--copilot", "--copilot-cli"],
+    "selection_aliases": ["copilot", "copilot cli", "copilot-cli", "github copilot"],
+    "manifest_file_prefixes": ["command/"],
+    "validated_command_surface": "public_runtime_slash_command",
+    "capabilities": {
+      "permissions_surface": "config-file",
+      "permission_surface_kind": "copilot.json:mcp",
+      "prompt_free_mode_value": "none",
+      "supports_runtime_permission_sync": true
+    },
+    "hook_payload": {},
+    "global_config": {
+      "strategy": "env_or_home",
+      "env_var": "COPILOT_CONFIG_DIR",
+      "home_subpath": ".copilot"
+    }
   }
 ]

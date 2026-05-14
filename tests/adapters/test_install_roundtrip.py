@@ -20,6 +20,7 @@ import pytest
 from gpd.adapters import get_adapter, iter_adapters
 from gpd.adapters.claude_code import ClaudeCodeAdapter
 from gpd.adapters.codex import CodexAdapter
+from gpd.adapters.copilot_cli import CopilotCliAdapter
 from gpd.adapters.gemini import GeminiAdapter
 from gpd.adapters.install_utils import (
     convert_tool_references_in_body,
@@ -288,6 +289,12 @@ def _install_real_repo_for_runtime(tmp_path: Path, runtime: str, source_root: Pa
         OpenCodeAdapter().install(source_root, target)
         return target
 
+    if runtime == "copilot-cli":
+        target = tmp_path / ".copilot"
+        target.mkdir()
+        CopilotCliAdapter().install(source_root, target)
+        return target
+
     raise AssertionError(f"Unsupported runtime {runtime}")
 
 
@@ -369,14 +376,13 @@ def _canonicalize_runtime_markdown(content: str, *, runtime: str) -> str:
     content = content.replace("$gpd-", "gpd:")
     content = content.replace("/gpd:", "gpd:")
     content = content.replace("/gpd-", "gpd:")
-    if runtime == "opencode":
-        # The opencode adapter rewrites bare `gpd:X` command references in
-        # markdown body text to `gpd-X` during install (see
-        # `_GPD_BARE_COMMAND_RE` in gpd.adapters.opencode). Reverse that here
-        # for contract-assertion purposes so tests can use the canonical
-        # `gpd:X` form regardless of runtime. Stems come from the live command
-        # registry so new commands are covered automatically while CLI tools
-        # or agent names like `gpd-check-proof` stay hyphenated.
+    if runtime in {"copilot-cli", "opencode"}:
+        # Flat command runtimes rewrite public command references to hyphenated
+        # names during install. Reverse that here for contract-assertion
+        # purposes so tests can use the canonical `gpd:X` form regardless of
+        # runtime. Stems come from the live command registry so new commands are
+        # covered automatically while CLI tools or agent names like
+        # `gpd-check-proof` stay hyphenated.
         content = _opencode_hyphenated_public_command_re().sub(
             lambda match: f"gpd:{match.group('stem')}",
             content,
@@ -397,7 +403,7 @@ def _read_compare_experiment_command(tmp_path: Path, target: Path, runtime: str)
         assert isinstance(prompt, str)
         return prompt
 
-    if runtime == "opencode":
+    if runtime in {"copilot-cli", "opencode"}:
         return (target / "command" / "gpd-compare-experiment.md").read_text(encoding="utf-8")
 
     raise AssertionError(f"Unsupported runtime {runtime}")
@@ -416,7 +422,7 @@ def _read_runtime_command_prompt(tmp_path: Path, target: Path, runtime: str, com
         assert isinstance(prompt, str)
         return prompt
 
-    if runtime == "opencode":
+    if runtime in {"copilot-cli", "opencode"}:
         return (target / "command" / f"gpd-{command_name}.md").read_text(encoding="utf-8")
 
     raise AssertionError(f"Unsupported runtime {runtime}")
@@ -434,6 +440,8 @@ def _installed_command_kind(runtime: str) -> str:
         return "codex_skill"
     if runtime == "gemini":
         return "gemini_toml_prompt"
+    if runtime == "copilot-cli":
+        return "copilot_flat_md"
     if runtime == "opencode":
         return "opencode_flat_md"
     raise AssertionError(f"Unsupported runtime {runtime}")
@@ -483,14 +491,14 @@ def _read_runtime_update_surface(tmp_path: Path, target: Path, runtime: str) -> 
         assert isinstance(prompt, str)
         return prompt
 
-    if runtime == "opencode":
+    if runtime in {"copilot-cli", "opencode"}:
         return (target / "command" / "gpd-update.md").read_text(encoding="utf-8")
 
     raise AssertionError(f"Unsupported runtime {runtime}")
 
 
 def _read_runtime_agent_prompt(target: Path, runtime: str, agent_name: str) -> str:
-    if runtime in {"claude-code", "codex", "gemini", "opencode"}:
+    if runtime in {"claude-code", "codex", "copilot-cli", "gemini", "opencode"}:
         return (target / "agents" / f"{agent_name}.md").read_text(encoding="utf-8")
     raise AssertionError(f"Unsupported runtime {runtime}")
 

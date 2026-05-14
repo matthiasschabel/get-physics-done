@@ -25,7 +25,7 @@ https://github.com/user-attachments/assets/e79f8153-c0bd-484f-b69e-da8f142649e0
 
 ## Start Here
 
-GPD is not a standalone app. It installs physics-research commands into Claude Code, Codex, Gemini CLI, or OpenCode.
+GPD is not a standalone app. It installs physics-research commands into Claude Code, Codex, Gemini CLI, GitHub Copilot CLI, or OpenCode.
 
 To install GPD, run this in your system terminal:
 ```bash
@@ -79,7 +79,7 @@ model access, billing, or API credits.
 There are two places you type commands: your normal system terminal and the AI runtime.
 
 <!-- gpd-public-surface:terminal-runtime-bridge:start -->
-Use your normal terminal for installs, local `gpd ...` diagnostics, and runtime launchers such as `claude`, `codex`, `gemini`, `opencode`.
+Use your normal terminal for installs, local `gpd ...` diagnostics, and runtime launchers such as `claude`, `codex`, `gh copilot`, `gemini`, `opencode`.
 Use the opened runtime for the installed GPD command ladder (`help -> start -> tour -> new-project / map-research -> resume-work`); start with `/gpd:help`, `$gpd-help`, `/gpd-help`.
 <!-- gpd-public-surface:terminal-runtime-bridge:end -->
 
@@ -108,16 +108,16 @@ Canonical post-install order, shown as command names without runtime prefixes:
 `help -> start -> tour -> new-project / map-research -> resume-work`
 <!-- gpd-public-surface:beginner-startup-ladder:end -->
 
-Run its help command first: Claude Code / Gemini CLI use `/gpd:help`. Codex uses `$gpd-help`, and OpenCode uses `/gpd-help`.
+Run its help command first: Claude Code / Gemini CLI use `/gpd:help`. Codex uses `$gpd-help`, and GitHub Copilot CLI / OpenCode use `/gpd-help`.
 
 Expert fast path:
 
-- From inside the folder where your project should live, install GPD with the matching `npx -y get-physics-done` bootstrap command from [Start Here](#start-here), then launch `claude`, `codex`, `gemini`, or `opencode`.
+- From inside the folder where your project should live, install GPD with the matching `npx -y get-physics-done` bootstrap command from [Start Here](#start-here), then launch `claude`, `codex`, `gemini`, `gh copilot`, or `opencode`.
 - Run the matching GPD help command shown in [Supported Runtimes](#supported-runtimes).
 - Then use `start` if you are not sure what fits this folder, `tour` for a read-only walkthrough, `new-project --minimal` for new work, `map-research` for existing work, or `resume-work` when you return later.
 - Treat the new-work choice as distinct from the existing-work choice; pick one, then follow it through.
 
-The bootstrap installer requires Node.js 20+, Python 3.11+ with `venv`, and one supported runtime (`claude`, `gemini`, `codex`, or `opencode`).
+The bootstrap installer requires Node.js 20+, Python 3.11+ with `venv`, and one supported runtime (`claude`, `gemini`, `codex`, `gh copilot`, or `opencode`).
 
 If the install worked, both of these should be true:
 
@@ -216,7 +216,7 @@ Typical new-project workflow, shown as command names without runtime prefixes:
 
 | Flag | Meaning |
 |------|---------|
-| `--claude`, `--codex`, `--gemini`, `--opencode` | Select one runtime. `--claude-code` and `--gemini-cli` also work. |
+| `--claude`, `--codex`, `--gemini`, `--copilot`, `--opencode` | Select one runtime. `--claude-code`, `--gemini-cli`, and `--copilot-cli` also work. |
 | `--all` | Select all supported runtimes. |
 | `--local`, `-l` | Use the current project only. |
 | `--global`, `-g` | Use the global runtime config dir. |
@@ -239,18 +239,19 @@ npx -y github:psi-oss/get-physics-done --upgrade
 
 ## Supported Runtimes
 
-GPD currently installs into four AI runtimes. To preselect one during install, use the matching `npx` flag, or use `--all` to install everything in one pass:
+GPD currently installs into five AI runtimes. To preselect one during install, use the matching `npx` flag, or use `--all` to install everything in one pass:
 
 <!-- gpd-public-surface:supported-runtimes-table:start -->
 | Runtime | `npx` flag | Help | Start | Tour | New work | Existing work | Return later |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Claude Code | `--claude` | `/gpd:help` | `/gpd:start` | `/gpd:tour` | `/gpd:new-project --minimal` | `/gpd:map-research` | `/gpd:resume-work` |
 | Codex | `--codex` | `$gpd-help` | `$gpd-start` | `$gpd-tour` | `$gpd-new-project --minimal` | `$gpd-map-research` | `$gpd-resume-work` |
+| GitHub Copilot CLI | `--copilot` | `/gpd-help` | `/gpd-start` | `/gpd-tour` | `/gpd-new-project --minimal` | `/gpd-map-research` | `/gpd-resume-work` |
 | Gemini CLI | `--gemini` | `/gpd:help` | `/gpd:start` | `/gpd:tour` | `/gpd:new-project --minimal` | `/gpd:map-research` | `/gpd:resume-work` |
 | OpenCode | `--opencode` | `/gpd-help` | `/gpd-start` | `/gpd-tour` | `/gpd-new-project --minimal` | `/gpd-map-research` | `/gpd-resume-work` |
 <!-- gpd-public-surface:supported-runtimes-table:end -->
 
-Each runtime uses its own command prefix, but the workflow is the same across all four. For install-path details, runtime-specific hooks, and launcher notes, use the onboarding hub and the runtime guides in `docs/`.
+Each runtime uses its own command prefix, but the workflow is the same across all five. For install-path details, runtime-specific hooks, and launcher notes, use the onboarding hub and the runtime guides in `docs/`.
 
 ## What GPD Does
 
@@ -449,6 +450,7 @@ Available profiles are `deep-theory`, `numerical`, `exploratory`, `review`, and 
 |---------|-------------|-----------------|---------------|
 | Claude Code / Gemini CLI | `/gpd:set-profile review` | `/gpd:set-tier-models` | `/gpd:settings` |
 | Codex | `$gpd-set-profile review` | `$gpd-set-tier-models` | `$gpd-settings` |
+| GitHub Copilot CLI | `/gpd-set-profile review` | `/gpd-set-tier-models` | `/gpd-settings` |
 | OpenCode | `/gpd-set-profile review` | `/gpd-set-tier-models` | `/gpd-settings` |
 
 <details>
@@ -459,6 +461,7 @@ When you set explicit tier overrides, the model string is runtime-native. GPD pa
 - **Claude Code**: use the exact model or deployment identifier accepted by your install.
 - **Codex**: use the exact `model` string accepted by your configured provider.
 - **Gemini CLI**: use the exact Gemini model name accepted by your install.
+- **GitHub Copilot CLI**: use the exact model identifier accepted by your install.
 - **OpenCode**: use the exact `provider/model` string accepted by your install.
 
 If you are unsure, keep the runtime defaults and tune tiers later through your runtime's `set-tier-models` command.
@@ -489,6 +492,11 @@ Per-project tier settings live in `GPD/config.json` under `model_overrides`:
       "tier-2": "<runtime-native-model-id>",
       "tier-3": "<runtime-native-model-id>"
     },
+    "copilot-cli": {
+      "tier-1": "<runtime-native-model-id>",
+      "tier-2": "<runtime-native-model-id>",
+      "tier-3": "<runtime-native-model-id>"
+    },
     "opencode": {
       "tier-1": "<runtime-native-model-id>",
       "tier-2": "<runtime-native-model-id>",
@@ -498,7 +506,7 @@ Per-project tier settings live in `GPD/config.json` under `model_overrides`:
 }
 ```
 
-Valid runtime keys are `claude-code`, `codex`, `gemini`, and `opencode`. If no override is set for the active runtime, GPD uses that runtime's default model.
+Valid runtime keys are `claude-code`, `codex`, `gemini`, `copilot-cli`, and `opencode`. If no override is set for the active runtime, GPD uses that runtime's default model.
 
 </details>
 
@@ -625,9 +633,10 @@ This research made use of Get Physics Done (GPD), developed by Physical Superint
 
 Papers that cite or acknowledge use of GPD. If your paper should be listed here, please open a pull request.
 
+- C. Ferko, S. Frank, J. Halverson and V. Jejjala, *Anomalies in Neural Network Field Theory* (2026), [arXiv:2605.12488](https://arxiv.org/abs/2605.12488).
 - L. Eberhardt, *The Super Virasoro Minimal String from 3d Supergravity* (2026), [arXiv:2604.26038](https://arxiv.org/abs/2604.26038).
-- C. Ferko, J. Halverson, V. Jejjala and B. Robinson, *Topological Effects in Neural Network Field Theory* (2026), [arXiv:2604.02313](https://arxiv.org/abs/2604.02313).
 - V. G. Filev, *Holographic entanglement entropy, Wilson loops, and neural networks* (2026), [arXiv:2604.05970](https://arxiv.org/abs/2604.05970).
+- C. Ferko, J. Halverson, V. Jejjala and B. Robinson, *Topological Effects in Neural Network Field Theory* (2026), [arXiv:2604.02313](https://arxiv.org/abs/2604.02313).
 
 ## Star History
 

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 import tempfile
+from collections.abc import Mapping
 from dataclasses import dataclass
 from email.message import Message
 from pathlib import Path
@@ -18,6 +20,8 @@ logger = logging.getLogger(__name__)
 
 ARXIV_SOURCE_URL_TEMPLATE = "https://arxiv.org/e-print/{arxiv_id}"
 ARXIV_SOURCE_STORAGE_DIRNAME = "sources"
+ARXIV_SOURCE_STORAGE_ENV_VAR = "GPD_ARXIV_SOURCE_DIR"
+ARXIV_PROJECT_LOCAL_CACHE_DIRNAME = ".arxiv-cache"
 ARXIV_SOURCE_USER_AGENT_TEMPLATE = "get-physics-done/{version} (https://github.com/psi-oss/get-physics-done)"
 ARXIV_SOURCE_TIMEOUT_SECONDS = 60
 ARXIV_SOURCE_CHUNK_BYTES = 64 * 1024
@@ -50,6 +54,65 @@ def default_arxiv_source_storage_path() -> Path:
     """Return the default arXiv source storage root using the current home directory."""
 
     return Path.home() / ".arxiv-mcp-server" / "papers"
+
+
+def _env_arxiv_source_storage_path(environ: Mapping[str, str] | None = None) -> Path | None:
+    """Return the storage path from ``GPD_ARXIV_SOURCE_DIR`` if it is set and non-empty."""
+
+    env = os.environ if environ is None else environ
+    raw = env.get(ARXIV_SOURCE_STORAGE_ENV_VAR)
+    if not isinstance(raw, str):
+        return None
+    cleaned = raw.strip()
+    if not cleaned:
+        return None
+    return Path(cleaned).expanduser()
+
+
+def _project_local_arxiv_source_storage_path(workspace: Path | str | None = None) -> Path | None:
+    """Return ``<project_root>/.arxiv-cache`` when invoked inside a verified GPD project.
+
+    Detection uses the same marker-backed walk as the rest of the gpd
+    runtime: a ``GPD/`` directory is required for a hit. We import the
+    resolver lazily to avoid a hard import cycle through ``gpd.core``.
+    """
+
+    from gpd.core.root_resolution import resolve_project_root
+
+    candidate = Path(workspace) if workspace is not None else Path.cwd()
+    project_root = resolve_project_root(candidate, require_layout=True)
+    if project_root is None:
+        return None
+    return project_root / ARXIV_PROJECT_LOCAL_CACHE_DIRNAME
+
+
+def resolve_default_arxiv_storage_path(
+    workspace: Path | str | None = None,
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> Path:
+    """Return the storage root the bridge should use when no caller override is supplied.
+
+    Precedence (highest first):
+
+    1. ``GPD_ARXIV_SOURCE_DIR`` environment variable
+    2. ``<project_root>/.arxiv-cache`` when *workspace* (or current working directory)
+       resolves to a verified GPD project layout
+    3. The legacy home cache at ``~/.arxiv-mcp-server/papers``
+
+    The legacy fallback preserves backward compatibility for invocations outside a
+    project (for example, when arxiv tools run from a bare shell with no GPD layout).
+    """
+
+    env_path = _env_arxiv_source_storage_path(environ)
+    if env_path is not None:
+        return env_path
+
+    project_path = _project_local_arxiv_source_storage_path(workspace)
+    if project_path is not None:
+        return project_path
+
+    return default_arxiv_source_storage_path()
 
 
 @dataclass(frozen=True, slots=True)
@@ -302,13 +365,16 @@ def download_arxiv_source_archive(
 
 
 __all__ = [
+    "ARXIV_PROJECT_LOCAL_CACHE_DIRNAME",
     "ARXIV_SOURCE_MAX_BYTES",
     "ARXIV_SOURCE_STORAGE_DIRNAME",
+    "ARXIV_SOURCE_STORAGE_ENV_VAR",
     "ArxivSourceDownload",
     "arxiv_source_user_agent",
     "build_source_download_url",
     "default_arxiv_source_storage_path",
     "download_arxiv_source_archive",
     "normalize_arxiv_id",
+    "resolve_default_arxiv_storage_path",
     "resolve_source_storage_dir",
 ]

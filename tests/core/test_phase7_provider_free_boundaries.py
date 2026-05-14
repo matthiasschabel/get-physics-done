@@ -23,17 +23,21 @@ from tests.helpers.github_actions import (
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def _launch_executable(command: str) -> str:
+def _launch_tokens(command: str) -> tuple[str, ...]:
     try:
         parts = shlex.split(command)
     except ValueError:
-        parts = []
-    return Path(parts[0] if parts else command.strip()).name
+        parts = command.split()
+    return tuple(parts)
 
 
-_PROVIDER_LAUNCH_COMMANDS = tuple(
-    sorted({_launch_executable(descriptor.launch_command) for descriptor in iter_runtime_descriptors()})
+_PROVIDER_LAUNCH_COMMAND_TOKENS = tuple(
+    sorted(
+        {tokens for descriptor in iter_runtime_descriptors() if (tokens := _launch_tokens(descriptor.launch_command))},
+        key=lambda tokens: (-len(tokens), tokens),
+    )
 )
+_PROVIDER_LAUNCH_COMMANDS = tuple(" ".join(tokens) for tokens in _PROVIDER_LAUNCH_COMMAND_TOKENS)
 _PROVIDER_LAUNCH_COMMAND_SET = frozenset(_PROVIDER_LAUNCH_COMMANDS)
 _SHELL_SEGMENT_SPLIT_RE = re.compile(r"(?:&&|\|\||[;|()])")
 _SHELL_ASSIGNMENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=.*")
@@ -123,8 +127,12 @@ def _provider_command_in_tokens(tokens: Sequence[str]) -> str | None:
 
     if not remaining:
         return None
-    command = Path(remaining[0]).name
-    return command if command in _PROVIDER_LAUNCH_COMMAND_SET else None
+    if remaining:
+        remaining[0] = Path(remaining[0]).name
+    for launch_tokens in _PROVIDER_LAUNCH_COMMAND_TOKENS:
+        if tuple(remaining[: len(launch_tokens)]) == launch_tokens:
+            return " ".join(launch_tokens)
+    return None
 
 
 def _workflow_provider_launches(script: str) -> Iterator[tuple[int, str, str]]:

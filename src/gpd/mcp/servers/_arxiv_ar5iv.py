@@ -1,23 +1,9 @@
-"""HTML retrieval for arxiv papers via ar5iv.labs.arxiv.org.
-
-ar5iv is arxiv's own LaTeXML-based HTML rendering service. It sits on a
-separate origin from arxiv.org (different rate-limit budget, confirmed
-by live probe: 20 sequential requests with no 429s) and covers ~100% of
-real arxiv IDs in our sample. The HTML is class-compatible with the
-arxiv.org/html output that ``arxiv_mcp_server.tools.download._html_to_text``
-already parses.
-
-Primary use: replace ``arxiv.org/html/{id}`` as the first fetch path in
-``arxiv_bridge.download_paper``. ar5iv 307-redirects when a paper isn't
-in its corpus (e.g. very recent submissions); we treat that as a miss
-rather than following the redirect, so the next fallback layer fires.
-"""
+"""HTML retrieval for arxiv papers via ar5iv.labs.arxiv.org."""
 
 from __future__ import annotations
 
 import logging
 from html.parser import HTMLParser
-from typing import Optional
 
 import httpx
 
@@ -37,14 +23,6 @@ _TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 
 
 class _ArticleTextExtractor(HTMLParser):
-    """Plain-text extractor mirroring ``arxiv_mcp_server.tools.download._ArticleTextExtractor``.
-
-    Skips script/style/nav/header/footer/aside subtrees and joins the
-    remaining stripped text chunks with newlines. Identical output shape
-    to the upstream extractor so the downstream content envelope stays
-    compatible with cache reads and read_paper.
-    """
-
     SKIP_TAGS = {"script", "style", "nav", "header", "footer", "aside"}
 
     def __init__(self) -> None:
@@ -76,22 +54,9 @@ def _html_to_text(html: str) -> str:
     return parser.get_text()
 
 
-def fetch_html_content(paper_id: str) -> Optional[str]:
-    """Fetch a paper's HTML and return its extracted plain text.
-
-    Order:
-      1. ``ar5iv.labs.arxiv.org/html/{paper_id}`` with ``follow_redirects=False``.
-         A 307 redirect means ar5iv doesn't have the paper (typically very
-         recent submissions); treat as miss without leaking a hop into
-         ar5iv's logs.
-      2. ``arxiv.org/html/{paper_id}`` with ``follow_redirects=True``.
-         Last HTML option before the PDF path.
-
-    Returns the extracted text on the first 200 with non-empty body. Returns
-    ``None`` if both endpoints miss, so the caller can fall through to the
-    PDF path. Never raises on network errors — they are logged and treated
-    as misses (same convention as upstream ``_fetch_html_content``).
-    """
+def fetch_html_content(paper_id: str) -> str | None:
+    # ar5iv first (follow_redirects=False so 307 = miss, not a hop into
+    # arxiv.org). arxiv.org/html as fallback for papers ar5iv lacks.
     attempts = (
         (_AR5IV_BASE, False, "ar5iv"),
         (_ARXIV_HTML_BASE, True, "arxiv-html"),
@@ -116,21 +81,11 @@ def fetch_html_content(paper_id: str) -> Optional[str]:
                     continue
 
                 if not resp.content:
-                    logger.info("html-%s empty body for %s", label, paper_id)
                     continue
 
                 text = _html_to_text(resp.text)
                 if text.strip():
-                    logger.info(
-                        "html-%s hit for %s (%d bytes html -> %d chars text)",
-                        label,
-                        paper_id,
-                        len(resp.content),
-                        len(text),
-                    )
                     return text
-
-                logger.info("html-%s extracted empty text for %s", label, paper_id)
     except Exception:
         logger.exception("unexpected error in HTML fetch for %s", paper_id)
     return None

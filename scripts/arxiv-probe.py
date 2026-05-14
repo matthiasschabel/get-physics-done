@@ -30,15 +30,13 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import statistics
 import subprocess
 import sys
 import time
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
 from urllib.parse import quote_plus
 
 import httpx
@@ -88,7 +86,7 @@ class EndpointReport:
         else:
             self.errors.append(r.error or f"status={r.status}")
 
-    def summary(self) -> dict[str, Any]:
+    def summary(self) -> dict[str, object]:
         lat = sorted(self.latencies_ms)
         p50 = statistics.median(lat) if lat else None
         p95 = lat[int(len(lat) * 0.95) - 1] if len(lat) >= 20 else (lat[-1] if lat else None)
@@ -106,7 +104,7 @@ class EndpointReport:
         }
 
 
-def bq_pull(project: str, days: int, tool_suffix: str, limit: int) -> list[dict[str, Any]]:
+def bq_pull(project: str, days: int, tool_suffix: str, limit: int) -> list[dict[str, object]]:
     """Pull recent tool-call args from BigQuery via the `bq` CLI."""
     sql = f"""
 SELECT

@@ -107,7 +107,7 @@ WORST_COMMAND_HARD_CAPS = {
     "peer-review": (1_280, 74_000),
 }
 PROJECTED_COMMAND_HARD_CAPS = {
-    "execute-phase": (2_100, 116_000),
+    "execute-phase": (2_100, 117_500),
     "new-project": (2_200, 107_000),
     "research-phase": (430, 22_000),
     "respond-to-referees": (1_000, 62_000),

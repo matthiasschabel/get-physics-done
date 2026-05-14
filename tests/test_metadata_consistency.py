@@ -247,7 +247,13 @@ def test_canonical_registry_skill_inventory_counts_match_repo_contents() -> None
     agents_count = len(list((repo_root / "src" / "gpd" / "agents").glob("*.md")))
     content_registry.invalidate_cache()
     canonical_skills_count = len(content_registry.list_skills())
-    mcp_server_count = len([p for p in (repo_root / "src" / "gpd" / "mcp" / "servers").glob("*.py") if p.name != "__init__.py"])
+    mcp_server_count = len(
+        [
+            p
+            for p in (repo_root / "src" / "gpd" / "mcp" / "servers").glob("*.py")
+            if p.name != "__init__.py" and not p.name.startswith("_")
+        ]
+    )
     mcp_script_count = sum(1 for line in _project_script_lines(repo_root) if line.startswith('"gpd-mcp-'))
     managed_integration_script_count = sum(
         1 for name in _project_script_targets(repo_root) if name == "gpd-mcp-wolfram"
@@ -304,7 +310,13 @@ def test_mcp_server_count_matches_public_entrypoints() -> None:
     from gpd.mcp.managed_integrations import WOLFRAM_BRIDGE_COMMAND
 
     repo_root = _repo_root()
-    mcp_server_count = len([p for p in (repo_root / "src" / "gpd" / "mcp" / "servers").glob("*.py") if p.name != "__init__.py"])
+    mcp_server_count = len(
+        [
+            p
+            for p in (repo_root / "src" / "gpd" / "mcp" / "servers").glob("*.py")
+            if p.name != "__init__.py" and not p.name.startswith("_")
+        ]
+    )
     builtin_mcp_script_count = sum(
         1
         for name in _project_script_targets(repo_root)
@@ -407,7 +419,7 @@ def test_arxiv_descriptor_tracks_optional_dependency_surface() -> None:
         "pypdf>=5.0",
     }
     assert set(optional["arxiv"]) == {
-        "arxiv-mcp-server>=0.4.11",
+        "arxiv-mcp-server[pdf]>=0.4.11",
         "arxiv>=2.4.1",
         "cairosvg>=2.7.0",
         "pypdf>=5.0",

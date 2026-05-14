@@ -20,6 +20,7 @@ xfails cleanly so the suite stays green during the bring-up window.
 from __future__ import annotations
 
 import os
+
 import pytest
 
 pytestmark = [pytest.mark.parity]
@@ -61,9 +62,9 @@ UPSTREAM_ABSTRACT_KEYS = {
 def translators():
     try:
         from gpd.mcp.servers.arxiv_translators import (  # type: ignore
-            openalex_search,
-            openalex_abstract,
             gcs_fetch_pdf,
+            openalex_abstract,
+            openalex_search,
         )
     except Exception as exc:
         pytest.xfail(f"arxiv_translators not yet implemented: {exc}")

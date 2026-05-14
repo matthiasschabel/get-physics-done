@@ -62,7 +62,7 @@ _ARXIV_EXTRA_PREREQUISITE = (
 )
 _EXPECTED_OPTIONAL_DEPENDENCIES = {
     "paper": ["cairosvg>=2.7.0", "pypdf>=5.0"],
-    "arxiv": ["arxiv-mcp-server>=0.4.11", "arxiv>=2.4.1", "cairosvg>=2.7.0", "pypdf>=5.0"],
+    "arxiv": ["arxiv-mcp-server[pdf]>=0.4.11", "arxiv>=2.4.1", "cairosvg>=2.7.0", "pypdf>=5.0"],
 }
 _OPTIONAL_IMPORT_MODULE_TO_DEPENDENCY = {
     "arxiv": "arxiv",

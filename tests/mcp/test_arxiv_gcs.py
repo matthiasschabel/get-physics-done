@@ -1,10 +1,4 @@
-"""Unit tests for the GCS arxiv path parser and PDF fetch helpers.
-
-The parser covers the two ID formats (new YYMM.NNNNN, old category/YYMMNNN)
-and the path-building corner cases we've seen in production: trailing
-.pdf, version suffixes, mixed case, leading whitespace. Live GCS fetch
-is not exercised here — see scripts/arxiv-probe.py for network probes.
-"""
+"""Unit tests for the GCS arxiv path parser and PDF fetch helpers."""
 
 from __future__ import annotations
 
@@ -27,9 +21,7 @@ def test_parse_new_format_four_digit_number() -> None:
 
 
 def test_parse_old_format() -> None:
-    """Old-format IDs use just the numeric tail in the GCS path, not the
-    concatenated form. Confirmed via live probe — `hep-th9901001` 404s,
-    `9901001` returns 200."""
+    # Numeric-tail-only path. `hep-th9901001` etc 404 on the bucket.
     assert _arxiv_gcs.parse_paper_id("hep-th/9901001") == ("hep-th", "9901", "9901001")
 
 
@@ -66,11 +58,6 @@ def test_parse_rejects_empty() -> None:
 
 
 def test_pdf_bytes_to_markdown_rejects_empty_output(tmp_path) -> None:
-    """If pymupdf4llm returns an empty string we must raise rather than
-    cache empty content. The 100-byte zero-fill is enough to not crash
-    pymupdf but its `to_markdown` call has been observed to return
-    empty on malformed inputs."""
     pytest.importorskip("pymupdf4llm")
     with pytest.raises((RuntimeError, Exception)):
-        # Garbage bytes — pymupdf raises, which is fine for this test.
         _arxiv_gcs.pdf_bytes_to_markdown(b"\x00" * 100, "test/0000001", tmp_path)

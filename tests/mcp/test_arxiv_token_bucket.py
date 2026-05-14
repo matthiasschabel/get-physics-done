@@ -18,7 +18,6 @@ def reset_bucket() -> None:
 
 @pytest.mark.asyncio
 async def test_first_acquire_does_not_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The first call should not pay the 3s gate — _last_request_time starts at 0."""
     slept: list[float] = []
 
     async def fake_sleep(seconds: float) -> None:
@@ -36,7 +35,6 @@ async def test_first_acquire_does_not_sleep(monkeypatch: pytest.MonkeyPatch) -> 
 async def test_back_to_back_calls_sleep_for_min_interval(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Second call should sleep ~3 seconds (the _MIN_INTERVAL)."""
     slept: list[float] = []
 
     async def fake_sleep(seconds: float) -> None:
@@ -55,11 +53,7 @@ async def test_back_to_back_calls_sleep_for_min_interval(
 
 @pytest.mark.asyncio
 async def test_acquire_is_serialized(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Two concurrent tasks must not run their critical sections in parallel."""
-
     async def fake_sleep(_seconds: float) -> None:
-        # Stripping the sleep so the test runs fast; the lock is what
-        # we're verifying, not the wait.
         return None
 
     monkeypatch.setattr(_arxiv_token_bucket.asyncio, "sleep", fake_sleep)
@@ -72,7 +66,7 @@ async def test_acquire_is_serialized(monkeypatch: pytest.MonkeyPatch) -> None:
         async with _arxiv_token_bucket.acquire():
             in_flight += 1
             max_seen = max(max_seen, in_flight)
-            await asyncio.sleep(0)  # yield to other tasks
+            await asyncio.sleep(0)
             in_flight -= 1
 
     await asyncio.gather(worker(), worker(), worker())

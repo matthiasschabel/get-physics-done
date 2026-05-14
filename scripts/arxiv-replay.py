@@ -41,9 +41,8 @@ import statistics
 import subprocess
 import sys
 import time
-from dataclasses import dataclass, asdict, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
 
 # We import the upstream + bridge in-process to avoid stdio overhead.
 # Both expose async handlers we can call directly.
@@ -52,7 +51,7 @@ from typing import Any
 @dataclass
 class CallRecord:
     tool: str
-    args: dict[str, Any]
+    args: dict[str, object]
     old_ok: bool = False
     new_ok: bool = False
     old_error: str | None = None
@@ -79,7 +78,7 @@ class CallRecord:
         return self.new_ok and self.old_ok and self.latency_new_ms < self.latency_old_ms
 
 
-def bq_pull_calls(project: str, days: int, tool_suffix: str, limit: int) -> list[dict[str, Any]]:
+def bq_pull_calls(project: str, days: int, tool_suffix: str, limit: int) -> list[dict[str, object]]:
     sql = f"""
 SELECT
   JSON_VALUE(part, '$.state.input') AS input_str
@@ -108,7 +107,7 @@ LIMIT {limit}
     if proc.returncode != 0:
         raise SystemExit(f"bq query failed: {proc.stderr}")
     rows = json.loads(proc.stdout) if proc.stdout.strip() else []
-    out: list[dict[str, Any]] = []
+    out: list[dict[str, object]] = []
     for row in rows:
         raw = row.get("input_str")
         if not raw:
@@ -120,7 +119,7 @@ LIMIT {limit}
     return out
 
 
-def _extract_papers_from_textcontent(parts: Any, tool: str) -> tuple[list[str], int]:
+def _extract_papers_from_textcontent(parts: object, tool: str) -> tuple[list[str], int]:
     """Both upstream and forked side return List[types.TextContent] whose
     `.text` field carries a JSON document. Parse it and return
     (top_ids_in_order, total_count)."""
@@ -143,7 +142,7 @@ def _extract_papers_from_textcontent(parts: Any, tool: str) -> tuple[list[str], 
     return [], 0
 
 
-async def call_upstream(tool: str, args: dict[str, Any], timeout: float) -> tuple[Any, str | None]:
+async def call_upstream(tool: str, args: dict[str, object], timeout: float) -> tuple[object, str | None]:
     """Call the unmodified upstream `arxiv_mcp_server` handler in-process."""
     try:
         if tool == "search_papers":
@@ -155,13 +154,13 @@ async def call_upstream(tool: str, args: dict[str, Any], timeout: float) -> tupl
         else:
             return None, f"unsupported_tool:{tool}"
         return parts, None
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return None, "timeout"
     except Exception as e:
         return None, f"{type(e).__name__}:{e}"
 
 
-async def call_forked(tool: str, args: dict[str, Any], timeout: float) -> tuple[Any, str | None]:
+async def call_forked(tool: str, args: dict[str, object], timeout: float) -> tuple[object, str | None]:
     """Call the GPD-forked handler in-process."""
     try:
         from gpd.mcp.servers import arxiv_translators  # type: ignore
@@ -175,13 +174,13 @@ async def call_forked(tool: str, args: dict[str, Any], timeout: float) -> tuple[
         else:
             return None, f"unsupported_tool:{tool}"
         return parts, None
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return None, "timeout"
     except Exception as e:
         return None, f"{type(e).__name__}:{e}"
 
 
-async def run_one(tool: str, args: dict[str, Any], timeout: float, sem: asyncio.Semaphore) -> CallRecord:
+async def run_one(tool: str, args: dict[str, object], timeout: float, sem: asyncio.Semaphore) -> CallRecord:
     rec = CallRecord(tool=tool, args=args)
     async with sem:
         # Run both sides truly in parallel.
@@ -249,11 +248,11 @@ async def replay(
     return records
 
 
-def summarize(records: list[CallRecord]) -> dict[str, Any]:
+def summarize(records: list[CallRecord]) -> dict[str, object]:
     by_tool: dict[str, list[CallRecord]] = {}
     for r in records:
         by_tool.setdefault(r.tool, []).append(r)
-    out: dict[str, Any] = {"total": len(records), "tools": {}}
+    out: dict[str, object] = {"total": len(records), "tools": {}}
     for tool, recs in by_tool.items():
         n = len(recs)
         old_ok = [r for r in recs if r.old_ok]
@@ -279,7 +278,7 @@ def summarize(records: list[CallRecord]) -> dict[str, Any]:
     return out
 
 
-def evaluate_gate(summary: dict[str, Any]) -> tuple[bool, list[str]]:
+def evaluate_gate(summary: dict[str, object]) -> tuple[bool, list[str]]:
     failures: list[str] = []
     for tool, s in summary["tools"].items():
         if (s.get("new_ok_on_old_ok_rate") or 0) < 0.95:
@@ -303,7 +302,7 @@ def evaluate_gate(summary: dict[str, Any]) -> tuple[bool, list[str]]:
     return len(failures) == 0, failures
 
 
-def write_markdown(summary: dict[str, Any], records: list[CallRecord], path: Path) -> None:
+def write_markdown(summary: dict[str, object], records: list[CallRecord], path: Path) -> None:
     lines = ["# arXiv replay report\n"]
     lines.append(f"Total calls: **{summary['total']}**\n")
     lines.append("| tool | n | old_ok | new_ok_on_old_ok | new_only_on_old_fail | lat_old(ms) | lat_new(ms) | new_faster | top3_overlap | coverage_med |")

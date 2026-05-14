@@ -1,9 +1,4 @@
-"""Unit tests for the retry-gating predicate.
-
-The whole point of the predicate is that retries only fire on isolated
-failures, not inside a burst. These tests pin that behavior so a future
-edit can't silently re-enable retry-inside-burst.
-"""
+"""Unit tests for the retry-gating predicate."""
 
 from __future__ import annotations
 

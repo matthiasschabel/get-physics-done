@@ -1,14 +1,6 @@
-"""Unit tests for ar5iv HTML fetcher.
-
-Live network calls are out of scope here — those live in
-``scripts/arxiv-probe.py``. These tests cover the local extraction logic
-and the fetch decision tree (ar5iv → arxiv.org/html fallback, 307-as-miss).
-"""
+"""Unit tests for ar5iv HTML fetcher."""
 
 from __future__ import annotations
-
-from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -42,21 +34,18 @@ def test_html_to_text_returns_stripped_chunks() -> None:
     assert "world" in text
 
 
-def _make_fake_client(responses: list[Any]) -> Any:
-    """Build a context-manager-style httpx.Client mock that returns the
-    given response objects in order on get()."""
-
+def _make_fake_client(responses: list[object]) -> object:
     class FakeClient:
         def __init__(self) -> None:
             self._idx = 0
 
-        def __enter__(self) -> "FakeClient":
+        def __enter__(self) -> FakeClient:
             return self
 
         def __exit__(self, *exc) -> None:
             pass
 
-        def get(self, url: str, follow_redirects: bool = True) -> Any:
+        def get(self, url: str, follow_redirects: bool = True) -> object:
             resp = responses[self._idx]
             self._idx += 1
             return resp
@@ -72,12 +61,11 @@ class _FakeResponse:
 
 
 def test_fetch_hits_ar5iv_first(monkeypatch: pytest.MonkeyPatch) -> None:
-    """When ar5iv returns 200 with extractable text, the fallback is never tried."""
     fake = _make_fake_client(
         [_FakeResponse(200, content=b"<html><body>hello</body></html>", text="<html><body>hello</body></html>")]
     )
 
-    def fake_client_ctor(*args, **kwargs) -> Any:
+    def fake_client_ctor(*args, **kwargs) -> object:
         return fake
 
     monkeypatch.setattr(_arxiv_ar5iv.httpx, "Client", fake_client_ctor)
@@ -87,8 +75,6 @@ def test_fetch_hits_ar5iv_first(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_fetch_falls_through_on_307(monkeypatch: pytest.MonkeyPatch) -> None:
-    """ar5iv 307 means 'paper not in our corpus'; the fetcher must try
-    arxiv.org/html next."""
     fake = _make_fake_client(
         [
             _FakeResponse(307),  # ar5iv miss
@@ -110,7 +96,6 @@ def test_fetch_returns_none_on_total_miss(monkeypatch: pytest.MonkeyPatch) -> No
 def test_fetch_treats_empty_extracted_text_as_miss(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """200 with only stripped-tag content (no body text) is not a useful hit."""
     fake = _make_fake_client(
         [
             _FakeResponse(200, content=b"<html><script>x</script></html>", text="<html><script>x</script></html>"),

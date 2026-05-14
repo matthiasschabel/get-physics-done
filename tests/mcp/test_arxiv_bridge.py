@@ -381,21 +381,7 @@ def test_module_entrypoint_runs_main(monkeypatch: pytest.MonkeyPatch) -> None:
     assert called
 
 
-# ---------------------------------------------------------------------------
-# Hybrid-backend intercept tests
-#
-# These cover the new intercept paths added on top of the legacy proxy:
-# - GPD_ARXIV_BACKEND switching
-# - search_papers sort_by=relevance default
-# - download_paper ar5iv/GCS intercept
-# - get_abstract SQLite cache round-trip
-# - 429 detection + retry gating
-# - bit-exact _CONTENT_WARNING preservation
-# ---------------------------------------------------------------------------
-
-
 def _make_fake_session(call_outputs=None, call_log=None):
-    """Build a FakeSession suitable for ArxivBridge tests."""
     call_log = call_log if call_log is not None else []
 
     class FakeSession:
@@ -421,8 +407,6 @@ def _make_fake_session(call_outputs=None, call_log=None):
 
 @pytest.mark.asyncio
 async def test_arxiv_only_backend_skips_intercepts(monkeypatch: pytest.MonkeyPatch) -> None:
-    """With backend='arxiv-only', download_paper must go straight to the
-    upstream session without touching ar5iv or GCS."""
     from gpd.mcp.servers import _arxiv_ar5iv, _arxiv_gcs
     from gpd.mcp.servers.arxiv_bridge import ArxivBridge, ArxivBridgeConfig
 
@@ -452,9 +436,6 @@ async def test_arxiv_only_backend_skips_intercepts(monkeypatch: pytest.MonkeyPat
 async def test_search_papers_defaults_sort_by_relevance(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """search_papers without an explicit sort_by must be coerced to
-    sort_by='relevance' before hitting the upstream session — production
-    `sort_by=date` was returning topically unrelated recent papers."""
     from gpd.mcp.servers import _arxiv_token_bucket
     from gpd.mcp.servers.arxiv_bridge import ArxivBridge, ArxivBridgeConfig
 
@@ -486,7 +467,6 @@ async def test_search_papers_defaults_sort_by_relevance(
 async def test_search_papers_preserves_caller_sort_by(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """If the caller explicitly sets sort_by, the bridge must not override it."""
     from gpd.mcp.servers import _arxiv_token_bucket
     from gpd.mcp.servers.arxiv_bridge import ArxivBridge, ArxivBridgeConfig
 
@@ -514,8 +494,6 @@ async def test_search_papers_preserves_caller_sort_by(
 async def test_download_paper_hits_ar5iv_first(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
-    """When ar5iv returns content, the bridge emits a success envelope
-    and never reaches the upstream session."""
     import json as _json
 
     from gpd.mcp.servers import _arxiv_ar5iv, _arxiv_gcs, _arxiv_token_bucket
@@ -624,8 +602,6 @@ async def test_download_paper_falls_through_to_upstream_on_total_miss(
 async def test_get_abstract_cache_round_trip(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
-    """First get_abstract call hits upstream; second hit returns from cache
-    without invoking the session at all."""
     from gpd.mcp.servers import _arxiv_cache, _arxiv_token_bucket
     from gpd.mcp.servers.arxiv_bridge import ArxivBridge, ArxivBridgeConfig
 
@@ -657,11 +633,7 @@ async def test_get_abstract_cache_round_trip(
 async def test_rate_limit_in_payload_surfaces_as_iserror(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
-    """A `{status: error, message: "HTTP 429..."}` payload must be retried
-    once (then coerced to isError=True for the MCP client). Today upstream
-    returns these as completed-with-status-error tool results that the
-    MCP client doesn't surface as errors — our 429 detection fixes that."""
-    from gpd.mcp.servers import _arxiv_retry, _arxiv_token_bucket
+    from gpd.mcp.servers import _arxiv_token_bucket
     from gpd.mcp.servers.arxiv_bridge import ArxivBridge, ArxivBridgeConfig
 
     _arxiv_token_bucket._reset_for_tests()
@@ -693,10 +665,7 @@ async def test_rate_limit_in_payload_surfaces_as_iserror(
 async def test_rate_limit_inside_burst_window_skips_retry(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
-    """A rate-limit failure inside an active burst must NOT trigger the
-    60s retry — that wait is empirically wasted (~83% of bursty retries
-    fail again immediately)."""
-    from gpd.mcp.servers import _arxiv_retry, _arxiv_token_bucket
+    from gpd.mcp.servers import _arxiv_token_bucket
     from gpd.mcp.servers.arxiv_bridge import ArxivBridge, ArxivBridgeConfig
 
     _arxiv_token_bucket._reset_for_tests()
@@ -713,7 +682,6 @@ async def test_rate_limit_inside_burst_window_skips_retry(
     bridge = ArxivBridge(ArxivBridgeConfig(storage_path=tmp_path, backend="hybrid"))
     bridge._session = fake  # type: ignore[assignment]
 
-    # Seed a recent failure so the predicate says we're inside a burst.
     import time as _time
 
     bridge._state.failure_log.append(_time.monotonic())  # type: ignore[attr-defined]
@@ -729,16 +697,13 @@ async def test_rate_limit_inside_burst_window_skips_retry(
 
 @pytest.mark.asyncio
 async def test_get_abstract_is_advertised() -> None:
-    """`get_abstract` must show up in tools/list (was previously filtered out)."""
-    from gpd.mcp.servers.arxiv_bridge import UPSTREAM_CORE_TOOL_NAMES, ADVERTISED_TOOL_NAMES
+    from gpd.mcp.servers.arxiv_bridge import ADVERTISED_TOOL_NAMES, UPSTREAM_CORE_TOOL_NAMES
 
     assert "get_abstract" in UPSTREAM_CORE_TOOL_NAMES
     assert "get_abstract" in ADVERTISED_TOOL_NAMES
 
 
 def test_content_warning_is_bit_exact() -> None:
-    """The `_CONTENT_WARNING` constant must be byte-for-byte identical to
-    upstream's so prompt-injection guards downstream behave the same way."""
     from gpd.mcp.servers.arxiv_bridge import _CONTENT_WARNING
 
     expected = (

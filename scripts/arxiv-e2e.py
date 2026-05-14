@@ -32,13 +32,11 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import os
 import subprocess
 import sys
 import time
-from dataclasses import dataclass, asdict, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
 
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
@@ -70,7 +68,7 @@ CONTRACT_DOWNLOAD_KEYS = {"status", "paper_id", "source", "content"}
 @dataclass
 class E2EResult:
     tool: str
-    args: dict[str, Any]
+    args: dict[str, object]
     ok: bool = False
     is_error: bool = False
     envelope_keys_ok: bool = False
@@ -81,7 +79,7 @@ class E2EResult:
     diff_notes: list[str] = field(default_factory=list)
 
 
-def bq_pull(project: str, days: int, tool_suffix: str, limit: int) -> list[dict[str, Any]]:
+def bq_pull(project: str, days: int, tool_suffix: str, limit: int) -> list[dict[str, object]]:
     sql = f"""
 SELECT JSON_VALUE(part, '$.state.input') AS input_str
 FROM `{project}.gpd_logs.sessions`
@@ -109,7 +107,7 @@ LIMIT {limit}
     if proc.returncode != 0:
         raise SystemExit(f"bq query failed: {proc.stderr}")
     rows = json.loads(proc.stdout) if proc.stdout.strip() else []
-    out: list[dict[str, Any]] = []
+    out: list[dict[str, object]] = []
     for row in rows:
         raw = row.get("input_str")
         if not raw:
@@ -121,7 +119,7 @@ LIMIT {limit}
     return out
 
 
-def _validate_inner(tool: str, data: dict[str, Any]) -> tuple[bool, bool, list[str]]:
+def _validate_inner(tool: str, data: dict[str, object]) -> tuple[bool, bool, list[str]]:
     """Return (keys_ok, types_ok, notes)."""
     notes: list[str] = []
     expected: set[str]
@@ -158,7 +156,7 @@ def _validate_inner(tool: str, data: dict[str, Any]) -> tuple[bool, bool, list[s
     return keys_ok, types_ok, notes
 
 
-async def run_session(samples: list[tuple[str, dict[str, Any]]], storage_path: Path) -> tuple[list[E2EResult], int]:
+async def run_session(samples: list[tuple[str, dict[str, object]]], storage_path: Path) -> tuple[list[E2EResult], int]:
     server = StdioServerParameters(
         command=sys.executable,
         args=["-m", "gpd.mcp.servers.arxiv_bridge", "--storage-path", str(storage_path)],
@@ -202,7 +200,7 @@ async def run_session(samples: list[tuple[str, dict[str, Any]]], storage_path: P
                             rec.diff_notes.append(f"inner_not_json:{e}")
                     else:
                         rec.diff_notes.append("no_text_content")
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     rec.error = "timeout"
                     rec.latency_ms = (time.perf_counter() - t0) * 1000
                 except Exception as e:
@@ -218,7 +216,7 @@ async def run_session(samples: list[tuple[str, dict[str, Any]]], storage_path: P
     return results, exit_code
 
 
-def evaluate_gate(records: list[E2EResult]) -> tuple[bool, dict[str, Any], list[str]]:
+def evaluate_gate(records: list[E2EResult]) -> tuple[bool, dict[str, object], list[str]]:
     n = len(records)
     if n == 0:
         return False, {"n": 0}, ["no records"]
@@ -262,7 +260,7 @@ def main() -> int:
     abstract_args = bq_pull(args.project, args.days, "get_abstract", n_abstract * 2)[:n_abstract]
     download_args = bq_pull(args.project, args.days, "download_paper", n_download * 2)[:n_download]
 
-    samples: list[tuple[str, dict[str, Any]]] = []
+    samples: list[tuple[str, dict[str, object]]] = []
     for a in search_args:
         if isinstance(a.get("query"), str):
             samples.append(("search_papers", a))

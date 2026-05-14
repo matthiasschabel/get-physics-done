@@ -26,12 +26,17 @@ SCHEMA_VERSION = 1
 
 GENERATED_ON_BLOCK_ID = "generated-on"
 SCOPE_BLOCK_ID = "scope"
+PROMPT_STEM_INVENTORY_BLOCK_ID = "prompt-stem-inventory"
 SAME_STEM_COMMAND_WORKFLOW_BLOCK_ID = "same-stem-command-workflow"
+REQUIRED_EDGES_BLOCK_ID = "required-edges"
 REPO_GRAPH_BLOCK_IDS = (
     GENERATED_ON_BLOCK_ID,
     SCOPE_BLOCK_ID,
+    PROMPT_STEM_INVENTORY_BLOCK_ID,
     SAME_STEM_COMMAND_WORKFLOW_BLOCK_ID,
+    REQUIRED_EDGES_BLOCK_ID,
 )
+PROMPT_STEM_INVENTORY_KEYS = ("same_stems", "command_only_stems", "workflow_only_stems")
 
 REPO_GRAPH_REGION_SPEC = GeneratedRegionSpec(
     marker_prefix="repo-graph",
@@ -42,9 +47,16 @@ REPO_GRAPH_REGION_SPEC = GeneratedRegionSpec(
 
 GENERATED_ON_START, GENERATED_ON_END = marker_pair(REPO_GRAPH_REGION_SPEC, GENERATED_ON_BLOCK_ID)
 SCOPE_START, SCOPE_END = marker_pair(REPO_GRAPH_REGION_SPEC, SCOPE_BLOCK_ID)
+PROMPT_STEM_INVENTORY_START, PROMPT_STEM_INVENTORY_END = marker_pair(
+    REPO_GRAPH_REGION_SPEC, PROMPT_STEM_INVENTORY_BLOCK_ID
+)
 SAME_STEM_COMMAND_WORKFLOW_START, SAME_STEM_COMMAND_WORKFLOW_END = marker_pair(
     REPO_GRAPH_REGION_SPEC, SAME_STEM_COMMAND_WORKFLOW_BLOCK_ID
 )
+REQUIRED_EDGES_START, REQUIRED_EDGES_END = marker_pair(REPO_GRAPH_REGION_SPEC, REQUIRED_EDGES_BLOCK_ID)
+
+COMMAND_PROMPT_PARENT = ("src", "gpd", "commands")
+WORKFLOW_PROMPT_PARENT = ("src", "gpd", "specs", "workflows")
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +77,13 @@ class GraphScopeSpec:
         return _has_parent(path, *self.parent_parts)
 
 
+@dataclass(frozen=True, slots=True)
+class GraphEdgeSpec:
+    source: str
+    target: str
+    edge_type: str
+
+
 GRAPH_SCOPE_SPECS = (
     GraphScopeSpec("`src/gpd/commands/*.md`", ("src", "gpd", "commands"), ".md"),
     GraphScopeSpec("`src/gpd/agents/*.md`", ("src", "gpd", "agents"), ".md"),
@@ -83,6 +102,130 @@ GRAPH_SCOPE_LABELS = tuple(spec.label for spec in GRAPH_SCOPE_SPECS)
 _NORMALIZED_SCOPE_LABELS = {
     label[1:-1] if label.startswith("`") and label.endswith("`") else label: label for label in GRAPH_SCOPE_LABELS
 }
+
+REQUIRED_REPO_GRAPH_EDGES = (
+    GraphEdgeSpec(".github/workflows/test.yml", "tests/ci_sharding.py", "authority"),
+    GraphEdgeSpec(".github/workflows/test.yml", "actions/checkout@v6", "external-service"),
+    GraphEdgeSpec(".github/workflows/test.yml", "actions/setup-node@v6", "external-service"),
+    GraphEdgeSpec("src/gpd/mcp/builtin_servers.py", "src/gpd/mcp/descriptor_text.py", "hard-import"),
+    GraphEdgeSpec("src/gpd/mcp/servers/skills_server.py", "src/gpd/mcp/descriptor_text.py", "hard-import"),
+    GraphEdgeSpec(
+        "pyproject.toml",
+        (
+            "src/gpd/mcp/servers/{arxiv_bridge,conventions_server,verification_server,protocols_server,"
+            "errors_mcp,patterns_server,state_server,skills_server}.py"
+        ),
+        "authority",
+    ),
+    GraphEdgeSpec("pyproject.toml", "src/gpd/mcp/integrations/wolfram_bridge.py", "authority"),
+    GraphEdgeSpec("src/gpd/hooks/statusline.py", "src/gpd/hooks/runtime_detect.py", "hard-import"),
+    GraphEdgeSpec("src/gpd/hooks/statusline.py", "src/gpd/adapters/__init__.py", "hard-import"),
+    GraphEdgeSpec("src/gpd/hooks/check_update.py", "src/gpd/hooks/runtime_detect.py", "hard-import"),
+    GraphEdgeSpec("src/gpd/hooks/notify.py", "src/gpd/hooks/check_update.py", "spawn"),
+    GraphEdgeSpec("src/gpd/hooks/notify.py", "src/gpd/hooks/runtime_detect.py", "hard-import"),
+    GraphEdgeSpec(
+        "src/gpd/cli.py::sync_phase_checkpoints",
+        "src/gpd/core/checkpoints.py::sync_phase_checkpoints",
+        "spawn",
+    ),
+    GraphEdgeSpec("src/gpd/core/phases.py", "src/gpd/core/checkpoints.py::sync_phase_checkpoints", "hard-import"),
+    GraphEdgeSpec("src/gpd/core/state.py", "<cwd>/GPD/.state-write-intent", "generated-output"),
+    GraphEdgeSpec(
+        "src/gpd/core/checkpoints.py",
+        "generated outputs {GPD/CHECKPOINTS.md, GPD/phase-checkpoints/*.md}",
+        "generated-output",
+    ),
+    GraphEdgeSpec("src/gpd/core/checkpoints.py", "<cwd>/GPD/CHECKPOINTS.md", "generated-output"),
+    GraphEdgeSpec("src/gpd/core/checkpoints.py", "<cwd>/GPD/phase-checkpoints/*.md", "generated-output"),
+    GraphEdgeSpec(
+        "src/gpd/specs/workflows/execute-phase.md",
+        (
+            "src/gpd/specs/{references/orchestration/meta-orchestration.md,references/orchestration/"
+            "artifact-surfacing.md,references/orchestration/checkpoints.md,references/verification/core/"
+            "verification-core.md,templates/summary.md,templates/continuation-prompt.md,templates/paper/"
+            "figure-tracker.md,templates/paper/experimental-comparison.md,templates/recovery-plan.md}"
+        ),
+        "include",
+    ),
+    GraphEdgeSpec(
+        "src/gpd/specs/workflows/execute-phase.md",
+        (
+            "src/gpd/specs/{references/orchestration/meta-orchestration.md,references/orchestration/"
+            "checkpoints.md,references/orchestration/continuous-execution.md,references/verification/core/"
+            "verification-core.md,templates/summary.md,templates/continuation-prompt.md,templates/paper/"
+            "figure-tracker.md,templates/paper/experimental-comparison.md,templates/recovery-plan.md}"
+        ),
+        "include",
+    ),
+    GraphEdgeSpec(
+        "src/gpd/specs/workflows/execute-plan.md",
+        (
+            "src/gpd/specs/{references/execution/git-integration.md,references/execution/github-lifecycle.md,"
+            "references/execution/execute-plan-recovery.md,references/execution/execute-plan-validation.md,"
+            "references/execution/execute-plan-checkpoints.md,references/protocols/reproducibility.md,"
+            "references/execution/executor-index.md,references/orchestration/context-budget.md,references/"
+            "orchestration/checkpoints.md,templates/summary.md}"
+        ),
+        "include",
+    ),
+    GraphEdgeSpec(
+        "src/gpd/specs/workflows/plan-phase.md",
+        "src/gpd/specs/templates/plan-contract-schema.md",
+        "include",
+    ),
+    GraphEdgeSpec(
+        "src/gpd/specs/workflows/execute-plan.md",
+        "src/gpd/specs/templates/contract-results-schema.md",
+        "include",
+    ),
+    GraphEdgeSpec(
+        "src/gpd/specs/workflows/verify-work.md",
+        "src/gpd/specs/templates/contract-results-schema.md",
+        "include",
+    ),
+    GraphEdgeSpec(
+        "src/gpd/specs/workflows/verify-work.md",
+        "src/gpd/specs/templates/plan-contract-schema.md",
+        "include",
+    ),
+    GraphEdgeSpec(
+        "src/gpd/specs/workflows/write-paper.md",
+        (
+            "src/gpd/specs/templates/paper/{paper-config-schema.md,artifact-manifest-schema.md,"
+            "bibliography-audit-schema.md,reproducibility-manifest.md}"
+        ),
+        "include",
+    ),
+    GraphEdgeSpec(
+        "src/gpd/specs/workflows/new-project.md",
+        "src/gpd/specs/templates/project-contract-schema.md",
+        "include",
+    ),
+    GraphEdgeSpec(
+        "src/gpd/commands/peer-review.md",
+        (
+            "src/gpd/agents/{gpd-review-reader,gpd-review-literature,gpd-review-math,gpd-check-proof,"
+            "gpd-review-physics,gpd-review-significance,gpd-referee}.md"
+        ),
+        "spawn",
+    ),
+    GraphEdgeSpec(
+        "src/gpd/specs/workflows/peer-review.md",
+        (
+            "src/gpd/agents/{gpd-review-reader,gpd-review-literature,gpd-review-math,gpd-check-proof,"
+            "gpd-review-physics,gpd-review-significance,gpd-referee}.md"
+        ),
+        "spawn",
+    ),
+    GraphEdgeSpec(
+        (
+            "src/gpd/agents/{gpd-review-reader,gpd-review-literature,gpd-review-math,gpd-check-proof,"
+            "gpd-review-physics,gpd-review-significance,gpd-referee}.md"
+        ),
+        "src/gpd/specs/references/publication/peer-review-panel.md",
+        "include",
+    ),
+)
 
 
 @lru_cache(maxsize=1)
@@ -276,6 +419,42 @@ def expected_scope_counts(repo_root: Path = REPO_ROOT) -> dict[str, int]:
     return {spec.label: sum(1 for path in repo_files if spec.matches_path(path)) for spec in GRAPH_SCOPE_SPECS}
 
 
+def prompt_stem_inventory(repo_root: Path = REPO_ROOT) -> dict[str, tuple[str, ...]]:
+    repo_files = _repo_files_in_scope(repo_root)
+    command_stems = {
+        path.stem for path in repo_files if _has_parent(path, *COMMAND_PROMPT_PARENT) and path.suffix == ".md"
+    }
+    workflow_stems = {
+        path.stem for path in repo_files if _has_parent(path, *WORKFLOW_PROMPT_PARENT) and path.suffix == ".md"
+    }
+
+    return {
+        "same_stems": tuple(sorted(command_stems & workflow_stems)),
+        "command_only_stems": tuple(sorted(command_stems - workflow_stems)),
+        "workflow_only_stems": tuple(sorted(workflow_stems - command_stems)),
+    }
+
+
+def _contract_prompt_stem_tuple(payload: object, key: str) -> tuple[str, ...]:
+    assert isinstance(payload, list), f"prompt_stem_inventory.{key} must be a list"
+    stems: list[str] = []
+    for item in payload:
+        assert isinstance(item, str), f"prompt_stem_inventory.{key} entries must be strings"
+        stems.append(item)
+    return tuple(stems)
+
+
+def contract_prompt_stem_inventory(contract: dict[str, object]) -> dict[str, tuple[str, ...]]:
+    payload = contract["prompt_stem_inventory"]
+    assert isinstance(payload, dict), "prompt_stem_inventory must be a mapping"
+    return {key: _contract_prompt_stem_tuple(payload.get(key), key) for key in PROMPT_STEM_INVENTORY_KEYS}
+
+
+def _prompt_stem_contract_payload(repo_root: Path) -> dict[str, list[str]]:
+    inventory = prompt_stem_inventory(repo_root)
+    return {key: list(inventory[key]) for key in PROMPT_STEM_INVENTORY_KEYS}
+
+
 def build_contract(
     repo_root: Path = REPO_ROOT,
 ) -> dict[str, object]:
@@ -286,6 +465,7 @@ def build_contract(
         "schema_version": SCHEMA_VERSION,
         "excluded_graph_dirs": excluded_dirs,
         "scope_counts": scope_counts,
+        "prompt_stem_inventory": _prompt_stem_contract_payload(repo_root),
     }
 
 
@@ -324,32 +504,52 @@ def _render_scope_body(contract: dict[str, object]) -> str:
     return "\n".join(lines)
 
 
-def _render_same_stem_command_workflow_body(repo_root: Path = REPO_ROOT) -> str:
-    repo_files = _repo_files_in_scope(repo_root)
-    command_stems = {
-        path.stem for path in repo_files if _has_parent(path, "src", "gpd", "commands") and path.suffix == ".md"
-    }
-    workflow_stems = {
-        path.stem
-        for path in repo_files
-        if _has_parent(path, "src", "gpd", "specs", "workflows") and path.suffix == ".md"
-    }
-    same_stems = ",".join(sorted(command_stems & workflow_stems))
+def _render_compact_stem_list(stems: tuple[str, ...]) -> str:
+    if not stems:
+        return "`none`"
+    return ", ".join(f"`{stem}`" for stem in stems)
+
+
+def _render_prompt_stem_inventory_body(contract: dict[str, object]) -> str:
+    inventory = contract_prompt_stem_inventory(contract)
+
+    return "\n".join(
+        (
+            f"- Same-stem command/workflow prompt stems: `{len(inventory['same_stems'])}`",
+            f"- Command-only prompt stems: {_render_compact_stem_list(inventory['command_only_stems'])}",
+            f"- Workflow-only prompt stems: {_render_compact_stem_list(inventory['workflow_only_stems'])}",
+        )
+    )
+
+
+def _render_same_stem_command_workflow_body(contract: dict[str, object]) -> str:
+    same_stems = ",".join(contract_prompt_stem_inventory(contract)["same_stems"])
 
     return f"- `src/gpd/commands/{{{same_stems}}}.md -> src/gpd/specs/workflows/{{same stems}}.md`"
+
+
+def _render_required_edges_body(_contract: dict[str, object]) -> str:
+    lines: list[str] = []
+    for edge in REQUIRED_REPO_GRAPH_EDGES:
+        lines.append(f"- `{edge.source} -> {edge.target}`")
+        lines.append(f"  `{edge.edge_type}`")
+    return "\n".join(lines)
 
 
 def _render_repo_graph_region_body(
     block_id: str,
     contract: dict[str, object],
-    repo_root: Path = REPO_ROOT,
 ) -> str:
     if block_id == GENERATED_ON_BLOCK_ID:
         return _render_generated_on_body(contract)
     if block_id == SCOPE_BLOCK_ID:
         return _render_scope_body(contract)
+    if block_id == PROMPT_STEM_INVENTORY_BLOCK_ID:
+        return _render_prompt_stem_inventory_body(contract)
     if block_id == SAME_STEM_COMMAND_WORKFLOW_BLOCK_ID:
-        return _render_same_stem_command_workflow_body(repo_root)
+        return _render_same_stem_command_workflow_body(contract)
+    if block_id == REQUIRED_EDGES_BLOCK_ID:
+        return _render_required_edges_body(contract)
     raise ValueError(f"Unknown repo graph generated block {block_id!r}")
 
 
@@ -361,19 +561,32 @@ def render_scope_block(contract: dict[str, object]) -> str:
     return render_region(REPO_GRAPH_REGION_SPEC, SCOPE_BLOCK_ID, _render_scope_body(contract))
 
 
-def render_same_stem_command_workflow_block(repo_root: Path = REPO_ROOT) -> str:
+def render_prompt_stem_inventory_block(contract: dict[str, object]) -> str:
     return render_region(
         REPO_GRAPH_REGION_SPEC,
-        SAME_STEM_COMMAND_WORKFLOW_BLOCK_ID,
-        _render_same_stem_command_workflow_body(repo_root),
+        PROMPT_STEM_INVENTORY_BLOCK_ID,
+        _render_prompt_stem_inventory_body(contract),
     )
 
 
-def sync_readme_text(readme_text: str, contract: dict[str, object], repo_root: Path = REPO_ROOT) -> str:
+def render_same_stem_command_workflow_block(repo_root: Path = REPO_ROOT) -> str:
+    contract = build_contract(repo_root)
+    return render_region(
+        REPO_GRAPH_REGION_SPEC,
+        SAME_STEM_COMMAND_WORKFLOW_BLOCK_ID,
+        _render_same_stem_command_workflow_body(contract),
+    )
+
+
+def render_required_edges_block(contract: dict[str, object]) -> str:
+    return render_region(REPO_GRAPH_REGION_SPEC, REQUIRED_EDGES_BLOCK_ID, _render_required_edges_body(contract))
+
+
+def sync_readme_text(readme_text: str, contract: dict[str, object], _repo_root: Path = REPO_ROOT) -> str:
     synced, block_ids = replace_regions(
         readme_text,
         spec=REPO_GRAPH_REGION_SPEC,
-        render_body=lambda block_id: _render_repo_graph_region_body(block_id, contract, repo_root),
+        render_body=lambda block_id: _render_repo_graph_region_body(block_id, contract),
         path=GRAPH_PATH,
     )
     inventory_diffs = check_region_inventory(

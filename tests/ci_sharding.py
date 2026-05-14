@@ -314,6 +314,8 @@ def assert_contributing_documents_current_pytest_commands(contributing: str) -> 
     required_shell_commands = {
         "uv run python scripts/sync_repo_graph_contract.py --check",
         "uv run python scripts/render_public_surface.py --check",
+        "uv run python scripts/render_help_surface.py --check",
+        "uv run python scripts/render_bootstrap_installer_metadata.py --check",
         "uv run pytest -n 0 tests/test_metadata_consistency.py -v",
         "uv run pytest -n 0 tests/test_release_consistency.py -v",
         "uv run pytest -n 0 tests/adapters/test_registry.py tests/adapters/test_install_roundtrip.py -v",
@@ -324,14 +326,13 @@ def assert_contributing_documents_current_pytest_commands(contributing: str) -> 
     assert required_shell_commands <= set(shell_commands)
     assert "uv run python scripts/sync_repo_graph_contract.py" in code_spans
     assert "uv run python scripts/render_public_surface.py" in code_spans
+    assert "uv run python scripts/render_help_surface.py" in code_spans
+    assert "uv run python scripts/render_bootstrap_installer_metadata.py" in code_spans
     assert "-n 0" in code_spans
     assert "uv run pytest tests/ -q" in code_spans
     assert "tests/ci_sharding.py" in code_spans
     assert f"{CI_FULL_SUITE_SHARD_BUDGET_SECONDS} second per-shard budget" in contributing
-    assert (
-        'uv run pytest -q --durations=20 --durations-min=1.0 "${PYTEST_TARGETS[@]}"'
-        in contributing
-    )
+    assert 'uv run pytest -q --durations=20 --durations-min=1.0 "${PYTEST_TARGETS[@]}"' in contributing
     assert "complementary_heavy_suite_ignore_args" not in contributing
     assert "HEAVY_SUITE_IGNORE_ARGS" not in contributing
     assert "--full-suite" not in contributing

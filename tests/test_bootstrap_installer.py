@@ -623,6 +623,7 @@ def _run_bootstrap_with_fake_python(
     *,
     installer_args: list[str] | None = None,
     extra_env: dict[str, str] | None = None,
+    metadata_payload: dict[str, object] | None = None,
     python_versions: dict[str, str] | None = None,
     precreate_managed_version: str | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
@@ -671,6 +672,12 @@ def _run_bootstrap_with_fake_python(
     env["GPD_BOOTSTRAP_DISABLE_NETWORK_PROBES"] = "1"
     env["PATH"] = os.pathsep.join([str(local_bin), str(fake_bin)])
     env.update(_BOOTSTRAP_INSTALLER_METADATA_ENV)
+    if metadata_payload is not None:
+        env[_BOOTSTRAP_INSTALLER_METADATA_JSON_ENV] = json.dumps(
+            metadata_payload,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
     if extra_env:
         env.update(extra_env)
 
@@ -811,6 +818,61 @@ assert.throws(
   () => validateBootstrapInstallerMetadata(missingConfigDir),
   /bootstrap installer metadata\\.runtimes\\[0\\] is missing required key\\(s\\): config_dir_name/
 );
+"""
+    )
+
+    assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
+
+
+def test_bootstrap_installer_metadata_validator_checks_python_compatibility_fields() -> None:
+    result = _run_node_contract_validation(
+        r"""
+const assert = require("node:assert/strict");
+const { validateBootstrapInstallerMetadata } = require("./bin/install.js");
+const metadata = JSON.parse(process.env.GPD_BOOTSTRAP_TEST_INSTALLER_METADATA_JSON);
+
+const cases = [
+  [
+    "unknown key",
+    (candidate) => { candidate.python_compatibility.extraUnexpectedKey = true; },
+    /bootstrap installer metadata\.python_compatibility contains unknown key\(s\): extraUnexpectedKey/,
+  ],
+  [
+    "missing floor",
+    (candidate) => { delete candidate.python_compatibility.minimum_supported_python; },
+    /bootstrap installer metadata\.python_compatibility is missing required key\(s\): minimum_supported_python/,
+  ],
+  [
+    "bad label",
+    (candidate) => { candidate.python_compatibility.minimum_supported_python_label = "3.10"; },
+    /bootstrap installer metadata\.python_compatibility\.minimum_supported_python_label must match minimum_supported_python/,
+  ],
+  [
+    "duplicate preferred minor",
+    (candidate) => { candidate.python_compatibility.preferred_versioned_python_minors = [13, 13, 11]; },
+    /bootstrap installer metadata\.python_compatibility\.preferred_versioned_python_minors must not contain duplicate values/,
+  ],
+  [
+    "unsupported preferred minor",
+    (candidate) => { candidate.python_compatibility.preferred_versioned_python_minors = [10, 12, 11]; },
+    /bootstrap installer metadata\.python_compatibility\.preferred_versioned_python_minors\[0\] must be >= minimum_supported_python\.minor/,
+  ],
+  [
+    "recommended mismatch",
+    (candidate) => { candidate.python_compatibility.recommended_python_version.minor = 12; },
+    /bootstrap installer metadata\.python_compatibility\.recommended_python_version\.minor must match the first preferred_versioned_python_minors entry/,
+  ],
+];
+
+for (const [label, mutate, expectedError] of cases) {
+  const candidate = JSON.parse(JSON.stringify(metadata));
+  mutate(candidate);
+  assert.throws(
+    () => validateBootstrapInstallerMetadata(candidate),
+    expectedError,
+    `${label} metadata should reject invalid Python compatibility`
+  );
+}
 """
     )
 
@@ -1933,7 +1995,11 @@ def test_bootstrap_falls_back_to_tag_git_when_tag_archive_install_fails(tmp_path
         TAG_ARCHIVE_SPEC,
         TAG_HTTPS_GIT_SPEC,
     ]
-    _assert_public(result.stdout, "bootstrap PyPI fallback to GitHub source", "PyPI install failed. Falling back to GitHub source...")
+    _assert_public(
+        result.stdout,
+        "bootstrap PyPI fallback to GitHub source",
+        "PyPI install failed. Falling back to GitHub source...",
+    )
     assert (
         f"GitHub source archive for v{PYTHON_PACKAGE_VERSION} failed. Falling back to HTTPS git checkout for v{PYTHON_PACKAGE_VERSION}..."
         in result.stdout
@@ -1973,7 +2039,11 @@ def test_bootstrap_prefers_preflighted_tag_git_candidate_when_tag_archive_is_ina
 
     assert managed_pip_targets == [PYPI_SPEC, TAG_HTTPS_GIT_SPEC]
     combined_output = result.stdout + result.stderr
-    _assert_public(combined_output, "bootstrap preflighted tag git PyPI fallback", "PyPI install failed. Falling back to GitHub source...")
+    _assert_public(
+        combined_output,
+        "bootstrap preflighted tag git PyPI fallback",
+        "PyPI install failed. Falling back to GitHub source...",
+    )
     assert (
         f"Detected that GitHub source archive for v{PYTHON_PACKAGE_VERSION} is unavailable: HTTP 404."
         in combined_output
@@ -2126,6 +2196,42 @@ def test_bootstrap_prefers_versioned_python_when_generic_alias_is_newer(tmp_path
     assert venv_creations[0]["exe"].endswith("python3.13")
     assert "Found Python 3.13.2" in result.stdout
     assert "Found Python 3.14.3" not in result.stdout
+
+
+@pytest.mark.skipif(os.name == "nt", reason="bootstrap installer harness uses POSIX-style fake Python shims")
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is required for bootstrap installer tests")
+def test_bootstrap_preferred_interpreter_selection_comes_from_generated_metadata(tmp_path: Path) -> None:
+    metadata_payload = json.loads(json.dumps(_BOOTSTRAP_INSTALLER_METADATA_PAYLOAD))
+    python_compatibility = metadata_payload["python_compatibility"]
+    assert isinstance(python_compatibility, dict)
+    minimum_supported_python = python_compatibility["minimum_supported_python"]
+    assert isinstance(minimum_supported_python, dict)
+    assert minimum_supported_python["major"] == 3
+    python_compatibility["preferred_versioned_python_minors"] = [12, 13, minimum_supported_python["minor"]]
+    python_compatibility["recommended_python_version"] = {"major": 3, "minor": 12}
+
+    result, _, log_path = _run_bootstrap_with_fake_python(
+        tmp_path,
+        metadata_payload=metadata_payload,
+        python_versions={
+            "python3.13": "Python 3.13.2",
+            "python3.12": "Python 3.12.9",
+            "python3": "Python 3.13.2",
+            "python": "Python 3.13.2",
+        },
+    )
+
+    assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
+
+    entries = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
+    venv_creations = [
+        entry for entry in entries if entry["argv"][:2] == ["-m", "venv"] and entry["argv"] != ["-m", "venv", "--help"]
+    ]
+
+    assert len(venv_creations) == 1
+    assert venv_creations[0]["exe"].endswith("python3.12")
+    assert "Found Python 3.12.9" in result.stdout
+    assert "Found Python 3.13.2" not in result.stdout
 
 
 @pytest.mark.skipif(os.name == "nt", reason="bootstrap installer harness uses POSIX-style fake Python shims")

@@ -4,6 +4,12 @@ import hashlib
 import json
 from dataclasses import asdict
 
+from gpd._python_compat import (
+    MIN_SUPPORTED_PYTHON,
+    MIN_SUPPORTED_PYTHON_LABEL,
+    PREFERRED_VERSIONED_PYTHON_MINORS,
+    RECOMMENDED_PYTHON_VERSION,
+)
 from gpd.adapters.runtime_catalog import iter_runtime_descriptors
 from gpd.core.public_surface_contract import load_public_surface_contract
 from scripts.render_bootstrap_installer_metadata import (
@@ -24,8 +30,32 @@ def test_bootstrap_installer_metadata_is_current() -> None:
 
     assert check_installer_metadata() == ()
     assert metadata == build_installer_metadata()
-    assert list(metadata) == ["schema_version", "source_hashes", "runtimes", "shared_public_surface_text"]
+    assert list(metadata) == [
+        "schema_version",
+        "source_hashes",
+        "python_compatibility",
+        "runtimes",
+        "shared_public_surface_text",
+    ]
     assert metadata["schema_version"] == 1
+
+
+def test_bootstrap_installer_python_compatibility_metadata_matches_source_of_truth() -> None:
+    metadata = _load_metadata()
+
+    assert metadata["python_compatibility"] == {
+        "schema_version": 1,
+        "minimum_supported_python": {
+            "major": MIN_SUPPORTED_PYTHON[0],
+            "minor": MIN_SUPPORTED_PYTHON[1],
+        },
+        "minimum_supported_python_label": MIN_SUPPORTED_PYTHON_LABEL,
+        "preferred_versioned_python_minors": list(PREFERRED_VERSIONED_PYTHON_MINORS),
+        "recommended_python_version": {
+            "major": RECOMMENDED_PYTHON_VERSION[0],
+            "minor": RECOMMENDED_PYTHON_VERSION[1],
+        },
+    }
 
 
 def test_bootstrap_installer_metadata_source_hashes_match_checked_in_sources() -> None:

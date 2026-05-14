@@ -12,6 +12,7 @@ import subprocess
 import tarfile
 import tomllib
 import zipfile
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -124,6 +125,64 @@ def _python_release_version(repo_root: Path) -> str:
 
     assert package_version == python_version == pyproject_version
     return pyproject_version
+
+
+def _project_table(repo_root: Path) -> dict[str, object]:
+    project = tomllib.loads((repo_root / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    assert isinstance(project, dict)
+    return project
+
+
+def _project_url(project: dict[str, object], label: str) -> str:
+    urls = project.get("urls")
+    assert isinstance(urls, dict)
+    url = urls.get(label)
+    assert isinstance(url, str)
+    return url
+
+
+def _project_author_name(project: dict[str, object]) -> str:
+    authors = project.get("authors")
+    assert isinstance(authors, list) and len(authors) == 1
+    author = authors[0]
+    assert isinstance(author, dict)
+    name = author.get("name")
+    assert isinstance(name, str)
+    return name
+
+
+def _project_keywords(project: dict[str, object]) -> list[str]:
+    keywords = project.get("keywords")
+    assert isinstance(keywords, list)
+    assert all(isinstance(keyword, str) for keyword in keywords)
+    return keywords
+
+
+def _project_spdx_license(project: dict[str, object]) -> str:
+    classifiers = project.get("classifiers")
+    assert project.get("license") == {"file": "LICENSE"}
+    assert isinstance(classifiers, list)
+    assert "License :: OSI Approved :: Apache Software License" in classifiers
+    return "Apache-2.0"
+
+
+def _package_json_metadata(repo_root: Path) -> dict[str, object]:
+    package_json = json.loads((repo_root / "package.json").read_text(encoding="utf-8"))
+    assert isinstance(package_json, dict)
+    return package_json
+
+
+def _citation_metadata(repo_root: Path) -> dict[str, object]:
+    citation = yaml.safe_load((repo_root / "CITATION.cff").read_text(encoding="utf-8"))
+    assert isinstance(citation, dict)
+    return citation
+
+
+def _citation_release_date(citation: dict[str, object]) -> str:
+    release_date = citation.get("date-released")
+    assert isinstance(release_date, str)
+    assert date.fromisoformat(release_date).isoformat() == release_date
+    return release_date
 
 
 def _uv_lock_editable_package(repo_root: Path) -> dict[str, object]:
@@ -418,9 +477,9 @@ def test_required_public_release_artifacts_exist() -> None:
 
 def test_public_citation_metadata_uses_iso_release_date() -> None:
     repo_root = _repo_root()
-    citation = (repo_root / "CITATION.cff").read_text(encoding="utf-8")
+    citation = _citation_metadata(repo_root)
 
-    assert re.search(r"^date-released: '\d{4}-\d{2}-\d{2}'$", citation, re.M)
+    _citation_release_date(citation)
 
 
 def test_bug_report_template_asks_for_current_version_without_stale_placeholder() -> None:
@@ -438,12 +497,46 @@ def test_bug_report_template_asks_for_current_version_without_stale_placeholder(
 def test_public_citation_and_readme_versions_match_release_version() -> None:
     repo_root = _repo_root()
     version = _python_release_version(repo_root)
-    citation = (repo_root / "CITATION.cff").read_text(encoding="utf-8")
+    citation = _citation_metadata(repo_root)
     readme = (repo_root / "README.md").read_text(encoding="utf-8")
 
-    assert f"version: {version}" in citation
+    assert citation["version"] == version
     assert f"version = {{{version}}}" in readme
     assert f"(Version {version})" in readme
+
+
+def test_public_package_json_identity_fields_are_derived_from_pyproject() -> None:
+    repo_root = _repo_root()
+    project = _project_table(repo_root)
+    package_json = _package_json_metadata(repo_root)
+
+    repository_url = _project_url(project, "Repository").rstrip("/")
+    project_author = _project_author_name(project)
+
+    assert package_json["name"] == project["name"]
+    assert package_json["version"] == project["version"]
+    assert package_json["gpdPythonVersion"] == project["version"]
+    assert package_json["repository"] == {"type": "git", "url": f"git+{repository_url}.git"}
+    assert package_json["homepage"] == _project_url(project, "Documentation")
+    assert package_json["bugs"] == {"url": _project_url(project, "Issues")}
+    assert package_json["keywords"] == _project_keywords(project)
+    assert package_json["license"] == _project_spdx_license(project)
+    assert isinstance(package_json["author"], str)
+    assert package_json["author"].startswith(project_author)
+
+
+def test_public_citation_identity_fields_are_derived_from_pyproject() -> None:
+    repo_root = _repo_root()
+    project = _project_table(repo_root)
+    citation = _citation_metadata(repo_root)
+    project_author = _project_author_name(project)
+    citation_authors = citation.get("authors")
+
+    assert citation["version"] == project["version"]
+    assert citation["repository-code"] == _project_url(project, "Repository")
+    assert citation["license"] == _project_spdx_license(project)
+    assert citation_authors == [{"name": project_author, "affiliation": project_author}]
+    _citation_release_date(citation)
 
 
 def test_uv_lock_matches_release_version() -> None:
@@ -476,12 +569,10 @@ def test_installed_prompt_sources_do_not_pin_release_version_literals() -> None:
 
 def test_public_readme_citation_year_matches_citation_release_date() -> None:
     repo_root = _repo_root()
-    citation = (repo_root / "CITATION.cff").read_text(encoding="utf-8")
+    citation = _citation_metadata(repo_root)
     readme = (repo_root / "README.md").read_text(encoding="utf-8")
 
-    match = re.search(r"^date-released: '(\d{4})-\d{2}-\d{2}'$", citation, re.M)
-    assert match is not None
-    release_year = match.group(1)
+    release_year = _citation_release_date(citation).split("-", 1)[0]
 
     assert f"year = {{{release_year}}}" in readme
     assert f"Physical Superintelligence PBC ({release_year}). Get Physics Done (GPD)" in readme
@@ -490,14 +581,15 @@ def test_public_readme_citation_year_matches_citation_release_date() -> None:
 def test_public_metadata_records_psi_affiliation() -> None:
     repo_root = _repo_root()
 
-    citation = (repo_root / "CITATION.cff").read_text(encoding="utf-8")
+    citation = _citation_metadata(repo_root)
     contributing = (repo_root / "CONTRIBUTING.md").read_text(encoding="utf-8")
-    pyproject = tomllib.loads((repo_root / "pyproject.toml").read_text(encoding="utf-8"))
+    project = _project_table(repo_root)
+    project_author = _project_author_name(project)
 
-    assert 'affiliation: "Physical Superintelligence PBC"' in citation
+    assert citation["authors"] == [{"name": project_author, "affiliation": project_author}]
     assert "Physical Superintelligence PBC (PSI)" in contributing
-    assert pyproject["project"]["authors"] == [{"name": "Physical Superintelligence PBC"}]
-    assert pyproject["project"]["maintainers"] == [{"name": "Physical Superintelligence PBC"}]
+    assert project["authors"] == [{"name": "Physical Superintelligence PBC"}]
+    assert project["maintainers"] == [{"name": "Physical Superintelligence PBC"}]
 
 
 def test_contributor_docs_describe_gemini_completion_at_cli_boundary() -> None:
@@ -787,6 +879,12 @@ def test_merge_gate_workflow_uses_main_branch_pytest_on_python_floor() -> None:
     compatibility_job = workflow_job(workflow_data, "python-compatibility")
     ruff_repo_graph_step = workflow_step_by_name(workflow_data, "ruff", "Check repo graph generated artifacts")
     ruff_public_surface_step = workflow_step_by_name(workflow_data, "ruff", "Check public surface generated artifacts")
+    ruff_help_surface_step = workflow_step_by_name(workflow_data, "ruff", "Check help surface generated artifacts")
+    ruff_bootstrap_metadata_step = workflow_step_by_name(
+        workflow_data,
+        "ruff",
+        "Check bootstrap installer metadata generated artifacts",
+    )
     pytest_python_step = workflow_step_by_name(workflow_data, "pytest", "Set up Python")
     pytest_uv_step = workflow_step_by_name(workflow_data, "pytest", "Set up uv")
     compatibility_console_step = workflow_step_by_name(workflow_data, "python-compatibility", "Smoke console script")
@@ -814,6 +912,8 @@ def test_merge_gate_workflow_uses_main_branch_pytest_on_python_floor() -> None:
     assert_setup_uv_step_pins_expected_version(pytest_uv_step, context="test.yml pytest Set up uv")
     assert ruff_repo_graph_step["run"] == "uv run python scripts/sync_repo_graph_contract.py --check"
     assert ruff_public_surface_step["run"] == "uv run python scripts/render_public_surface.py --check"
+    assert ruff_help_surface_step["run"] == "uv run python scripts/render_help_surface.py --check"
+    assert ruff_bootstrap_metadata_step["run"] == "uv run python scripts/render_bootstrap_installer_metadata.py --check"
     _assert_machine_fragments(pyproject, "pytest default xdist policy", 'addopts = "-n auto --dist=worksteal"')
 
     # Staging rebuild trigger lives in a separate workflow (staging-rebuild.yml)

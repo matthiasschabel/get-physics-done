@@ -44,11 +44,6 @@ const INSTALL_CANDIDATE_PROBE_TIMEOUT_MS = 5000;
 const INSTALL_CANDIDATE_PROBE_REDIRECT_LIMIT = 5;
 const MIN_SUPPORTED_NODE_MAJOR = 20;
 const MIN_SUPPORTED_NODE_LABEL = `${MIN_SUPPORTED_NODE_MAJOR}+`;
-const MIN_SUPPORTED_PYTHON_MAJOR = 3;
-const MIN_SUPPORTED_PYTHON_MINOR = 11;
-const MIN_SUPPORTED_PYTHON_LABEL = `${MIN_SUPPORTED_PYTHON_MAJOR}.${MIN_SUPPORTED_PYTHON_MINOR}+`;
-// Keep this in sync with gpd._python_compat.PREFERRED_VERSIONED_PYTHON_MINORS.
-const PREFERRED_VERSIONED_PYTHON_MINORS = [13, 12, MIN_SUPPORTED_PYTHON_MINOR];
 
 const red = "\x1b[31m";
 const green = "\x1b[32m";
@@ -191,6 +186,35 @@ function requireStrictInteger(value, label) {
   return value;
 }
 
+function requireNonNegativeInteger(value, label) {
+  const integer = requireStrictInteger(value, label);
+  if (integer < 0) {
+    throw new Error(`${label} must be a non-negative integer`);
+  }
+  return integer;
+}
+
+function requireStrictIntegerList(value, label, { allowEmpty = false } = {}) {
+  if (!Array.isArray(value)) {
+    throw new Error(`${label} must be a list of integers`);
+  }
+  if (value.length === 0 && !allowEmpty) {
+    throw new Error(`${label} must contain at least one integer`);
+  }
+
+  const seen = new Set();
+  const items = [];
+  for (const [index, item] of value.entries()) {
+    const integer = requireStrictInteger(item, `${label}[${index}]`);
+    if (seen.has(integer)) {
+      throw new Error(`${label} must not contain duplicate values`);
+    }
+    seen.add(integer);
+    items.push(integer);
+  }
+  return items;
+}
+
 function requireKnownKeys(payload, allowedKeys, label) {
   const unknownKeys = Object.keys(payload).filter((key) => !allowedKeys.has(key));
   if (unknownKeys.length > 0) {
@@ -309,6 +333,82 @@ function validateSourceHashes(sourceHashes, options = {}) {
     validated[normalizedSourcePath] = expectedHash;
   }
   return validated;
+}
+
+function validatePythonVersionMetadata(version, label) {
+  const payload = requireJsonObject(version, label);
+  const keys = ["major", "minor"];
+  requireKnownKeys(payload, new Set(keys), label);
+  requirePresentKeys(payload, keys, label);
+  const major = requireNonNegativeInteger(payload.major, `${label}.major`);
+  const minor = requireNonNegativeInteger(payload.minor, `${label}.minor`);
+  return { major, minor };
+}
+
+function validatePythonCompatibilityMetadata(pythonCompatibility) {
+  const label = "bootstrap installer metadata.python_compatibility";
+  const payload = requireJsonObject(pythonCompatibility, label);
+  const keys = [
+    "schema_version",
+    "minimum_supported_python",
+    "minimum_supported_python_label",
+    "preferred_versioned_python_minors",
+    "recommended_python_version",
+  ];
+  requireKnownKeys(payload, new Set(keys), label);
+  requirePresentKeys(payload, keys, label);
+  if (payload.schema_version !== 1) {
+    throw new Error(`Unsupported bootstrap Python compatibility schema_version: ${JSON.stringify(payload.schema_version)}`);
+  }
+
+  const minimumSupportedPython = validatePythonVersionMetadata(
+    payload.minimum_supported_python,
+    `${label}.minimum_supported_python`
+  );
+  const minimumSupportedPythonLabel = requireStrictString(
+    payload.minimum_supported_python_label,
+    `${label}.minimum_supported_python_label`
+  );
+  const expectedMinimumLabel = `${minimumSupportedPython.major}.${minimumSupportedPython.minor}`;
+  if (minimumSupportedPythonLabel !== expectedMinimumLabel) {
+    throw new Error(
+      `${label}.minimum_supported_python_label must match minimum_supported_python (${expectedMinimumLabel})`
+    );
+  }
+
+  const preferredVersionedPythonMinors = requireStrictIntegerList(
+    payload.preferred_versioned_python_minors,
+    `${label}.preferred_versioned_python_minors`
+  );
+  for (const [index, minor] of preferredVersionedPythonMinors.entries()) {
+    if (minor < minimumSupportedPython.minor) {
+      throw new Error(
+        `${label}.preferred_versioned_python_minors[${index}] must be >= minimum_supported_python.minor`
+      );
+    }
+  }
+  if (!preferredVersionedPythonMinors.includes(minimumSupportedPython.minor)) {
+    throw new Error(`${label}.preferred_versioned_python_minors must include minimum_supported_python.minor`);
+  }
+
+  const recommendedPythonVersion = validatePythonVersionMetadata(
+    payload.recommended_python_version,
+    `${label}.recommended_python_version`
+  );
+  if (recommendedPythonVersion.major !== minimumSupportedPython.major) {
+    throw new Error(`${label}.recommended_python_version.major must match minimum_supported_python.major`);
+  }
+  if (recommendedPythonVersion.minor !== preferredVersionedPythonMinors[0]) {
+    throw new Error(`${label}.recommended_python_version.minor must match the first preferred_versioned_python_minors entry`);
+  }
+
+  return {
+    schemaVersion: 1,
+    minimumSupportedPython,
+    minimumSupportedPythonLabel,
+    preferredVersionedPythonMinors,
+    recommendedPythonVersion,
+  };
 }
 
 function validateRuntimeCatalogGlobalConfigMetadata(globalConfig, label) {
@@ -672,12 +772,12 @@ function validateBootstrapInstallerMetadata(metadataPayload, options = {}) {
   const payload = requireJsonObject(metadataPayload, "bootstrap installer metadata");
   requireKnownKeys(
     payload,
-    new Set(["schema_version", "source_hashes", "runtimes", "shared_public_surface_text"]),
+    new Set(["schema_version", "source_hashes", "python_compatibility", "runtimes", "shared_public_surface_text"]),
     "bootstrap installer metadata"
   );
   requirePresentKeys(
     payload,
-    ["schema_version", "source_hashes", "runtimes", "shared_public_surface_text"],
+    ["schema_version", "source_hashes", "python_compatibility", "runtimes", "shared_public_surface_text"],
     "bootstrap installer metadata"
   );
   if (payload.schema_version !== 1) {
@@ -687,6 +787,7 @@ function validateBootstrapInstallerMetadata(metadataPayload, options = {}) {
   return {
     schemaVersion: 1,
     sourceHashes: validateSourceHashes(payload.source_hashes, options),
+    pythonCompatibility: validatePythonCompatibilityMetadata(payload.python_compatibility),
     runtimes: validateRuntimeMetadataList(payload.runtimes),
     sharedPublicSurfaceText: validateSharedPublicSurfaceTextMetadata(payload.shared_public_surface_text),
   };
@@ -701,6 +802,11 @@ function cloneJson(value) {
 }
 
 const BOOTSTRAP_INSTALLER_METADATA = loadBootstrapInstallerMetadata();
+const PYTHON_COMPATIBILITY = BOOTSTRAP_INSTALLER_METADATA.pythonCompatibility;
+const MIN_SUPPORTED_PYTHON_MAJOR = PYTHON_COMPATIBILITY.minimumSupportedPython.major;
+const MIN_SUPPORTED_PYTHON_MINOR = PYTHON_COMPATIBILITY.minimumSupportedPython.minor;
+const MIN_SUPPORTED_PYTHON_LABEL = `${PYTHON_COMPATIBILITY.minimumSupportedPythonLabel}+`;
+const PREFERRED_VERSIONED_PYTHON_MINORS = PYTHON_COMPATIBILITY.preferredVersionedPythonMinors;
 RUNTIME_CATALOG = BOOTSTRAP_INSTALLER_METADATA.runtimes;
 ALL_RUNTIMES = RUNTIME_CATALOG.map((runtime) => runtime.runtime_name);
 RUNTIME_BY_NAME = Object.fromEntries(RUNTIME_CATALOG.map((runtime) => [runtime.runtime_name, runtime]));
@@ -838,8 +944,8 @@ function isSupportedPython(info) {
 
 function preferredPythonCommands() {
   return [
-    ...PREFERRED_VERSIONED_PYTHON_MINORS.map((minor) => `python3.${minor}`),
-    "python3",
+    ...PREFERRED_VERSIONED_PYTHON_MINORS.map((minor) => `python${MIN_SUPPORTED_PYTHON_MAJOR}.${minor}`),
+    `python${MIN_SUPPORTED_PYTHON_MAJOR}`,
     "python",
   ];
 }

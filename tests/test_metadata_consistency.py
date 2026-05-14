@@ -218,17 +218,22 @@ def test_python_floor_is_consistent_across_install_surfaces() -> None:
 
     readme = _read("README.md")
     installer = _read("bin/install.js")
-    installer_preferred_minors = _installer_preferred_python_minors(installer)
+    installer_metadata = json.loads(_read("src/gpd/bootstrap/installer_metadata.json"))
+    python_compatibility = installer_metadata["python_compatibility"]
+    installer_floor = python_compatibility["minimum_supported_python"]
+    installer_recommended = python_compatibility["recommended_python_version"]
+    installer_preferred_minors = tuple(python_compatibility["preferred_versioned_python_minors"])
 
     assert f"Python {MIN_SUPPORTED_PYTHON_LABEL}+" in readme
     assert CORE_RECOMMENDED_PYTHON_VERSION == RECOMMENDED_PYTHON_VERSION
-    assert _installer_js_int_constant(installer, "MIN_SUPPORTED_PYTHON_MAJOR") == MIN_SUPPORTED_PYTHON[0]
-    assert _installer_js_int_constant(installer, "MIN_SUPPORTED_PYTHON_MINOR") == MIN_SUPPORTED_PYTHON[1]
+    assert installer_floor == {"major": MIN_SUPPORTED_PYTHON[0], "minor": MIN_SUPPORTED_PYTHON[1]}
+    assert python_compatibility["minimum_supported_python_label"] == MIN_SUPPORTED_PYTHON_LABEL
     assert installer_preferred_minors == PREFERRED_VERSIONED_PYTHON_MINORS
-    assert installer_preferred_minors[0] == RECOMMENDED_PYTHON_VERSION[1]
+    assert installer_recommended == {"major": RECOMMENDED_PYTHON_VERSION[0], "minor": RECOMMENDED_PYTHON_VERSION[1]}
     assert MIN_SUPPORTED_PYTHON[1] in installer_preferred_minors
     assert "Python 3.11+ is required" not in installer
     assert "Python ${MIN_SUPPORTED_PYTHON_LABEL} is required" in installer
+    assert "BOOTSTRAP_INSTALLER_METADATA.pythonCompatibility" in installer
     assert "preferredPythonCommands" in installer
 
 
@@ -236,13 +241,12 @@ def test_public_package_keywords_do_not_hand_maintain_runtime_names() -> None:
     project = tomllib.loads(_read("pyproject.toml"))["project"]
     package_json = json.loads(_read("package.json"))
     runtime_keyword_forms = _runtime_metadata_keyword_forms()
+    metadata_keywords = _metadata_keywords(project, package_json)
 
-    for source, keywords in _metadata_keywords(project, package_json).items():
-        leaked = sorted(
-            keyword
-            for keyword in keywords
-            if _metadata_keyword_forms(keyword) & runtime_keyword_forms
-        )
+    assert metadata_keywords["package.json"] == metadata_keywords["pyproject.toml"]
+
+    for source, keywords in metadata_keywords.items():
+        leaked = sorted(keyword for keyword in keywords if _metadata_keyword_forms(keyword) & runtime_keyword_forms)
         assert leaked == [], f"{source} should not hand-maintain runtime catalog names in package keywords"
 
 
@@ -252,7 +256,9 @@ def test_canonical_registry_skill_inventory_counts_match_repo_contents() -> None
     agents_count = len(list((repo_root / "src" / "gpd" / "agents").glob("*.md")))
     content_registry.invalidate_cache()
     canonical_skills_count = len(content_registry.list_skills())
-    mcp_server_count = len([p for p in (repo_root / "src" / "gpd" / "mcp" / "servers").glob("*.py") if p.name != "__init__.py"])
+    mcp_server_count = len(
+        [p for p in (repo_root / "src" / "gpd" / "mcp" / "servers").glob("*.py") if p.name != "__init__.py"]
+    )
     mcp_script_count = sum(1 for line in _project_script_lines(repo_root) if line.startswith('"gpd-mcp-'))
     managed_integration_script_count = sum(
         1 for name in _project_script_targets(repo_root) if name == "gpd-mcp-wolfram"
@@ -309,7 +315,9 @@ def test_mcp_server_count_matches_public_entrypoints() -> None:
     from gpd.mcp.managed_integrations import WOLFRAM_BRIDGE_COMMAND
 
     repo_root = _repo_root()
-    mcp_server_count = len([p for p in (repo_root / "src" / "gpd" / "mcp" / "servers").glob("*.py") if p.name != "__init__.py"])
+    mcp_server_count = len(
+        [p for p in (repo_root / "src" / "gpd" / "mcp" / "servers").glob("*.py") if p.name != "__init__.py"]
+    )
     builtin_mcp_script_count = sum(
         1
         for name in _project_script_targets(repo_root)
@@ -483,8 +491,8 @@ def test_branching_strategy_docs_use_canonical_config_literals() -> None:
 
     assert '"branching_strategy": "none" | "per-phase" | "per-milestone"' in settings
     assert 'Git branching approach: `"none"`, `"per-phase"`, or `"per-milestone"`' in planning
-    assert '| `per-phase`     | At `execute-phase` start' in planning
-    assert '| `per-milestone` | At first `execute-phase` of milestone' in planning
+    assert "| `per-phase`     | At `execute-phase` start" in planning
+    assert "| `per-milestone` | At first `execute-phase` of milestone" in planning
     assert "`per-phase` or `per-milestone`: use precomputed `branch_name`" in execute_phase
     assert '**For "per-phase" strategy:**' in complete_milestone
     assert '**For "per-milestone" strategy:**' in complete_milestone
@@ -492,8 +500,8 @@ def test_branching_strategy_docs_use_canonical_config_literals() -> None:
     assert 'if [ "$BRANCHING_STRATEGY" = "per-milestone" ]; then' in complete_milestone
     assert '"branching_strategy": "none" | "phase" | "milestone"' not in settings
     assert 'Git branching approach: `"none"`, `"phase"`, or `"milestone"`' not in planning
-    assert '| `phase`     | At `execute-phase` start' not in planning
-    assert '| `milestone` | At first `execute-phase` of milestone' not in planning
+    assert "| `phase`     | At `execute-phase` start" not in planning
+    assert "| `milestone` | At first `execute-phase` of milestone" not in planning
 
 
 def test_help_and_settings_surface_current_commit_docs_and_review_cadence_shapes() -> None:

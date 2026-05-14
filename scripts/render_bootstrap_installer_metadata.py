@@ -14,6 +14,12 @@ if __package__ in {None, ""}:
     repo_root = Path(__file__).resolve().parent.parent
     sys.path[:0] = [str(repo_root), str(repo_root / "src")]
 
+from gpd._python_compat import (
+    MIN_SUPPORTED_PYTHON,
+    MIN_SUPPORTED_PYTHON_LABEL,
+    PREFERRED_VERSIONED_PYTHON_MINORS,
+    RECOMMENDED_PYTHON_VERSION,
+)
 from gpd.adapters.runtime_catalog import GlobalConfigPolicy, RuntimeDescriptor, iter_runtime_descriptors
 from gpd.core.public_surface_contract import PublicSurfaceContract, load_public_surface_contract
 from scripts.generated_region_support import GeneratedRegionDiff, unified_diff_text, write_stale_check_result
@@ -42,6 +48,21 @@ def _without_none(payload: Mapping[str, object]) -> dict[str, object]:
 
 def _global_config_payload(policy: GlobalConfigPolicy) -> dict[str, object]:
     return _without_none(asdict(policy))
+
+
+def _python_version_payload(version: tuple[int, int]) -> dict[str, int]:
+    major, minor = version
+    return {"major": major, "minor": minor}
+
+
+def _python_compatibility_payload() -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "minimum_supported_python": _python_version_payload(MIN_SUPPORTED_PYTHON),
+        "minimum_supported_python_label": MIN_SUPPORTED_PYTHON_LABEL,
+        "preferred_versioned_python_minors": list(PREFERRED_VERSIONED_PYTHON_MINORS),
+        "recommended_python_version": _python_version_payload(RECOMMENDED_PYTHON_VERSION),
+    }
 
 
 def _runtime_payload(descriptor: RuntimeDescriptor) -> dict[str, object]:
@@ -120,6 +141,7 @@ def build_installer_metadata(*, repo_root: Path = REPO_ROOT) -> dict[str, object
     return {
         "schema_version": 1,
         "source_hashes": _source_hashes(repo_root=repo_root),
+        "python_compatibility": _python_compatibility_payload(),
         "runtimes": [_runtime_payload(descriptor) for descriptor in iter_runtime_descriptors()],
         "shared_public_surface_text": _shared_public_surface_text(load_public_surface_contract()),
     }

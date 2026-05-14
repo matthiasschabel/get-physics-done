@@ -6,6 +6,23 @@
     "src/gpd/core/public_surface_contract.json": "833665c9a43ce0979fd9061edaa22e732042a2847de23129a98116799f149042",
     "src/gpd/core/public_surface_contract_schema.json": "f9605ba3d6c49fce9bc3fd9a3748f0d5eb4ed242d60e4751376de615bbdfbe07"
   },
+  "python_compatibility": {
+    "schema_version": 1,
+    "minimum_supported_python": {
+      "major": 3,
+      "minor": 11
+    },
+    "minimum_supported_python_label": "3.11",
+    "preferred_versioned_python_minors": [
+      13,
+      12,
+      11
+    ],
+    "recommended_python_version": {
+      "major": 3,
+      "minor": 13
+    }
+  },
   "runtimes": [
     {
       "runtime_name": "claude-code",

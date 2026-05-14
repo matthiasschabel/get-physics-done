@@ -50,6 +50,8 @@ npm_config_cache="$(mktemp -d)" npm pack --dry-run --json
 pre-commit run --all-files
 uv run python scripts/sync_repo_graph_contract.py --check
 uv run python scripts/render_public_surface.py --check
+uv run python scripts/render_help_surface.py --check
+uv run python scripts/render_bootstrap_installer_metadata.py --check
 uv run pytest -n 0 tests/test_metadata_consistency.py -v
 uv run pytest -n 0 tests/test_release_consistency.py -v
 uv run pytest -n 0 tests/adapters/test_registry.py tests/adapters/test_install_roundtrip.py -v
@@ -61,6 +63,10 @@ If the repo graph check reports generated-artifact drift, repair it separately w
 `uv run python scripts/sync_repo_graph_contract.py`, then review and commit the generated changes.
 If the public surface check reports generated-region drift, repair it separately with
 `uv run python scripts/render_public_surface.py`, then review and commit the generated changes.
+If the help surface check reports generated-region drift, repair it separately with
+`uv run python scripts/render_help_surface.py`, then review and commit the generated changes.
+If the bootstrap installer metadata check reports generated-artifact drift, repair it separately with
+`uv run python scripts/render_bootstrap_installer_metadata.py`, then review and commit the generated changes.
 
 Focused single-file and small targeted checks use `-n 0` so they do not pay xdist startup cost from the global default. `uv run pytest tests/ -q` is the fast local full checked-in suite. GitHub Actions runs the same suite as category-named shards resolved by `tests/ci_sharding.py`; each shard runs `uv run pytest -q --durations=20 --durations-min=1.0 "${PYTEST_TARGETS[@]}"` with a 180 second per-shard budget.
 

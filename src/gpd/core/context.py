@@ -13,14 +13,11 @@ import logging
 import re
 import shlex
 from collections.abc import Mapping
-from datetime import UTC, date, datetime
-from enum import StrEnum
+from datetime import UTC, datetime
 from pathlib import Path
 
 from pydantic import ValidationError as PydanticValidationError
 
-from gpd.adapters.install_utils import GPD_INSTALL_DIR_NAME
-from gpd.adapters.runtime_catalog import iter_runtime_descriptors
 from gpd.contracts import (
     CONTRACT_CONTEXT_INTAKE_FIELD_NAMES,
     ConventionLock,
@@ -35,7 +32,6 @@ from gpd.core.constants import (
     AGENT_ID_FILENAME,
     CONFIG_FILENAME,
     CONTEXT_SUFFIX,
-    ENV_GPD_ACTIVE_RUNTIME,
     MILESTONES_DIR_NAME,
     MILESTONES_FILENAME,
     PHASES_DIR_NAME,
@@ -57,6 +53,38 @@ from gpd.core.constants import (
     VALIDATION_SUFFIX,
     VERIFICATION_SUFFIX,
     ProjectLayout,
+)
+from gpd.core.context_roots import (
+    InitRootPolicy,
+    _detect_platform,
+    _path_exists,
+    _resolve_project_scoped_cwd,
+    _start_folder_state,
+    _workspace_start_classifier_context,
+)
+from gpd.core.context_roots import (
+    _resolve_cwd_for_root_policy as _resolve_cwd_for_root_policy,
+)
+from gpd.core.context_roots import (
+    _resolve_workspace_locked_cwd as _resolve_workspace_locked_cwd,
+)
+from gpd.core.context_scan import (
+    _discover_research_file_samples as _discover_research_file_samples,
+)
+from gpd.core.context_scan import (
+    _ignore_dirs as _ignore_dirs,
+)
+from gpd.core.context_scan import (
+    _research_scan_max_depth_for_directory as _research_scan_max_depth_for_directory,
+)
+from gpd.core.context_scan import (
+    _runtime_config_dirs as _runtime_config_dirs,
+)
+from gpd.core.context_scan import (
+    _runtime_ignored_scan_paths as _runtime_ignored_scan_paths,
+)
+from gpd.core.context_scan import (
+    _should_skip_research_scan_entry as _should_skip_research_scan_entry,
 )
 from gpd.core.context_staged_providers import (
     assembly_context_provider as _staged_assembly_context_provider,
@@ -81,6 +109,19 @@ from gpd.core.context_staged_providers import (
 )
 from gpd.core.context_staged_providers import (
     selected_fields_provider as _staged_selected_fields_provider,
+)
+from gpd.core.context_todos import (
+    _extract_frontmatter_field,
+    _read_todo_frontmatter,
+)
+from gpd.core.context_todos import (
+    _looks_like_todo_frontmatter_candidate as _looks_like_todo_frontmatter_candidate,
+)
+from gpd.core.context_todos import (
+    _normalize_todo_frontmatter_text as _normalize_todo_frontmatter_text,
+)
+from gpd.core.context_todos import (
+    _normalize_todo_metadata_value as _normalize_todo_metadata_value,
 )
 from gpd.core.continuation import (
     RESUMABLE_SEGMENT_STATUSES,
@@ -145,7 +186,6 @@ from gpd.core.resume_surface import (
 from gpd.core.root_resolution import (
     RootResolutionPolicy,
     resolve_project_roots,
-    resolve_state_json_root,
 )
 from gpd.core.staged_context_fields import (
     ARXIV_SUBMISSION_BOOTSTRAP_FIELDS,
@@ -322,83 +362,6 @@ from gpd.core.write_paper_intake import (
 logger = logging.getLogger(__name__)
 
 
-class InitRootPolicy(StrEnum):
-    """High-level workspace/project policy for init payload assembly."""
-
-    WORKSPACE_LOCKED = "workspace_locked"
-    PROJECT_SCOPED = "project_scoped"
-    PROJECT_REENTRY_ALLOWED = "project_reentry_allowed"
-    CURRENT_WORKSPACE_ONLY = "current_workspace_only"
-
-
-# Research file extensions for project detection.
-_RESEARCH_EXTENSIONS = frozenset(
-    {
-        ".bib",
-        ".c",
-        ".cc",
-        ".cls",
-        ".cpp",
-        ".csv",
-        ".cu",
-        ".cuh",
-        ".cxx",
-        ".dat",
-        ".f",
-        ".f03",
-        ".f08",
-        ".f77",
-        ".f90",
-        ".f95",
-        ".fits",
-        ".for",
-        ".ftn",
-        ".h",
-        ".h5",
-        ".hdf5",
-        ".hh",
-        ".hpp",
-        ".hxx",
-        ".ipynb",
-        ".jl",
-        ".m",
-        ".mat",
-        ".nb",
-        ".npy",
-        ".npz",
-        ".pdf",
-        ".py",
-        ".root",
-        ".sty",
-        ".tex",
-        ".tsv",
-    }
-)
-_RESEARCH_FILE_SAMPLE_LIMIT = 5
-_RESEARCH_SCAN_MAX_DEPTH = 3
-_RESEARCH_FOCUSED_SCAN_MAX_DEPTH = 6
-_RESEARCH_FOCUSED_SCAN_DIR_NAMES = frozenset(
-    {
-        "analysis",
-        "analyses",
-        "bibliography",
-        "code",
-        "data",
-        "datasets",
-        "notebook",
-        "notebooks",
-        "paper",
-        "papers",
-        "refs",
-        "references",
-        "script",
-        "scripts",
-        "simulation",
-        "simulations",
-        "source",
-        "src",
-    }
-)
 _LITERATURE_DIR_NAME = "literature"
 _REFERENCE_MAP_DOCS = ("REFERENCES.md", "VALIDATION.md")
 _LITERATURE_INCLUDE_LIMIT = 2
@@ -468,49 +431,6 @@ _RESEARCH_PHASE_INCLUDE_FILE_FIELDS = {
     "config": "config_content",
     "roadmap": "roadmap_content",
 }
-# Directories to skip when scanning for research files.
-_LEADING_BLANK_LINES_BEFORE_FRONTMATTER_RE = re.compile(r"^(?:[ \t]*\r?\n)+(?=---[ \t]*\r?\n)")
-
-
-def _runtime_config_dirs() -> frozenset[str]:
-    """Return the live runtime config-dir inventory."""
-
-    return frozenset(descriptor.config_dir_name for descriptor in iter_runtime_descriptors())
-
-
-def _runtime_ignored_scan_paths() -> frozenset[tuple[str, ...]]:
-    """Return runtime-owned path suffixes to skip during research scans."""
-
-    return frozenset((descriptor.config_dir_name,) for descriptor in iter_runtime_descriptors())
-
-
-def _ignore_dirs() -> frozenset[str]:
-    """Return directory names excluded from research-file scans."""
-
-    return frozenset(
-        {
-            ".git",
-            PLANNING_DIR_NAME,
-            *_runtime_config_dirs(),
-            ".venv",
-            ".eggs",
-            ".nox",
-            ".tox",
-            ".pytest_cache",
-            ".mypy_cache",
-            ".ruff_cache",
-            ".vscode",
-            ".idea",
-            "build",
-            "cmake-build-debug",
-            "cmake-build-release",
-            "dist",
-            "node_modules",
-            "target",
-            "__pycache__",
-            GPD_INSTALL_DIR_NAME,
-        }
-    )
 
 
 __all__ = [
@@ -537,11 +457,6 @@ __all__ = [
 ]
 
 
-def _path_exists(cwd: Path, target: str) -> bool:
-    """Check if a relative path exists under cwd."""
-    return (cwd / target).exists()
-
-
 def _state_exists(cwd: Path) -> bool:
     """Return whether the project has recoverable state from JSON or STATE.md."""
     layout = ProjectLayout(cwd)
@@ -562,148 +477,6 @@ def _backup_only_state_guidance(cwd: Path) -> str | None:
     if layout.state_json_backup.exists() and not layout.state_json.exists() and not layout.state_md.exists():
         return backup_only_state_guidance()
     return None
-
-
-def _new_project_init_progress_context(cwd: Path) -> dict[str, object]:
-    """Return structured interrupted-initialization routing context."""
-
-    relative_path = f"{PLANNING_DIR_NAME}/init-progress.json"
-    progress_path = cwd / relative_path
-    result: dict[str, object] = {
-        "init_progress_exists": progress_path.exists(),
-        "init_progress_status": "absent",
-        "init_progress_valid": False,
-        "init_progress_corrupt": False,
-        "init_progress_step": None,
-        "init_progress_description": None,
-        "init_progress_path": relative_path,
-    }
-    if not progress_path.exists():
-        return result
-
-    try:
-        raw = progress_path.read_text(encoding="utf-8")
-        payload = json.loads(raw)
-    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
-        result["init_progress_status"] = "corrupt_init_progress"
-        result["init_progress_corrupt"] = True
-        return result
-
-    if not isinstance(payload, Mapping):
-        result["init_progress_status"] = "corrupt_init_progress"
-        result["init_progress_corrupt"] = True
-        return result
-
-    step = payload.get("step")
-    description = payload.get("description")
-    normalized_step = step.strip() if isinstance(step, str) else ""
-    normalized_description = description.strip() if isinstance(description, str) else ""
-    if not normalized_step:
-        result["init_progress_status"] = "corrupt_init_progress"
-        result["init_progress_corrupt"] = True
-        return result
-
-    result.update(
-        {
-            "init_progress_status": "interrupted_init_progress",
-            "init_progress_valid": True,
-            "init_progress_step": normalized_step,
-            "init_progress_description": normalized_description,
-        }
-    )
-    return result
-
-
-def _workspace_start_classifier_context(cwd: Path) -> tuple[Path, Path, dict[str, object]]:
-    """Return the read-only workspace classifier facts shared by start/new-project."""
-
-    requested_cwd = cwd.expanduser().resolve(strict=False)
-    project_cwd = _resolve_workspace_locked_cwd(requested_cwd)
-
-    research_file_samples = _discover_research_file_samples(requested_cwd)
-    has_research_files = bool(research_file_samples)
-    has_research_map = _path_exists(project_cwd, f"{PLANNING_DIR_NAME}/{RESEARCH_MAP_DIR_NAME}")
-
-    has_project_manifest = (
-        _path_exists(requested_cwd, "requirements.txt")
-        or _path_exists(requested_cwd, "pyproject.toml")
-        or _path_exists(requested_cwd, "Makefile")
-        or resolve_current_manuscript_entrypoint(requested_cwd) is not None
-    )
-
-    state_exists, roadmap_exists, project_file_exists = recoverable_project_context(project_cwd)
-    recoverable_project_exists = state_exists or roadmap_exists or project_file_exists
-    partial_project_exists = recoverable_project_exists and not project_file_exists
-    if project_file_exists:
-        project_recovery_status = "initialized"
-    elif recoverable_project_exists:
-        project_recovery_status = "partial"
-    else:
-        project_recovery_status = "none"
-
-    return (
-        requested_cwd,
-        project_cwd,
-        {
-            "project_exists": project_file_exists,
-            "state_exists": state_exists,
-            "roadmap_exists": roadmap_exists,
-            "recoverable_project_exists": recoverable_project_exists,
-            "partial_project_exists": partial_project_exists,
-            "project_recovery_status": project_recovery_status,
-            **_new_project_init_progress_context(project_cwd),
-            "has_research_map": has_research_map,
-            "planning_exists": _path_exists(project_cwd, PLANNING_DIR_NAME),
-            "has_research_files": has_research_files,
-            "research_file_samples": research_file_samples,
-            "has_project_manifest": has_project_manifest,
-            "needs_research_map": (has_research_files or has_project_manifest) and not has_research_map,
-            "has_git": _path_exists(project_cwd, ".git"),
-            "platform": _detect_platform(project_cwd),
-        },
-    )
-
-
-def _start_folder_state(classifier: Mapping[str, object]) -> str:
-    """Return the normalized start-router state for a classifier payload."""
-
-    if classifier.get("project_exists") is True:
-        return "initialized_project"
-    if classifier.get("partial_project_exists") is True or classifier.get("init_progress_exists") is True:
-        return "partial_project"
-    if classifier.get("has_research_map") is True:
-        return "research_map"
-    if classifier.get("needs_research_map") is True:
-        return "existing_research"
-    return "fresh"
-
-
-def _resolve_project_scoped_cwd(cwd: Path) -> Path:
-    """Return the nearest verified current-workspace project root, else the normalized cwd."""
-
-    return _resolve_cwd_for_root_policy(cwd, policy=RootResolutionPolicy.PROJECT_SCOPED)
-
-
-def _resolve_workspace_locked_cwd(cwd: Path) -> Path:
-    """Return the requested workspace unless it is itself a verified GPD root."""
-
-    return _resolve_cwd_for_root_policy(cwd, policy=RootResolutionPolicy.WORKSPACE_LOCKED)
-
-
-def _resolve_cwd_for_root_policy(cwd: Path, *, policy: RootResolutionPolicy) -> Path:
-    """Resolve *cwd* according to one explicit root policy."""
-
-    requested_cwd = cwd.expanduser().resolve(strict=False)
-    resolution = resolve_project_roots(requested_cwd, policy=policy)
-    if resolution is None:
-        return requested_cwd
-    if resolution.has_project_layout:
-        return resolution.project_root
-    if policy == RootResolutionPolicy.PROJECT_SCOPED:
-        state_root = resolve_state_json_root(requested_cwd, policy=policy)
-        if state_root is not None:
-            return state_root
-    return requested_cwd
 
 
 def _structured_state_objects(value: object) -> list[dict[str, object]]:
@@ -946,89 +719,6 @@ def _compute_branch_name(
     return None
 
 
-def _normalize_todo_metadata_value(value: object, *, allow_typed_scalars: bool = False) -> str | None:
-    """Return a normalized todo metadata value from a todo metadata block."""
-    if allow_typed_scalars:
-        if isinstance(value, datetime):
-            return value.isoformat()
-        if isinstance(value, date):
-            return value.isoformat()
-    if not isinstance(value, str):
-        return None
-    val = value.strip()
-    if len(val) >= 2 and val[0] in ('"', "'") and val[-1] == val[0]:
-        val = val[1:-1]
-    return val or None
-
-
-def _normalize_todo_frontmatter_text(content: str) -> str:
-    """Return a todo text view that preserves valid frontmatter after blank lines."""
-    text = content.lstrip("\ufeff")
-    return _LEADING_BLANK_LINES_BEFORE_FRONTMATTER_RE.sub("", text, count=1)
-
-
-def _read_todo_frontmatter(content: str) -> dict[str, object] | None:
-    """Read one todo's YAML frontmatter, returning ``None`` when it is malformed."""
-    text = _normalize_todo_frontmatter_text(content)
-    if not text.startswith("---"):
-        return {}
-
-    from gpd.core.frontmatter import FrontmatterParseError, extract_frontmatter
-
-    try:
-        meta, body = extract_frontmatter(text)
-    except FrontmatterParseError:
-        return None
-    if body == text and _looks_like_todo_frontmatter_candidate(text):
-        return None
-    return meta if isinstance(meta, dict) else {}
-
-
-def _looks_like_todo_frontmatter_candidate(text: str) -> bool:
-    """Return whether a leading ``---`` block appears to be attempted metadata."""
-    lines = text.splitlines()
-    if not lines or lines[0].strip() != "---":
-        return False
-    for raw_line in lines[1:]:
-        stripped = raw_line.strip()
-        if not stripped:
-            return False
-        if stripped == "---":
-            return True
-        return re.fullmatch(r"[A-Za-z0-9_-]+:[ \t]*(.*)", raw_line) is not None
-    return False
-
-
-def _extract_frontmatter_field(
-    content: str,
-    field: str,
-    *,
-    parsed_frontmatter: dict[str, object] | None = None,
-) -> str | None:
-    """Extract a bare field from the leading todo metadata block only."""
-    text = _normalize_todo_frontmatter_text(content)
-
-    if text.startswith("---"):
-        meta = parsed_frontmatter if parsed_frontmatter is not None else _read_todo_frontmatter(text)
-        if not isinstance(meta, dict):
-            return None
-        raw_value = meta.get(field)
-        return _normalize_todo_metadata_value(raw_value, allow_typed_scalars=field == "created")
-
-    for line in text.splitlines():
-        stripped = line.strip()
-        if not stripped:
-            break
-        match = re.fullmatch(r"([A-Za-z0-9_-]+):[ \t]*(.*)", line)
-        if not match:
-            break
-        if match.group(1) != field:
-            continue
-        return _normalize_todo_metadata_value(match.group(2))
-
-    return None
-
-
 def _load_project_contract(cwd: Path) -> tuple[ResearchContract | None, dict[str, object]]:
     """Load the canonical project contract and return load diagnostics."""
     contract, load_info = _state_module._load_project_contract_for_runtime_context(cwd)
@@ -1136,71 +826,6 @@ def _append_unique_strings(target: list[str], values: list[object] | tuple[objec
         text = str(value).strip()
         if text and text not in target:
             target.append(text)
-
-
-def _should_skip_research_scan_entry(cwd: Path, entry: Path) -> bool:
-    """Return whether *entry* should be skipped during research-file discovery."""
-
-    if entry.name in _ignore_dirs():
-        return True
-
-    try:
-        relative_parts = entry.relative_to(cwd).parts
-    except ValueError:
-        return False
-    for ignored_parts in _runtime_ignored_scan_paths():
-        ignored_length = len(ignored_parts)
-        if ignored_length == 0 or len(relative_parts) < ignored_length:
-            continue
-        for offset in range(len(relative_parts) - ignored_length + 1):
-            if relative_parts[offset : offset + ignored_length] == ignored_parts:
-                return True
-    return False
-
-
-def _research_scan_max_depth_for_directory(cwd: Path, directory: Path) -> int:
-    """Return the depth limit for this bounded research-file scan branch."""
-
-    try:
-        relative_parts = directory.relative_to(cwd).parts
-    except ValueError:
-        return _RESEARCH_SCAN_MAX_DEPTH
-    if any(part.casefold() in _RESEARCH_FOCUSED_SCAN_DIR_NAMES for part in relative_parts):
-        return _RESEARCH_FOCUSED_SCAN_MAX_DEPTH
-    return _RESEARCH_SCAN_MAX_DEPTH
-
-
-def _discover_research_file_samples(cwd: Path) -> list[str]:
-    """Return bounded project-relative research-looking file samples."""
-
-    samples: list[str] = []
-
-    def _walk(directory: Path, depth: int) -> None:
-        if (
-            depth > _research_scan_max_depth_for_directory(cwd, directory)
-            or len(samples) >= _RESEARCH_FILE_SAMPLE_LIMIT
-        ):
-            return
-        try:
-            entries = sorted(directory.iterdir())
-        except (PermissionError, FileNotFoundError):
-            return
-        for entry in entries:
-            if len(samples) >= _RESEARCH_FILE_SAMPLE_LIMIT:
-                return
-            if _should_skip_research_scan_entry(cwd, entry):
-                continue
-            if entry.is_dir():
-                _walk(entry, depth + 1)
-            elif entry.is_file() and entry.suffix.lower() in _RESEARCH_EXTENSIONS:
-                try:
-                    sample = entry.relative_to(cwd).as_posix()
-                except ValueError:
-                    sample = entry.as_posix()
-                samples.append(sample)
-
-    _walk(cwd, 0)
-    return sorted(samples)
 
 
 def _reference_identity_tokens(values: list[object]) -> set[str]:
@@ -3556,30 +3181,6 @@ def _try_get_milestone_info(cwd: Path) -> dict:
 
     result = get_milestone_info(cwd)
     return result.model_dump()
-
-
-def _detect_platform(cwd: Path | None = None) -> str:
-    """Detect the active AI runtime, if any."""
-    resolved_cwd = cwd or Path.cwd()
-    resolved_home = Path.home()
-    runtime_unknown = "unknown"
-    try:
-        import os
-
-        from gpd.adapters.runtime_catalog import normalize_runtime_name
-        from gpd.hooks.runtime_detect import RUNTIME_UNKNOWN, detect_runtime_for_gpd_use
-
-        runtime_unknown = RUNTIME_UNKNOWN
-        explicit_override = normalize_runtime_name(os.environ.get(ENV_GPD_ACTIVE_RUNTIME))
-        if explicit_override:
-            return explicit_override
-        detected = detect_runtime_for_gpd_use(cwd=resolved_cwd, home=resolved_home)
-        if isinstance(detected, str) and detected.strip():
-            return detected
-    except Exception:
-        pass
-
-    return runtime_unknown
 
 
 def init_execute_phase(

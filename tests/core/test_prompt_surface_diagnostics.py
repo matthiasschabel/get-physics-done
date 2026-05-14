@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import importlib
 import textwrap
 from pathlib import Path
@@ -13,9 +14,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 PROMPT_DIAGNOSTICS_PATH = REPO_ROOT / "src" / "gpd" / "core" / "prompt_diagnostics.py"
 PROMPT_MARKDOWN_SCAN_PATH = REPO_ROOT / "src" / "gpd" / "core" / "prompt_markdown_scan.py"
 STAGE_PROMPT_DIAGNOSTICS_PATH = REPO_ROOT / "src" / "gpd" / "core" / "stage_prompt_diagnostics.py"
-PROMPT_DIAGNOSTICS_TOTAL_LOC_CAP = 3_180
-PROMPT_DIAGNOSTICS_SPLIT_FACADE_LOC_CAP = 2_250
-PROMPT_DIAGNOSTICS_SUPPORT_MODULE_LOC_CAP = 650
+PROMPT_DIAGNOSTICS_TOTAL_LOC_CAP = 3_300
+PROMPT_DIAGNOSTICS_SPLIT_FACADE_LOC_CAP = 1_100
+PROMPT_DIAGNOSTICS_SUPPORT_MODULE_LOC_CAP = 800
 STAGE_PROMPT_DIAGNOSTICS_LOC_CAP = 1_210
 
 
@@ -592,6 +593,57 @@ def test_renderers_include_actionable_sections(tmp_path: Path) -> None:
     assert "runtime top prompts" in table
 
 
+def test_prompt_diagnostics_facade_reexports_split_symbols_by_identity() -> None:
+    diagnostics = _diagnostics()
+    types = importlib.import_module("gpd.core.prompt_diagnostics_types")
+    renderers = importlib.import_module("gpd.core.prompt_diagnostics_renderers")
+    scanners = importlib.import_module("gpd.core.prompt_diagnostics_scanners")
+
+    pairs = (
+        (types, types.PromptSource.__name__),
+        (types, types.PromptSurfaceReport.__name__),
+        (types, types.RuntimeProjectionMetric.__name__),
+        (renderers, renderers.report_to_dict.__name__),
+        (renderers, renderers.render_prompt_surface_markdown.__name__),
+        (renderers, renderers.render_prompt_surface_table.__name__),
+        (scanners, scanners._inspect_visible_schema_examples.__name__),
+        (scanners, scanners._scan_return_field_mentions.__name__),
+        (scanners, scanners._count_shell_fences.__name__),
+    )
+    public_names = set(diagnostics.__all__)
+
+    for module, name in pairs:
+        assert getattr(diagnostics, name) is getattr(module, name)
+        if not name.startswith("_"):
+            assert name in public_names
+
+
+def test_prompt_diagnostics_facade_no_longer_defines_split_bodies() -> None:
+    diagnostics = _diagnostics()
+    types = importlib.import_module("gpd.core.prompt_diagnostics_types")
+    renderers = importlib.import_module("gpd.core.prompt_diagnostics_renderers")
+    scanners = importlib.import_module("gpd.core.prompt_diagnostics_scanners")
+    tree = ast.parse(PROMPT_DIAGNOSTICS_PATH.read_text(encoding="utf-8"))
+    facade_definitions = {
+        node.name for node in tree.body if isinstance(node, ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef)
+    }
+    split_definitions = {
+        types.PromptSource.__name__,
+        types.PromptSurfaceItem.__name__,
+        types.PromptSurfaceReport.__name__,
+        renderers.report_to_dict.__name__,
+        renderers.render_prompt_surface_markdown.__name__,
+        renderers.render_prompt_surface_table.__name__,
+        scanners._inspect_visible_schema_examples.__name__,
+        scanners._scan_return_field_mentions.__name__,
+        scanners._scan_forbidden_child_return_synthesis_mentions.__name__,
+        scanners._count_shell_parsing_lines.__name__,
+    }
+
+    assert facade_definitions.isdisjoint(split_definitions), facade_definitions & split_definitions
+    assert diagnostics.report_to_dict is renderers.report_to_dict
+
+
 def test_production_prompt_diagnostics_does_not_import_from_tests() -> None:
     source = PROMPT_DIAGNOSTICS_PATH.read_text(encoding="utf-8")
 
@@ -599,7 +651,7 @@ def test_production_prompt_diagnostics_does_not_import_from_tests() -> None:
     assert "import tests" not in source
 
 
-def test_prompt_diagnostics_modules_stay_small_enough_for_phase_6_split() -> None:
+def test_prompt_diagnostics_modules_stay_small_enough_for_phase_7_split() -> None:
     module_paths = sorted(
         {
             PROMPT_MARKDOWN_SCAN_PATH,

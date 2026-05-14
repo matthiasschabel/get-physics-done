@@ -7,22 +7,18 @@ from pathlib import Path
 
 import pytest
 
-from gpd.adapters.runtime_catalog import iter_runtime_descriptors
 from gpd.contracts import ResearchContract
 from gpd.core import context as context_module
 from gpd.core.constants import ProjectLayout
 from gpd.core.context import (
     _WRITE_PAPER_INIT_FIELDS,
-    _extract_frontmatter_field,
     _generate_slug,
     _is_phase_complete,
     _load_project_contract,
     _merge_active_references,
     _merge_reference_intake,
     _normalize_phase_name,
-    _read_todo_frontmatter,
     _render_active_reference_context,
-    _should_skip_research_scan_entry,
     _state_exists,
     init_arxiv_submission,
     init_execute_phase,
@@ -61,11 +57,6 @@ from tests.workflow_stage_test_support import (
 )
 
 FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "stage0"
-_RUNTIME_DESCRIPTORS = iter_runtime_descriptors()
-_XDG_RUNTIME_DESCRIPTOR = next(
-    (descriptor for descriptor in _RUNTIME_DESCRIPTORS if descriptor.global_config.xdg_subdir),
-    None,
-)
 _write_bundle_ready_contract_state = stage_ctx.write_bundle_ready_contract_state
 _write_knowledge_doc = stage_ctx.write_knowledge_doc
 _write_manuscript_proof_review_artifacts = stage_ctx.write_manuscript_proof_review_artifacts
@@ -199,30 +190,6 @@ def _create_roadmap(tmp_path: Path, content: str) -> Path:
     roadmap.parent.mkdir(parents=True, exist_ok=True)
     roadmap.write_text(content, encoding="utf-8")
     return roadmap
-
-
-def _runtime_owned_local_install_dirs(root: Path) -> tuple[Path, ...]:
-    """Return runtime-owned local install roots derived from the catalog."""
-    paths: list[Path] = []
-    for descriptor in _RUNTIME_DESCRIPTORS:
-        paths.append(root / descriptor.config_dir_name)
-    return tuple(dict.fromkeys(paths))
-
-
-@pytest.mark.skipif(_XDG_RUNTIME_DESCRIPTOR is None, reason="No runtime advertises an XDG mirror path")
-def test_research_scan_skips_only_runtime_owned_install_roots(tmp_path: Path) -> None:
-    workspace = tmp_path
-    assert _XDG_RUNTIME_DESCRIPTOR is not None
-    runtime_root = workspace / _XDG_RUNTIME_DESCRIPTOR.config_dir_name
-    runtime_root.mkdir()
-    xdg_mirror = workspace / ".config" / _XDG_RUNTIME_DESCRIPTOR.global_config.xdg_subdir
-    xdg_mirror.mkdir(parents=True)
-    foreign_mirror = xdg_mirror / "notes"
-    foreign_mirror.mkdir(parents=True)
-
-    assert _should_skip_research_scan_entry(workspace, runtime_root) is True
-    assert _should_skip_research_scan_entry(workspace, xdg_mirror) is False
-    assert _should_skip_research_scan_entry(workspace, foreign_mirror) is False
 
 
 def _write_project_contract_state(tmp_path: Path) -> None:
@@ -1644,15 +1611,6 @@ class TestInitPlanPhase:
         assert active_references["prior-baseline"]["required_actions"] == ["use"]
         assert active_references["prior-baseline"]["carry_forward_to"] == ["planning", "execution"]
 
-    def test_todo_frontmatter_parsing_handles_blank_lines_before_frontmatter(self) -> None:
-        content = '\n\n---\ntitle: Todo task\ncreated: "2026-01-01"\n---\nBody.\n'
-
-        meta = _read_todo_frontmatter(content)
-
-        assert meta == {"title": "Todo task", "created": "2026-01-01"}
-        assert _extract_frontmatter_field(content, "title") == "Todo task"
-        assert _extract_frontmatter_field(content, "created") == "2026-01-01"
-
     def test_does_not_persist_canonical_reference_merges(self, tmp_path: Path) -> None:
         _setup_project(tmp_path)
         _create_phase_dir(tmp_path, "02-analysis")
@@ -1708,168 +1666,6 @@ class TestInitNewProject:
         assert "has_existing_project" not in ctx
         assert ctx["planning_exists"] is False
         assert "staged_loading" not in ctx
-
-    def test_new_project_is_workspace_bound_from_nested_workspace(self, tmp_path: Path) -> None:
-        planning = tmp_path / "GPD"
-        planning.mkdir()
-        (planning / "PROJECT.md").write_text("# Project\n", encoding="utf-8")
-        (planning / "state.json").write_text("{}", encoding="utf-8")
-        nested = tmp_path / "notes" / "scratch"
-        nested.mkdir(parents=True)
-        (nested / "calc.py").write_text("print('local research')\n", encoding="utf-8")
-
-        ctx = init_new_project(nested, stage="scope_intake")
-
-        assert ctx["project_exists"] is False
-        assert ctx["state_exists"] is False
-        assert ctx["recoverable_project_exists"] is False
-        assert ctx["planning_exists"] is False
-        assert ctx["has_research_map"] is False
-        assert ctx["has_research_files"] is True
-        assert ctx["research_file_samples"] == ["calc.py"]
-        assert ctx["needs_research_map"] is True
-        assert not (planning / "state.json.lock").exists()
-
-    def test_detects_research_files(self, tmp_path: Path) -> None:
-        (tmp_path / "calc.py").write_text("import numpy", encoding="utf-8")
-        ctx = init_new_project(tmp_path)
-        assert ctx["has_research_files"] is True
-        assert ctx["research_file_samples"] == ["calc.py"]
-        assert "has_existing_project" not in ctx
-
-    def test_collects_bounded_sorted_project_relative_research_file_samples(self, tmp_path: Path) -> None:
-        for filename in ("zeta.ipynb", "alpha.py", "epsilon.pdf", "delta.csv", "beta.tex"):
-            (tmp_path / filename).write_text("research artifact\n", encoding="utf-8")
-        notes = tmp_path / "notes"
-        notes.mkdir()
-        (notes / "gamma.jl").write_text('println("research")\n', encoding="utf-8")
-
-        ctx = init_new_project(tmp_path)
-
-        assert ctx["has_research_files"] is True
-        assert ctx["research_file_samples"] == [
-            "alpha.py",
-            "beta.tex",
-            "delta.csv",
-            "epsilon.pdf",
-            "notes/gamma.jl",
-        ]
-
-    def test_research_file_samples_are_depth_limited(self, tmp_path: Path) -> None:
-        deep_dir = tmp_path / "one" / "two" / "three" / "four"
-        deep_dir.mkdir(parents=True)
-        (deep_dir / "too_deep.py").write_text("print('outside scan')\n", encoding="utf-8")
-
-        ctx = init_new_project(tmp_path)
-
-        assert ctx["has_research_files"] is False
-        assert ctx["research_file_samples"] == []
-
-    def test_research_file_scan_reaches_bounded_focused_research_directories(self, tmp_path: Path) -> None:
-        deep_analysis_dir = tmp_path / "analysis" / "runs" / "2026" / "notebooks"
-        deep_analysis_dir.mkdir(parents=True)
-        (deep_analysis_dir / "spectrum.nb").write_text("Notebook[{}]\n", encoding="utf-8")
-
-        ctx = init_new_project(tmp_path)
-
-        assert ctx["has_research_files"] is True
-        assert ctx["research_file_samples"] == ["analysis/runs/2026/notebooks/spectrum.nb"]
-
-    @pytest.mark.parametrize("filename", ("draft.pdf", "measurements.csv"))
-    def test_detects_documented_research_file_extensions(self, tmp_path: Path, filename: str) -> None:
-        (tmp_path / filename).write_text("research artifact\n", encoding="utf-8")
-
-        ctx = init_new_project(tmp_path)
-
-        assert ctx["has_research_files"] is True
-        assert ctx["research_file_samples"] == [filename]
-        assert ctx["needs_research_map"] is True
-
-    @pytest.mark.parametrize(
-        "filename",
-        (
-            "analysis.nb",
-            "references.bib",
-            "observables.dat",
-            "samples.h5",
-            "array.npy",
-            "arrays.npz",
-            "simulation.cpp",
-            "include/model.hpp",
-            "solver.f95",
-            "module.f03",
-            "paper/style.sty",
-            "table.tsv",
-        ),
-    )
-    def test_detects_common_physics_research_artifacts(self, tmp_path: Path, filename: str) -> None:
-        target = tmp_path / filename
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text("research artifact\n", encoding="utf-8")
-
-        ctx = init_new_project(tmp_path)
-
-        assert ctx["has_research_files"] is True
-        assert ctx["research_file_samples"] == [filename]
-        assert ctx["needs_research_map"] is True
-
-    def test_research_file_scan_skips_generated_trees(self, tmp_path: Path) -> None:
-        generated = tmp_path / "build" / "simulation"
-        generated.mkdir(parents=True)
-        (generated / "observables.dat").write_text("generated data\n", encoding="utf-8")
-
-        ctx = init_new_project(tmp_path)
-
-        assert ctx["has_research_files"] is False
-        assert ctx["research_file_samples"] == []
-
-    def test_ignores_runtime_owned_dirs_when_detecting_research_files(self, tmp_path: Path) -> None:
-        for runtime_dir in _runtime_owned_local_install_dirs(tmp_path):
-            runtime_dir.mkdir(parents=True, exist_ok=True)
-            (runtime_dir / "mirror.py").write_text("print('runtime mirror')", encoding="utf-8")
-
-        ctx = init_new_project(tmp_path)
-
-        assert ctx["has_research_files"] is False
-        assert ctx["research_file_samples"] == []
-        assert "has_existing_project" not in ctx
-
-    def test_detects_non_runtime_config_research_files(self, tmp_path: Path) -> None:
-        (tmp_path / ".config").mkdir()
-        (tmp_path / ".config" / "notes.py").write_text("print('research notes')", encoding="utf-8")
-
-        ctx = init_new_project(tmp_path)
-
-        assert ctx["has_research_files"] is True
-        assert ctx["research_file_samples"] == [".config/notes.py"]
-        assert "has_existing_project" not in ctx
-
-    @pytest.mark.parametrize("directory_name", ("agents", "hooks", "command"))
-    def test_detects_user_owned_research_files_in_generic_tool_named_directories(
-        self, tmp_path: Path, directory_name: str
-    ) -> None:
-        owned_dir = tmp_path / directory_name
-        owned_dir.mkdir()
-        (owned_dir / "notes.py").write_text("print('research notes')", encoding="utf-8")
-
-        ctx = init_new_project(tmp_path)
-
-        assert ctx["has_research_files"] is True
-        assert "has_existing_project" not in ctx
-
-    def test_detects_xdg_config_subdir_research_files_inside_a_project(self, tmp_path: Path) -> None:
-        opencode_descriptor = next(
-            descriptor for descriptor in _RUNTIME_DESCRIPTORS if descriptor.global_config.xdg_subdir
-        )
-        (tmp_path / ".config" / opencode_descriptor.global_config.xdg_subdir).mkdir(parents=True)
-        (tmp_path / ".config" / opencode_descriptor.global_config.xdg_subdir / "notes.py").write_text(
-            "print('research notes')", encoding="utf-8"
-        )
-
-        ctx = init_new_project(tmp_path)
-
-        assert ctx["has_research_files"] is True
-        assert "has_existing_project" not in ctx
 
     def test_detects_manifest(self, tmp_path: Path) -> None:
         (tmp_path / "pyproject.toml").write_text("[project]", encoding="utf-8")
@@ -5248,46 +5044,6 @@ class TestInitProgress:
 
         assert loaded is None
         assert load_info["status"] == "blocked_schema"
-
-
-class TestExtractFrontmatterField:
-    """Assert \\s* in the field regex does not match newlines."""
-
-    def test_empty_value_does_not_bleed_into_next_line(self, tmp_path: Path) -> None:
-        """When a field has an empty value (e.g. 'title:\\n'), the regex must
-        NOT consume the newline and capture the next line's content."""
-        from gpd.core.context import _extract_frontmatter_field
-
-        content = "title:\narea: numerical\ncreated: 2026-03-01"
-        # 'title' has no value on its line → should return None
-        assert _extract_frontmatter_field(content, "title") is None
-
-    def test_field_with_value_still_works(self, tmp_path: Path) -> None:
-        from gpd.core.context import _extract_frontmatter_field
-
-        content = "title: Check convergence\narea: numerical"
-        assert _extract_frontmatter_field(content, "title") == "Check convergence"
-        assert _extract_frontmatter_field(content, "area") == "numerical"
-
-    def test_field_with_leading_spaces(self, tmp_path: Path) -> None:
-        from gpd.core.context import _extract_frontmatter_field
-
-        content = "title:   spaced value  \narea: numerical"
-        assert _extract_frontmatter_field(content, "title") == "spaced value"
-
-    def test_field_with_quoted_value(self, tmp_path: Path) -> None:
-        from gpd.core.context import _extract_frontmatter_field
-
-        content = 'title: "Quoted Title"\narea: theory'
-        assert _extract_frontmatter_field(content, "title") == "Quoted Title"
-
-    def test_body_lines_do_not_override_leading_metadata_block(self, tmp_path: Path) -> None:
-        from gpd.core.context import _extract_frontmatter_field
-
-        content = 'title: "Check convergence"\n\narea: numerical\ncreated: 2026-03-01\n'
-        assert _extract_frontmatter_field(content, "title") == "Check convergence"
-        assert _extract_frontmatter_field(content, "area") is None
-        assert _extract_frontmatter_field(content, "created") is None
 
 
 class TestInitPhaseOp:

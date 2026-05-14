@@ -30,6 +30,7 @@ __all__ = [
     "ProjectReentryCandidate",
     "ProjectReentryResolution",
     "project_reentry_candidate_summary",
+    "recent_project_row_sort_key",
     "recoverable_project_context",
     "resolve_project_reentry",
 ]
@@ -214,6 +215,14 @@ def _candidate_sort_key(candidate: ProjectReentryCandidate) -> tuple[int, int, i
         recovery.resume_target_recorded_at or candidate.source_recorded_at or candidate.last_session_at or "",
         candidate.project_root,
     )
+
+
+def recent_project_row_sort_key(row: Mapping[str, object]) -> tuple[int, int, int, int, int, str, str]:
+    """Return the canonical re-entry ranking key for one recent-project row."""
+    candidate = _candidate_from_recent_row(row)
+    if candidate is None:
+        return (0, 0, 0, 0, 0, "", "")
+    return _candidate_sort_key(candidate)
 
 
 def _candidate_has_concrete_target(candidate: ProjectReentryCandidate) -> bool:

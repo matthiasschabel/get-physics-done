@@ -20,10 +20,8 @@ import json
 import logging
 import os
 import re
-import shlex
 import sys
 from collections.abc import Collection, Mapping
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
@@ -36,6 +34,13 @@ from rich.text import Text
 from gpd.adapters.base import INSTALL_ROLLBACK_RESULT_KEY as _INSTALL_RESULT_ROLLBACK_KEY
 from gpd.adapters.runtime_catalog import list_runtime_names, normalize_runtime_name
 from gpd.command_labels import canonical_command_label, validated_public_command_prefix
+from gpd.core import artifact_writers as _artifact_writers
+from gpd.core import install_cli_support as _install_cli_support
+from gpd.core import install_readiness_support as _install_readiness_support
+from gpd.core import permissions_cli_support as _permissions_cli_support
+from gpd.core import recent_project_presentation as _recent_project_presentation
+from gpd.core import resume_presentation as _resume_presentation
+from gpd.core import runtime_targeting as _runtime_targeting
 from gpd.core.artifact_command_payloads import (
     call_proof_redteam_finalizer as _call_proof_redteam_finalizer,
 )
@@ -56,9 +61,6 @@ from gpd.core.artifact_command_payloads import (
 )
 from gpd.core.artifact_command_payloads import (
     mapping_payload as _mapping_payload,
-)
-from gpd.core.artifact_command_payloads import (
-    markdown_payload_value as _markdown_payload_value,
 )
 from gpd.core.artifact_command_payloads import (
     validation_result_is_valid as _validation_result_is_valid,
@@ -127,9 +129,6 @@ from gpd.core.manuscript_artifacts import (
     locate_publication_artifact,
     resolve_current_manuscript_resolution,
 )
-from gpd.core.onboarding_surfaces import (
-    beginner_onboarding_hub_url,
-)
 from gpd.core.peer_review_mode import (
     PEER_REVIEW_PROJECT_BACKED_MODE,
     PeerReviewModeResolution,
@@ -137,9 +136,6 @@ from gpd.core.peer_review_mode import (
 )
 from gpd.core.project_reentry import (
     ProjectReentryResolution,
-    _candidate_from_recent_row,
-    _candidate_sort_key,
-    recoverable_project_context,
     resolve_project_reentry,
 )
 from gpd.core.proof_review import (
@@ -150,9 +146,7 @@ from gpd.core.proof_review import (
 from gpd.core.public_surface_contract import (
     local_cli_bridge_commands,
     local_cli_doctor_local_command,
-    local_cli_help_command,
     local_cli_install_local_example_command,
-    local_cli_permissions_sync_command,
     local_cli_plan_preflight_command,
     local_cli_resume_command,
     local_cli_resume_recent_command,
@@ -195,7 +189,6 @@ from gpd.core.recovery_advice import (
 from gpd.core.resume_surface import (
     build_resume_presentation_lanes,
     canonicalize_resume_public_payload,
-    lookup_resume_surface_list,
     lookup_resume_surface_value,
     resume_candidate_kind,
     resume_candidate_kind_from_source,
@@ -210,7 +203,7 @@ from gpd.core.surface_phrases import (
     recovery_action_lines,
     tangent_branch_later_follow_up_lines,
 )
-from gpd.core.utils import atomic_write, normalize_ascii_slug
+from gpd.core.utils import normalize_ascii_slug
 from gpd.core.workflow_presets import (
     get_workflow_preset,
     list_workflow_presets,
@@ -1887,37 +1880,7 @@ def milestone_complete(
 
 def _resume_status_message(payload: dict[str, object], *, recovery_advice: RecoveryAdvice) -> str:
     """Return a concise human summary of resume readiness for this workspace."""
-    auto_selected = _payload_flag(payload, "project_root_auto_selected")
-    if recovery_advice.decision_source == "ambiguous-recent-projects":
-        return (
-            recovery_advice.project_reentry_reason
-            or recovery_advice.primary_reason
-            or "Multiple recoverable recent projects were found; choose one explicitly."
-        )
-    if not _payload_flag(payload, "planning_exists"):
-        return "No GPD planning directory is present in this workspace."
-    if not any(_payload_flag(payload, key) for key in ("state_exists", "roadmap_exists", "project_exists")):
-        return "Planning scaffolding exists, but there is no recoverable project state yet."
-
-    if recovery_advice.status == "bounded-segment":
-        if auto_selected:
-            return "A bounded segment is resumable from an auto-selected recent project."
-        return "A bounded segment is resumable from the current workspace state."
-    if recovery_advice.status == "interrupted-agent":
-        return "An interrupted agent marker is present, but no bounded resume segment is active."
-    if recovery_advice.status == "session-handoff":
-        return "A continuity handoff is available, but no resumable bounded segment is currently active."
-    if recovery_advice.status == "missing-handoff":
-        return "Canonical recovery metadata exists, but the continuity handoff file is missing."
-    if recovery_advice.status == "live-execution":
-        return "A live execution snapshot exists, but it is advisory only and does not expose a portable bounded-segment target."
-    if recovery_advice.status == "workspace-recovery" and recovery_advice.machine_change_notice:
-        return "A machine change was detected, but the project state is portable and does not require repair."
-    if recovery_advice.status == "workspace-recovery":
-        return "Current workspace has recorded recovery context to inspect."
-    if recovery_advice.machine_change_notice:
-        return "A machine change was detected, but the project state is portable and does not require repair."
-    return "No recent local recovery target is currently recorded."
+    return _resume_presentation.resume_status_message(payload, recovery_advice=recovery_advice)
 
 
 def _resume_recent_hint(payload: dict[str, object]) -> str | None:
@@ -1982,42 +1945,17 @@ def _resume_recovery_advice(
 
 def _resume_mode_label(value: object) -> str:
     """Format a resume mode for human-facing CLI output."""
-    if not isinstance(value, str) or not value.strip():
-        return "none"
-    return value.replace("_", " ")
+    return _resume_presentation.resume_mode_label(value)
 
 
 def _resume_status_label(status: object) -> str:
     """Return a canonical human label for one recovery status."""
-    labels = {
-        "bounded-segment": "Bounded segment",
-        "interrupted-agent": "Interrupted agent",
-        "session-handoff": "Continuity handoff",
-        "missing-handoff": "Missing continuity handoff",
-        "live-execution": "Advisory live execution",
-        "workspace-recovery": "Recovery context",
-        "recent-projects": "Recent projects",
-        "recovery-error": "Recovery error",
-        "no-recovery": "No recovery target",
-    }
-    status_text = str(status).strip() if status is not None else ""
-    return labels.get(status_text, status_text.replace("_", " ") if status_text else "Unknown")
+    return _resume_presentation.resume_status_label(status)
 
 
 def _project_root_source_label(source: object, *, auto_selected: bool = False) -> str:
     """Map a project-root source to a plain-language re-entry label."""
-    labels = {
-        "current_workspace": "current workspace",
-        "workspace": "current workspace",
-        "recent_project": "machine-local recent-project index",
-    }
-    source_text = str(source).strip() if source is not None else ""
-    label = labels.get(source_text, source_text.replace("_", " ") if source_text else "unknown")
-    if source_text == "recent_project":
-        if auto_selected:
-            return f"auto-selected recent project (unique recoverable match from the {label})"
-        return f"recent project selected explicitly from the {label}"
-    return label
+    return _resume_presentation.project_root_source_label(source, auto_selected=auto_selected)
 
 
 def _resume_candidate_canonical_kind(candidate: dict[str, object]) -> str:
@@ -2027,13 +1965,7 @@ def _resume_candidate_canonical_kind(candidate: dict[str, object]) -> str:
 
 def _resume_candidate_kind_label(candidate: dict[str, object]) -> str:
     """Map one resume candidate to a user-facing kind label."""
-    kind = _resume_candidate_canonical_kind(candidate)
-    labels = {
-        "bounded_segment": "Bounded segment",
-        "continuity_handoff": "Continuity handoff",
-        "interrupted_agent": "Interrupted agent",
-    }
-    return labels.get(kind, kind.replace("_", " ") if kind else "unknown")
+    return _resume_presentation.resume_candidate_kind_label(candidate)
 
 
 def _resume_candidate_kind(source: object, *, status: object) -> str:
@@ -2045,15 +1977,7 @@ def _resume_candidate_kind(source: object, *, status: object) -> str:
 
 def _resume_origin_label(origin: object) -> str:
     """Map one canonical resume origin to a user-facing label."""
-    labels = {
-        "canonical_continuation": "canonical continuation",
-        "derived_execution_head": "derived execution head",
-        "interrupted_agent": "interrupted agent",
-    }
-    origin_text = str(origin).strip() if origin is not None else ""
-    if not origin_text:
-        return "Unknown"
-    return labels.get(origin_text, "Unknown")
+    return _resume_presentation.resume_origin_label(origin)
 
 
 def _public_resume_origin_family(
@@ -2064,61 +1988,24 @@ def _public_resume_origin_family(
     current_execution: dict[str, object] | None = None,
 ) -> str | None:
     """Collapse internal resume-origin tokens into the public resume-origin families."""
-
-    origin_text = str(origin).strip() if origin is not None else ""
-    if origin_text in {"canonical_continuation", "derived_execution_head", "interrupted_agent"}:
-        return origin_text
-
-    normalized_source = str(source).strip() if source is not None else ""
-
-    if normalized_source == "current_execution":
-        return "canonical_continuation" if isinstance(active_execution, dict) else "derived_execution_head"
-    if normalized_source == "handoff_resume_file":
-        return "canonical_continuation"
-    if normalized_source == "interrupted_agent":
-        return "interrupted_agent"
-
-    if origin_text == "current_execution":
-        return "canonical_continuation" if isinstance(active_execution, dict) else "derived_execution_head"
-    if origin_text == "handoff_resume_file":
-        return "canonical_continuation"
-    if origin_text in {"continuation.bounded_segment", "continuation.handoff"}:
-        return "canonical_continuation"
-    if origin_text == "interrupted_agent_marker":
-        return "interrupted_agent"
-    return None
+    return _resume_presentation.public_resume_origin_family(
+        origin,
+        source=source,
+        active_execution=active_execution,
+        current_execution=current_execution,
+    )
 
 
 def _resume_authoritative_active_execution(
     payload: dict[str, object],
 ) -> dict[str, object] | None:
     """Return the bounded segment only when it comes from canonical continuation."""
-    active_bounded_segment_raw = _resume_surface_value(payload, "active_bounded_segment")
-    if not isinstance(active_bounded_segment_raw, dict):
-        return None
-
-    active_origin = payload.get("active_resume_origin")
-    if not isinstance(active_origin, str) or not active_origin.strip():
-        active_origin = _resume_surface_value(payload, "active_resume_origin")
-
-    if str(active_origin).strip() in {"canonical_continuation", "continuation.bounded_segment"}:
-        return active_bounded_segment_raw
-    return None
+    return _resume_presentation.resume_authoritative_active_execution(payload)
 
 
 def _resume_candidate_phase_plan(candidate: dict[str, object]) -> str:
     """Format phase/plan context for one resume candidate."""
-    phase = candidate.get("phase")
-    plan = candidate.get("plan")
-    phase_text = str(phase).strip() if phase is not None else ""
-    plan_text = str(plan).strip() if plan is not None else ""
-    if phase_text and plan_text:
-        return f"{phase_text} / {plan_text}"
-    if phase_text:
-        return phase_text
-    if plan_text:
-        return plan_text
-    return "—"
+    return _resume_presentation.resume_candidate_phase_plan(candidate)
 
 
 def _resume_surface_value(
@@ -2141,76 +2028,27 @@ def _payload_flag(payload: dict[str, object], key: str) -> bool:
 
 def _resume_visible_candidates(payload: dict[str, object]) -> list[dict[str, object]]:
     """Return the canonical candidate list to render."""
-    candidates = lookup_resume_surface_list(payload, "resume_candidates")
-    if not isinstance(candidates, list):
-        return []
-    return [item for item in candidates if isinstance(item, dict)]
+    return _resume_presentation.resume_visible_candidates(payload)
 
 
 def _resume_candidate_target(candidate: dict[str, object]) -> str:
     """Format the primary target/pointer for one resume candidate."""
-    source = str(candidate.get("source") or "").strip()
-    if source == "interrupted_agent":
-        agent_id = candidate.get("agent_id")
-        return str(agent_id).strip() if agent_id is not None and str(agent_id).strip() else "—"
-
-    resume_file = candidate.get("resume_file")
-    if isinstance(resume_file, str) and resume_file.strip():
-        return _format_display_path(resume_file.strip())
-    return "—"
+    return _resume_presentation.resume_candidate_target(candidate, cwd=_get_cwd())
 
 
 def _resume_candidate_rerun_anchor(candidate: dict[str, object]) -> str | None:
     """Return the canonical rerun anchor note for one candidate, if any."""
-    last_result_id = candidate.get("last_result_id")
-    last_result_label = candidate.get("last_result_label")
-    if not isinstance(last_result_id, str) or not last_result_id.strip():
-        if isinstance(last_result_label, str) and last_result_label.strip():
-            return f"last result: {last_result_label.strip()}"
-        return None
-
-    last_result_id_text = last_result_id.strip()
-    if isinstance(last_result_label, str) and last_result_label.strip():
-        return f"rerun anchor: {last_result_label.strip()} ({last_result_id_text})"
-    return f"rerun anchor: {last_result_id_text}"
+    return _resume_presentation.resume_candidate_rerun_anchor(candidate)
 
 
 def _resume_result_payload(value: object) -> dict[str, object] | None:
     """Normalize a hydrated result payload into a plain dictionary."""
-    if hasattr(value, "model_dump"):
-        try:
-            value = value.model_dump(mode="json")
-        except Exception:
-            return None
-    if isinstance(value, Mapping):
-        return dict(value)
-    return None
+    return _resume_presentation.resume_result_payload(value)
 
 
 def _resume_result_summary(result: Mapping[str, object] | None, *, include_id: bool = True) -> str | None:
     """Render a concise human summary for one hydrated intermediate result."""
-    if not isinstance(result, Mapping):
-        return None
-
-    result_id = _recent_project_text(result, "id")
-    description = _recent_project_text(result, "description", "label", "name", "title")
-    equation = _recent_project_text(result, "equation")
-    if description and equation:
-        summary = f"{description} [{equation}]"
-    elif description:
-        summary = description
-    elif equation:
-        summary = equation
-    elif result_id:
-        summary = result_id
-    else:
-        return None
-
-    if include_id and result_id and summary != result_id:
-        summary = f"{summary} ({result_id})"
-    if _strict_bool_value(result.get("verified")) is True or bool(result.get("verification_records")):
-        summary = f"{summary} · verified"
-    return summary
+    return _resume_presentation.resume_result_summary(result, include_id=include_id)
 
 
 def _resume_candidate_last_result(
@@ -2219,29 +2057,7 @@ def _resume_candidate_last_result(
     payload: dict[str, object] | None = None,
 ) -> dict[str, object] | None:
     """Return the hydrated last-result payload for one candidate, if available."""
-    result = _resume_result_payload(candidate.get("last_result"))
-    if result is not None:
-        return result
-
-    if payload is None:
-        return None
-
-    last_result_id = _recent_project_text(candidate, "last_result_id")
-    if not isinstance(last_result_id, str) or not last_result_id.strip():
-        return None
-
-    active_result = _resume_result_payload(_resume_surface_value(payload, "active_resume_result"))
-    if active_result is not None and _recent_project_text(active_result, "id") == last_result_id:
-        return active_result
-
-    derived_results = _resume_surface_value(payload, "derived_intermediate_results")
-    if isinstance(derived_results, list):
-        for item in derived_results:
-            result = _resume_result_payload(item)
-            if result is not None and _recent_project_text(result, "id") == last_result_id:
-                return result
-
-    return None
+    return _resume_presentation.resume_candidate_last_result(candidate, payload=payload)
 
 
 def _resume_active_result(
@@ -2249,16 +2065,7 @@ def _resume_active_result(
     candidates: list[dict[str, object]],
 ) -> dict[str, object] | None:
     """Return the most relevant hydrated result for the current resume view."""
-    active_result = _resume_result_payload(_resume_surface_value(payload, "active_resume_result"))
-    if active_result is not None:
-        return active_result
-
-    for candidate in candidates:
-        result = _resume_candidate_last_result(candidate, payload=payload)
-        if result is not None:
-            return result
-
-    return None
+    return _resume_presentation.resume_active_result(payload, candidates)
 
 
 def _resume_candidate_origin(
@@ -2268,112 +2075,31 @@ def _resume_candidate_origin(
     current_execution: dict[str, object] | None,
 ) -> tuple[str, str]:
     """Return a machine label and human summary for one candidate origin."""
-    origin = candidate.get("origin")
-    source = str(candidate.get("source") or "").strip()
-    public_origin = _public_resume_origin_family(
-        origin,
-        source=source,
+    return _resume_presentation.resume_candidate_origin(
+        candidate,
         active_execution=active_execution,
         current_execution=current_execution,
     )
-    if public_origin is not None and source != "current_execution":
-        return public_origin, _resume_origin_label(public_origin)
-    status = str(candidate.get("status") or "").strip()
-    if source == "current_execution":
-        active_resume = (
-            str(active_execution.get("resume_file")).strip()
-            if isinstance(active_execution, dict) and active_execution.get("resume_file") is not None
-            else ""
-        )
-        current_resume = (
-            str(current_execution.get("resume_file")).strip()
-            if isinstance(current_execution, dict) and current_execution.get("resume_file") is not None
-            else ""
-        )
-        if isinstance(active_execution, dict):
-            if active_resume and current_resume and active_resume != current_resume:
-                return (
-                    "canonical_continuation",
-                    "canonical continuation; current execution points at a different handoff file",
-                )
-            return ("canonical_continuation", "canonical continuation")
-        if isinstance(current_execution, dict):
-            return ("derived_execution_head", "derived execution head")
-        return ("derived_execution_head", "derived execution head")
-    if source == "handoff_resume_file":
-        if status == "missing":
-            return ("canonical_continuation", "canonical continuation; handoff file missing")
-        return ("canonical_continuation", "canonical continuation")
-    if source == "interrupted_agent":
-        return ("interrupted_agent", "interrupted-agent marker")
-    return ("unknown", "unknown origin")
 
 
 def _recent_project_label(row: dict[str, object]) -> str | None:
     """Return an optional human label for one recent-project row."""
-    return _recent_project_text(row, "label", "title", "project_label", "project_title", "name")
+    return _recent_project_presentation.recent_project_label(row)
 
 
 def _recent_project_summary(row: dict[str, object]) -> str | None:
     """Return an optional human summary for one recent-project row."""
-    return _recent_project_text(row, "summary", "project_summary", "description", "project_description")
+    return _recent_project_presentation.recent_project_summary(row)
 
 
 def _recent_project_current_state(row: dict[str, object]) -> str | None:
     """Return an optional phase/status/progress summary for one recent-project row."""
-    current_phase = row.get("current_phase")
-    if isinstance(current_phase, dict):
-        phase = _recent_project_text(current_phase, "phase", "id", "number", "name", "title")
-        phase_label = _recent_project_text(current_phase, "label", "name", "title")
-        status = _recent_project_text(current_phase, "status", "state")
-        progress = _recent_project_text(current_phase, "progress", "progress_summary", "summary")
-        pieces: list[str] = []
-        if phase and phase_label and phase_label != phase:
-            pieces.append(f"phase {phase} ({phase_label})")
-        elif phase_label:
-            pieces.append(phase_label)
-        elif phase:
-            pieces.append(f"phase {phase}" if not phase.lower().startswith("phase") else phase)
-        if status is not None:
-            pieces.append(status.replace("_", " "))
-        if progress is not None:
-            pieces.append(progress)
-        return " · ".join(pieces) if pieces else None
-
-    phase = _recent_project_text(row, "current_phase", "phase")
-    phase_label = _recent_project_text(row, "current_phase_name", "phase_name")
-    status = _recent_project_text(row, "project_status", "status")
-    progress = _recent_project_text(row, "progress", "progress_summary", "phase_progress")
-    pieces: list[str] = []
-    if phase and phase_label and phase_label != phase:
-        pieces.append(f"phase {phase} ({phase_label})")
-    elif phase_label:
-        pieces.append(phase_label)
-    elif phase:
-        pieces.append(f"phase {phase}" if not phase.lower().startswith("phase") else phase)
-    if status is not None and status.replace("_", " ") not in {"recent", "resumable", "unavailable"}:
-        pieces.append(status.replace("_", " "))
-    if progress is not None:
-        pieces.append(progress)
-    return " · ".join(pieces) if pieces else None
+    return _recent_project_presentation.recent_project_current_state(row)
 
 
 def _recent_project_selection_reason(row: dict[str, object]) -> str:
     """Return a plain-language explanation for why a recent-project row is shown."""
-    if _strict_bool_value(row.get("available")) is not True:
-        reason = row.get("availability_reason")
-        if isinstance(reason, str) and reason.strip():
-            return reason.strip()
-        return "shown because the project root is missing on this machine"
-    if _strict_bool_value(row.get("resumable")) is True:
-        reason = row.get("resume_file_reason")
-        if isinstance(reason, str) and reason.strip():
-            return f"shown because it still has a usable handoff target ({reason.strip()})"
-        return "shown because it still has a usable handoff target"
-    resume_file = row.get("resume_file")
-    if isinstance(resume_file, str) and resume_file.strip():
-        return "shown because the checkout is available, but the recorded handoff is not currently usable"
-    return "shown because the checkout is available, but no recovery handoff is recorded"
+    return _recent_project_presentation.recent_project_selection_reason(row)
 
 
 def _resume_candidate_notes(
@@ -2384,65 +2110,12 @@ def _resume_candidate_notes(
     current_execution: dict[str, object] | None = None,
 ) -> str:
     """Render the most relevant resume notes for one candidate."""
-    notes: list[str] = []
-
-    checkpoint_reason = candidate.get("checkpoint_reason")
-    if isinstance(checkpoint_reason, str) and checkpoint_reason.strip():
-        notes.append(f"checkpoint: {checkpoint_reason.strip().replace('_', ' ')}")
-
-    waiting_reason = candidate.get("waiting_reason")
-    if isinstance(waiting_reason, str) and waiting_reason.strip():
-        notes.append(waiting_reason.strip())
-
-    blocked_reason = candidate.get("blocked_reason")
-    if isinstance(blocked_reason, str) and blocked_reason.strip():
-        notes.append(f"blocked: {blocked_reason.strip()}")
-
-    hydrated_result = _resume_candidate_last_result(candidate, payload=payload)
-    if hydrated_result is not None:
-        hydrated_summary = _resume_result_summary(hydrated_result)
-        if hydrated_summary is not None:
-            notes.append(f"result: {hydrated_summary}")
-    else:
-        rerun_anchor = _resume_candidate_rerun_anchor(candidate)
-        if rerun_anchor is not None:
-            notes.append(rerun_anchor)
-
-    if _strict_bool_value(candidate.get("first_result_gate_pending")) is True:
-        notes.append("first-result gate pending")
-    if _strict_bool_value(candidate.get("pre_fanout_review_pending")) is True:
-        notes.append("pre-fanout review pending")
-    if _strict_bool_value(candidate.get("skeptical_requestioning_required")) is True:
-        notes.append("skeptical re-questioning required")
-    if _strict_bool_value(candidate.get("downstream_locked")) is True:
-        notes.append("downstream locked")
-
-    execution_view = current_execution or active_execution
-    if execution_view is not None:
-        current_task = execution_view.get("current_task")
-        current_task_index = execution_view.get("current_task_index")
-        current_task_total = execution_view.get("current_task_total")
-        if isinstance(current_task, str) and current_task.strip():
-            if current_task_index is not None and current_task_total is not None:
-                notes.append(f"task {current_task_index}/{current_task_total}: {current_task.strip()}")
-            else:
-                notes.append(current_task.strip())
-
-        updated_at = execution_view.get("updated_at")
-        if isinstance(updated_at, str) and updated_at.strip():
-            notes.append(f"updated {updated_at.strip()}")
-
-    if not notes:
-        kind = _resume_candidate_canonical_kind(candidate)
-        status = str(candidate.get("status") or "").strip()
-        if kind == "continuity_handoff" and status == "missing":
-            return "Recorded in canonical continuation state, but the handoff file is missing from this workspace."
-        if kind == "continuity_handoff":
-            return "Recorded in canonical continuation state."
-        if kind == "interrupted_agent":
-            return "Interrupted agent marker only; inspect agent output before continuing."
-        return "No additional resume notes recorded."
-    return "; ".join(notes[:5])
+    return _resume_presentation.resume_candidate_notes(
+        candidate,
+        payload=payload,
+        active_execution=active_execution,
+        current_execution=current_execution,
+    )
 
 
 def _resume_candidate_projection(
@@ -2453,80 +2126,18 @@ def _resume_candidate_projection(
     current_execution: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Project one raw candidate into a canonical recovery view."""
-    origin, origin_label = _resume_candidate_origin(
+    return _resume_presentation.resume_candidate_projection(
         candidate,
+        payload=payload,
         active_execution=active_execution,
         current_execution=current_execution,
+        cwd=_get_cwd(),
     )
-    status = str(candidate.get("status") or "unknown").strip() or "unknown"
-    kind = _resume_candidate_canonical_kind(candidate)
-    if kind == "unknown":
-        kind = _resume_candidate_kind(candidate.get("source"), status=status)
-    return {
-        "kind": kind,
-        "kind_label": _resume_candidate_kind_label(candidate),
-        "status": status,
-        "status_label": status.replace("_", " "),
-        "origin": origin,
-        "origin_label": origin_label,
-        "phase_plan": _resume_candidate_phase_plan(candidate),
-        "target": _resume_candidate_target(candidate),
-        "notes": _resume_candidate_notes(
-            candidate,
-            payload=payload,
-            active_execution=active_execution,
-            current_execution=current_execution,
-        ),
-        "source": candidate.get("source"),
-        "resume_file": candidate.get("resume_file"),
-        "resumable": candidate.get("resumable"),
-        "advisory": candidate.get("advisory"),
-    }
 
 
 def _recent_project_resume_file_state(project_root: object, resume_file: object) -> tuple[bool | None, str | None]:
     """Return whether a recent-project handoff file is still usable."""
-    if not isinstance(project_root, str) or not project_root.strip():
-        return None, None
-    if not isinstance(resume_file, str) or not resume_file.strip():
-        return None, None
-
-    project_path = Path(project_root).expanduser()
-    try:
-        project_exists = project_path.exists()
-        project_is_dir = project_path.is_dir()
-    except OSError:
-        return False, "project unavailable on this machine"
-    if not project_exists or not project_is_dir:
-        return None, None
-
-    try:
-        resolved_project = project_path.resolve(strict=False)
-    except OSError:
-        return False, "project unavailable on this machine"
-    candidate = Path(resume_file).expanduser()
-    try:
-        resolved_target = (
-            candidate.resolve(strict=False)
-            if candidate.is_absolute()
-            else (project_path / candidate).resolve(strict=False)
-        )
-    except OSError:
-        return False, "resume file unavailable"
-    try:
-        resolved_target.relative_to(resolved_project)
-    except ValueError:
-        return False, "resume file outside project root"
-    try:
-        target_exists = resolved_target.exists()
-        target_is_file = resolved_target.is_file()
-    except OSError:
-        return False, "resume file unavailable"
-    if not target_exists:
-        return False, "resume file missing"
-    if not target_is_file:
-        return False, "resume file is not a file"
-    return True, None
+    return _recent_project_presentation.recent_project_resume_file_state(project_root, resume_file)
 
 
 def _recent_projects_data_root() -> Path:
@@ -2539,267 +2150,65 @@ def _recent_projects_data_root() -> Path:
 
 def _recent_project_text(payload: dict[str, object], *keys: str) -> str | None:
     """Return the first non-empty string value among *keys*."""
-    for key in keys:
-        value = payload.get(key)
-        if isinstance(value, str):
-            stripped = value.strip()
-            if stripped:
-                return stripped
-    return None
+    return _recent_project_presentation.recent_project_text(payload, *keys)
 
 
 def _normalize_recent_project_row(row: object) -> dict[str, object] | None:
     """Project one canonical recent-project row into the CLI display shape."""
-    if not isinstance(row, dict):
-        return None
-
-    from gpd.core.recent_projects import RecentProjectEntry
-
-    project_root = _recent_project_text(row, "project_root")
-    if project_root is None:
-        unexpected_fields = sorted(key for key in row if key not in RecentProjectEntry.model_fields)
-        if unexpected_fields:
-            formatted = ", ".join(unexpected_fields)
-            raise ValueError(f"recent-project row contains unexpected field(s): {formatted}")
-        return None
-
-    project_path = Path(project_root).expanduser()
-    available_value = row.get("available")
-    if isinstance(available_value, bool):
-        available = available_value
-        derived_availability_reason = None
-    else:
-        try:
-            available = project_path.is_dir()
-        except OSError:
-            available = False
-            derived_availability_reason = "project unavailable on this machine"
-        else:
-            if available:
-                derived_availability_reason = None
-            else:
-                try:
-                    project_exists = project_path.exists()
-                except OSError:
-                    derived_availability_reason = "project unavailable on this machine"
-                else:
-                    derived_availability_reason = (
-                        "project root is not a directory" if project_exists else "project root missing"
-                    )
-    normalized: dict[str, object] = {
-        "project_root": project_root,
-        "workspace": _format_display_path(project_path),
-        "available": available,
-        "missing": not available,
-    }
-    if not available:
-        normalized["command"] = "unavailable"
-    elif project_path.is_absolute():
-        try:
-            resolved_project_path = project_path.resolve(strict=False)
-        except OSError:
-            normalized["command"] = "unavailable"
-        else:
-            normalized["command"] = f"gpd --cwd {shlex.quote(str(resolved_project_path))} resume"
-    else:
-        normalized["command"] = None
-
-    for key in (
-        "schema_version",
-        "last_session_at",
-        "last_seen_at",
-        "stopped_at",
-        "resume_file",
-        "resume_file_available",
-        "resume_file_reason",
-        "status",
-        "resumable",
-        "availability_reason",
-        "last_result_id",
-        "resume_target_kind",
-        "resume_target_recorded_at",
-        "hostname",
-        "platform",
-        "source_kind",
-        "source_session_id",
-        "source_segment_id",
-        "source_transition_id",
-        "source_event_id",
-        "source_recorded_at",
-        "recovery_phase",
-        "recovery_plan",
-    ):
-        if key in row:
-            normalized[key] = row[key]
-    if derived_availability_reason is not None and not normalized.get("availability_reason"):
-        normalized["availability_reason"] = derived_availability_reason
-
-    resume_file_available, resume_file_reason = _recent_project_resume_file_state(
-        normalized.get("project_root"),
-        normalized.get("resume_file"),
-    )
-    if resume_file_available is not None:
-        normalized["resume_file_available"] = resume_file_available
-    if resume_file_reason is not None:
-        normalized["resume_file_reason"] = resume_file_reason
-
-    resumable_value = normalized.get("resumable")
-    if resumable_value is None:
-        resumable_value = normalized.get("resume_file") if isinstance(normalized.get("resume_file"), str) else False
-    else:
-        resumable_value = _strict_bool_value(resumable_value) is True
-    normalized["resumable"] = (
-        bool(resumable_value)
-        and _strict_bool_value(normalized["available"]) is True
-        and normalized.get("resume_file_available") is not False
-    )
-    status = _recent_project_text(normalized, "status")
-    if _strict_bool_value(normalized["available"]) is not True:
-        status = "unavailable"
-    elif status is None:
-        status = "resumable" if normalized["resumable"] else "recent"
-    normalized["status"] = status
-
-    return normalized
+    return _recent_project_presentation.normalize_recent_project_row(row, cwd=_get_cwd())
 
 
-def _recent_project_sort_key(row: dict[str, object]) -> tuple[int, int, int, int, str, str]:
+def _recent_project_sort_key(row: dict[str, object]) -> tuple[int, int, int, int, int, str, str]:
     """Sort recent rows by recovery strength first, then by recency."""
-    candidate = _candidate_from_recent_row(row)
-    if candidate is None:
-        return (0, 0, 0, 0, "", "")
-    return _candidate_sort_key(candidate)
+    return _recent_project_presentation.recent_project_row_sort_key(row)
 
 
 def _load_recent_projects_rows(*, last: int | None = None) -> list[dict[str, object]]:
     """Load the recent-project index, preferring the shared helper module when present."""
-    from gpd.core.recent_projects import RecentProjectsError, list_recent_projects
+    from gpd.core.recent_projects import RecentProjectsError
 
     try:
-        raw_rows = list_recent_projects(_recent_projects_data_root(), last=last)
-    except RecentProjectsError as exc:
+        return _recent_project_presentation.load_recent_project_display_rows(
+            data_root=_recent_projects_data_root(),
+            last=last,
+            cwd=_get_cwd(),
+        )
+    except (RecentProjectsError, ValueError) as exc:
         raise GPDError(str(exc)) from exc
-
-    rows: list[dict[str, object]] = []
-    for row in raw_rows:
-        row_payload = row.model_dump(mode="json") if hasattr(row, "model_dump") else row
-        try:
-            normalized = _normalize_recent_project_row(row_payload)
-        except ValueError as exc:
-            raise GPDError(str(exc)) from exc
-        if normalized is None:
-            raise GPDError("recent-project cache returned a malformed canonical row")
-        rows.append(normalized)
-
-    rows.sort(key=_recent_project_sort_key, reverse=True)
-    return rows
 
 
 def _resume_recent_project_command(row: dict[str, object]) -> str:
     """Return the exact command to reopen one recent project."""
-    project_root = row.get("project_root")
-    if not isinstance(project_root, str) or not project_root.strip():
-        return "unavailable"
-    if row.get("available") is not True:
-        return "unavailable"
-    try:
-        project_path = Path(project_root).expanduser().resolve(strict=False)
-    except OSError:
-        return "unavailable"
-    return f"gpd --cwd {shlex.quote(str(project_path))} resume"
+    return _recent_project_presentation.recent_project_resume_command(row)
 
 
 def _resume_recent_project_notes(row: dict[str, object]) -> str:
     """Return a concise availability/resumability note for one recent project row."""
-    recovery_note = _recent_project_text(row, "recovery_note")
-    if recovery_note is not None:
-        return recovery_note
-    if _strict_bool_value(row.get("available")) is not True:
-        reason = row.get("availability_reason")
-        if isinstance(reason, str) and reason.strip():
-            return reason.strip()
-        return "project unavailable on this machine"
-    if _strict_bool_value(row.get("resumable")) is True:
-        return "ready to reopen"
-    reason = row.get("resume_file_reason")
-    if isinstance(reason, str) and reason.strip():
-        return reason.strip()
-    return "continue from local recovery state"
+    return _recent_project_presentation.recent_project_notes(row)
 
 
 def _recent_project_recovery_view(row: dict[str, object]) -> dict[str, object] | None:
     """Return a canonical recovery summary for one recent-project row when available."""
-    project_root = row.get("project_root")
-    if not isinstance(project_root, str) or not project_root.strip():
-        return None
-
-    try:
-        project_path = Path(project_root).expanduser().resolve(strict=False)
-        project_exists = project_path.exists()
-        project_is_dir = project_path.is_dir()
-    except OSError:
-        project_path = Path(project_root).expanduser()
-        project_exists = False
-        project_is_dir = False
-    if not project_exists or not project_is_dir:
-        return {
-            "recovery_status": "no-recovery",
-            "recovery_status_label": "Unavailable checkout",
-            "recovery_note": "project unavailable on this machine",
-        }
-
-    try:
-        state_exists, roadmap_exists, project_exists = recoverable_project_context(project_path)
-    except OSError:
-        return {
-            "recovery_status": "no-recovery",
-            "recovery_status_label": "Unavailable checkout",
-            "recovery_note": "project unavailable on this machine",
-        }
-    if not (state_exists or roadmap_exists or project_exists):
-        return None
-
-    try:
-        from gpd.core.context import init_resume
-
-        payload = init_resume(project_path)
-        advice = _resume_recovery_advice(resume_payload=payload, recent_rows=[], cwd=project_path)
-    except Exception as exc:
-        error_message = str(exc).strip() or type(exc).__name__
-        return {
-            "recovery_status": "recovery-error",
-            "recovery_status_label": _resume_status_label("recovery-error"),
-            "recovery_note": f"Recovery metadata could not be inspected: {error_message}",
-            "recovery_error": error_message,
-            "recovery_error_type": type(exc).__name__,
-        }
-
-    public_payload = canonicalize_resume_public_payload(payload)
-    view: dict[str, str] = {
-        "recovery_status": advice.status,
-        "recovery_status_label": _resume_status_label(advice.status),
-        "recovery_note": _resume_status_message(public_payload, recovery_advice=advice),
-    }
-    primary_resume_file = _resume_surface_value(public_payload, "active_resume_pointer")
-    if isinstance(primary_resume_file, str) and primary_resume_file.strip():
-        view["recovery_target"] = _format_display_path(primary_resume_file.strip())
-    execution_source = _resume_surface_value(public_payload, "active_resume_origin")
-    public_origin = _public_resume_origin_family(execution_source, active_execution=None, current_execution=None)
-    if public_origin is not None:
-        view["recovery_origin"] = _resume_origin_label(public_origin)
-    return view
+    return _recent_project_presentation.recent_project_recovery_view(
+        row,
+        recovery_advice_builder=lambda cwd, **kwargs: _resume_recovery_advice(
+            resume_payload=dict(kwargs.get("resume_payload") or {}),
+            recent_rows=list(kwargs.get("recent_rows") or []),
+            cwd=cwd,
+        ),
+    )
 
 
 def _annotate_recent_project_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
     """Add canonical recovery summaries to recent-project rows while keeping existing fields."""
-    annotated: list[dict[str, object]] = []
-    for row in rows:
-        payload = dict(row)
-        recovery_view = _recent_project_recovery_view(payload)
-        if recovery_view is not None:
-            payload.update(recovery_view)
-        annotated.append(payload)
-    return annotated
+    return _recent_project_presentation.annotate_recent_project_rows(
+        rows,
+        recovery_advice_builder=lambda cwd, **kwargs: _resume_recovery_advice(
+            resume_payload=dict(kwargs.get("resume_payload") or {}),
+            recent_rows=list(kwargs.get("recent_rows") or []),
+            cwd=cwd,
+        ),
+    )
 
 
 def _resume_follow_up_actions(recovery_advice: RecoveryAdvice) -> list[str]:
@@ -2814,128 +2223,21 @@ def _resume_follow_up_actions(recovery_advice: RecoveryAdvice) -> list[str]:
 def _resume_augmented_payload(payload: dict[str, object], *, cwd: Path | None = None) -> dict[str, object]:
     """Augment the raw resume payload with canonical recovery projections."""
     public_payload = canonicalize_resume_public_payload(payload)
-
     recovery_advice = _resume_recovery_advice(resume_payload=public_payload, recent_rows=[], cwd=cwd)
-    derived_execution_head_raw = _resume_surface_value(public_payload, "derived_execution_head")
-    derived_execution_head = derived_execution_head_raw if isinstance(derived_execution_head_raw, dict) else None
-    active_execution = _resume_authoritative_active_execution(public_payload)
-    current_execution = derived_execution_head
-    active_resume_kind = public_payload.get("active_resume_kind")
-    if isinstance(active_resume_kind, str) and active_resume_kind.strip():
-        active_resume_kind = _resume_candidate_canonical_kind({"kind": active_resume_kind})
-    segment_candidates = _resume_visible_candidates(public_payload)
-    projected_candidates = [
-        _resume_candidate_projection(
-            candidate,
-            payload=public_payload,
-            active_execution=active_execution
-            if _resume_candidate_canonical_kind(candidate) == "bounded_segment"
-            else None,
-            current_execution=current_execution
-            if _resume_candidate_canonical_kind(candidate) == "bounded_segment"
-            else None,
-        )
-        for candidate in segment_candidates
-    ]
-    active_resume_result = _resume_active_result(public_payload, segment_candidates)
-    augmented = dict(public_payload)
-    active_resume_origin = augmented.get("active_resume_origin")
-    if isinstance(active_resume_origin, str) and active_resume_origin.strip():
-        public_active_origin = _public_resume_origin_family(
-            active_resume_origin,
-            active_execution=active_execution,
-            current_execution=current_execution,
-        )
-        if public_active_origin is not None:
-            augmented["active_resume_origin"] = public_active_origin
-    normalized_resume_candidates: list[dict[str, object]] = []
-    for candidate in list(augmented.get("resume_candidates") or []):
-        if not isinstance(candidate, dict):
-            continue
-        normalized_candidate = dict(candidate)
-        candidate_origin = normalized_candidate.get("origin")
-        public_candidate_origin = _public_resume_origin_family(
-            candidate_origin,
-            source=normalized_candidate.get("source"),
-            active_execution=active_execution
-            if _resume_candidate_canonical_kind(normalized_candidate) == "bounded_segment"
-            else None,
-            current_execution=current_execution
-            if _resume_candidate_canonical_kind(normalized_candidate) == "bounded_segment"
-            else None,
-        )
-        if public_candidate_origin is not None:
-            normalized_candidate["origin"] = public_candidate_origin
-        normalized_resume_candidates.append(normalized_candidate)
-    augmented["resume_candidates"] = normalized_resume_candidates
-    augmented["recovery_status"] = recovery_advice.status
-    augmented["recovery_status_label"] = _resume_status_label(recovery_advice.status)
-    augmented["recovery_summary"] = _resume_status_message(public_payload, recovery_advice=recovery_advice)
-    augmented["active_resume_kind_label"] = _resume_mode_label(active_resume_kind)
-    recovery_advice_payload = serialize_recovery_advice(recovery_advice)
-    advice_origin = recovery_advice_payload.get("active_resume_origin")
-    if isinstance(advice_origin, str) and advice_origin.strip():
-        public_advice_origin = _public_resume_origin_family(
-            advice_origin,
-            active_execution=active_execution,
-            current_execution=current_execution,
-        )
-        if public_advice_origin is not None:
-            recovery_advice_payload["active_resume_origin"] = public_advice_origin
-    augmented["recovery_advice"] = recovery_advice_payload
-    augmented["recovery_candidates"] = projected_candidates
-    if active_resume_result is not None and "active_resume_result_summary" not in augmented:
-        active_resume_result_summary = _resume_result_summary(active_resume_result)
-        if active_resume_result_summary is not None:
-            augmented["active_resume_result_summary"] = active_resume_result_summary
-    if projected_candidates:
-        augmented["primary_recovery_target"] = projected_candidates[0]
-    return augmented
+    return _resume_presentation.resume_augmented_payload(
+        public_payload,
+        recovery_advice=recovery_advice,
+        cwd=cwd or _get_cwd(),
+    )
 
 
 def _render_recent_resume_summary(rows: list[dict[str, object]]) -> None:
     """Render the recent-project picker for cross-project recovery."""
-    console.print("[bold]Recent Projects[/]")
-    console.print(
-        "[dim]Machine-local recovery index. Recent projects are ordered by recovery strength, then recency. A single recoverable match can auto-select; otherwise choose explicitly with the command shown for each row.[/]"
-    )
-    console.print()
-
-    if not rows:
-        console.print("[dim]No recent projects are recorded on this machine yet.[/]")
-        console.print(
-            f"[dim]Run `{local_cli_resume_command()}` inside a project first, or wait for session continuity to be recorded.[/]"
-        )
-        return
-
-    for idx, row in enumerate(rows, start=1):
-        label = _recent_project_label(row)
-        summary = _recent_project_summary(row)
-        current_state = _recent_project_current_state(row)
-        console.print(
-            f"[bold]{idx}.[/] "
-            f"{str(row.get('workspace') or _format_display_path(str(row.get('project_root') or '')) or 'unknown')}"
-        )
-        if label is not None:
-            console.print(f"   Label: {label}")
-        if summary is not None:
-            console.print(f"   Summary: {summary}")
-        if current_state is not None:
-            console.print(f"   Current: {current_state}")
-        console.print(f"   Last session: {str(row.get('last_session_at') or row.get('last_seen_at') or '—')}")
-        console.print(f"   Stopped at: {str(row.get('stopped_at') or '—')}")
-        recovery_label = _recent_project_text(row, "recovery_status_label")
-        if recovery_label is not None:
-            console.print(f"   Recovery: {recovery_label}")
-        console.print(f"   Resumable: {'yes' if _strict_bool_value(row.get('resumable')) is True else 'no'}")
-        console.print(f"   Why shown: {_recent_project_selection_reason(row)}")
-        console.print(f"   Notes: {_resume_recent_project_notes(row)}")
-        console.print(f"   Resume: {_resume_recent_project_command(row)}")
-        console.print()
-    console.print()
-    console.print("[bold]Next here[/]")
-    console.print("- Select a workspace above, then continue there with `resume-work`.")
-    console.print("- After resuming, `suggest-next` is the fastest next action.")
+    for line in _recent_project_presentation.build_recent_resume_summary_lines(
+        rows,
+        local_resume_command=local_cli_resume_command(),
+    ):
+        console.print(line)
 
 
 def _render_resume_summary(payload: dict[str, object]) -> None:
@@ -6174,8 +5476,7 @@ def integrations_disable(
     _output(_update_wolfram_integration_state(_get_cwd(), enabled=False))
 
 
-class _PermissionsResolutionError(RuntimeError):
-    """Internal error used to report non-fatal permissions resolution failures."""
+_PermissionsResolutionError = _permissions_cli_support.PermissionsResolutionError
 
 
 def _raise_permissions_resolution_error(message: str, *, strict: bool) -> None:
@@ -6192,54 +5493,30 @@ def _resolve_permissions_runtime_name(
     prefer_installed_runtime: bool = False,
 ) -> str:
     """Resolve the runtime to use for permission status/sync commands."""
-    from gpd.hooks.runtime_detect import (
-        RUNTIME_UNKNOWN,
-        detect_active_runtime,
-        detect_runtime_for_gpd_use,
+    return _permissions_cli_support.resolve_permissions_runtime_name(
+        runtime,
+        cwd=_get_cwd(),
+        strict=strict,
+        prefer_installed_runtime=prefer_installed_runtime,
+        supported_runtime_names=_supported_runtime_names,
+        normalize_runtime_name=normalize_runtime_name,
+        error=_error,
     )
-
-    supported = _supported_runtime_names()
-    if runtime is not None:
-        normalized = normalize_runtime_name(runtime)
-        if normalized is None or normalized not in supported:
-            _raise_permissions_resolution_error(
-                f"Unknown runtime {runtime!r}. Supported: {', '.join(supported)}",
-                strict=strict,
-            )
-        return normalized
-
-    detected = (
-        detect_runtime_for_gpd_use(cwd=_get_cwd())
-        if prefer_installed_runtime
-        else detect_active_runtime(cwd=_get_cwd())
-    )
-    if detected == RUNTIME_UNKNOWN:
-        _raise_permissions_resolution_error("No active runtime was detected. Pass --runtime explicitly.", strict=strict)
-    return detected
 
 
 def _resolve_permissions_autonomy(autonomy: str | None, *, strict: bool = True) -> str:
     """Resolve the autonomy value used for runtime-permission sync."""
-    from gpd.core.config import AutonomyMode, load_config
-
-    if autonomy is None:
-        return load_config(_get_cwd()).autonomy.value
-
-    normalized = autonomy.strip().lower()
-    valid_values = {mode.value for mode in AutonomyMode}
-    if normalized not in valid_values:
-        _raise_permissions_resolution_error(
-            f"Unknown autonomy {autonomy!r}. Supported: {', '.join(sorted(valid_values))}",
-            strict=strict,
-        )
-    return normalized
+    return _permissions_cli_support.resolve_permissions_autonomy(
+        autonomy,
+        cwd=_get_cwd(),
+        strict=strict,
+        error=_error,
+    )
 
 
 def _permissions_install_target_assessment(runtime_name: str, target_dir: Path):
     """Return the shared install-state assessment for a permissions target."""
-    from gpd.hooks.install_metadata import assess_install_target
-
-    return assess_install_target(target_dir, expected_runtime=runtime_name)
+    return _permissions_cli_support.permissions_install_target_assessment(runtime_name, target_dir)
 
 
 def _permissions_install_target_error_message(
@@ -6249,26 +5526,12 @@ def _permissions_install_target_error_message(
     action: str,
 ) -> str:
     """Return a user-facing error message for a non-complete permissions target."""
-    target = _format_display_path(assessment.config_dir)
-    if assessment.state == "owned_incomplete":
-        missing = ", ".join(f"`{relpath}`" for relpath in assessment.missing_install_artifacts)
-        missing_message = f" Missing artifacts: {missing}." if missing else ""
-        return (
-            f"Found an incomplete GPD install for runtime {runtime_name!r} at {target}.{missing_message} "
-            f"Repair the install before you {action}."
-        )
-    if assessment.state == "foreign_runtime":
-        other_runtime = assessment.manifest_runtime or "unknown"
-        return (
-            f"Found a GPD install at {target}, but its manifest belongs to runtime {other_runtime!r}, "
-            f"not {runtime_name!r}."
-        )
-    if assessment.state == "untrusted_manifest":
-        return (
-            f"Found a managed GPD surface at {target}, but its manifest state is {assessment.manifest_state!r}. "
-            "Repair or reinstall it before using permissions."
-        )
-    return f"No GPD install found for runtime {runtime_name!r}. Run `gpd install {runtime_name}` first."
+    return _permissions_cli_support.permissions_install_target_error_message(
+        runtime_name,
+        assessment,
+        action=action,
+        cwd=_get_cwd(),
+    )
 
 
 def _resolve_permissions_target_dir(
@@ -6279,80 +5542,20 @@ def _resolve_permissions_target_dir(
     action: str = "inspect runtime permissions on",
 ) -> Path:
     """Resolve the installed config directory targeted by a permissions command."""
-    from gpd.adapters import get_adapter
-    from gpd.hooks.runtime_detect import detect_install_scope, detect_runtime_install_target
-
-    adapter = get_adapter(runtime_name)
-    assessment = None
-    if target_dir:
-        resolved = _resolve_cli_target_dir(target_dir)
-        try:
-            adapter.validate_target_runtime(resolved, action=action)
-        except RuntimeError as exc:
-            _error(str(exc))
-        assessment = _permissions_install_target_assessment(runtime_name, resolved)
-    else:
-        install_target = detect_runtime_install_target(runtime_name, cwd=_get_cwd())
-        if install_target is not None:
-            resolved = install_target.config_dir
-            assessment = _permissions_install_target_assessment(runtime_name, resolved)
-        else:
-            install_scope = detect_install_scope(runtime_name, cwd=_get_cwd())
-            if install_scope == "global":
-                resolved = adapter.resolve_target_dir(True, _get_cwd())
-                assessment = _permissions_install_target_assessment(runtime_name, resolved)
-            elif install_scope == "local":
-                resolved = adapter.resolve_target_dir(False, _get_cwd())
-                assessment = _permissions_install_target_assessment(runtime_name, resolved)
-            else:
-                local_target = adapter.resolve_target_dir(False, _get_cwd())
-                global_target = adapter.resolve_target_dir(True, _get_cwd())
-                local_assessment = _permissions_install_target_assessment(runtime_name, local_target)
-                global_assessment = _permissions_install_target_assessment(runtime_name, global_target)
-                candidate_assessments = (local_assessment, global_assessment)
-                complete_assessment = next(
-                    (candidate for candidate in candidate_assessments if candidate.state == "owned_complete"),
-                    None,
-                )
-                if complete_assessment is not None:
-                    resolved = complete_assessment.config_dir
-                    assessment = complete_assessment
-                else:
-                    informative_assessment = next(
-                        (
-                            candidate
-                            for candidate in candidate_assessments
-                            if candidate.state not in {"absent", "clean"}
-                        ),
-                        None,
-                    )
-                    if informative_assessment is None:
-                        _raise_permissions_resolution_error(
-                            f"No GPD install found for runtime {runtime_name!r}. Run `gpd install {runtime_name}` first.",
-                            strict=strict,
-                        )
-                    resolved = informative_assessment.config_dir
-                    assessment = informative_assessment
-
-    if assessment is None:
-        assessment = _permissions_install_target_assessment(runtime_name, resolved)
-
-    if assessment.state in {"absent", "clean"} and adapter.has_complete_install(resolved):
-        return resolved
-
-    if assessment.state != "owned_complete":
-        _raise_permissions_resolution_error(
-            _permissions_install_target_error_message(runtime_name, assessment, action=action),
-            strict=strict,
-        )
-    return resolved
+    return _permissions_cli_support.resolve_permissions_target_dir(
+        runtime_name,
+        target_dir=target_dir,
+        cwd=_get_cwd(),
+        strict=strict,
+        action=action,
+        target_assessment_resolver=_permissions_install_target_assessment,
+        error=_error,
+    )
 
 
 def _annotate_permissions_payload(payload: dict[str, object]) -> dict[str, object]:
     """Attach structured capability and evidence metadata to a permissions payload."""
-    from gpd.core.health import annotate_permissions_payload
-
-    return annotate_permissions_payload(payload, requested_runtime=None)
+    return _permissions_cli_support.annotate_permissions_payload(payload, requested_runtime=None)
 
 
 def _runtime_permissions_payload(
@@ -6365,75 +5568,30 @@ def _runtime_permissions_payload(
     prefer_installed_runtime: bool = False,
 ) -> dict[str, object]:
     """Return runtime-permissions status or sync payload for the selected runtime."""
-    from gpd.adapters import get_adapter
-    from gpd.hooks.runtime_detect import RUNTIME_UNKNOWN
-
-    try:
-        runtime_name = _resolve_permissions_runtime_name(
-            runtime,
-            strict=strict,
-            prefer_installed_runtime=prefer_installed_runtime,
-        )
-    except _PermissionsResolutionError as exc:
-        return _annotate_permissions_payload(
-            {
-                "runtime": None,
-                "target": None,
-                "sync_applied": False,
-                "changed": False,
-                "message": str(exc),
-            }
-        )
-
-    if runtime is None and runtime_name == RUNTIME_UNKNOWN:
-        if strict:
-            _error("No active runtime was detected. Pass --runtime explicitly.")
-        return _annotate_permissions_payload(
-            {
-                "runtime": None,
-                "target": None,
-                "sync_applied": False,
-                "changed": False,
-                "message": (
-                    "No active runtime was detected. "
-                    f"Run `{local_cli_permissions_sync_command()}` after installing GPD into a runtime."
-                ),
-            }
-        )
-
-    try:
-        resolved_target_dir = _resolve_permissions_target_dir(
-            runtime_name,
-            target_dir=target_dir,
-            strict=strict,
-            action=("sync" if apply_sync else "inspect") + " runtime permissions on",
-        )
-    except _PermissionsResolutionError as exc:
-        return _annotate_permissions_payload(
-            {
-                "runtime": runtime_name,
-                "target": None if target_dir is None else str(_resolve_cli_target_dir(target_dir)),
-                "sync_applied": False,
-                "changed": False,
-                "message": str(exc),
-            }
-        )
-
-    adapter = get_adapter(runtime_name)
-
-    autonomy_value = _resolve_permissions_autonomy(autonomy, strict=strict)
-    payload = (
-        adapter.sync_runtime_permissions(resolved_target_dir, autonomy=autonomy_value)
-        if apply_sync
-        else adapter.runtime_permissions_status(resolved_target_dir, autonomy=autonomy_value)
-    )
-    return _annotate_permissions_payload(
-        {
-            "runtime": runtime_name,
-            "target": str(resolved_target_dir),
-            "autonomy": autonomy_value,
-            **payload,
-        }
+    return _permissions_cli_support.runtime_permissions_payload(
+        runtime=runtime,
+        autonomy=autonomy,
+        target_dir=target_dir,
+        apply_sync=apply_sync,
+        strict=strict,
+        cwd=_get_cwd(),
+        prefer_installed_runtime=prefer_installed_runtime,
+        runtime_name_resolver=lambda value, **kwargs: _resolve_permissions_runtime_name(
+            value,
+            strict=bool(kwargs.get("strict", True)),
+            prefer_installed_runtime=bool(kwargs.get("prefer_installed_runtime", False)),
+        ),
+        target_dir_resolver=lambda value, **kwargs: _resolve_permissions_target_dir(
+            value,
+            target_dir=kwargs.get("target_dir"),
+            strict=bool(kwargs.get("strict", True)),
+            action=str(kwargs.get("action") or "inspect runtime permissions on"),
+        ),
+        autonomy_resolver=lambda value, **kwargs: _resolve_permissions_autonomy(
+            value,
+            strict=bool(kwargs.get("strict", True)),
+        ),
+        payload_annotator=lambda payload, requested_runtime=None: _annotate_permissions_payload(payload),
     )
 
 
@@ -6444,19 +5602,19 @@ def _permissions_status_payload(
     target_dir: str | None,
 ) -> dict[str, object]:
     """Return a status payload annotated for unattended-readiness checks."""
-    from gpd.core.health import normalize_permissions_readiness_payload
-
-    payload = _runtime_permissions_payload(
+    return _permissions_cli_support.permissions_status_payload(
         runtime=runtime,
         autonomy=autonomy,
         target_dir=target_dir,
-        apply_sync=False,
-        strict=True,
-        prefer_installed_runtime=True,
-    )
-    return normalize_permissions_readiness_payload(
-        payload,
-        requested_runtime=runtime,
+        cwd=_get_cwd(),
+        runtime_permissions_payload_func=lambda **kwargs: _runtime_permissions_payload(
+            runtime=kwargs.get("runtime"),
+            autonomy=kwargs.get("autonomy"),
+            target_dir=kwargs.get("target_dir"),
+            apply_sync=bool(kwargs.get("apply_sync", False)),
+            strict=bool(kwargs.get("strict", True)),
+            prefer_installed_runtime=bool(kwargs.get("prefer_installed_runtime", False)),
+        ),
     )
 
 
@@ -8942,36 +8100,15 @@ def validate_review_preflight(
 
 
 def _project_local_artifact_ref(path: Path) -> str | None:
-    resolved = path.resolve(strict=False)
-    project_root = resolve_project_root(resolved.parent, require_layout=True)
-    if project_root is not None:
-        try:
-            relative = resolved.relative_to(project_root.resolve(strict=False))
-        except ValueError:
-            pass
-        else:
-            if relative.parts and relative.parts[0] == PLANNING_DIR_NAME:
-                return relative.as_posix()
-
-    gpd_indexes = [index for index, part in enumerate(resolved.parts) if part == PLANNING_DIR_NAME]
-    if gpd_indexes:
-        return Path(*resolved.parts[gpd_indexes[-1] :]).as_posix()
-    return None
+    return _artifact_writers.project_local_artifact_ref(path)
 
 
 def _verification_report_plan_contract_ref(plan_path: Path) -> str:
-    """Return the canonical project-local contract ref for a PLAN path."""
-
-    resolved = plan_path.resolve(strict=False)
-    artifact_ref = _project_local_artifact_ref(plan_path)
-    return f"{artifact_ref}#/contract" if artifact_ref is not None else f"{resolved.name}#/contract"
+    return _artifact_writers.verification_report_plan_contract_ref(plan_path)
 
 
 def _normalize_verification_report_skeleton_status(status: str) -> str:
-    normalized = status.strip()
-    if normalized != "gaps_found":
-        raise GPDError("verification-report skeleton currently supports only --status gaps_found")
-    return normalized
+    return _artifact_writers.normalize_verification_report_skeleton_status(status)
 
 
 def _normalize_verification_report_skeleton_output(
@@ -8981,37 +8118,20 @@ def _normalize_verification_report_skeleton_output(
     plan_contract_ref: str,
     target_status: str,
 ) -> dict[str, object]:
-    normalized = _mapping_payload(raw_payload, label="verification-report skeleton builder")
-    normalized.setdefault("plan_path", str(plan_path))
-    normalized.setdefault("plan_contract_ref", plan_contract_ref)
-    normalized.setdefault("target_status", target_status)
-    if "validation_commands" not in normalized:
-        normalized["validation_commands"] = _verification_report_validation_commands(normalized)
-    if "authoring_rules" not in normalized:
-        normalized["authoring_rules"] = _verification_report_authoring_rules()
-    if "warnings" not in normalized:
-        normalized["warnings"] = []
-    if "frontmatter_yaml" not in normalized:
-        normalized["frontmatter_yaml"] = _render_verification_report_frontmatter_yaml(
-            normalized.get("frontmatter"),
-            target_report_ref=_verification_report_artifact_ref(normalized),
-        )
-    if "markdown_draft" not in normalized:
-        normalized["markdown_draft"] = _render_verification_report_markdown_draft(normalized)
-    return normalized
+    return _artifact_writers.normalize_verification_report_skeleton_output(
+        raw_payload,
+        plan_path=plan_path,
+        plan_contract_ref=plan_contract_ref,
+        target_status=target_status,
+    )
 
 
 def _normalize_verification_report_skeleton_format(output_format: str) -> str:
-    normalized = output_format.strip().lower()
-    if normalized not in {"markdown", "frontmatter", "json"}:
-        raise GPDError("verification-report skeleton --format must be one of: markdown, frontmatter, json")
-    return normalized
+    return _artifact_writers.normalize_verification_report_skeleton_format(output_format)
 
 
 def _project_local_gpd_ref(path_value: object) -> str | None:
-    if not isinstance(path_value, str) or not path_value.strip():
-        return None
-    return _project_local_artifact_ref(Path(path_value).expanduser()) or path_value
+    return _artifact_writers.project_local_gpd_ref(path_value)
 
 
 def _render_verification_report_frontmatter_yaml(
@@ -9019,82 +8139,34 @@ def _render_verification_report_frontmatter_yaml(
     *,
     target_report_ref: str | None = None,
 ) -> str:
-    if not isinstance(frontmatter, Mapping):
-        raise GPDError("verification-report skeleton payload is missing frontmatter")
-
-    from gpd.core.verification_report import render_verification_report_frontmatter_yaml
-
-    kwargs: dict[str, object] = {}
-    if target_report_ref is not None and _callable_accepts_kwarg(
-        render_verification_report_frontmatter_yaml,
-        "target_report_ref",
-    ):
-        kwargs["target_report_ref"] = target_report_ref
-    return render_verification_report_frontmatter_yaml(dict(frontmatter), **kwargs)
+    return _artifact_writers.render_verification_report_frontmatter_yaml(
+        frontmatter,
+        target_report_ref=target_report_ref,
+    )
 
 
 def _ensure_frontmatter_block(frontmatter_yaml: object) -> str:
-    if not isinstance(frontmatter_yaml, str) or not frontmatter_yaml.strip():
-        raise GPDError("verification-report skeleton payload is missing frontmatter_yaml")
-    rendered = frontmatter_yaml.strip()
-    if rendered.startswith("---"):
-        return f"{rendered}\n"
-    return f"---\n{rendered}\n---\n"
+    return _artifact_writers.ensure_frontmatter_block(frontmatter_yaml)
 
 
 def _body_markdown_starts_with_frontmatter(body_markdown: str) -> bool:
-    stripped = body_markdown.lstrip("\ufeff \t\r\n")
-    return stripped == "---" or stripped.startswith("---\n") or stripped.startswith("---\r\n")
+    return _artifact_writers.body_markdown_starts_with_frontmatter(body_markdown)
 
 
 def _verification_report_artifact_ref(payload: Mapping[str, object]) -> str:
-    for key in ("target_report_ref", "target_report_path"):
-        rendered = _project_local_gpd_ref(payload.get(key))
-        if rendered:
-            return rendered
-    return "GPD/phases/<phase>/<plan>-VERIFICATION.md"
+    return _artifact_writers.verification_report_artifact_ref(payload)
 
 
 def _verification_report_validation_commands(payload: Mapping[str, object]) -> list[str]:
-    existing = payload.get("validation_commands")
-    if isinstance(existing, list) and all(isinstance(item, str) for item in existing):
-        return list(existing)
-    report_ref = _verification_report_artifact_ref(payload)
-    return _verification_report_validation_commands_for_ref(report_ref)
+    return _artifact_writers.verification_report_validation_commands(payload)
 
 
 def _verification_report_authoring_rules() -> list[str]:
-    return [
-        "Use this generated frontmatter as the starting YAML, not as a loose example.",
-        "Do not add prose strings to contract_results.*.evidence; put prose in summary, notes, or the Markdown body.",
-        "Keep top-level status as gaps_found until a validated report can support a stronger result.",
-        "Run the validation commands before treating the report as canonical.",
-    ]
+    return _artifact_writers.verification_report_authoring_rules()
 
 
 def _render_verification_report_markdown_draft(payload: Mapping[str, object]) -> str:
-    from gpd.core.verification_report import render_verification_report_markdown
-
-    frontmatter_block = _ensure_frontmatter_block(payload.get("frontmatter_yaml"))
-    validation_commands = _verification_report_validation_commands(payload)
-    authoring_rules = payload.get("authoring_rules")
-    rules = authoring_rules if isinstance(authoring_rules, list) else _verification_report_authoring_rules()
-    validation_block = "\n".join(validation_commands)
-    rules_block = "\n".join(f"- {rule}" for rule in rules if isinstance(rule, str))
-    body_stub = (
-        "# Verification\n\n"
-        "## Evidence\n\n"
-        "Add the independent verification commands, exact outputs, and PASS/FAIL/INCONCLUSIVE verdict here.\n\n"
-        "## Gap Notes\n\n"
-        "Explain unresolved contract gaps without changing schema-only fields into prose evidence.\n\n"
-        "## Validation Commands\n\n"
-        "```bash\n"
-        f"{validation_block}\n"
-        "```\n\n"
-        "## Authoring Rules\n\n"
-        f"{rules_block}\n"
-    )
-    return render_verification_report_markdown(frontmatter_block, body_stub)
+    return _artifact_writers.render_verification_report_markdown_draft(payload)
 
 
 def _emit_verification_report_skeleton(payload: Mapping[str, object], *, output_format: str) -> None:
@@ -9111,41 +8183,19 @@ def _emit_verification_report_skeleton(payload: Mapping[str, object], *, output_
 
 
 def _normalize_verification_report_validate_mode(validate_mode: str | None, *, has_body_file: bool) -> str:
-    if validate_mode is None:
-        return "contract" if has_body_file else "frontmatter"
-    normalized = validate_mode.strip().lower()
-    if normalized not in {"none", "frontmatter", "contract"}:
-        raise GPDError("verification-report skeleton --validate must be one of: none, frontmatter, contract")
-    return normalized
+    return _artifact_writers.normalize_verification_report_validate_mode(validate_mode, has_body_file=has_body_file)
 
 
 def _normalize_verification_report_finalize_validate_mode(validate_mode: str | None) -> str:
-    if validate_mode is None:
-        return "contract"
-    normalized = validate_mode.strip().lower()
-    if normalized != "contract":
-        raise GPDError("verification-report finalize --validate must be contract")
-    return normalized
+    return _artifact_writers.normalize_verification_report_finalize_validate_mode(validate_mode)
 
 
 def _normalize_verification_report_verified(verified: str | None) -> str | None:
-    if verified is None:
-        return None
-    normalized = verified.strip()
-    if not normalized:
-        raise GPDError("verification-report skeleton --verified cannot be empty")
-    if normalized.lower() == "now":
-        return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-    return normalized
+    return _artifact_writers.normalize_verification_report_verified(verified)
 
 
 def _normalize_verification_report_score(score: str | None) -> str | None:
-    if score is None:
-        return None
-    normalized = score.strip()
-    if not normalized:
-        raise GPDError("verification-report skeleton --score cannot be empty")
-    return normalized
+    return _artifact_writers.normalize_verification_report_score(score)
 
 
 def _verification_report_output_target(
@@ -9154,55 +8204,24 @@ def _verification_report_output_target(
     payload: Mapping[str, object],
     plan_path: Path,
 ) -> Path:
-    target_base = _get_cwd()
-    if output_path is not None:
-        raw_target = output_path
-    else:
-        raw_target = None
-        payload_target = payload.get("target_report_path")
-        if isinstance(payload_target, str) and payload_target.strip():
-            raw_target = payload_target
-            payload_path = Path(payload_target).expanduser()
-            if payload_path.parts and payload_path.parts[0] == PLANNING_DIR_NAME:
-                target_base = resolve_project_root(plan_path.parent, require_layout=True) or plan_path.parent
-            else:
-                target_base = plan_path.parent
-        else:
-            name = plan_path.name
-            raw_target = str(
-                plan_path.with_name(
-                    name.replace("PLAN.md", "VERIFICATION.md") if "PLAN.md" in name else "VERIFICATION.md"
-                )
-            )
-
-    target = Path(raw_target).expanduser()
-    if not target.is_absolute():
-        target = target_base / target
-    return target.resolve(strict=False)
+    return _artifact_writers.verification_report_output_target(
+        output_path,
+        payload=payload,
+        plan_path=plan_path,
+        launch_cwd=_get_cwd(),
+    )
 
 
 def _verification_report_validation_commands_for_ref(report_ref: str) -> list[str]:
-    quoted_ref = shlex.quote(report_ref)
-    return [
-        f"gpd frontmatter validate {quoted_ref} --schema verification",
-        f"gpd validate verification-contract {quoted_ref}",
-    ]
+    return _artifact_writers.verification_report_validation_commands_for_ref(report_ref)
 
 
 def _verification_report_warning_list(payload: Mapping[str, object], *, validate_mode: str) -> list[str]:
-    warnings: list[str] = []
-    raw_warnings = payload.get("warnings")
-    if isinstance(raw_warnings, list):
-        warnings.extend(str(item) for item in raw_warnings if str(item).strip())
-    if validate_mode == "none":
-        warnings.append("Validation skipped because --validate none was requested.")
-    return warnings
+    return _artifact_writers.verification_report_warning_list(payload, validate_mode=validate_mode)
 
 
 def _render_verification_report_markdown_candidate(frontmatter_yaml: str, body_markdown: str) -> str:
-    from gpd.core.verification_report import render_verification_report_markdown
-
-    return render_verification_report_markdown(frontmatter_yaml, body_markdown)
+    return _artifact_writers.render_verification_report_markdown_candidate(frontmatter_yaml, body_markdown)
 
 
 def _render_verification_report_candidate(
@@ -9213,48 +8232,21 @@ def _render_verification_report_candidate(
     verified: str | None,
     score: str | None,
 ) -> tuple[str, dict[str, object]]:
-    frontmatter = payload.get("frontmatter")
-    if not isinstance(frontmatter, Mapping):
-        raise GPDError("verification-report skeleton payload is missing frontmatter")
-
-    rendered_payload = dict(payload)
-    rendered_frontmatter = dict(frontmatter)
-    if verified is not None:
-        rendered_frontmatter["verified"] = verified
-    if score is not None:
-        rendered_frontmatter["score"] = score
-
-    frontmatter_yaml = _render_verification_report_frontmatter_yaml(
-        rendered_frontmatter,
+    return _artifact_writers.render_verification_report_candidate(
+        payload,
         target_report_ref=target_report_ref,
+        body_markdown=body_markdown,
+        verified=verified,
+        score=score,
     )
-    body = body_markdown
-    if body is None:
-        body_candidate = rendered_payload.get("body_stub")
-        body = body_candidate if isinstance(body_candidate, str) else ""
-    candidate = _render_verification_report_markdown_candidate(frontmatter_yaml, body)
-
-    rendered_payload["frontmatter"] = rendered_frontmatter
-    rendered_payload["frontmatter_yaml"] = frontmatter_yaml
-    rendered_payload["markdown_draft"] = candidate
-    return candidate, rendered_payload
 
 
 def _verification_report_validation_not_run(mode: str, error: str) -> dict[str, object]:
-    return {
-        "mode": mode,
-        "status": "not_run",
-        "valid": False,
-        "missing": [],
-        "present": [],
-        "errors": [error],
-        "schema_name": "verification",
-        "oracle_evidence_count": None,
-    }
+    return _artifact_writers.verification_report_validation_not_run(mode, error)
 
 
 def _artifact_target_ref(target_path: Path) -> str:
-    return _project_local_gpd_ref(str(target_path)) or target_path.as_posix()
+    return _artifact_writers.artifact_target_ref(target_path)
 
 
 def _artifact_write_blocker(
@@ -9264,22 +8256,17 @@ def _artifact_write_blocker(
     target_exists: bool | None = None,
     existing_requires_force: bool = True,
 ) -> str | None:
-    exists = target_path.exists() if target_exists is None else target_exists
-    if exists and existing_requires_force and not force:
-        return f"target exists; pass --force to overwrite: {_format_display_path(target_path)}"
-    if not target_path.parent.exists():
-        return f"target parent directory does not exist: {_format_display_path(target_path.parent)}"
-    if not target_path.parent.is_dir():
-        return f"target parent is not a directory: {_format_display_path(target_path.parent)}"
-    return None
+    return _artifact_writers.artifact_write_blocker(
+        target_path,
+        force=force,
+        target_exists=target_exists,
+        existing_requires_force=existing_requires_force,
+        display_path=_format_display_path,
+    )
 
 
 def _atomic_write_artifact_error(target_path: Path, content: str) -> str | None:
-    try:
-        atomic_write(target_path, content)
-    except OSError as exc:
-        return f"failed to write target atomically: {exc}"
-    return None
+    return _artifact_writers.atomic_write_artifact_error(target_path, content)
 
 
 def _emit_raw_json_and_exit(payload: Mapping[str, object]) -> NoReturn:
@@ -9297,20 +8284,15 @@ def _verification_report_write_payload(
     validation_commands: list[str],
     patch_file_path: Path | None = None,
 ) -> dict[str, object]:
-    payload: dict[str, object] = {
-        "written": False,
-        "target_report_path": str(target_path),
-        "target_report_ref": target_ref,
-        "replaced": False,
-        "force": force,
-        "body_file": str(body_path) if body_path is not None else None,
-        "validation": {},
-        "warnings": warnings,
-        "validation_commands": validation_commands,
-    }
-    if patch_file_path is not None:
-        payload["patch_file"] = str(patch_file_path)
-    return payload
+    return _artifact_writers.verification_report_write_payload(
+        target_path=target_path,
+        target_ref=target_ref,
+        force=force,
+        body_path=body_path,
+        warnings=warnings,
+        validation_commands=validation_commands,
+        patch_file_path=patch_file_path,
+    )
 
 
 def _emit_verification_report_not_run(
@@ -9334,47 +8316,17 @@ def _verification_report_write_recovery(
     verified: str | None,
     score: str | None,
 ) -> dict[str, object]:
-    from gpd.core.verification_report import VERIFICATION_REPORT_BODY_CONTRACT
-
-    body_display = _format_display_path(body_path) if body_path is not None else "BODY.md"
-    command_parts = [
-        "gpd",
-        "verification-report",
-        "skeleton",
-        _format_display_path(plan_path),
-        "--status",
-        status,
-        "--write",
-        "--output",
-        _format_display_path(target_path),
-        "--body-file",
-        body_display,
-        "--validate",
-        validate_mode,
-    ]
-    if force:
-        command_parts.insert(6, "--force")
-    if verified is not None:
-        command_parts.extend(["--verified", verified])
-    if score is not None:
-        command_parts.extend(["--score", score])
-
-    if body_path is None:
-        safe_next_step = (
-            "Create a Markdown body file with executed oracle evidence, then rerun the writer with --body-file."
-        )
-    else:
-        safe_next_step = "Edit only the Markdown body file, then rerun the writer command."
-
-    return {
-        "safe_next_step": safe_next_step,
-        "body_file_contract": [
-            VERIFICATION_REPORT_BODY_CONTRACT,
-            "Do not include YAML frontmatter in the body file.",
-            "Keep generated frontmatter unchanged; the canonical report is written only after validation passes.",
-        ],
-        "rerun_command": " ".join(shlex.quote(part) for part in command_parts),
-    }
+    return _artifact_writers.verification_report_write_recovery(
+        plan_path=plan_path,
+        target_path=target_path,
+        body_path=body_path,
+        validate_mode=validate_mode,
+        force=force,
+        status=status,
+        verified=verified,
+        score=score,
+        display_path=_format_display_path,
+    )
 
 
 def _verification_report_finalize_recovery(
@@ -9386,34 +8338,15 @@ def _verification_report_finalize_recovery(
     validate_mode: str,
     force: bool,
 ) -> dict[str, object]:
-    from gpd.core.verification_report import VERIFICATION_REPORT_BODY_CONTRACT
-
-    command_parts = [
-        "gpd",
-        "verification-report",
-        "finalize",
-        _format_display_path(plan_path),
-        "--patch",
-        _format_display_path(patch_path),
-        "--body-file",
-        _format_display_path(body_path),
-        "--output",
-        _format_display_path(target_path),
-        "--validate",
-        validate_mode,
-    ]
-    if force:
-        command_parts.append("--force")
-
-    return {
-        "safe_next_step": "Edit only the typed patch or body file, then rerun the finalizer command.",
-        "body_file_contract": [
-            VERIFICATION_REPORT_BODY_CONTRACT,
-            "Do not include YAML frontmatter in the body file.",
-            "The finalizer writes the canonical report only after contract validation passes.",
-        ],
-        "rerun_command": " ".join(shlex.quote(part) for part in command_parts),
-    }
+    return _artifact_writers.verification_report_finalize_recovery(
+        plan_path=plan_path,
+        patch_path=patch_path,
+        target_path=target_path,
+        body_path=body_path,
+        validate_mode=validate_mode,
+        force=force,
+        display_path=_format_display_path,
+    )
 
 
 def _validate_verification_report_candidate(
@@ -9422,124 +8355,39 @@ def _validate_verification_report_candidate(
     source_path: Path,
     mode: str,
 ) -> dict[str, object]:
-    if mode == "none":
-        return {
-            "mode": mode,
-            "status": "skipped",
-            "valid": True,
-            "missing": [],
-            "present": [],
-            "errors": [],
-            "schema_name": "verification",
-            "oracle_evidence_count": None,
-        }
-
-    from gpd.core.correctness_validators import validate_verification_oracle_evidence
-    from gpd.core.frontmatter import FrontmatterParseError, FrontmatterValidationError, validate_frontmatter
-
-    try:
-        schema_result = validate_frontmatter(content, "verification", source_path=source_path)
-    except (FrontmatterParseError, FrontmatterValidationError) as exc:
-        return {
-            "mode": mode,
-            "status": "invalid",
-            "valid": False,
-            "missing": [],
-            "present": [],
-            "errors": [f"{type(exc).__name__}: {exc}"],
-            "schema_name": "verification",
-            "oracle_evidence_count": None,
-        }
-
-    errors = list(schema_result.errors)
-    oracle_evidence_count: int | None = None
-    if mode == "contract":
-        oracle_result = validate_verification_oracle_evidence(content, source_path=source_path)
-        oracle_evidence_count = oracle_result.evidence_count
-        errors.extend(oracle_result.errors)
-
-    valid = len(schema_result.missing) == 0 and not errors
-    return {
-        "mode": mode,
-        "status": "valid" if valid else "invalid",
-        "valid": valid,
-        "missing": list(schema_result.missing),
-        "present": list(schema_result.present),
-        "errors": errors,
-        "schema_name": schema_result.schema_name,
-        "oracle_evidence_count": oracle_evidence_count,
-    }
+    return _artifact_writers.validate_verification_report_candidate(content, source_path=source_path, mode=mode)
 
 
 def _verification_report_finalized_markdown(payload: Mapping[str, object]) -> str:
-    markdown = _markdown_payload_value(
-        payload,
-        keys=("markdown", "markdown_draft", "content", "report_markdown"),
-        label="verification-report finalizer",
-        required=True,
-    )
-    assert markdown is not None
-    return markdown
+    return _artifact_writers.verification_report_finalized_markdown(payload)
 
 
 def _normalize_proof_redteam_skeleton_status(status: str) -> str:
-    normalized = status.strip().lower()
-    if normalized not in {"gaps_found", "human_needed"}:
-        raise GPDError("proof-redteam skeleton --status must be one of: gaps_found, human_needed")
-    return normalized
+    return _artifact_writers.normalize_proof_redteam_skeleton_status(status)
 
 
 def _normalize_proof_redteam_claim_id(claim_id: str) -> str:
-    normalized = claim_id.strip()
-    if not normalized:
-        raise GPDError("proof-redteam skeleton --claim-id cannot be empty")
-    return normalized
+    return _artifact_writers.normalize_proof_redteam_claim_id(claim_id)
 
 
 def _normalize_optional_proof_redteam_claim_text(claim_text: str | None) -> str | None:
-    if claim_text is None:
-        return None
-    normalized = claim_text.strip()
-    if not normalized:
-        raise GPDError("proof-redteam skeleton --claim-text cannot be empty when provided")
-    return normalized
+    return _artifact_writers.normalize_optional_proof_redteam_claim_text(claim_text)
 
 
 def _normalize_proof_redteam_proof_artifact_paths(proof_artifact_paths: list[str] | None) -> list[str]:
-    normalized: list[str] = []
-    seen: set[str] = set()
-    for raw_path in proof_artifact_paths or []:
-        path = raw_path.strip()
-        if not path:
-            raise GPDError("proof-redteam skeleton --proof-artifact-path cannot be empty")
-        if path in seen:
-            continue
-        seen.add(path)
-        normalized.append(path)
-    return normalized
+    return _artifact_writers.normalize_proof_redteam_proof_artifact_paths(proof_artifact_paths)
 
 
 def _normalize_required_proof_redteam_claim_text(claim_text: str) -> str:
-    normalized = claim_text.strip()
-    if not normalized:
-        raise GPDError("proof-redteam finalize --claim-text cannot be empty")
-    return normalized
+    return _artifact_writers.normalize_required_proof_redteam_claim_text(claim_text)
 
 
 def _normalize_proof_redteam_reviewed_at(reviewed_at: str | None) -> str | None:
-    if reviewed_at is None:
-        return None
-    normalized = reviewed_at.strip()
-    if not normalized:
-        raise GPDError("proof-redteam finalize --reviewed-at cannot be empty")
-    return normalized
+    return _artifact_writers.normalize_proof_redteam_reviewed_at(reviewed_at)
 
 
 def _normalize_single_proof_redteam_artifact_path(proof_artifact_path: str) -> str:
-    normalized = proof_artifact_path.strip()
-    if not normalized:
-        raise GPDError("proof-redteam finalize --proof-artifact-path cannot be empty")
-    return normalized
+    return _artifact_writers.normalize_single_proof_redteam_artifact_path(proof_artifact_path)
 
 
 def _resolve_proof_redteam_proof_artifact_path(
@@ -9548,34 +8396,23 @@ def _resolve_proof_redteam_proof_artifact_path(
     project_root: Path,
     artifact_dir: Path,
 ) -> Path | None:
-    target = Path(proof_artifact_path).expanduser()
-    if target.is_absolute():
-        candidates = [target.resolve(strict=False)]
-    else:
-        candidates = [
-            (project_root / target).resolve(strict=False),
-            (artifact_dir / target).resolve(strict=False),
-        ]
-    return next((candidate for candidate in candidates if candidate.exists() and candidate.is_file()), None)
+    return _artifact_writers.resolve_proof_redteam_proof_artifact_path(
+        proof_artifact_path,
+        project_root=project_root,
+        artifact_dir=artifact_dir,
+    )
 
 
 def _proof_redteam_validation_commands_for_ref(artifact_ref: str) -> list[str]:
-    return [f"gpd validate proof-redteam {shlex.quote(artifact_ref)}"]
+    return _artifact_writers.proof_redteam_validation_commands_for_ref(artifact_ref)
 
 
 def _proof_redteam_finalize_validation_commands_for_ref(artifact_ref: str) -> list[str]:
-    return [
-        f"gpd validate proof-redteam {shlex.quote(artifact_ref)}",
-        "gpd validate verification-contract VERIFICATION.md",
-    ]
+    return _artifact_writers.proof_redteam_finalize_validation_commands_for_ref(artifact_ref)
 
 
 def _proof_redteam_artifact_ref_from_payload(payload: Mapping[str, object]) -> str:
-    for key in ("target_artifact_ref", "target_report_ref", "target_artifact_path", "target_path"):
-        rendered = _project_local_gpd_ref(payload.get(key))
-        if rendered:
-            return rendered
-    return "PROOF-REDTEAM.md"
+    return _artifact_writers.proof_redteam_artifact_ref_from_payload(payload)
 
 
 def _normalize_proof_redteam_skeleton_output(
@@ -9585,26 +8422,12 @@ def _normalize_proof_redteam_skeleton_output(
     claim_text: str | None,
     target_status: str,
 ) -> dict[str, object]:
-    if isinstance(raw_payload, str):
-        normalized = {"markdown_draft": raw_payload}
-    else:
-        normalized = _mapping_payload(raw_payload, label="proof-redteam skeleton builder")
-
-    normalized.setdefault("claim_id", claim_id)
-    if claim_text is not None:
-        normalized.setdefault("claim_text", claim_text)
-    normalized.setdefault("status", target_status)
-    normalized.setdefault("target_status", target_status)
-    if "validation_commands" not in normalized:
-        normalized["validation_commands"] = _proof_redteam_validation_commands_for_ref(
-            _proof_redteam_artifact_ref_from_payload(normalized)
-        )
-    if "warnings" not in normalized:
-        normalized["warnings"] = []
-    markdown_draft = normalized.get("markdown_draft")
-    if not isinstance(markdown_draft, str) or not markdown_draft.strip():
-        raise GPDError("proof-redteam skeleton payload is missing markdown_draft")
-    return normalized
+    return _artifact_writers.normalize_proof_redteam_skeleton_output(
+        raw_payload,
+        claim_id=claim_id,
+        claim_text=claim_text,
+        target_status=target_status,
+    )
 
 
 def _emit_proof_redteam_skeleton(payload: Mapping[str, object]) -> None:
@@ -9618,12 +8441,11 @@ def _emit_proof_redteam_skeleton(payload: Mapping[str, object]) -> None:
 
 
 def _proof_redteam_finalize_output_target(input_path: Path, output_path: str | None) -> Path:
-    if output_path is None:
-        return input_path.resolve(strict=False)
-    target = Path(output_path).expanduser()
-    if not target.is_absolute():
-        target = _get_cwd() / target
-    return target.resolve(strict=False)
+    return _artifact_writers.proof_redteam_finalize_output_target(
+        input_path,
+        output_path,
+        launch_cwd=_get_cwd(),
+    )
 
 
 def _proof_redteam_finalize_not_run(
@@ -9633,27 +8455,16 @@ def _proof_redteam_finalize_not_run(
     target_path: Path,
     force: bool,
 ) -> dict[str, object]:
-    target_ref = _artifact_target_ref(target_path)
-    return {
-        "written": False,
-        "input_path": str(input_path),
-        "target_path": str(target_path),
-        "target_ref": target_ref,
-        "replaced": False,
-        "force": force,
-        "valid": False,
-        "errors": [error],
-        "validation_commands": _proof_redteam_finalize_validation_commands_for_ref(target_ref),
-    }
+    return _artifact_writers.proof_redteam_finalize_not_run(
+        error,
+        input_path=input_path,
+        target_path=target_path,
+        force=force,
+    )
 
 
 def _proof_redteam_finalized_markdown(payload: Mapping[str, object]) -> str | None:
-    return _markdown_payload_value(
-        payload,
-        keys=("markdown", "markdown_draft", "content", "artifact_markdown"),
-        label="proof-redteam finalizer",
-        required=False,
-    )
+    return _artifact_writers.proof_redteam_finalized_markdown(payload)
 
 
 def _return_status_help_list(*, include_any: bool = False) -> str:
@@ -9913,25 +8724,11 @@ def return_profiles_cmd(
 
 
 def _proof_redteam_output_target(output_path: str | None) -> Path:
-    if output_path is None or not output_path.strip():
-        raise GPDError("proof-redteam skeleton --write requires --output PATH")
-    target = Path(output_path).expanduser()
-    if not target.is_absolute():
-        target = _get_cwd() / target
-    return target.resolve(strict=False)
+    return _artifact_writers.proof_redteam_output_target(output_path, launch_cwd=_get_cwd())
 
 
 def _proof_redteam_write_not_run(error: str, *, target_path: Path, force: bool) -> dict[str, object]:
-    target_ref = _artifact_target_ref(target_path)
-    return {
-        "written": False,
-        "target_path": str(target_path),
-        "target_ref": target_ref,
-        "replaced": False,
-        "force": force,
-        "error": error,
-        "validation_commands": _proof_redteam_validation_commands_for_ref(target_ref),
-    }
+    return _artifact_writers.proof_redteam_write_not_run(error, target_path=target_path, force=force)
 
 
 @proof_redteam_app.command("skeleton")
@@ -11865,23 +10662,7 @@ def version_cmd() -> None:
 # install — Install GPD into a runtime
 # ═══════════════════════════════════════════════════════════════════════════
 
-_GPD_BANNER = r"""
- ██████╗ ██████╗ ██████╗
-██╔════╝ ██╔══██╗██╔══██╗
-██║  ███╗██████╔╝██║  ██║
-██║   ██║██╔═══╝ ██║  ██║
-╚██████╔╝██║     ██████╔╝
- ╚═════╝ ╚═╝     ╚═════╝
-"""
-
-_GPD_DISPLAY_NAME = "Get Physics Done"
-_GPD_OWNER = "Physical Superintelligence PBC"
-_GPD_OWNER_SHORT = "PSI"
-_GPD_COPYRIGHT_YEAR = 2026
-_INSTALL_LOGO_COLOR = "#F3F0E8"
-_INSTALL_TITLE_COLOR = "#F7F4ED"
-_INSTALL_META_COLOR = "#9E988C"
-_INSTALL_ACCENT_COLOR = "#D8C7A3"
+_INSTALL_ACCENT_COLOR = _install_cli_support.INSTALL_ACCENT_COLOR
 _INSTALL_TARGET_DIR_HELP = (
     "Override the runtime config directory; defaults to local scope unless the path resolves to that runtime's "
     "canonical global config dir"
@@ -11891,46 +10672,22 @@ _ENV_BOOTSTRAP_EMBEDDED_INSTALL = "GPD_BOOTSTRAP_EMBEDDED_INSTALL"
 
 def _format_install_header_lines(version: str) -> tuple[str, str]:
     """Return the branded header shown during interactive install."""
-    return (
-        f"GPD v{version} - {_GPD_DISPLAY_NAME}",
-        f"© {_GPD_COPYRIGHT_YEAR} {_GPD_OWNER} ({_GPD_OWNER_SHORT})",
-    )
+    return _install_cli_support.format_install_header_lines(version)
 
 
 def _print_install_header(version: str) -> None:
     """Render the branded install banner for human-facing install flows."""
-    console.print(_GPD_BANNER, style=f"bold {_INSTALL_LOGO_COLOR}")
-    console.print()
-    header_line, attribution_line = _format_install_header_lines(version)
-    console.print(header_line, style=f"bold {_INSTALL_TITLE_COLOR}", markup=False, highlight=False)
-    console.print(attribution_line, style=f"dim {_INSTALL_META_COLOR}", markup=False, highlight=False)
-    console.print()
+    _install_cli_support.print_install_header(version, console=console)
 
 
 def _render_install_option_line(index: int, label: str, *details: str, label_width: int | None = None) -> Text:
     """Return a single-line formatted install menu option."""
-    rendered = Text("  ")
-    rendered.append(f"[{index}]", style=f"bold {_INSTALL_ACCENT_COLOR}")
-    rendered.append(" ")
-    rendered.append(label.ljust(label_width or len(label)), style=f"bold {_INSTALL_TITLE_COLOR}")
-    filtered_details = [detail for detail in details if detail]
-    if filtered_details:
-        rendered.append("  ")
-        for detail_index, detail in enumerate(filtered_details):
-            if detail_index:
-                rendered.append(" ")
-            rendered.append("·", style=f"bold {_INSTALL_ACCENT_COLOR}")
-            rendered.append(" ")
-            rendered.append(detail, style=f"dim {_INSTALL_META_COLOR}")
-    return rendered
+    return _install_cli_support.render_install_option_line(index, label, *details, label_width=label_width)
 
 
 def _render_install_choice_prompt() -> Text:
     """Return the shared interactive prompt label for install menus."""
-    rendered = Text()
-    rendered.append("Enter choice", style=f"bold {_INSTALL_TITLE_COLOR}")
-    rendered.append(" [1]", style=f"dim {_INSTALL_META_COLOR}")
-    return rendered
+    return _install_cli_support.render_install_choice_prompt()
 
 
 def _prompt_runtimes(*, action: str = "install") -> list[str]:
@@ -11938,102 +10695,47 @@ def _prompt_runtimes(*, action: str = "install") -> list[str]:
     from rich.prompt import Prompt
 
     runtimes = _list_runtimes_or_error(action=f"{action} runtime selection")
-    adapters = {runtime: _get_adapter_or_error(runtime, action=f"{action} runtime selection") for runtime in runtimes}
-    label_width = max(len(adapter.display_name) for adapter in adapters.values())
-    all_label = "All runtimes"
-    label_width = max(label_width, len(all_label))
-    console.print(f"\n[bold {_INSTALL_TITLE_COLOR}]Select runtime(s) to {action}[/]\n")
-    for i, rt in enumerate(runtimes, 1):
-        adapter = adapters[rt]
-        console.print(_render_install_option_line(i, adapter.display_name, rt, label_width=label_width))
-    console.print(_render_install_option_line(len(runtimes) + 1, all_label, label_width=label_width))
-
-    console.print()
-    choice = Prompt.ask(_render_install_choice_prompt(), default="1", show_default=False)
-
     try:
-        idx = int(choice)
-    except ValueError:
-        canonical_runtime = normalize_runtime_name(choice)
-        if canonical_runtime in adapters:
-            return [canonical_runtime]
-
-        normalized = choice.strip().casefold()
-        exact_matches = [
-            runtime_name
-            for runtime_name, adapter in adapters.items()
-            if normalized
-            in {
-                runtime_name.casefold(),
-                adapter.display_name.casefold(),
-                *(alias.casefold() for alias in adapter.selection_aliases),
-            }
-        ]
-        if len(exact_matches) == 1:
-            return exact_matches
-
-        fuzzy_matches = [
-            runtime_name
-            for runtime_name, adapter in adapters.items()
-            if normalized
-            and any(
-                normalized in candidate
-                for candidate in (
-                    runtime_name.casefold(),
-                    adapter.display_name.casefold(),
-                    *(alias.casefold() for alias in adapter.selection_aliases),
-                )
-            )
-        ]
-        if len(fuzzy_matches) == 1:
-            return fuzzy_matches
-        if len(fuzzy_matches) > 1:
-            _error(f"Ambiguous selection: {choice!r}. Matches: {', '.join(fuzzy_matches)}")
-        _error(f"Invalid selection: {choice!r}")
+        return _install_cli_support.prompt_runtimes(
+            action=action,
+            runtime_names=runtimes,
+            adapter_lookup=lambda runtime: _get_adapter_or_error(runtime, action=f"{action} runtime selection"),
+            normalize_runtime_name=normalize_runtime_name,
+            console=console,
+            prompt_ask=Prompt.ask,
+        )
+    except _install_cli_support.InstallSelectionError as exc:
+        _error(str(exc))
         return []  # unreachable
-
-    if idx == len(runtimes) + 1:
-        return runtimes
-    if 1 <= idx <= len(runtimes):
-        return [runtimes[idx - 1]]
-
-    _error(f"Invalid selection: {idx}")
-    return []  # unreachable
 
 
 def _location_example(runtimes: list[str], *, is_global: bool, action: str) -> str:
     """Return a representative install location example for the selected runtime set."""
-    if len(runtimes) != 1:
-        return "one config dir per runtime"
-
-    adapter = _get_adapter_or_error(runtimes[0], action=f"{action} location selection")
-    target = adapter.resolve_target_dir(is_global, _get_cwd())
-    return _format_display_path(target)
+    return _install_cli_support.location_example(
+        runtimes,
+        is_global=is_global,
+        action=action,
+        cwd=_get_cwd(),
+        adapter_lookup=lambda runtime: _get_adapter_or_error(runtime, action=f"{action} location selection"),
+    )
 
 
 def _prompt_location(runtimes: list[str], *, action: str = "install") -> bool:
     """Interactive location selection. Returns True for global, False for local."""
     from rich.prompt import Prompt
 
-    label = "Install" if action == "install" else "Uninstall"
-    local_example = _location_example(runtimes, is_global=False, action=action)
-    global_example = _location_example(runtimes, is_global=True, action=action)
-    label_width = max(len("Local"), len("Global"))
-    console.print(f"\n[bold {_INSTALL_TITLE_COLOR}]{label} location[/]\n")
-    console.print(
-        _render_install_option_line(1, "Local", "current project only", local_example, label_width=label_width)
-    )
-    console.print(_render_install_option_line(2, "Global", "all projects", global_example, label_width=label_width))
-
-    console.print()
-    choice = Prompt.ask(_render_install_choice_prompt(), default="1", show_default=False)
-    normalized = choice.strip().lower()
-    if normalized in {"1", "local"}:
-        return False
-    if normalized in {"2", "global"}:
-        return True
-    _error(f"Invalid selection: {choice!r}")
-    return False  # unreachable
+    try:
+        return _install_cli_support.prompt_location(
+            runtimes,
+            action=action,
+            cwd=_get_cwd(),
+            adapter_lookup=lambda runtime: _get_adapter_or_error(runtime, action=f"{action} location selection"),
+            console=console,
+            prompt_ask=Prompt.ask,
+        )
+    except _install_cli_support.InstallSelectionError as exc:
+        _error(str(exc))
+        return False  # unreachable
 
 
 def _install_single_runtime(
@@ -12187,67 +10889,13 @@ def _print_install_summary(
     include_next_steps: bool = True,
 ) -> None:
     """Print a rich summary table of install results."""
-    console.print()
-    table = Table(
-        title="Install Summary",
-        title_style=f"italic {_INSTALL_ACCENT_COLOR}",
-        show_header=True,
-        header_style=f"bold {_INSTALL_ACCENT_COLOR}",
+    _install_cli_support.print_install_summary(
+        results,
+        cwd=_get_cwd(),
+        console=console,
+        adapter_lookup=lambda runtime: _get_adapter_or_error(runtime, action="install summary"),
+        include_next_steps=include_next_steps,
     )
-    table.add_column("Runtime", style="bold")
-    table.add_column("Target")
-    table.add_column("Status")
-
-    for runtime_name, result in results:
-        adapter = _get_adapter_or_error(runtime_name, action="install summary")
-        target = _format_display_path(result.get("target"))
-        agents = result.get("agents", 0)
-        commands = result.get("commands", 0)
-        table.add_row(
-            adapter.display_name,
-            target,
-            f"[green]✓[/] {agents} agents, {commands} commands",
-        )
-
-    console.print(table)
-
-    # Post-install next steps
-    if results and include_next_steps:
-        next_step_entries: list[tuple[str, str]] = []
-        seen_runtime_names: set[str] = set()
-        for runtime_name, _result in results:
-            if runtime_name in seen_runtime_names:
-                continue
-            seen_runtime_names.add(runtime_name)
-            adapter = _get_adapter_or_error(runtime_name, action="install summary")
-            next_step_entries.append(
-                (
-                    adapter.display_name,
-                    adapter.format_command("start"),
-                )
-            )
-
-        console.print()
-        console.print("[bold]After install[/]")
-        console.print(f"Docs hub: {beginner_onboarding_hub_url()}", soft_wrap=True)
-        if len(next_step_entries) == 1:
-            display_name, start_command = next_step_entries[0]
-            console.print(
-                f"Next: open {display_name} in this folder, then run [{_INSTALL_ACCENT_COLOR} bold]{start_command}[/].",
-                soft_wrap=True,
-            )
-        else:
-            console.print(
-                "Next: choose a runtime and run its GPD start command:",
-                soft_wrap=True,
-            )
-            for display_name, start_command in next_step_entries:
-                console.print(
-                    f"- {display_name}: [{_INSTALL_ACCENT_COLOR} bold]{start_command}[/]",
-                    soft_wrap=True,
-                )
-        console.print(_install_summary_local_cli_bridge_line(), soft_wrap=True)
-        console.print()
 
 
 def _validate_all_runtime_selection(action: str, runtimes: list[str] | None, use_all: bool) -> None:
@@ -12258,60 +10906,35 @@ def _validate_all_runtime_selection(action: str, runtimes: list[str] | None, use
 
 def _validate_target_dir_runtime_selection(action: str, runtimes: list[str], target_dir: str | None) -> None:
     """Reject explicit target-dir usage when multiple runtimes are selected."""
-    if target_dir and len(runtimes) != 1:
-        _error(f"--target-dir requires exactly one runtime for {action}")
+    try:
+        _runtime_targeting.validate_target_dir_runtime_selection(action, runtimes, target_dir)
+    except _runtime_targeting.RuntimeTargetingError as exc:
+        _error(str(exc))
 
 
 def _resolve_cli_target_dir(target_dir: str) -> Path:
     """Resolve a CLI target-dir argument relative to the active --cwd."""
-    resolved = Path(target_dir).expanduser()
-    if resolved.is_absolute():
-        return resolved.resolve(strict=False)
-    return (_get_cwd() / resolved).resolve(strict=False)
+    return _runtime_targeting.resolve_cli_target_dir(target_dir, cwd=_get_cwd())
 
 
 def _target_dir_matches_global(runtime_name: str, target_dir: str, *, action: str) -> bool:
     """Return whether an explicit target-dir names the runtime's canonical global dir."""
-    from gpd.adapters.runtime_catalog import resolve_global_config_dir_candidates
-
-    adapter = _get_adapter_or_error(runtime_name, action=action)
-    resolved_target = _resolve_cli_target_dir(target_dir)
-    descriptor = getattr(adapter, "runtime_descriptor", None)
-    if descriptor is not None:
-        try:
-            return any(
-                resolved_target == candidate.expanduser().resolve(strict=False)
-                for candidate in resolve_global_config_dir_candidates(descriptor)
-            )
-        except (AttributeError, TypeError, ValueError):
-            return False
-
-    resolve_target_dir = getattr(adapter, "resolve_target_dir", None)
-    if not callable(resolve_target_dir):
-        return False
-    try:
-        canonical_global_target = resolve_target_dir(True, _get_cwd())
-    except (AttributeError, TypeError, ValueError):
-        return False
-    return resolved_target == canonical_global_target.expanduser().resolve(strict=False)
+    return _runtime_targeting.target_dir_matches_global(
+        runtime_name,
+        target_dir,
+        cwd=_get_cwd(),
+        action=action,
+        adapter_lookup=lambda runtime: _get_adapter_or_error(runtime, action=action),
+    )
 
 
 def _resolve_detected_runtime_target(runtime_name: str) -> tuple[Path | None, str | None]:
     """Return the concrete installed runtime target when one can be detected."""
-    from gpd.hooks.runtime_detect import detect_install_scope, detect_runtime_install_target
-
-    install_target = detect_runtime_install_target(runtime_name, cwd=_get_cwd())
-    if install_target is not None:
-        return install_target.config_dir, install_target.install_scope
-
-    install_scope = detect_install_scope(runtime_name, cwd=_get_cwd())
-    if install_scope == "global":
-        adapter = _get_adapter_or_error(runtime_name, action="inspect runtime readiness")
-        return adapter.resolve_target_dir(True, _get_cwd()), "global"
-    if install_scope == "local":
-        adapter = _get_adapter_or_error(runtime_name, action="inspect runtime readiness")
-        return adapter.resolve_target_dir(False, _get_cwd()), "local"
-    return None, None
+    return _runtime_targeting.resolve_detected_runtime_target(
+        runtime_name,
+        cwd=_get_cwd(),
+        adapter_lookup=lambda runtime: _get_adapter_or_error(runtime, action="inspect runtime readiness"),
+    )
 
 
 def _install_summary_local_cli_bridge_line() -> str:
@@ -12320,7 +10943,7 @@ def _install_summary_local_cli_bridge_line() -> str:
     The richer settings guidance stays in bootstrap/help surfaces that render
     post_start_settings_note() and post_start_settings_recommendation().
     """
-    return f"Diagnostics: use [bold]{local_cli_help_command()}[/] for local diagnostics and later setup."
+    return _install_cli_support.install_summary_local_cli_bridge_line()
 
 
 def _print_workflow_preset_list() -> None:
@@ -12358,65 +10981,17 @@ def _print_workflow_preset_details(preset_name: str) -> None:
 
 def _doctor_blocker_messages(report: object) -> list[str]:
     """Extract blocking doctor messages from a report-like object."""
-    messages: list[str] = []
-    seen: set[str] = set()
-
-    for check in getattr(report, "checks", []) or []:
-        status = getattr(check, "status", None)
-        issues = [str(issue) for issue in getattr(check, "issues", []) or [] if str(issue).strip()]
-        if str(status) != "fail":
-            continue
-        if not issues:
-            label = str(getattr(check, "label", "Runtime readiness")).strip() or "Runtime readiness"
-            issues = [f"{label}: readiness check failed."]
-        for issue in issues:
-            if issue not in seen:
-                seen.add(issue)
-                messages.append(issue)
-
-    return messages
+    return _install_readiness_support.doctor_blocker_messages(report)
 
 
 def _doctor_advisory_messages(report: object) -> list[str]:
     """Extract advisory doctor warnings from a report-like object."""
-    messages: list[str] = []
-    seen: set[str] = set()
-
-    for check in getattr(report, "checks", []) or []:
-        warnings = [str(item) for item in getattr(check, "warnings", []) or [] if str(item).strip()]
-        for warning in warnings:
-            if warning not in seen:
-                seen.add(warning)
-                messages.append(warning)
-
-    return messages
+    return _install_readiness_support.doctor_advisory_messages(report)
 
 
 def _install_repairable_runtime_target_messages(report: object, runtime_name: str) -> list[str]:
     """Return install-preflight messages for same-runtime incomplete targets."""
-    messages: list[str] = []
-    canonical_runtime = normalize_runtime_name(runtime_name) or runtime_name
-
-    for check in getattr(report, "checks", []) or []:
-        if str(getattr(check, "status", None)) != "fail":
-            continue
-        if str(getattr(check, "label", "")).strip() != "Runtime Config Target":
-            continue
-        details = getattr(check, "details", {}) or {}
-        if not isinstance(details, dict) or details.get("install_state") != "owned_incomplete":
-            continue
-        target_assessment = details.get("target_assessment")
-        assessment_payload = target_assessment if isinstance(target_assessment, dict) else details
-        manifest_runtime = normalize_runtime_name(str(assessment_payload.get("manifest_runtime") or "")) or None
-        expected_runtime = (
-            normalize_runtime_name(str(assessment_payload.get("expected_runtime") or "")) or canonical_runtime
-        )
-        if manifest_runtime not in {None, canonical_runtime} or expected_runtime != canonical_runtime:
-            continue
-        issues = [str(issue) for issue in getattr(check, "issues", []) or [] if str(issue).strip()]
-        messages.extend(issues or ["Incomplete same-runtime GPD install will be repaired during install."])
-
-    return messages
+    return _install_readiness_support.install_repairable_runtime_target_messages(report, runtime_name)
 
 
 def _build_unattended_readiness(
@@ -12429,60 +11004,37 @@ def _build_unattended_readiness(
     live_executable_probes: bool,
 ) -> UnattendedReadinessResult:
     """Compose doctor and permissions status into one unattended-readiness verdict."""
-    from gpd.core.health import build_unattended_readiness_result, run_doctor
     from gpd.specs import SPECS_DIR
 
-    if global_install and local_install:
-        _error("Cannot specify both --global and --local")
-
-    normalized_runtime = _normalize_runtime_selection([runtime], action="validate unattended-readiness")[0]
-    resolved_target = _resolve_cli_target_dir(target_dir) if target_dir is not None else None
-    install_scope = (
-        "global"
-        if global_install
-        else "local"
-        if local_install
-        else "global"
-        if target_dir
-        and _target_dir_matches_global(normalized_runtime, target_dir, action="validate unattended-readiness")
-        else "local"
-    )
-    if target_dir is None and not global_install and not local_install:
-        detected_target, detected_scope = _resolve_detected_runtime_target(normalized_runtime)
-        if detected_target is not None and detected_scope is not None:
-            resolved_target = detected_target
-            install_scope = detected_scope
-
-    if resolved_target is not None:
-        permissions_target = str(resolved_target)
-    else:
-        adapter = _get_adapter_or_error(normalized_runtime, action="validate unattended-readiness")
-        permissions_target = str(adapter.resolve_target_dir(install_scope == "global", _get_cwd()))
-
-    doctor_report = run_doctor(
-        specs_dir=SPECS_DIR,
-        runtime=normalized_runtime,
-        install_scope=install_scope,
-        target_dir=resolved_target,
-        cwd=_get_cwd(),
-        live_executable_probes=live_executable_probes,
-    )
-    permissions_payload = _permissions_status_payload(
-        runtime=normalized_runtime,
-        autonomy=autonomy,
-        target_dir=permissions_target,
-    )
-
-    return build_unattended_readiness_result(
-        runtime=normalized_runtime,
-        autonomy=autonomy,
-        install_scope=install_scope,
-        target_dir=resolved_target,
-        doctor_report=doctor_report,
-        permissions_payload=permissions_payload,
-        live_executable_probes=live_executable_probes,
-        validated_surface=_validated_runtime_surface(cwd=_get_cwd()),
-    )
+    try:
+        return _install_readiness_support.build_unattended_readiness(
+            runtime=runtime,
+            autonomy=autonomy,
+            global_install=global_install,
+            local_install=local_install,
+            target_dir=target_dir,
+            live_executable_probes=live_executable_probes,
+            cwd=_get_cwd(),
+            normalize_runtime_selection=_normalize_runtime_selection,
+            validated_surface=_validated_runtime_surface(cwd=_get_cwd()),
+            specs_dir=SPECS_DIR,
+            target_dir_matches_global_func=lambda runtime_name, target, cwd, action: _target_dir_matches_global(
+                runtime_name,
+                target,
+                action=action,
+            ),
+            resolve_detected_runtime_target_func=lambda runtime_name, cwd: _resolve_detected_runtime_target(
+                runtime_name
+            ),
+            permissions_status_payload_func=lambda **kwargs: _permissions_status_payload(
+                runtime=kwargs.get("runtime"),
+                autonomy=kwargs.get("autonomy"),
+                target_dir=kwargs.get("target_dir"),
+            ),
+        )
+    except _install_readiness_support.InstallReadinessError as exc:
+        _error(str(exc))
+        raise
 
 
 def _run_install_readiness_preflight(
@@ -12492,43 +11044,15 @@ def _run_install_readiness_preflight(
     target_dir: Path | None,
 ) -> tuple[list[tuple[str, list[str]]], dict[str, list[str]]]:
     """Run doctor-led readiness checks before mutating runtime install targets."""
-    from gpd.core.health import CheckStatus, run_doctor
     from gpd.specs import SPECS_DIR
 
-    failures: list[tuple[str, list[str]]] = []
-    advisories: dict[str, list[str]] = {}
-
-    for runtime_name in runtimes:
-        try:
-            report = run_doctor(
-                specs_dir=SPECS_DIR,
-                runtime=runtime_name,
-                install_scope=install_scope,
-                target_dir=target_dir,
-                cwd=_get_cwd(),
-            )
-        except Exception as exc:
-            failures.append((runtime_name, [str(exc)]))
-            continue
-
-        blocker_messages = _doctor_blocker_messages(report)
-        repairable_messages = _install_repairable_runtime_target_messages(report, runtime_name)
-        if repairable_messages:
-            repairable_set = set(repairable_messages)
-            blocker_messages = [message for message in blocker_messages if message not in repairable_set]
-        if getattr(report, "overall", None) == CheckStatus.FAIL and not blocker_messages and not repairable_messages:
-            blocker_messages = ["Runtime readiness reported a failure without blocking details."]
-
-        if blocker_messages:
-            failures.append((runtime_name, blocker_messages))
-            continue
-
-        advisory_messages = _doctor_advisory_messages(report)
-        advisory_messages.extend(repairable_messages)
-        if advisory_messages:
-            advisories[runtime_name] = list(dict.fromkeys(advisory_messages))
-
-    return failures, advisories
+    return _install_readiness_support.run_install_readiness_preflight(
+        runtimes,
+        install_scope=install_scope,
+        target_dir=target_dir,
+        cwd=_get_cwd(),
+        specs_dir=SPECS_DIR,
+    )
 
 
 def _install_command_doc() -> str:

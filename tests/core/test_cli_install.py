@@ -23,8 +23,14 @@ from typer.testing import CliRunner
 from gpd.adapters import get_adapter
 from gpd.adapters.install_utils import MANIFEST_NAME
 from gpd.adapters.runtime_catalog import iter_runtime_descriptors
-from gpd.cli import _format_install_header_lines, _render_install_option_line, app
+from gpd.cli import app
 from gpd.core.health import CheckStatus, DoctorReport, HealthCheck, HealthSummary
+from gpd.core.install_cli_support import (
+    format_install_header_lines as _format_install_header_lines,
+)
+from gpd.core.install_cli_support import (
+    render_install_option_line as _render_install_option_line,
+)
 from gpd.core.public_surface_contract import beginner_onboarding_hub_url
 from tests.doc_surface_contracts import (
     assert_install_summary_runtime_follow_up_contract,
@@ -1033,7 +1039,9 @@ def test_install_raw_finalizes_same_adapter_instance_used_for_install(tmp_path: 
     payload = json.loads(result.output)
     assert payload["failed"] == []
     assert "__gpd_install_adapter_instance__" not in json.dumps(payload)
-    assert any(getattr(instance, "installed", False) and getattr(instance, "finalized", False) for instance in instances)
+    assert any(
+        getattr(instance, "installed", False) and getattr(instance, "finalized", False) for instance in instances
+    )
 
 
 def test_install_human_reports_failures_after_progress_exits(tmp_path: Path):

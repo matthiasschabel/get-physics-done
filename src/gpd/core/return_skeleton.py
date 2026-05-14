@@ -49,12 +49,14 @@ RETURN_ROLE_ALIASES: dict[str, str] = {
     "bibliographer": "researcher",
     "gpd-bibliographer": "researcher",
     "consistency_checker": "checker",
+    "experiment": "experiment_designer",
     "gpd-consistency-checker": "checker",
-    "paper_writer": "executor",
-    "gpd-paper-writer": "executor",
+    "gpd-research-mapper": "researcher",
+    "notation_coordinator": "notation",
     "proof_redteam": "verifier",
     "gpd-check-proof": "verifier",
     "response_writer": "executor",
+    "research_mapper": "researcher",
     "review_reader": "reviewer",
     "review_stage_report": "reviewer",
     "gpd-review-interestingness": "reviewer",
@@ -514,12 +516,19 @@ _FIELD_DEFAULTS: dict[str, object] = {
     "confidence": "unassessed",
     "context_pressure": "normal",
     "conventions": [],
+    "categories_defined": [],
     "dimensions_checked": [],
     "dimensions_evaluated": [],
     "duration_seconds": 0,
     "field_assessment": "pending",
     "focus": "unspecified",
+    "citations_added": 0,
+    "cross_convention_checks": [],
+    "equations_added": 0,
+    "figures_added": 0,
+    "framing_strategy": "unspecified",
     "issues_found": [],
+    "journal_calibration": "unspecified",
     "major_issues": [],
     "minor_issues": [],
     "papers_reviewed": 0,
@@ -532,8 +541,10 @@ _FIELD_DEFAULTS: dict[str, object] = {
     "revision_round": 1,
     "roadmap_updates": [],
     "score": "unscored",
+    "section_name": "unspecified",
     "tasks_completed": 0,
     "tasks_total": 0,
+    "test_values_defined": [],
     "verification_status": "gaps_found",
     "waves": [],
 }
@@ -587,6 +598,56 @@ _RESEARCH_ROLE_FIELDS = (
 )
 _RESEARCH_DEFAULT_FIELDS = _RESEARCH_ROLE_FIELDS[:-2]
 
+_PAPER_WRITER_ROLE_FIELDS = (
+    "section_name",
+    "equations_added",
+    "figures_added",
+    "citations_added",
+    "journal_calibration",
+    "framing_strategy",
+    "confidence",
+    "context_pressure",
+    "blockers",
+    "continuation_update",
+)
+_PAPER_WRITER_DEFAULT_FIELDS = _PAPER_WRITER_ROLE_FIELDS[:-2]
+
+_EXPERIMENT_DESIGNER_ROLE_FIELDS = (
+    "phase",
+    "plan",
+    "design_file",
+    "confidence",
+    "context_pressure",
+    "blockers",
+    "continuation_update",
+)
+_EXPERIMENT_DESIGNER_DEFAULT_FIELDS = ("phase", "plan", "confidence", "context_pressure")
+
+_NOTATION_ROLE_FIELDS = (
+    "conventions_file",
+    "categories_defined",
+    "test_values_defined",
+    "cross_convention_checks",
+    "reference_maps",
+    "change_id",
+    "category",
+    "old_value",
+    "new_value",
+    "affected_quantities",
+    "conversion_table",
+    "downstream_phases_flagged",
+    "conflicts",
+    "severity",
+    "blockers",
+    "continuation_update",
+)
+_NOTATION_DEFAULT_FIELDS = (
+    "categories_defined",
+    "test_values_defined",
+    "cross_convention_checks",
+    "reference_maps",
+)
+
 GPD_RETURN_ROLE_PROFILES: dict[str, GpdReturnRoleProfile] = {
     "executor": _profile(
         profile_id="executor",
@@ -607,6 +668,20 @@ GPD_RETURN_ROLE_PROFILES: dict[str, GpdReturnRoleProfile] = {
             "confidence",
         ),
         default_render_fields=("phase", "plan", "tasks_completed", "tasks_total", "duration_seconds"),
+        local_callsite_fields=_CALLSITE_FIELDS,
+    ),
+    "paper_writer": _profile(
+        profile_id="paper_writer",
+        agent_names=("gpd-paper-writer",),
+        role_fields=_PAPER_WRITER_ROLE_FIELDS,
+        default_render_fields=_PAPER_WRITER_DEFAULT_FIELDS,
+        local_callsite_fields=_CALLSITE_FIELDS,
+    ),
+    "experiment_designer": _profile(
+        profile_id="experiment_designer",
+        agent_names=("gpd-experiment-designer",),
+        role_fields=_EXPERIMENT_DESIGNER_ROLE_FIELDS,
+        default_render_fields=_EXPERIMENT_DESIGNER_DEFAULT_FIELDS,
         local_callsite_fields=_CALLSITE_FIELDS,
     ),
     "planner": _profile(
@@ -666,9 +741,16 @@ GPD_RETURN_ROLE_PROFILES: dict[str, GpdReturnRoleProfile] = {
         default_render_fields=_REVIEW_DEFAULT_FIELDS,
         local_callsite_fields=_CALLSITE_FIELDS,
     ),
+    "notation": _profile(
+        profile_id="notation",
+        agent_names=("gpd-notation-coordinator",),
+        role_fields=_NOTATION_ROLE_FIELDS,
+        default_render_fields=_NOTATION_DEFAULT_FIELDS,
+        local_callsite_fields=_CALLSITE_FIELDS,
+    ),
     "researcher": _profile(
         profile_id="researcher",
-        agent_names=("gpd-project-researcher", "gpd-phase-researcher"),
+        agent_names=("gpd-project-researcher", "gpd-phase-researcher", "gpd-research-mapper"),
         role_fields=_RESEARCH_ROLE_FIELDS,
         default_render_fields=_RESEARCH_DEFAULT_FIELDS,
         local_callsite_fields=_CALLSITE_FIELDS,

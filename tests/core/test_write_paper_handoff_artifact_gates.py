@@ -76,7 +76,7 @@ def test_write_paper_writer_completion_requires_typed_status_files_written_and_d
 
     assert "stage-recovery-gate.md" in source
     assert payload["child_gate"]["return_profile"] == "paper_writer"
-    assert gate.return_profile == "executor"
+    assert gate.return_profile == "paper_writer"
     assert gate.role == "gpd-paper-writer"
     assert _artifact_paths(gate) == ("${PAPER_DIR}/{section_path}.tex",)
     assert gate.allowed_roots == ("${PAPER_DIR}",)
@@ -163,7 +163,7 @@ def test_write_paper_response_artifact_completion_requires_typed_status_files_wr
 
     assert "stage-recovery-gate.md" in source
     assert payload["child_gate"]["return_profile"] == "paper_writer"
-    assert gate.return_profile == "executor"
+    assert gate.return_profile == "paper_writer"
     assert gate.role == "gpd-paper-writer"
     assert _artifact_paths(gate) == (
         "${selected_publication_root}/AUTHOR-RESPONSE{round_suffix}.md",

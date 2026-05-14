@@ -14,15 +14,45 @@ REFERENCES_DIR = SOURCE_ROOT / "specs" / "references" / "publication"
 
 
 def test_gpd_referee_prompt_stays_within_expected_budget() -> None:
+    referee = (AGENTS_DIR / "gpd-referee.md").read_text(encoding="utf-8")
     metrics = measure_prompt_surface(
         AGENTS_DIR / "gpd-referee.md",
         src_root=SOURCE_ROOT,
         path_prefix=PATH_PREFIX,
     )
 
+    assert len(referee) < 27_400
     assert metrics.raw_include_count == 0
     assert metrics.expanded_line_count < 800
     assert metrics.expanded_char_count < 50_000
+
+
+def test_gpd_referee_prompt_uses_return_role_profile_without_losing_stage6_boundary() -> None:
+    referee = (AGENTS_DIR / "gpd-referee.md").read_text(encoding="utf-8")
+
+    assert "status-routing" in referee
+    assert "fresh-continuation" in referee
+    assert "files-written-freshness" in referee
+    assert "gpd return skeleton --role referee --status <status>" in referee
+    assert "Checkpoint ownership is orchestrator-side" not in referee
+    assert "fresh continuation handoff" not in referee
+    assert "Preexisting files are stale and do not count." not in referee
+
+    assert "Stage 6 writable allowlist" in referee
+    assert "${selected_publication_root}/REFEREE-REPORT{round_suffix}.md" in referee
+    assert "${selected_publication_root}/REFEREE-REPORT{round_suffix}.tex" in referee
+    assert "${selected_review_root}/REVIEW-LEDGER{round_suffix}.json" in referee
+    assert "${selected_review_root}/REFEREE-DECISION{round_suffix}.json" in referee
+    assert "${selected_publication_root}/CONSISTENCY-REPORT.md" in referee
+    assert (
+        "Treat upstream `CLAIMS{round_suffix}.json`, `STAGE-*.json`, and "
+        "`PROOF-REDTEAM{round_suffix}.md` artifacts as read-only evidence."
+        in referee
+    )
+    assert "proof-redteam clearance" in referee
+    assert "`blocked`: unrecoverable review-state or upstream staged-review integrity failure" in referee
+    assert "`failed`: partial review because available evidence is insufficient" in referee
+    assert "Never issue `minor_revision`" in referee
 
 
 def test_gpd_referee_prompt_keeps_publication_path_mentions_without_eager_schema_expansion() -> None:

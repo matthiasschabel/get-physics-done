@@ -2210,17 +2210,15 @@ class TestRegistryPromptIncludeInlining:
             "body-only Markdown",
             "one fenced executed `python`/`bash` block",
             "adjacent `**Output:**` plus fenced `output`",
-            "following `PASS`/`FAIL`/`INCONCLUSIVE` verdict",
-            "Do not hand-author or reflow `VERIFICATION.md` YAML",
-            "Use `skeleton_command` only as read-only preview context",
-            "gpd verification-report skeleton PLAN.md --write --output VERIFICATION.md --force --body-file BODY.md --validate contract",
+            "a `PASS`/`FAIL`/`INCONCLUSIVE` verdict",
+            "Do not hand-author or reflow `VERIFICATION.md` frontmatter",
+            "`skeleton_command` is preview-only",
+            "gpd verification-report skeleton ... --write --body-file ... --validate contract",
             "Keep `gpd_return`, computational-oracle/runtime details, command transcripts, hashes, and prose-only evidence out of frontmatter",
             "helper-generated compact gap ledger",
             "Use the verification-report helper to serialize the gap ledger",
-            "perform exactly one bounded repair pass",
-            "max two targeted repairs",
-            "After the second validator failure total",
-            "stop all edits and return `gpd_return.status: blocked`",
+            "perform one bounded repair pass",
+            "stop blocked with latest errors",
             "only after the canonical report passes frontmatter and contract validation",
         )
         for fragment in durable_fragments:
@@ -3145,7 +3143,10 @@ class TestPublicAPI:
         assert synthesizer.source_kind == "agent"
         assert synthesizer.path.endswith("gpd-research-synthesizer.md")
         assert "`files-written-freshness`" in synthesizer.content
-        assert "Use the role-kit return envelope." in synthesizer.content
+        assert (
+            "Use the synthesizer profile (`gpd return skeleton --role synthesizer --status <status>`)"
+            in synthesizer.content
+        )
         assert (
             "record `GPD/literature/SUMMARY.md` as the sole written artifact when this run creates or updates it"
             in synthesizer.content

@@ -22,14 +22,12 @@ def _gpd_return_block(path: Path) -> str:
 def test_paper_writer_prompt_uses_typed_status_and_one_shot_checkpoint_language() -> None:
     source = _read(PAPER_WRITER)
 
-    assert "one-shot checkpoint handoff and fresh continuation handoff semantics" in source
+    assert "continuation-boundary.md" in source
+    assert "checkpoint handoffs" in source
     assert "do not wait for user input inside the current run" not in source
     assert "Use `gpd_return.status: checkpoint` as the control surface." in source
-    assert "The `## CHECKPOINT REACHED` heading below is presentation only." in source
-    assert (
-        "The markdown headings in this section, including `## SECTION DRAFTED`, `## CHECKPOINT REACHED`, and `## WRITING BLOCKED`, are presentation only."
-        in source
-    )
+    assert "gpd return skeleton --role paper_writer --status <status>" in source
+    assert "The `## CHECKPOINT REACHED` heading below is presentation only." not in source
     assert "return with CHECKPOINT status" not in source
     assert "Return WRITING BLOCKED." not in source
 

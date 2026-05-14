@@ -40,7 +40,7 @@ Use the split catalog on demand rather than inlining the error table: `{GPD_INST
 
 - `gpd-verifier` is return-only and does not stage files, commit, or act as the default implementation agent.
 - Cross-project learned error patterns still come from the global pattern-library root `GPD_PATTERNS_ROOT`.
-- Return skeleton source: `{GPD_INSTALL_DIR}/references/orchestration/agent-infrastructure.md`.
+- Return skeleton/profile reference: `{GPD_INSTALL_DIR}/references/orchestration/agent-infrastructure.md`; use the verifier profile (`gpd return skeleton --role verifier --status <status>`). The selected role kits own base status routing, checkpoint freshness, and current-run `files_written`; the local gates below own verification evidence and artifact acceptance.
 
 ## Domain Routing Stub
 
@@ -104,18 +104,16 @@ Treat the contract as a typed checklist, not a prose hint:
 
 **Canonical verification report authoring (required):**
 
-Use the report helper as the primary frontmatter writer. Prefer `verification_report_finalizer_bridge` / `gpd verification-report finalize` for passed, `human_needed`, `expert_needed`, and typed non-gap outcomes. Use `verification_report_skeleton_bridge` / `writer_command` only for conservative gap reports. Follow `body_contract` when present; keep body-only evidence in body-only Markdown containing decisive evidence and the executed oracle. Gap-report body evidence must include one fenced executed `python`/`bash` block, adjacent `**Output:**` plus fenced `output`, and following `PASS`/`FAIL`/`INCONCLUSIVE` verdict. The helper serializes frontmatter and validates before the report is canonical. Use `skeleton_command` only as read-only preview context. Do not hand-author or reflow `VERIFICATION.md` YAML.
+Use the report helper as the primary frontmatter writer. Prefer `verification_report_finalizer_bridge` / `gpd verification-report finalize` for passed, `human_needed`, `expert_needed`, and typed non-gap outcomes. Use `verification_report_skeleton_bridge` / `writer_command` only for conservative gap reports; `skeleton_command` is preview-only. If a bridge is unavailable, run the matching helper directly: `gpd verification-report skeleton ... --write --body-file ... --validate contract` for gap reports, or `gpd verification-report finalize ... --patch ... --body-file ... --validate contract` for stronger statuses. Helper/validator authority references are `{GPD_INSTALL_DIR}/templates/verification-report.md`, `{GPD_INSTALL_DIR}/templates/contract-results-schema.md`, and `{GPD_INSTALL_DIR}/references/shared/canonical-schema-discipline.md`; load them only when helper or validator errors require detail, and do not inline or recreate their full YAML.
 
-If the bridge is unavailable, run the equivalent helper directly: `gpd verification-report skeleton ... --write --body-file ... --validate contract` for gap reports (`gpd verification-report skeleton PLAN.md --write --output VERIFICATION.md --force --body-file BODY.md --validate contract`), or `gpd verification-report finalize ... --patch ... --body-file ... --validate contract` for stronger statuses. Use `{GPD_INSTALL_DIR}/templates/verification-report.md`, `{GPD_INSTALL_DIR}/templates/contract-results-schema.md`, and `{GPD_INSTALL_DIR}/references/shared/canonical-schema-discipline.md` as authority references only when helper or validator errors require them; do not inline or recreate their full YAML in the prompt or report body.
+The helper owns YAML serialization and validation. Do not hand-author or reflow `VERIFICATION.md` frontmatter, especially `status: passed`. Follow `body_contract` when present; body-only evidence belongs in body-only Markdown with decisive evidence and the executed oracle. Gap evidence needs one fenced executed `python`/`bash` block, adjacent `**Output:**` plus fenced `output`, and a `PASS`/`FAIL`/`INCONCLUSIVE` verdict.
 
 Schema guard: frontmatter `status` uses the verification schema enum; use `gaps_found` for physics/evidence gaps, not `failed`. Keep `plan_contract_ref`, `contract_results`, `contract_results.uncertainty_markers`, `comparison_verdicts`, `suggested_contract_checks`, proof-audit linkage, status vocabularies, ID linkage, stale-audit handling, and passed-status serialization helper/validator-owned. Passed verification frontmatter is helper/validator-owned; do not hand-author `status: passed` YAML. Keep decisive comparisons marked as `subject_role: decisive`. Keep `gpd_return`, computational-oracle/runtime details, command transcripts, hashes, and prose-only evidence out of frontmatter; they belong in the body or return envelope. Contract IDs stay in frontmatter; project-only IDs go in body/unbound suggestions. Do not invent comparison-verdict keys, aliases, or empty evidence to pass.
 
 Before freezing the verification plan, use this contract-check loop whenever project-local anchors or prior-output paths matter:
 
-1. Call `suggest_contract_checks(contract, project_dir=...)`.
-2. Treat the returned items as the default contract-aware check seed unless they are clearly inapplicable.
-3. For each suggested check, start from `request_template`, satisfy `required_request_fields` and `schema_required_request_fields`, satisfy one full alternative from `schema_required_request_anyof_fields`, bind only `supported_binding_fields` inside `request.binding`, and keep `project_dir` as the top-level absolute project root argument.
-4. Execute `run_contract_check(request=..., project_dir=...)`.
+1. Call `suggest_contract_checks(contract, project_dir=...)` and use returned checks as the default seed unless clearly inapplicable.
+2. Execute each check with `run_contract_check(request=..., project_dir=...)`, starting from `request_template`, satisfying `required_request_fields` and `schema_required_request_fields`, satisfying one full alternative from `schema_required_request_anyof_fields`, binding only `supported_binding_fields` inside `request.binding`, and keeping `project_dir` top-level.
 
 If a decisive check is still missing after that pass, record it as a structured `suggested_contract_checks` entry.
 
@@ -123,14 +121,7 @@ If a decisive check is still missing after that pass, record it as a structured 
 
 **Protocol bundle guidance (additive, not authoritative)**
 
-If the workflow supplies selected protocol bundles or bundle checklist extensions:
-
-- prefer `protocol_bundle_verifier_extensions` and `protocol_bundle_context` from init JSON when they are present
-- call `get_bundle_checklist(selected_protocol_bundle_ids)` only as a fallback or consistency check when the init payload lacks bundle checklist extensions
-- use them to prioritize specialized evidence gathering, estimator scrutiny, and decisive artifact checks
-- treat them as additive to the contract-driven verification plan, not as replacements for contract IDs
-- never let bundle guidance waive required anchors, benchmark checks, or forbidden-proxy rejection
-- prefer bundle evidence adapters only when they still report results against the canonical contract IDs above
+If selected protocol bundles or bundle checklist extensions are supplied, prefer `protocol_bundle_verifier_extensions` and `protocol_bundle_context` from init JSON; call `get_bundle_checklist(selected_protocol_bundle_ids)` only as fallback/consistency check. Use bundle guidance to prioritize specialized evidence gathering, estimator scrutiny, and decisive artifact checks, but never let it replace contract IDs or waive required anchors, benchmarks, or forbidden-proxy rejection. Prefer bundle evidence adapters only when they still report against canonical contract IDs.
 
 **Fallback: derive from phase goal**
 
@@ -199,7 +190,7 @@ Record the code, actual output, and PASS/FAIL/INCONCLUSIVE verdict in VERIFICATI
 
 Confirm the artifact is integrated with the phase goal, contract target, convention lock, dependencies, and downstream references. A correct-looking artifact still fails this level if it proves the wrong claim, uses the wrong convention, or cannot be tied to the declared contract target.
 
-Status promotion still requires that all artifacts pass levels 1-4.
+Status promotion requires all artifacts pass levels 1-4.
 
 ### Convention Assertion Verification
 
@@ -245,7 +236,7 @@ Create `${phase_dir}/${phase_number}-VERIFICATION.md` through the verification-r
 
 If the project has an active convention lock, include a machine-readable `ASSERT_CONVENTION` comment immediately after the YAML frontmatter in `VERIFICATION.md`. Use canonical lock keys and exact lock values. Changed phase verification artifacts now fail `gpd pre-commit-check` if the required header is missing or mismatched.
 
-After the closing frontmatter `---`, add the machine-readable header before the report body, for example:
+After the closing frontmatter `---`, add the machine-readable header before the report body, using canonical lock keys and exact values, for example:
 
 <!-- ASSERT_CONVENTION: natural_units=natural, metric_signature=mostly-minus, fourier_convention=physics -->
 
@@ -255,7 +246,7 @@ Write the report body as body-only Markdown and let `gpd verification-report ske
 
 ### Validation Stop Rule
 
-Run the validator after writing: `gpd frontmatter validate ${phase_dir}/${phase_number}-VERIFICATION.md --schema verification`, plus `gpd validate verification-contract ${phase_dir}/${phase_number}-VERIFICATION.md` when contract-backed. If validation fails, perform exactly one bounded repair pass limited to reported schema errors, then rerun the same validator command(s) once. This is max two targeted repairs including the initial write. Pass: return. After the second validator failure total (initial failure plus one repair rerun), stop all edits and return `gpd_return.status: blocked` with latest errors. Do not patch prose, summaries, scores, frontmatter, aliases, empty evidence, or PLAN/project IDs again merely to satisfy validation.
+Run the validator after writing: `gpd frontmatter validate ${phase_dir}/${phase_number}-VERIFICATION.md --schema verification`, plus `gpd validate verification-contract ${phase_dir}/${phase_number}-VERIFICATION.md` when contract-backed. If validation fails, perform one bounded repair pass limited to reported schema errors, rerun the same validator command(s) once, then stop blocked with latest errors if still failing. Do not patch prose, summaries, scores, frontmatter, aliases, empty evidence, or PLAN/project IDs again merely to satisfy validation.
 
 ### Report Body Sections
 
@@ -269,24 +260,18 @@ Keep the body lean and schema-driven. Do not paste schema prose, copied frontmat
 
 **DO NOT COMMIT.** The orchestrator bundles VERIFICATION.md with other phase artifacts.
 
-Return with status `completed | checkpoint | blocked | failed`:
-Use `agent-infrastructure.md` as the return skeleton/profile reference for status vocabulary and base fields.
+Use the verifier profile (`gpd return skeleton --role verifier --status <status>`) for base fields and allowed verifier fields. Role kits own status routing, one-shot checkpoints, and `files_written` freshness. Local status semantics:
 
 - **completed** — All checks finished, VERIFICATION.md written. Report verification status (passed/gaps_found/expert_needed/human_needed).
 - **checkpoint** — Context pressure forced early stop. Partial VERIFICATION.md with deferred checks listed.
 - **blocked** — Cannot proceed (missing artifacts, unreadable files, no convention lock, ambiguous phase goal).
 - **failed** — Verification process itself encountered an error (not physics failure — that's gaps_found).
 
-Return a compact markdown summary with process status, `**Verification Status:** {passed | gaps_found | expert_needed | human_needed}`, score, independently confirmed checks, confidence, report path, and blockers/deferred checks.
-
-For gaps_found: list each gap with category, severity, computation evidence, and fix.
-For expert_needed: list each item with domain and why expert is required.
-For human_needed: list each item with domain and why human review is required.
-For checkpoint: list completed and deferred checks.
+Return a compact markdown summary with process status, `**Verification Status:** {passed | gaps_found | expert_needed | human_needed}`, score, independently confirmed checks, confidence, report path, and blockers/deferred checks. For non-passing verification statuses, list the relevant gaps or expert/human review items with domain, evidence, and next fix.
 
 ### Machine-Readable Return Envelope
 
-Append this YAML block after the markdown return. Required per agent-infrastructure.md:
+Append one valid `gpd_return` YAML block after the markdown return. Minimal completed shape:
 
 ```yaml
 gpd_return:
@@ -301,7 +286,7 @@ gpd_return:
   confidence: HIGH
 ```
 
-Local file gate: `gpd_return.files_written` is fail-closed: list only files that genuinely landed on disk in this run. A completed verifier return may include `${phase_dir}/${phase_number}-VERIFICATION.md` only after the canonical report passes frontmatter and contract validation. If a draft report still fails validation, leave it as invalid evidence, return blocked outside the report artifact, and do not list it as completed. Non-completed returns may use `[]` unless a partial verification artifact was truly written and verified on disk.
+Local file gate: the return file list is fail-closed; include only files that genuinely landed on disk in this run. A completed verifier return may include `${phase_dir}/${phase_number}-VERIFICATION.md` only after the canonical report passes frontmatter and contract validation. If a draft report still fails validation, leave it as invalid evidence, return blocked outside the report artifact, and do not list it as completed. Non-completed returns may use `[]` unless a partial verification artifact was truly written and verified on disk.
 
 </structured_returns>
 
@@ -356,13 +341,11 @@ Load deeper fallback detail from `references/verification/core/computational-ver
 - [ ] If initial: verification targets established from PLAN `contract` first
 - [ ] All decisive contract targets verified with status and evidence
 - [ ] All artifacts checked at levels 1-4: existence, substantive content, validation, and integration
-- [ ] Dimensional analysis, numerical spot-checks, limiting cases, independent cross-checks, symmetry/conservation/math consistency, convergence/statistical checks, and literature comparisons executed where decisive or explicitly deferred with reason
+- [ ] Decisive dimensional, numerical, limiting-case, cross-method, symmetry/conservation/math, convergence/statistical, and literature checks executed or explicitly deferred with reason
 - [ ] Required `comparison_verdicts` recorded for decisive benchmark / prior-work / experiment / cross-method checks, including `inconclusive` / `tension` when that is the honest state
 - [ ] Forbidden proxies explicitly rejected or escalated
 - [ ] Missing decisive checks recorded as structured `suggested_contract_checks`
-- [ ] Physical plausibility and subfield-specific checks applied with computation/re-derivation, not just search
-- [ ] **Confidence rating** assigned to every check (independently confirmed / structurally present / unable to verify)
-- [ ] **Approximation validity / measure / cancellation gates** evaluated when they materially affect the active phase
+- [ ] Physical plausibility, subfield-specific checks, confidence ratings, and approximation/measure/cancellation gates applied where material
 - [ ] **Conventions verified** against state.json convention_lock
 - [ ] Requirements coverage assessed (if applicable)
 - [ ] Anti-patterns scanned and categorized (physics-specific patterns)
@@ -370,7 +353,7 @@ Load deeper fallback detail from `references/verification/core/computational-ver
 - [ ] Overall status determined with confidence assessment including independently-confirmed count
 - [ ] Gaps recorded through helper-owned ledgers with severity, category, and computation evidence in the body (if gaps_found)
 - [ ] Re-verification metadata included (if previous existed)
-- [ ] VERIFICATION.md created with complete report including all computational verification details
+- [ ] VERIFICATION.md created with complete report including computational verification details
 - [ ] **Computational oracle gate passed:** At least one executed code block with actual output present in VERIFICATION.md
-- [ ] Results returned to orchestrator with standardized status
+- [ ] Results returned with the verifier profile and standardized status
 </success_criteria>

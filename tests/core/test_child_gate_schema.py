@@ -260,8 +260,8 @@ _EXPECTED_WORKFLOW_CHILD_GATE_ROLE_PROFILE = {
     "verify_work_verifier_report": ("gpd-verifier", "verifier"),
     "wave_executor_plan_result": ("gpd-executor", "executor"),
     "write_paper_bibliographer": ("gpd-bibliographer", "researcher"),
-    "write_paper_response_pair": ("gpd-paper-writer", "executor"),
-    "write_paper_section_writer": ("gpd-paper-writer", "executor"),
+    "write_paper_response_pair": ("gpd-paper-writer", "paper_writer"),
+    "write_paper_section_writer": ("gpd-paper-writer", "paper_writer"),
 }
 
 _EXPECTED_WORKFLOW_CHILD_GATE_ARTIFACTS = {
@@ -602,7 +602,7 @@ def test_child_gate_tuple_accepts_compact_prompt_tuple_shape() -> None:
         }
     )
 
-    assert gate.return_profile == "executor"
+    assert gate.return_profile == "paper_writer"
     assert gate.expected_artifacts[0].path == "${PAPER_DIR}/intro.tex"
     assert gate.freshness is not None
     assert gate.freshness.marker == "$SECTION_HANDOFF_STARTED_AT"

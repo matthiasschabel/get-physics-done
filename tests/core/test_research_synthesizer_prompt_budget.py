@@ -24,8 +24,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 AGENTS_DIR = REPO_ROOT / "src" / "gpd" / "agents"
 SOURCE_ROOT = REPO_ROOT / "src" / "gpd"
 PATH_PREFIX = "/runtime/"
-BASELINE_EXPANDED_LINE_COUNT = 412
-BASELINE_EXPANDED_CHAR_COUNT = 24_089
+BASELINE_EXPANDED_LINE_COUNT = 371
+BASELINE_EXPANDED_CHAR_COUNT = 22_366
 MIN_LINE_MARGIN = 20
 MIN_CHAR_MARGIN = 1_000
 
@@ -117,8 +117,7 @@ def test_gpd_research_synthesizer_prompt_stays_within_expected_budget_and_keeps_
             (
                 "The generated role-kit section owns status routing, fresh-continuation, file freshness, and context-pressure mechanics.",
                 "If you checkpoint, write one draft `SUMMARY.md`, return `checkpoint`, and stop; do not continue to a final pass in the same run.",
-                "If a checkpoint is required, stop after the draft `SUMMARY.md` and return `checkpoint`.",
-                "Use the role-kit return envelope.",
+                "Use the synthesizer return profile (`gpd return skeleton --role synthesizer --status <status>`).",
                 "record `GPD/literature/SUMMARY.md` as the sole written artifact when this run creates or updates it",
                 "never record files you only read",
                 "target `SUMMARY.md` under 3000 words",

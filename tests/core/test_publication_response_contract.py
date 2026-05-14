@@ -204,7 +204,7 @@ def test_publication_final_adjudication_boundary_preserves_stage_six_guards() ->
     _assert_semantic(
         referee,
         "referee Stage 6 read-only upstream boundary",
-        "Stage 6 is read-only",
+        "read-only evidence",
         "Stage 6 writable allowlist",
     )
 
@@ -362,12 +362,11 @@ def test_referee_stage_six_files_written_must_be_fresh_current_run_outputs() -> 
     _assert_semantic(
         referee,
         "referee Stage 6 current-run files-written contract",
-        "Preexisting files are stale",
-        "fresh `gpd_return.files_written`",
-        "files written in this run",
-        "Stage 6 allowlist",
+        "return file list may name only paths produced in this Stage 6 run",
+        "allowed by `<report_format>`",
+        "Stage 6 run",
         "upstream-artifact `blocked` returns",
-        "keep it empty",
+        "keep the list empty",
     )
     assert "${selected_publication_root}/CONSISTENCY-REPORT.md" in referee
 
@@ -387,13 +386,9 @@ def test_referee_stage_six_write_allowlist_stops_before_upstream_repairs() -> No
     _assert_semantic(
         referee,
         "referee Stage 6 stale upstream artifact blocks instead of repairs",
-        "upstream staged-review artifact",
-        "missing",
-        "malformed",
-        "stale",
-        "suffix-inconsistent",
-        "manuscript-inconsistent",
-        "mutually inconsistent",
+        "upstream staged-review inputs",
+        "block with the earliest failing upstream artifact/stage",
+        "return `blocked` instead of repairing",
         "gpd_return.status: blocked",
     )
 
@@ -424,9 +419,8 @@ def test_stage_six_handoff_closure_and_retry_freshness_remain_explicit() -> None
     _assert_semantic(
         referee,
         "referee checkpoint then fresh continuation",
-        "Checkpoint ownership is orchestrator-side",
-        "orchestrator presents the issue",
-        "fresh continuation handoff",
-        "checkpoint = missing input",
-        "completed = final report plus fresh Stage 6 artifacts",
+        "continuation-boundary.md",
+        "orchestrator owns the follow-up after the pause",
+        "`checkpoint`: missing input",
+        "`completed`: valid final report package plus required fresh Stage 6 artifacts",
     )

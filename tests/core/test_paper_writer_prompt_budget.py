@@ -22,8 +22,14 @@ def test_gpd_paper_writer_prompt_stays_within_expected_budget_and_keeps_contract
     expanded = expanded_prompt_text(path, src_root=SOURCE_ROOT, path_prefix=PATH_PREFIX)
 
     assert metrics.raw_include_count == 0
+    assert len(source) < 25_000
     assert metrics.expanded_line_count < 3_400
     assert metrics.expanded_char_count < 160_000
+    assert "gpd return skeleton --role paper_writer --status <status>" in source
+    assert "section_name" in source
+    assert "Report section outputs against the resolved manuscript root" in source
+    assert "external_authoring_intake" in source
+    assert "Missing `CONFIDENCE:` tags are a calibration warning, not a writing block." in source
     assert "{GPD_INSTALL_DIR}/templates/notation-glossary.md" in source
     assert "{GPD_INSTALL_DIR}/templates/latex-preamble.md" in source
     assert "{GPD_INSTALL_DIR}/templates/paper/author-response.md" in source

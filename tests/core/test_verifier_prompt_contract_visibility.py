@@ -348,7 +348,7 @@ def test_verifier_prompt_surfaces_validator_enforced_contract_ledger_rules() -> 
             "`project_dir`",
         ),
     )
-    assert "Execute `run_contract_check(request=..., project_dir=...)`." in verifier
+    assert "Execute each check with `run_contract_check(request=..., project_dir=...)`" in verifier
     _assert_contains_all(
         gap_output,
         (
@@ -491,8 +491,8 @@ def test_verifier_prompt_frontmatter_example_includes_contract_ledgers() -> None
         (
             "gpd frontmatter validate ${phase_dir}/${phase_number}-VERIFICATION.md --schema verification",
             "gpd validate verification-contract ${phase_dir}/${phase_number}-VERIFICATION.md",
-            "max two targeted repairs",
-            "`gpd_return.status: blocked`",
+            "one bounded repair pass",
+            "stop blocked with latest errors",
             "frontmatter",
             "aliases",
             "empty evidence",

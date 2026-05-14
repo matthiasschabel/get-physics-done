@@ -137,7 +137,9 @@ def test_peer_review_surfaces_describe_dual_mode_project_and_external_artifact_r
         "publication modes subject-owned root",
         "subject-owned publication root at `GPD/publication/{subject_slug}`",
     )
-    _assert_forbidden(workflow, "peer-review workflow no standalone skeptical label", "standalone skeptical peer review")
+    _assert_forbidden(
+        workflow, "peer-review workflow no standalone skeptical label", "standalone skeptical peer review"
+    )
     _assert_semantic(
         workflow,
         "peer-review workflow current project or external path",
@@ -266,13 +268,18 @@ def test_peer_review_stage_six_boundary_aligns_reliability_workflow_panel_and_re
     for label, source in (
         ("reliability", reliability),
         ("boundary", boundary),
-        ("referee", referee),
     ):
         _assert_semantic(
             source,
             f"peer-review Stage 6 {label} fresh files-written",
             "fresh `gpd_return.files_written`",
         )
+    _assert_semantic(
+        referee,
+        "peer-review Stage 6 referee current-run file list",
+        "return file list may name only paths produced in this Stage 6 run",
+        "allowed by `<report_format>`",
+    )
 
     _assert_semantic(
         workflow,
@@ -306,7 +313,7 @@ def test_peer_review_stage_six_boundary_aligns_reliability_workflow_panel_and_re
     _assert_semantic(
         referee,
         "referee never modifies upstream staged-review inputs",
-        "Never modify upstream staged-review inputs",
+        "Do NOT modify upstream staged-review inputs",
     )
     _assert_machine(
         referee,

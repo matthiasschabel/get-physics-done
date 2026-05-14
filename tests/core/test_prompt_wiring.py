@@ -819,9 +819,9 @@ def test_referee_prompt_no_longer_claims_read_only_artifact_policy() -> None:
     _s(
         referee,
         "referee writable review artifact policy",
-        "scoped review artifacts",
-        "changed paths",
-        "gpd_return.files_written",
+        "Stage 6 owns only the allowlisted review artifacts",
+        "changed Stage 6 outputs",
+        "return file list",
     )
     _f(referee, "referee writable review artifact policy", "No files modified (read-only agent)")
 
@@ -2614,11 +2614,11 @@ def test_plan_checker_requires_contract_gate_and_reference_artifacts() -> None:
         (
             "project_contract_gate",
             "project_contract_load_info",
-                "project_contract_validation",
-                "contract_intake",
-                "effective_reference_intake",
-                "reference_artifact_files",
-            ),
+            "project_contract_validation",
+            "contract_intake",
+            "effective_reference_intake",
+            "reference_artifact_files",
+        ),
         context="plan-phase contract gate placeholders",
     )
     _s(workflow_text, "plan-phase decisive output checks", "Decisive outputs", "decisive claims and deliverables")
@@ -3573,10 +3573,10 @@ def test_plan_tool_preflight_surfaces_across_planning_and_execution_prompts() ->
     )
     _mf(
         planner_agent,
-        "# tool_requirements: # Machine-checkable specialized tools (omit entirely if none)",
-        "tool: command",
-        "Use only the closed tool vocabulary the validator accepts",
-        "| `tool_requirements` | No       | Machine-checkable specialized tool requirements |",
+        "machine-checkable prerequisites in `tool_requirements`",
+        "validator-accepted tools (`wolfram`, `command`)",
+        "`command` tools require a `command` field",
+        "`required` defaults to `true`",
         context="planner agent tool requirements",
     )
     _mf(plan_checker, "declare them in `tool_requirements`", context="plan checker tools")
@@ -5105,6 +5105,7 @@ def test_skill_surface_exposes_contract_references_for_paper_and_review_workflow
     respond_contract_documents = {
         Path(entry["path"]).name: entry for entry in respond_to_referees["contract_documents"]
     }
+
     def _all_stage_authorities(skill: dict[str, object]) -> set[str]:
         stages = skill.get("staged_loading", {}).get("stages", [])
         return {
@@ -6771,10 +6772,8 @@ def test_planner_and_plan_phase_keep_no_silent_branching_and_exploit_tangent_sup
     planner = (REPO_ROOT / "src/gpd/agents/gpd-planner.md").read_text(encoding="utf-8")
     tangent_model = (REFERENCES_DIR / "planning" / "planner-tangent-decision-model.md").read_text(encoding="utf-8")
     plan_phase = _workflow_authority_text("plan-phase")
-
     for content in (planner + "\n" + tangent_model, plan_phase):
         _s(content, "planner no silent tangent branching", "silently", "gpd:tangent", "gpd:branch-hypothesis")
-
     _s(
         tangent_model,
         "planner tangent exploration boundary",
@@ -6792,7 +6791,10 @@ def test_planner_and_plan_phase_keep_no_silent_branching_and_exploit_tangent_sup
     _assert_prompt_concepts(
         planner + "\n" + tangent_model,
         {
-            "optional tangent suppression": ("Exploit suppresses optional tangents", "current approach is blocked"),
+            "optional tangent suppression": (
+                "Exploit suppresses optional tangents",
+                "physics-validity failure blocks the current approach",
+            ),
         },
         context="planner optional tangent suppression",
     )

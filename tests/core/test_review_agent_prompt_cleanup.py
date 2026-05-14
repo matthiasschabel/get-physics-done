@@ -28,10 +28,10 @@ def test_referee_routes_on_status_and_shows_base_return_fields_first() -> None:
     assert_prompt_contracts(
         source,
         semantic_anchor(
-            "referee completion headings are labels only",
+            "referee completion routes through compact return profile",
             (
-                "The markdown headings `## REVIEW COMPLETE`, `## REVIEW INCOMPLETE`, and `## CHECKPOINT REACHED` are human-readable labels only.",
-                "Route on `gpd_return.status` and the written review artifacts, not on heading text.",
+                "Use the `status-routing`, `fresh-continuation`, and `files-written-freshness` role kits",
+                "gpd return skeleton --role referee --status <status>",
             ),
             match=MatchMode.CASEFOLD_NORMALIZED,
         ),
@@ -110,7 +110,7 @@ def test_plan_checker_uses_typed_status_and_drops_nested_return_payload_examples
         semantic_anchor(
             "plan checker status routing uses gpd_return",
             (
-                "The label examples in `checker-return-protocol.md` are UI only; use `gpd_return.status` for the machine decision.",
+                "The label examples in `checker-return-protocol.md` are UI only; the machine decision comes from `gpd_return.status`",
                 "the machine decision comes from `gpd_return.status`",
             ),
             match=MatchMode.CASEFOLD_NORMALIZED,
@@ -118,10 +118,10 @@ def test_plan_checker_uses_typed_status_and_drops_nested_return_payload_examples
         machine_exact(
             "plan checker recognized typed statuses",
             (
-                "`gpd_return.status: completed`",
-                "`gpd_return.status: checkpoint`",
-                "`gpd_return.status: failed`",
-                "`gpd_return.status: blocked`",
+                "`completed` approves all fresh plans",
+                "`checkpoint` returns explicit approved/blocked sets",
+                "`failed` requires planner revision",
+                "`blocked` escalates blocker-level issues",
             ),
         ),
     )

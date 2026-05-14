@@ -14,10 +14,14 @@ def test_paper_writer_balanced_mode_avoids_in_run_approval_language() -> None:
     source = _read_agent("gpd-paper-writer.md")
 
     assert "proceed unless objected" not in source
-    assert "Draft the outline, self-review it, and pause only if the narrative or claims need user judgment" in source
+    assert (
+        "Balanced mode follows the publication-pipeline matrix: draft the manuscript, self-review it, "
+        "and pause only when the narrative or claim decision needs user judgment." in source
+    )
     assert "Balanced mode follows the publication-pipeline matrix" in source
     assert "Checkpoint ownership is orchestrator-side" in source
-    assert "fresh continuation handoff" in source
+    assert "continuation-boundary.md" in source
+    assert "fresh continuation handoff" not in source
 
 
 def test_bibliographer_balanced_mode_adds_verified_citations_without_approval_loop() -> None:
@@ -39,8 +43,11 @@ def test_bibliographer_balanced_mode_adds_verified_citations_without_approval_lo
 def test_referee_checkpoint_ownership_and_mode_routing_are_explicit() -> None:
     source = _read_agent("gpd-referee.md")
 
-    assert "Checkpoint ownership is orchestrator-side" in source
-    assert "fresh continuation handoff" in source
+    assert "fresh-continuation" in source
+    assert "continuation-boundary.md" in source
+    assert "gpd return skeleton --role referee --status <status>" in source
+    assert "Checkpoint ownership is orchestrator-side" not in source
+    assert "fresh continuation handoff" not in source
     assert "publication-pipeline-modes.md" in source
 
 
@@ -69,7 +76,9 @@ def test_peer_review_and_referee_skill_surfaces_keep_lifecycle_cleanup_boundary(
     assert "panel-stages.md" in peer_review_references
     assert "final-adjudication.md" in peer_review_references
     assert peer_review["staged_loading"]["workflow_id"] == "peer-review"
-    assert "Checkpoint ownership is orchestrator-side" in referee_content
-    assert "owns the fresh continuation handoff" in referee_content
-    assert "fresh `gpd_return.files_written` list may name only files written in this run" in referee_content
-    assert "Preexisting files are stale and do not count." in referee_content
+    assert "fresh-continuation" in referee_content
+    assert "files-written-freshness" in referee_content
+    assert "gpd return skeleton --role referee --status <status>" in referee_content
+    assert "return file list may name only paths produced in this Stage 6 run" in referee_content
+    assert "Checkpoint ownership is orchestrator-side" not in referee_content
+    assert "Preexisting files are stale and do not count." not in referee_content

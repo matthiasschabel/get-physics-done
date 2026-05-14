@@ -116,6 +116,28 @@ def test_raw_planner_prompt_stays_under_phase6_cap() -> None:
     planner = _read_planner_prompt()
 
     assert len(planner.splitlines()) < 800
+    assert len(planner) < 27_700
+
+
+def test_planner_return_surface_uses_profile_and_role_kits() -> None:
+    planner = _read_planner_prompt()
+    returns = _between(planner, "<structured_returns>", "</structured_returns>")
+    gap_closure = _between(planner, "<gap_closure_mode>", "</gap_closure_mode>")
+
+    assert "gpd return skeleton --role planner --status <status>" in returns
+    assert "gpd --raw return profiles" in returns
+    assert "frontmatter `role_kits`" in returns
+    assert (
+        "Completed returns name only fresh PLAN.md files that passed `gpd validate plan-preflight <PLAN.md>`" in returns
+    )
+    assert "a YAML envelope is required" not in returns
+    assert "gpd_return:\n  status: completed" in returns
+    assert "plans_created: 1" in returns
+
+    assert "gap_closure: true" in gap_closure
+    assert "```yaml" in gap_closure
+    assert "proxy-no-status-only" in gap_closure
+    assert "weakest_anchors" in gap_closure
 
 
 def test_expanded_planner_prompt_stays_under_budget() -> None:

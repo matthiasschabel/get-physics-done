@@ -1106,7 +1106,7 @@ def test_regression_check_prompt_examples_include_optional_phase_before_quick_fl
     verifier_raw = (REPO_ROOT / "src/gpd/agents/gpd-verifier.md").read_text(encoding="utf-8")
     infra = (REPO_ROOT / "src/gpd/specs/references/orchestration/agent-infrastructure.md").read_text(encoding="utf-8")
 
-    assert "references/orchestration/agent-infrastructure.md" in verifier_raw
+    assert "agent-infrastructure.md" in verifier_raw
     assert "@{GPD_INSTALL_DIR}/references/orchestration/agent-infrastructure.md" not in verifier_raw
     assert "<!-- [included:" not in verifier_raw
     assert "gpd regression-check [phase] [--quick]" in infra

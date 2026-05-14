@@ -273,7 +273,7 @@ PLAN_AGENT_SURFACES = {
         agent_visibility_note(),
         "tool_requirements",
         "must_surface",
-        "`wolfram` and `command`",
+        "validator-accepted tools (`wolfram`, `command`)",
     ),
 }
 RESULT_AGENT_SURFACES = {

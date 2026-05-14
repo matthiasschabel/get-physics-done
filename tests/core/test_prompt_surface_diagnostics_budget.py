@@ -15,7 +15,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 PROMPT_TOTAL_BUDGET = {"lines": 42_800, "chars": 1_765_000}
 PROMPT_KIND_BUDGETS = {
     "command": {"lines": 20_200, "chars": 760_000},
-    "agent": {"lines": 7_350, "chars": 400_000},
+    "agent": {"lines": 6_400, "chars": 355_000},
     "workflow": {"lines": 15_300, "chars": 618_000},
 }
 STAGE_FIRST_TURN_BUDGET = {"lines": 3_460, "chars": 134_999}
@@ -124,12 +124,12 @@ SHELL_MIGRATION_TARGET_WORKFLOWS = frozenset(
 TARGET_WORKFLOW_SHELL_FENCE_BUDGET = 2
 TARGET_WORKFLOW_SHELL_PARSING_LINE_BUDGET = 3
 NON_REFERENCE_SEMANTIC_DUPLICATE_BUDGETS = {
-    "status_handling": 70,
-    "files_written_freshness": 17,
-    "stale_artifact_rejection": 25,
-    "fresh_continuation": 20,
-    "heading_prose_non_authority": 13,
-    "no_synthesized_child_gpd_return": 2,
+    "status_handling": 58,
+    "files_written_freshness": 12,
+    "stale_artifact_rejection": 14,
+    "fresh_continuation": 15,
+    "heading_prose_non_authority": 7,
+    "no_synthesized_child_gpd_return": 1,
 }
 # Future Phase 4 ratchet targets. These are asserted as exposed diagnostics only
 # until prompt cuts are integrated and measured in the current workspace.
@@ -140,6 +140,14 @@ PHASE4_NON_REFERENCE_SEMANTIC_DUPLICATE_TARGETS = {
     "stale_artifact_rejection": 25,
     "heading_prose_non_authority": 13,
     "no_synthesized_child_gpd_return": 2,
+}
+PHASE5_NON_REFERENCE_SEMANTIC_DUPLICATE_TARGETS = {
+    "status_handling": 58,
+    "fresh_continuation": 15,
+    "files_written_freshness": 12,
+    "stale_artifact_rejection": 14,
+    "heading_prose_non_authority": 7,
+    "no_synthesized_child_gpd_return": 1,
 }
 ZERO_SAFETY_TOTAL_FIELDS = (
     "unresolved_include_count",
@@ -720,6 +728,26 @@ def test_non_reference_semantic_duplicate_budgets_stay_under_caps() -> None:
             f"{category} non-reference semantic duplicate budget exceeded: "
             f"observed={observed} max={budget}; move generic invariant prose to shared references"
         )
+
+
+def test_phase5_duplicate_category_targets_are_ready_for_final_ratchet() -> None:
+    payload = _prompt_surface_payload(("all",), (), False)
+    groups_by_category = _semantic_duplicate_groups_by_category(payload)
+
+    missing_categories = sorted(set(PHASE5_NON_REFERENCE_SEMANTIC_DUPLICATE_TARGETS) - set(groups_by_category))
+    assert missing_categories == []
+
+    over_target: dict[str, tuple[int, int]] = {}
+    for category, target in PHASE5_NON_REFERENCE_SEMANTIC_DUPLICATE_TARGETS.items():
+        group = groups_by_category[category]
+        observed = group["non_reference_occurrence_count"]
+        assert isinstance(observed, int)
+        if observed > target:
+            over_target[category] = (observed, target)
+
+    assert over_target == {}, (
+        f"Phase 5 duplicate target exceeded; move generic invariant prose to the shared references: {over_target}"
+    )
 
 
 def test_phase4_duplicate_category_targets_are_exposed_for_future_ratchet() -> None:

@@ -771,7 +771,10 @@ class TestSkillsServerIntegration:
             "agent_policy": "mirrored",
         }
         assert "`files-written-freshness`" in synthesizer["content"]
-        assert "Use the role-kit return envelope." in synthesizer["content"]
+        assert (
+            "Use the synthesizer profile (`gpd return skeleton --role synthesizer --status <status>`)"
+            in synthesizer["content"]
+        )
         assert (
             "record `GPD/literature/SUMMARY.md` as the sole written artifact when this run creates or updates it"
             in synthesizer["content"]

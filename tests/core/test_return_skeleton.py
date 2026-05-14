@@ -48,10 +48,13 @@ DURABLE_CHECKPOINT_CONTEXT_FIELDS = {
 def test_return_profiles_cover_core_roles() -> None:
     assert set(GPD_RETURN_ROLE_PROFILES) == {
         "executor",
+        "experiment_designer",
+        "paper_writer",
         "planner",
         "checker",
         "verifier",
         "referee",
+        "notation",
         "researcher",
         "reviewer",
         "synthesizer",
@@ -135,9 +138,15 @@ def test_list_gpd_return_profiles_matches_profile_registry_and_filters() -> None
 @pytest.mark.parametrize(
     ("alias", "profile_id"),
     [
-        ("paper_writer", "executor"),
-        ("gpd-paper-writer", "executor"),
+        ("paper_writer", "paper_writer"),
+        ("gpd-paper-writer", "paper_writer"),
         ("bibliographer", "researcher"),
+        ("research_mapper", "researcher"),
+        ("gpd-research-mapper", "researcher"),
+        ("notation_coordinator", "notation"),
+        ("gpd-notation-coordinator", "notation"),
+        ("experiment_designer", "experiment_designer"),
+        ("gpd-experiment-designer", "experiment_designer"),
         ("proof_redteam", "verifier"),
         ("consistency_checker", "checker"),
         ("gpd-review-reader", "reviewer"),
@@ -165,6 +174,58 @@ def test_new_project_role_profiles_use_conservative_existing_defaults() -> None:
         GPD_RETURN_ROLE_PROFILES["roadmapper"].default_render_fields_by_status["completed"]
         == GPD_RETURN_ROLE_PROFILES["planner"].default_render_fields_by_status["completed"]
     )
+
+
+def test_phase5_prompt_worker_profiles_expose_local_fields_without_path_defaults() -> None:
+    paper_writer = GPD_RETURN_ROLE_PROFILES["paper_writer"]
+    assert set(paper_writer.agent_names) == {"gpd-paper-writer"}
+    assert {
+        "section_name",
+        "equations_added",
+        "figures_added",
+        "citations_added",
+        "journal_calibration",
+        "framing_strategy",
+    } <= set(paper_writer.role_fields_by_status["completed"])
+
+    notation = GPD_RETURN_ROLE_PROFILES["notation"]
+    assert set(notation.agent_names) == {"gpd-notation-coordinator"}
+    assert {
+        "conventions_file",
+        "categories_defined",
+        "test_values_defined",
+        "cross_convention_checks",
+        "reference_maps",
+        "conflicts",
+        "severity",
+    } <= set(notation.role_fields_by_status["completed"])
+    assert "conventions_file" not in notation.default_render_fields_by_status["completed"]
+
+    experiment_designer = GPD_RETURN_ROLE_PROFILES["experiment_designer"]
+    assert set(experiment_designer.agent_names) == {"gpd-experiment-designer"}
+    assert "design_file" in experiment_designer.role_fields_by_status["completed"]
+    assert "design_file" not in experiment_designer.default_render_fields_by_status["completed"]
+
+    researcher = GPD_RETURN_ROLE_PROFILES["researcher"]
+    assert "gpd-research-mapper" in researcher.agent_names
+
+
+def test_phase5_prompt_worker_checkpoint_profiles_keep_child_boundary() -> None:
+    for role, artifact_field in (
+        ("paper_writer", None),
+        ("notation_coordinator", "conventions_file"),
+        ("experiment_designer", "design_file"),
+        ("research_mapper", None),
+    ):
+        skeleton = build_gpd_return_skeleton(role=role, status="checkpoint")
+
+        assert skeleton.envelope["status"] == "checkpoint"
+        assert skeleton.envelope["files_written"] == []
+        assert "checkpoint_intent" in skeleton.envelope
+        assert "continuation_update" not in skeleton.envelope
+        assert skeleton.applicator_ready is False
+        if artifact_field is not None:
+            assert artifact_field not in skeleton.envelope
 
 
 @pytest.mark.parametrize("role", sorted(GPD_RETURN_ROLE_PROFILES))
@@ -232,7 +293,7 @@ def test_return_skeleton_cli_reads_files_from_stdin(tmp_path: Path) -> None:
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
-    assert payload["profile_id"] == "executor"
+    assert payload["profile_id"] == "paper_writer"
     assert payload["envelope"]["files_written"] == [
         "GPD/phases/01/01-01-PLAN.md",
         "GPD/ROADMAP.md",

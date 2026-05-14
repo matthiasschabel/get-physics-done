@@ -30,9 +30,12 @@ PATH_PREFIX = "/runtime/"
 
 MIN_LINE_MARGIN = 20
 MIN_CHAR_MARGIN = 1_000
-PHASE5_MAX_TOTAL_AGENT_EXPANDED_CHARS = 380_000
+PHASE5_MAX_TOTAL_AGENT_EXPANDED_CHARS = 355_000
+PHASE5_FINAL_TOTAL_AGENT_EXPANDED_CHARS = 355_000
 PHASE5_MAX_AGENT_EXPANDED_CHARS = 35_000
 PHASE5_MIN_ROLE_KIT_AGENT_COUNT = 12
+PHASE5_LARGE_AGENT_DROP_THRESHOLD_CHARS = 2_000
+PHASE5_MIN_LARGE_NON_EXECUTOR_DROPS = 3
 
 AGENT_BASELINES = {
     "gpd-bibliographer": (136, 5_800),
@@ -43,22 +46,31 @@ AGENT_BASELINES = {
     "gpd-experiment-designer": (360, 21_301),
     "gpd-explainer": (241, 9_508),
     "gpd-literature-reviewer": (395, 14_820),
-    "gpd-notation-coordinator": (350, 23_208),
-    "gpd-paper-writer": (433, 26_715),
+    "gpd-notation-coordinator": (301, 20_042),
+    "gpd-paper-writer": (385, 24_459),
     "gpd-phase-researcher": (370, 15_315),
-    "gpd-plan-checker": (401, 21_540),
-    "gpd-planner": (502, 29_581),
+    "gpd-plan-checker": (351, 19_893),
+    "gpd-planner": (442, 26_701),
     "gpd-project-researcher": (274, 12_605),
-    "gpd-referee": (397, 29_593),
+    "gpd-referee": (354, 27_381),
     "gpd-research-mapper": (355, 18_717),
-    "gpd-research-synthesizer": (412, 24_089),
+    "gpd-research-synthesizer": (371, 22_366),
     "gpd-review-literature": (53, 2_591),
     "gpd-review-math": (54, 3_343),
     "gpd-review-physics": (53, 2_604),
     "gpd-review-reader": (52, 3_166),
     "gpd-review-significance": (54, 2_790),
     "gpd-roadmapper": (415, 22_017),
-    "gpd-verifier": (374, 25_864),
+    "gpd-verifier": (355, 24_913),
+}
+PHASE5_PRE_CUT_LARGE_NON_EXECUTOR_AGENT_CHARS = {
+    "gpd-referee": 29_921,
+    "gpd-planner": 29_581,
+    "gpd-paper-writer": 26_782,
+    "gpd-verifier": 26_224,
+    "gpd-research-synthesizer": 24_089,
+    "gpd-notation-coordinator": 23_208,
+    "gpd-plan-checker": 21_684,
 }
 
 PEER_REVIEW_SPECIALIST_AGENTS = (
@@ -84,22 +96,22 @@ MODE_TABLE_ALLOWLIST = {
 WORST_AGENT_HARD_CAPS = {
     "gpd-executor": (600, 34_500),
     "gpd-experiment-designer": (380, 23_000),
-    "gpd-notation-coordinator": (370, 24_300),
-    "gpd-paper-writer": (453, 27_800),
-    "gpd-plan-checker": (421, 22_200),
-    "gpd-planner": (522, 30_600),
+    "gpd-notation-coordinator": (321, 21_100),
+    "gpd-paper-writer": (405, 25_500),
+    "gpd-plan-checker": (371, 20_900),
+    "gpd-planner": (462, 27_800),
     "gpd-project-researcher": (294, 13_700),
-    "gpd-referee": (417, 30_600),
+    "gpd-referee": (374, 28_500),
     "gpd-research-mapper": (375, 19_800),
-    "gpd-research-synthesizer": (432, 25_100),
+    "gpd-research-synthesizer": (391, 23_400),
     "gpd-roadmapper": (435, 23_500),
-    "gpd-verifier": (394, 26_700),
+    "gpd-verifier": (375, 25_950),
 }
 PHASE5_RAW_AGENT_LINE_CAPS = {
     "gpd-executor": 600,
     "gpd-experiment-designer": 380,
-    "gpd-plan-checker": 421,
-    "gpd-planner": 590,
+    "gpd-plan-checker": 371,
+    "gpd-planner": 462,
     "gpd-roadmapper": 435,
 }
 TOP_AGENT_HARD_CAP_COUNT = 6
@@ -283,6 +295,38 @@ def test_phase5_total_expanded_agent_prompt_chars_stays_under_target() -> None:
         total_chars += metrics.expanded_char_count
 
     assert total_chars <= PHASE5_MAX_TOTAL_AGENT_EXPANDED_CHARS
+
+
+def test_phase5_final_large_agent_reduction_gate_is_ready_for_final_ratchet() -> None:
+    total_chars = 0
+    measured_chars_by_agent: dict[str, int] = {}
+    for agent_name in sorted(registry.list_agents()):
+        metrics = measure_prompt_surface(
+            AGENTS_DIR / f"{agent_name}.md",
+            src_root=SOURCE_ROOT,
+            path_prefix=PATH_PREFIX,
+        )
+        total_chars += metrics.expanded_char_count
+        measured_chars_by_agent[agent_name] = metrics.expanded_char_count
+
+    if total_chars > PHASE5_FINAL_TOTAL_AGENT_EXPANDED_CHARS:
+        pytest.skip(
+            "final prompt-worker reductions are not visible yet: "
+            f"observed={total_chars} max={PHASE5_FINAL_TOTAL_AGENT_EXPANDED_CHARS}"
+        )
+
+    large_reductions = {
+        agent_name: baseline_chars - measured_chars_by_agent[agent_name]
+        for agent_name, baseline_chars in PHASE5_PRE_CUT_LARGE_NON_EXECUTOR_AGENT_CHARS.items()
+    }
+    agents_reduced_by_2k = {
+        agent_name
+        for agent_name, reduction in large_reductions.items()
+        if reduction >= PHASE5_LARGE_AGENT_DROP_THRESHOLD_CHARS
+    }
+
+    assert total_chars <= PHASE5_FINAL_TOTAL_AGENT_EXPANDED_CHARS
+    assert len(agents_reduced_by_2k) >= PHASE5_MIN_LARGE_NON_EXECUTOR_DROPS, large_reductions
 
 
 def test_phase5_role_kit_adoption_reaches_target() -> None:

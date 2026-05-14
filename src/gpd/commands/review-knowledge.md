@@ -110,9 +110,9 @@ Follow the included review-knowledge workflow exactly. The workflow owns schema 
 <success_criteria>
 - [ ] Review target resolved exactly from a current-workspace canonical path or canonical knowledge_id
 - [ ] Review artifact written under `GPD/knowledge/reviews/`
-- [ ] Review metadata records round, reviewer identity, artifact path/hash, reviewed-content hash, and stale handling
+- [ ] Review metadata records round, reviewer identity, artifact path/hash, reviewed-content hash, and recency handling
 - [ ] `approved` promotes the document to `stable` only when the review is fresh
 - [ ] `needs_changes` and `rejected` keep or mark the document `in_review`
-- [ ] Validation fails closed on non-canonical lookalikes, ambiguous targets, or stale approved evidence
+- [ ] Validation fails closed on non-canonical lookalikes, ambiguous targets, or expired approved evidence
 - [ ] No automatic import, beginner onboarding exposure, or full supersession orchestration is claimed
 </success_criteria>

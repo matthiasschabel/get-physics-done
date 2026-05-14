@@ -19,6 +19,7 @@ def _read_agent() -> str:
 
 
 def test_expanded_notation_coordinator_prompt_stays_under_slice4_budget() -> None:
+    agent = _read_agent()
     metrics = measure_prompt_surface(
         AGENT_PATH,
         src_root=SOURCE_ROOT,
@@ -26,6 +27,7 @@ def test_expanded_notation_coordinator_prompt_stays_under_slice4_budget() -> Non
     )
 
     assert metrics.raw_include_count == 0
+    assert len(agent) < 21_000
     assert metrics.expanded_line_count < 420
     assert metrics.expanded_char_count < 26_000
 
@@ -39,8 +41,13 @@ def test_notation_base_prompt_keeps_authority_and_return_contract_visible() -> N
         "state.json.convention_lock` is authoritative",
         "gpd convention set",
         "convention source of truth",
+        "gpd return skeleton --role notation_coordinator --status <status>",
         "files_written: []",
         "conventions_file: GPD/CONVENTIONS.md",
+        "CONVENTIONS.md is the projection/audit surface",
+        "test_values_defined",
+        "change_id",
+        "conflicts",
     ):
         assert required in agent
 

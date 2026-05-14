@@ -1,6 +1,23 @@
 {
   "schema_version": 1,
   "workflow_id": "research-phase",
+  "authority_groups": {
+    "researcher_shared_deferred": [
+      "references/shared/shared-protocols.md",
+      "references/research/researcher-shared.md",
+      "references/orchestration/agent-infrastructure.md"
+    ]
+  },
+  "stage_defaults": {
+    "allowed_tools": [
+      "ask_user",
+      "file_read",
+      "shell",
+      "task"
+    ],
+    "conditional_authorities": [],
+    "writes_allowed": []
+  },
   "stages": [
     {
       "id": "phase_bootstrap",
@@ -36,22 +53,14 @@
         "workflows/research-phase/phase-bootstrap.md",
         "references/orchestration/model-profile-resolution.md"
       ],
-      "conditional_authorities": [],
       "must_not_eager_load": [
         "workflows/research-phase.md",
         "workflows/research-phase/research-handoff.md",
-        "references/orchestration/runtime-delegation-note.md",
-        "references/shared/shared-protocols.md",
-        "references/research/researcher-shared.md",
-        "references/orchestration/agent-infrastructure.md"
+        "references/orchestration/runtime-delegation-note.md"
       ],
-      "allowed_tools": [
-        "ask_user",
-        "file_read",
-        "shell",
-        "task"
+      "must_not_eager_load_groups": [
+        "researcher_shared_deferred"
       ],
-      "writes_allowed": [],
       "produced_state": [
         "phase bootstrap state",
         "existing research routing state"
@@ -96,18 +105,11 @@
         "references/orchestration/model-profile-resolution.md",
         "references/orchestration/runtime-delegation-note.md"
       ],
-      "conditional_authorities": [],
       "must_not_eager_load": [
-        "workflows/research-phase.md",
-        "references/shared/shared-protocols.md",
-        "references/research/researcher-shared.md",
-        "references/orchestration/agent-infrastructure.md"
+        "workflows/research-phase.md"
       ],
-      "allowed_tools": [
-        "ask_user",
-        "file_read",
-        "shell",
-        "task"
+      "must_not_eager_load_groups": [
+        "researcher_shared_deferred"
       ],
       "writes_allowed": [
         "GPD/phases/XX-name/XX-RESEARCH.md"

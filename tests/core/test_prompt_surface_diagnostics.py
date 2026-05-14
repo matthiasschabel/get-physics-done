@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import ast
 import importlib
+import json
 import textwrap
 from pathlib import Path
 
 from gpd import registry
 from gpd.adapters.runtime_catalog import iter_runtime_descriptors
+from gpd.core.workflow_staging import load_workflow_stage_manifest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PROMPT_DIAGNOSTICS_PATH = REPO_ROOT / "src" / "gpd" / "core" / "prompt_diagnostics.py"
@@ -18,6 +20,14 @@ PROMPT_DIAGNOSTICS_TOTAL_LOC_CAP = 3_300
 PROMPT_DIAGNOSTICS_SPLIT_FACADE_LOC_CAP = 1_100
 PROMPT_DIAGNOSTICS_SUPPORT_MODULE_LOC_CAP = 800
 STAGE_PROMPT_DIAGNOSTICS_LOC_CAP = 1_210
+COMPACT_ONLY_MANIFEST_KEYS = {
+    "authority_groups",
+    "cold_authority_policy",
+    "derived_init_field_rules",
+    "must_not_eager_load_groups",
+    "required_init_field_groups",
+    "stage_defaults",
+}
 
 
 def _diagnostics():
@@ -65,6 +75,18 @@ def _stage_by_id(payload: dict[str, object], stage_id: str) -> dict[str, object]
 
 def _source_line_count(path: Path) -> int:
     return len(path.read_text(encoding="utf-8").splitlines())
+
+
+def _assert_no_compact_manifest_keys(value: object) -> None:
+    if isinstance(value, dict):
+        leaked_keys = sorted(COMPACT_ONLY_MANIFEST_KEYS & set(value))
+        assert leaked_keys == []
+        for child in value.values():
+            _assert_no_compact_manifest_keys(child)
+        return
+    if isinstance(value, list):
+        for child in value:
+            _assert_no_compact_manifest_keys(child)
 
 
 def _frontmatter_from_markdown(path: Path) -> str:
@@ -328,6 +350,22 @@ def test_stage_diagnostics_report_manifest_must_not_duplicates_even_when_loader_
     assert payload["totals"]["stage_diagnostics"]["manifest_must_not_duplicate_entry_count"] == 1
     assert payload["totals"]["stage_diagnostics"]["manifest_must_not_duplicate_stage_count"] == 1
     assert payload["totals"]["stage_diagnostics"]["manifest_must_not_duplicate_authority_count"] == 1
+
+
+def test_compact_autonomous_manifest_keys_do_not_enter_staged_loading_payloads() -> None:
+    manifest_path = REPO_ROOT / "src" / "gpd" / "specs" / "workflows" / "autonomous-stage-manifest.json"
+    source_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    assert {"stage_defaults", "cold_authority_policy"} <= set(source_payload)
+
+    manifest = load_workflow_stage_manifest("autonomous")
+    for stage_id in manifest.stage_ids():
+        staged_loading = manifest.staged_loading_payload(stage_id)
+
+        _assert_no_compact_manifest_keys(staged_loading)
+        assert "required_init_fields" in staged_loading
+        assert "must_not_eager_load" in staged_loading
+        assert "eager_authorities" in staged_loading
 
 
 def test_stage_diagnostics_detect_transitive_eager_loading_violations(tmp_path: Path) -> None:

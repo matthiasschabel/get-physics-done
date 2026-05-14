@@ -18,10 +18,11 @@ PROMPT_KIND_BUDGETS = {
     "agent": {"lines": 6_400, "chars": 355_000},
     "workflow": {"lines": 15_300, "chars": 618_000},
 }
-STAGE_FIRST_TURN_BUDGET = {"lines": 3_460, "chars": 134_287}
+STAGE_FIRST_TURN_BUDGET = {"lines": 3_159, "chars": 130_875}
 # Phase 3 strict target uses <= assertions, so char caps are one below the
 # acceptance threshold.
-STAGE_FIRST_TURN_ACTIVE_BUDGET = {"lines": 2_430, "chars": 103_532}
+STAGE_FIRST_TURN_ACTIVE_BUDGET = {"lines": 2_176, "chars": 101_389}
+STAGED_WORKFLOW_DIAGNOSTIC_COUNT = 16
 STAGE_EAGER_CHAR_BUDGET = 855_000
 PHASE2_STAGE_EAGER_CHAR_BASELINE = 772_803
 STAGE_SELECTED_INIT_FIELD_BUDGET = 2_498
@@ -453,13 +454,15 @@ def test_prompt_surface_safety_floors_stay_within_current_budgets() -> None:
 
     stage_diagnostics = totals["stage_diagnostics"]
     assert isinstance(stage_diagnostics, dict)
+    workflow_count = _required_stage_diagnostic_count(stage_diagnostics, "workflow_count")
+    assert workflow_count == STAGED_WORKFLOW_DIAGNOSTIC_COUNT
     violation_count = _stage_diagnostic_count(stage_diagnostics, "must_not_eager_load_violation_count")
-    assert violation_count <= MUST_NOT_EAGER_LOAD_VIOLATION_BUDGET
+    assert violation_count == MUST_NOT_EAGER_LOAD_VIOLATION_BUDGET
     actionable_violation_count = _required_stage_diagnostic_count(
         stage_diagnostics,
         "must_not_eager_load_actionable_violation_count",
     )
-    assert actionable_violation_count <= MUST_NOT_EAGER_LOAD_VIOLATION_BUDGET
+    assert actionable_violation_count == MUST_NOT_EAGER_LOAD_VIOLATION_BUDGET
     prior_stage_residue_count = _required_stage_diagnostic_count(
         stage_diagnostics,
         "must_not_eager_load_prior_stage_residue_count",
@@ -506,8 +509,13 @@ def test_phase1_pressure_counters_stay_within_advisory_budgets() -> None:
     )
 
     manifest_duplicate_rows = _manifest_duplicate_contributors(payload)
+    observed_duplicate_counts = {
+        field_name: _required_stage_diagnostic_count(stage_diagnostics, field_name)
+        for field_name in PHASE1_MANIFEST_MUST_NOT_DUPLICATE_ADVISORY_BUDGETS
+    }
+    assert observed_duplicate_counts == dict.fromkeys(PHASE1_MANIFEST_MUST_NOT_DUPLICATE_ADVISORY_BUDGETS, 0)
     for field_name, advisory_budget in PHASE1_MANIFEST_MUST_NOT_DUPLICATE_ADVISORY_BUDGETS.items():
-        observed = _required_stage_diagnostic_count(stage_diagnostics, field_name)
+        observed = observed_duplicate_counts[field_name]
         assert observed <= advisory_budget, _format_phase1_budget_failure(
             field_name,
             observed,

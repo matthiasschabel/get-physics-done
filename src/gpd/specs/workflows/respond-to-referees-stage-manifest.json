@@ -117,6 +117,26 @@
       "latest_response_artifacts"
     ]
   },
+  "authority_groups": {
+    "response_review_recovery_templates": [
+      "references/publication/peer-review-reliability.md",
+      "references/publication/stage-recovery-gate.md",
+      "templates/paper/referee-response.md",
+      "templates/paper/author-response.md"
+    ]
+  },
+  "stage_defaults": {
+    "allowed_tools": [
+      "ask_user",
+      "file_read",
+      "find_files",
+      "search_files",
+      "shell",
+      "task"
+    ],
+    "conditional_authorities": [],
+    "writes_allowed": []
+  },
   "stages": [
     {
       "id": "bootstrap",
@@ -132,28 +152,14 @@
         "workflows/respond-to-referees/bootstrap.md",
         "references/publication/publication-bootstrap-preflight.md"
       ],
-      "conditional_authorities": [],
       "must_not_eager_load": [
         "workflows/respond-to-referees.md",
         "workflows/respond-to-referees/report-triage.md",
         "workflows/respond-to-referees/revision-planning.md",
         "workflows/respond-to-referees/response-authoring.md",
         "workflows/respond-to-referees/finalize.md",
-        "references/publication/publication-response-writer-handoff.md",
-        "references/publication/peer-review-reliability.md",
-        "references/publication/stage-recovery-gate.md",
-        "templates/paper/referee-response.md",
-        "templates/paper/author-response.md"
+        "references/publication/publication-response-writer-handoff.md"
       ],
-      "allowed_tools": [
-        "ask_user",
-        "file_read",
-        "find_files",
-        "search_files",
-        "shell",
-        "task"
-      ],
-      "writes_allowed": [],
       "produced_state": [
         "response-round bootstrap state",
         "target-aware manuscript routing state",
@@ -177,6 +183,9 @@
         "response_blockers_context",
         "response_review_round_artifacts",
         "response_artifact_pair_context"
+      ],
+      "must_not_eager_load_groups": [
+        "response_review_recovery_templates"
       ]
     },
     {
@@ -208,21 +217,8 @@
         "workflows/respond-to-referees.md",
         "workflows/respond-to-referees/revision-planning.md",
         "workflows/respond-to-referees/response-authoring.md",
-        "workflows/respond-to-referees/finalize.md",
-        "references/publication/peer-review-reliability.md",
-        "references/publication/stage-recovery-gate.md",
-        "templates/paper/referee-response.md",
-        "templates/paper/author-response.md"
+        "workflows/respond-to-referees/finalize.md"
       ],
-      "allowed_tools": [
-        "ask_user",
-        "file_read",
-        "find_files",
-        "search_files",
-        "shell",
-        "task"
-      ],
-      "writes_allowed": [],
       "produced_state": [
         "parsed referee issue inventory",
         "active response round state",
@@ -244,6 +240,9 @@
         "response_blockers_context",
         "response_review_round_artifacts",
         "response_artifact_pair_context"
+      ],
+      "must_not_eager_load_groups": [
+        "response_review_recovery_templates"
       ]
     },
     {
@@ -286,15 +285,6 @@
         "templates/paper/referee-response.md",
         "templates/paper/author-response.md"
       ],
-      "allowed_tools": [
-        "ask_user",
-        "file_read",
-        "find_files",
-        "search_files",
-        "shell",
-        "task"
-      ],
-      "writes_allowed": [],
       "produced_state": [
         "response plan",
         "manuscript revision plan",
@@ -424,19 +414,7 @@
         "workflows/respond-to-referees.md",
         "workflows/respond-to-referees/report-triage.md",
         "workflows/respond-to-referees/revision-planning.md",
-        "workflows/respond-to-referees/response-authoring.md",
-        "references/publication/peer-review-reliability.md",
-        "references/publication/stage-recovery-gate.md",
-        "templates/paper/referee-response.md",
-        "templates/paper/author-response.md"
-      ],
-      "allowed_tools": [
-        "ask_user",
-        "file_read",
-        "find_files",
-        "search_files",
-        "shell",
-        "task"
+        "workflows/respond-to-referees/response-authoring.md"
       ],
       "writes_allowed": [
         "GPD/AUTHOR-RESPONSE{round_suffix}.md",
@@ -460,6 +438,9 @@
         "response_manuscript_resolution",
         "response_manuscript_package_paths",
         "response_artifact_pair_context"
+      ],
+      "must_not_eager_load_groups": [
+        "response_review_recovery_templates"
       ]
     }
   ]

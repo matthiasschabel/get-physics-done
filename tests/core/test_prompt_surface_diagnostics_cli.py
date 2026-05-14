@@ -18,6 +18,14 @@ class _StableCliRunner(CliRunner):
 
 
 runner = _StableCliRunner()
+COMPACT_ONLY_MANIFEST_KEYS = {
+    "authority_groups",
+    "cold_authority_policy",
+    "derived_init_field_rules",
+    "must_not_eager_load_groups",
+    "required_init_field_groups",
+    "stage_defaults",
+}
 
 
 def _rendered_tail_after(output: str, marker: str) -> str:
@@ -55,6 +63,17 @@ def _assert_no_dashboard_keys(value: object) -> None:
             _assert_no_dashboard_keys(child)
 
 
+def _assert_no_compact_manifest_keys(value: object) -> None:
+    if isinstance(value, dict):
+        assert not (COMPACT_ONLY_MANIFEST_KEYS & set(value))
+        for child in value.values():
+            _assert_no_compact_manifest_keys(child)
+        return
+    if isinstance(value, list):
+        for child in value:
+            _assert_no_compact_manifest_keys(child)
+
+
 def test_prompt_surface_diagnostics_raw_json_shape() -> None:
     result = runner.invoke(
         app,
@@ -89,6 +108,14 @@ def test_prompt_surface_diagnostics_raw_json_shape() -> None:
     assert isinstance(payload["semantic_duplicate_invariants"], list)
     assert len(payload["semantic_duplicate_invariants"]) <= 3
     assert all(len(group["examples"]) <= 3 for group in payload["semantic_duplicate_invariants"])
+    stage_totals = payload["totals"]["stage_diagnostics"]
+    assert stage_totals["workflow_count"] == 16
+    assert stage_totals["must_not_eager_load_violation_count"] == 0
+    assert stage_totals["must_not_eager_load_actionable_violation_count"] == 0
+    assert stage_totals["manifest_must_not_duplicate_entry_count"] == 0
+    assert stage_totals["manifest_must_not_duplicate_stage_count"] == 0
+    assert stage_totals["manifest_must_not_duplicate_authority_count"] == 0
+    _assert_no_compact_manifest_keys(payload["stage_diagnostics"])
 
 
 def test_prompt_surface_diagnostics_dashboard_cli_smoke() -> None:

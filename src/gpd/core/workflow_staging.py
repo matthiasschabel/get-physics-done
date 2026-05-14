@@ -49,6 +49,7 @@ from gpd.core.staged_context_fields import (
     WRITE_PAPER_PUBLICATION_BOOTSTRAP_FIELDS,
     WRITE_PAPER_REFERENCE_RUNTIME_FIELDS,
 )
+from gpd.core.workflow_manifest_compaction import canonicalize_workflow_stage_manifest_payload
 from gpd.specs import SPECS_DIR
 
 WORKFLOW_STAGE_MANIFEST_DIR = SPECS_DIR / "workflows"
@@ -622,11 +623,22 @@ _DEFAULT_KNOWN_INIT_FIELDS_BY_WORKFLOW = {
 }
 _MANIFEST_DERIVED_KNOWN_INIT_FIELD_WORKFLOWS = frozenset(
     {
+        "arxiv-submission",
+        "autonomous",
+        "execute-phase",
         "literature-review",
+        "map-research",
+        "new-milestone",
         "new-project",
+        "peer-review",
+        "plan-phase",
+        "quick",
         "research-phase",
+        "respond-to-referees",
         "resume-work",
         "sync-state",
+        "verify-work",
+        "write-paper",
     }
 )
 
@@ -1116,13 +1128,6 @@ def _expand_required_init_fields(
         seen.add(field_name)
         fields.append(field_name)
 
-    if "protocol_bundle_context" in seen and "protocol_bundle_load_manifest" not in seen:
-        for anchor in ("protocol_bundle_count", "selected_protocol_bundle_ids"):
-            if anchor in fields:
-                fields.insert(fields.index(anchor) + 1, "protocol_bundle_load_manifest")
-                break
-        else:
-            fields.insert(fields.index("protocol_bundle_context"), "protocol_bundle_load_manifest")
     return tuple(fields)
 
 
@@ -1139,6 +1144,9 @@ def _expanded_required_init_fields_by_stage_from_payload(
     *,
     expected_workflow_id: str | None = None,
 ) -> tuple[tuple[str, tuple[str, ...]], ...]:
+    if not isinstance(raw, dict):
+        raise ValueError("workflow stage manifest must be a JSON object")
+    raw = canonicalize_workflow_stage_manifest_payload(raw)
     if not isinstance(raw, dict):
         raise ValueError("workflow stage manifest must be a JSON object")
     if expected_workflow_id is not None:
@@ -1344,6 +1352,9 @@ def validate_workflow_stage_manifest_payload(
     known_init_fields: Iterable[str] | None = None,
     specs_root: Path | None = None,
 ) -> WorkflowStageManifest:
+    if not isinstance(raw, dict):
+        raise ValueError("workflow stage manifest must be a JSON object")
+    raw = canonicalize_workflow_stage_manifest_payload(raw)
     if not isinstance(raw, dict):
         raise ValueError("workflow stage manifest must be a JSON object")
 

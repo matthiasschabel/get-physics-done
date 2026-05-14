@@ -63,6 +63,26 @@
       "active_reference_context"
     ]
   },
+  "stage_defaults": {
+    "required_init_field_groups": [
+      "planner_model_context",
+      "planning_controls",
+      "phase_target_context",
+      "contract_gate_status"
+    ],
+    "required_init_fields": [
+      "platform"
+    ],
+    "conditional_authorities": [],
+    "allowed_tools": [
+      "file_read",
+      "shell",
+      "find_files",
+      "search_files",
+      "task"
+    ],
+    "writes_allowed": []
+  },
   "stages": [
     {
       "id": "phase_bootstrap",
@@ -71,19 +91,9 @@
       "mode_paths": [
         "workflows/plan-phase/phase-bootstrap.md"
       ],
-      "required_init_field_groups": [
-        "planner_model_context",
-        "planning_controls",
-        "phase_target_context",
-        "contract_gate_status"
-      ],
-      "required_init_fields": [
-        "platform"
-      ],
       "loaded_authorities": [
         "workflows/plan-phase/phase-bootstrap.md"
       ],
-      "conditional_authorities": [],
       "must_not_eager_load": [
         "references/orchestration/runtime-delegation-note.md",
         "references/ui/ui-brand.md",
@@ -95,14 +105,6 @@
         "workflows/plan-phase/planner-authoring.md",
         "workflows/plan-phase/research-routing.md"
       ],
-      "allowed_tools": [
-        "file_read",
-        "shell",
-        "find_files",
-        "search_files",
-        "task"
-      ],
-      "writes_allowed": [],
       "produced_state": [
         "planning bootstrap state",
         "contract gate decision state"
@@ -122,20 +124,10 @@
       "mode_paths": [
         "workflows/plan-phase/research-routing.md"
       ],
-      "required_init_field_groups": [
-        "planner_model_context",
-        "planning_controls",
-        "phase_target_context",
-        "contract_gate_status"
-      ],
-      "required_init_fields": [
-        "platform"
-      ],
       "loaded_authorities": [
         "workflows/plan-phase/research-routing.md",
         "references/orchestration/runtime-delegation-note.md"
       ],
-      "conditional_authorities": [],
       "must_not_eager_load": [
         "references/ui/ui-brand.md",
         "templates/phase-prompt.md",
@@ -145,14 +137,6 @@
         "workflows/plan-phase/checker-revision.md",
         "workflows/plan-phase/planner-authoring.md"
       ],
-      "allowed_tools": [
-        "file_read",
-        "shell",
-        "find_files",
-        "search_files",
-        "task"
-      ],
-      "writes_allowed": [],
       "produced_state": [
         "research routing state",
         "gap-closure planning mode"
@@ -193,7 +177,6 @@
         "workflows/plan-phase/planner-authoring.md",
         "templates/planner-subagent-prompt.md"
       ],
-      "conditional_authorities": [],
       "must_not_eager_load": [
         "references/ui/ui-brand.md",
         "templates/phase-prompt.md",
@@ -242,9 +225,6 @@
         "contract_gate_status",
         "checker_reference_handles"
       ],
-      "required_init_fields": [
-        "platform"
-      ],
       "loaded_authorities": [
         "workflows/plan-phase/checker-revision.md"
       ],
@@ -263,14 +243,6 @@
         "templates/planner-subagent-prompt.md",
         "workflows/plan-phase.md"
       ],
-      "allowed_tools": [
-        "file_read",
-        "shell",
-        "find_files",
-        "search_files",
-        "task"
-      ],
-      "writes_allowed": [],
       "produced_state": [
         "checker findings",
         "approval routing state",

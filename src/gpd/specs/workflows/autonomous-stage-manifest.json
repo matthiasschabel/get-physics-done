@@ -52,6 +52,20 @@
       "phase_proof_review_status"
     ]
   },
+  "stage_defaults": {
+    "allowed_tools": [
+      "ask_user",
+      "file_read",
+      "shell",
+      "task"
+    ],
+    "conditional_authorities": [],
+    "must_not_eager_load": [
+      "workflows/autonomous.md"
+    ],
+    "writes_allowed": []
+  },
+  "cold_authority_policy": "workflow_stage_authorities_cold_except_eager",
   "stages": [
     {
       "id": "initialize_discover",
@@ -68,23 +82,11 @@
       "loaded_authorities": [
         "workflows/autonomous/initialize-discover.md"
       ],
-      "conditional_authorities": [],
-      "must_not_eager_load": [
-        "workflows/autonomous.md",
-        "workflows/autonomous/phase-route.md",
-        "workflows/autonomous/discuss-delegate.md",
-        "workflows/autonomous/plan-execute-child-cycle.md",
-        "workflows/autonomous/verification-route.md",
-        "workflows/autonomous/gap-route.md",
-        "workflows/autonomous/convention-lifecycle-closeout.md",
-        "workflows/autonomous/blocked-recovery.md"
-      ],
       "allowed_tools": [
         "ask_user",
         "file_read",
         "shell"
       ],
-      "writes_allowed": [],
       "produced_state": [
         "autonomous launch state",
         "roadmap phase plan"
@@ -115,24 +117,6 @@
       "loaded_authorities": [
         "workflows/autonomous/phase-route.md"
       ],
-      "conditional_authorities": [],
-      "must_not_eager_load": [
-        "workflows/autonomous.md",
-        "workflows/autonomous/initialize-discover.md",
-        "workflows/autonomous/discuss-delegate.md",
-        "workflows/autonomous/plan-execute-child-cycle.md",
-        "workflows/autonomous/verification-route.md",
-        "workflows/autonomous/gap-route.md",
-        "workflows/autonomous/convention-lifecycle-closeout.md",
-        "workflows/autonomous/blocked-recovery.md"
-      ],
-      "allowed_tools": [
-        "ask_user",
-        "file_read",
-        "shell",
-        "task"
-      ],
-      "writes_allowed": [],
       "produced_state": [
         "phase routing decision"
       ],
@@ -160,24 +144,6 @@
       "loaded_authorities": [
         "workflows/autonomous/discuss-delegate.md"
       ],
-      "conditional_authorities": [],
-      "must_not_eager_load": [
-        "workflows/autonomous.md",
-        "workflows/autonomous/initialize-discover.md",
-        "workflows/autonomous/phase-route.md",
-        "workflows/autonomous/plan-execute-child-cycle.md",
-        "workflows/autonomous/verification-route.md",
-        "workflows/autonomous/gap-route.md",
-        "workflows/autonomous/convention-lifecycle-closeout.md",
-        "workflows/autonomous/blocked-recovery.md"
-      ],
-      "allowed_tools": [
-        "ask_user",
-        "file_read",
-        "shell",
-        "task"
-      ],
-      "writes_allowed": [],
       "produced_state": [
         "context delegation result"
       ],
@@ -205,24 +171,6 @@
       "loaded_authorities": [
         "workflows/autonomous/plan-execute-child-cycle.md"
       ],
-      "conditional_authorities": [],
-      "must_not_eager_load": [
-        "workflows/autonomous.md",
-        "workflows/autonomous/initialize-discover.md",
-        "workflows/autonomous/phase-route.md",
-        "workflows/autonomous/discuss-delegate.md",
-        "workflows/autonomous/verification-route.md",
-        "workflows/autonomous/gap-route.md",
-        "workflows/autonomous/convention-lifecycle-closeout.md",
-        "workflows/autonomous/blocked-recovery.md"
-      ],
-      "allowed_tools": [
-        "ask_user",
-        "file_read",
-        "shell",
-        "task"
-      ],
-      "writes_allowed": [],
       "produced_state": [
         "plan child return",
         "execute child return",
@@ -253,24 +201,6 @@
       "loaded_authorities": [
         "workflows/autonomous/verification-route.md"
       ],
-      "conditional_authorities": [],
-      "must_not_eager_load": [
-        "workflows/autonomous.md",
-        "workflows/autonomous/initialize-discover.md",
-        "workflows/autonomous/phase-route.md",
-        "workflows/autonomous/discuss-delegate.md",
-        "workflows/autonomous/plan-execute-child-cycle.md",
-        "workflows/autonomous/gap-route.md",
-        "workflows/autonomous/convention-lifecycle-closeout.md",
-        "workflows/autonomous/blocked-recovery.md"
-      ],
-      "allowed_tools": [
-        "ask_user",
-        "file_read",
-        "shell",
-        "task"
-      ],
-      "writes_allowed": [],
       "produced_state": [
         "verification routing decision"
       ],
@@ -300,24 +230,6 @@
       "loaded_authorities": [
         "workflows/autonomous/gap-route.md"
       ],
-      "conditional_authorities": [],
-      "must_not_eager_load": [
-        "workflows/autonomous.md",
-        "workflows/autonomous/initialize-discover.md",
-        "workflows/autonomous/phase-route.md",
-        "workflows/autonomous/discuss-delegate.md",
-        "workflows/autonomous/plan-execute-child-cycle.md",
-        "workflows/autonomous/verification-route.md",
-        "workflows/autonomous/convention-lifecycle-closeout.md",
-        "workflows/autonomous/blocked-recovery.md"
-      ],
-      "allowed_tools": [
-        "ask_user",
-        "file_read",
-        "shell",
-        "task"
-      ],
-      "writes_allowed": [],
       "produced_state": [
         "gap retry result",
         "fresh verification result"
@@ -349,24 +261,6 @@
       "loaded_authorities": [
         "workflows/autonomous/convention-lifecycle-closeout.md"
       ],
-      "conditional_authorities": [],
-      "must_not_eager_load": [
-        "workflows/autonomous.md",
-        "workflows/autonomous/initialize-discover.md",
-        "workflows/autonomous/phase-route.md",
-        "workflows/autonomous/discuss-delegate.md",
-        "workflows/autonomous/plan-execute-child-cycle.md",
-        "workflows/autonomous/verification-route.md",
-        "workflows/autonomous/gap-route.md",
-        "workflows/autonomous/blocked-recovery.md"
-      ],
-      "allowed_tools": [
-        "ask_user",
-        "file_read",
-        "shell",
-        "task"
-      ],
-      "writes_allowed": [],
       "produced_state": [
         "convention validation result",
         "milestone closeout routing decision"
@@ -397,23 +291,11 @@
       "loaded_authorities": [
         "workflows/autonomous/blocked-recovery.md"
       ],
-      "conditional_authorities": [],
-      "must_not_eager_load": [
-        "workflows/autonomous.md",
-        "workflows/autonomous/initialize-discover.md",
-        "workflows/autonomous/phase-route.md",
-        "workflows/autonomous/discuss-delegate.md",
-        "workflows/autonomous/plan-execute-child-cycle.md",
-        "workflows/autonomous/verification-route.md",
-        "workflows/autonomous/gap-route.md",
-        "workflows/autonomous/convention-lifecycle-closeout.md"
-      ],
       "allowed_tools": [
         "ask_user",
         "file_read",
         "shell"
       ],
-      "writes_allowed": [],
       "produced_state": [
         "blocked recovery decision"
       ],

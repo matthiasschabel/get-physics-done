@@ -362,6 +362,17 @@ from gpd.core.write_paper_intake import (
 logger = logging.getLogger(__name__)
 
 
+# Keep these aliases importable while known-init authority moves out of context builders.
+_LEGACY_INIT_FIELD_EXPORTS = (
+    _LITERATURE_REVIEW_INIT_FIELDS,
+    _MAP_RESEARCH_INIT_FIELDS,
+    _NEW_MILESTONE_INIT_FIELDS,
+    _PLAN_PHASE_INIT_FIELDS,
+    _QUICK_INIT_FIELDS,
+    _RESEARCH_PHASE_INIT_FIELDS,
+    _VERIFY_WORK_INIT_FIELDS,
+    _WRITE_PAPER_INIT_FIELDS,
+)
 _LITERATURE_DIR_NAME = "literature"
 _REFERENCE_MAP_DOCS = ("REFERENCES.md", "VALIDATION.md")
 _LITERATURE_INCLUDE_LIMIT = 2
@@ -3645,10 +3656,7 @@ def init_plan_phase(
 
     from gpd.core.workflow_staging import load_workflow_stage_manifest
 
-    manifest = load_workflow_stage_manifest(
-        "plan-phase",
-        known_init_fields=_PLAN_PHASE_INIT_FIELDS,
-    )
+    manifest = load_workflow_stage_manifest("plan-phase")
 
     return _assemble_staged_init_payload(
         workflow_id="plan-phase",
@@ -3791,10 +3799,7 @@ def init_new_milestone(cwd: Path, stage: str | None = None) -> dict:
 
     from gpd.core.workflow_staging import load_workflow_stage_manifest
 
-    manifest = load_workflow_stage_manifest(
-        "new-milestone",
-        known_init_fields=_NEW_MILESTONE_INIT_FIELDS,
-    )
+    manifest = load_workflow_stage_manifest("new-milestone")
 
     return _assemble_staged_init_payload(
         workflow_id="new-milestone",
@@ -3895,10 +3900,7 @@ def init_quick(cwd: Path, description: str | None = None, stage: str | None = No
 
     from gpd.core.workflow_staging import load_workflow_stage_manifest
 
-    manifest = load_workflow_stage_manifest(
-        "quick",
-        known_init_fields=_QUICK_INIT_FIELDS,
-    )
+    manifest = load_workflow_stage_manifest("quick")
 
     return _assemble_staged_init_payload(
         workflow_id="quick",
@@ -4204,10 +4206,7 @@ def init_verify_work(cwd: Path, phase: str | None, stage: str | None = None) -> 
 
     from gpd.core.workflow_staging import load_workflow_stage_manifest
 
-    manifest = load_workflow_stage_manifest(
-        "verify-work",
-        known_init_fields=_VERIFY_WORK_INIT_FIELDS,
-    )
+    manifest = load_workflow_stage_manifest("verify-work")
 
     return _assemble_staged_init_payload(
         workflow_id="verify-work",
@@ -4307,10 +4306,7 @@ def init_write_paper(cwd: Path, subject: str | None = None, stage: str | None = 
 
     from gpd.core.workflow_staging import load_workflow_stage_manifest
 
-    manifest = load_workflow_stage_manifest(
-        "write-paper",
-        known_init_fields=_WRITE_PAPER_INIT_FIELDS,
-    )
+    manifest = load_workflow_stage_manifest("write-paper")
 
     def build_write_paper_reference_or_bootstrap(assembly_context: object) -> Mapping[str, object]:
         required_fields = assembly_context.required_fields
@@ -4389,10 +4385,7 @@ def init_peer_review(cwd: Path, subject: str | None = None, stage: str | None = 
 
     from gpd.core.workflow_staging import load_workflow_stage_manifest
 
-    manifest = load_workflow_stage_manifest(
-        "peer-review",
-        known_init_fields=PEER_REVIEW_INIT_FIELDS,
-    )
+    manifest = load_workflow_stage_manifest("peer-review")
     return _assemble_staged_init_payload(
         workflow_id="peer-review",
         stage_id=stage,
@@ -4445,10 +4438,7 @@ def init_respond_to_referees(cwd: Path, subject: str | None = None, stage: str |
 
     from gpd.core.workflow_staging import load_workflow_stage_manifest
 
-    manifest = load_workflow_stage_manifest(
-        "respond-to-referees",
-        known_init_fields=PEER_REVIEW_INIT_FIELDS,
-    )
+    manifest = load_workflow_stage_manifest("respond-to-referees")
     return _assemble_staged_init_payload(
         workflow_id="respond-to-referees",
         stage_id=stage,
@@ -4618,7 +4608,7 @@ def init_phase_op(
 
     from gpd.core.workflow_staging import load_workflow_stage_manifest
 
-    manifest = load_workflow_stage_manifest("research-phase", known_init_fields=_RESEARCH_PHASE_INIT_FIELDS)
+    manifest = load_workflow_stage_manifest("research-phase")
 
     return _assemble_staged_init_payload(
         workflow_id="research-phase",
@@ -4687,7 +4677,7 @@ def init_literature_review(cwd: Path, topic: str | None = None, stage: str | Non
 
     from gpd.core.workflow_staging import load_workflow_stage_manifest
 
-    manifest = load_workflow_stage_manifest("literature-review", known_init_fields=_LITERATURE_REVIEW_INIT_FIELDS)
+    manifest = load_workflow_stage_manifest("literature-review")
 
     return _assemble_staged_init_payload(
         workflow_id="literature-review",
@@ -5054,7 +5044,7 @@ def init_map_research(cwd: Path, focus: str | None = None, stage: str | None = N
 
     from gpd.core.workflow_staging import load_workflow_stage_manifest
 
-    manifest = load_workflow_stage_manifest("map-research", known_init_fields=_MAP_RESEARCH_INIT_FIELDS)
+    manifest = load_workflow_stage_manifest("map-research")
 
     return _assemble_staged_init_payload(
         workflow_id="map-research",

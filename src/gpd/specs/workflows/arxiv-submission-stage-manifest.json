@@ -82,6 +82,15 @@
       "latest_response_freshness"
     ]
   },
+  "stage_defaults": {
+    "allowed_tools": [
+      "file_read",
+      "shell",
+      "task"
+    ],
+    "conditional_authorities": [],
+    "writes_allowed": []
+  },
   "stages": [
     {
       "id": "bootstrap",
@@ -106,7 +115,6 @@
         "workflows/arxiv-submission/bootstrap.md",
         "references/publication/publication-bootstrap-preflight.md"
       ],
-      "conditional_authorities": [],
       "must_not_eager_load": [
         "workflows/arxiv-submission.md",
         "workflows/arxiv-submission/manuscript-preflight.md",
@@ -125,7 +133,6 @@
         "shell",
         "task"
       ],
-      "writes_allowed": [],
       "produced_state": [
         "bootstrap routing state",
         "manuscript target state",
@@ -161,7 +168,6 @@
         "workflows/arxiv-submission/manuscript-preflight.md",
         "templates/paper/publication-manuscript-root-preflight.md"
       ],
-      "conditional_authorities": [],
       "must_not_eager_load": [
         "workflows/arxiv-submission.md",
         "workflows/arxiv-submission/review-gate.md",
@@ -177,7 +183,6 @@
         "shell",
         "task"
       ],
-      "writes_allowed": [],
       "produced_state": [
         "manuscript preflight state",
         "build freshness state"
@@ -227,12 +232,6 @@
         "workflows/arxiv-submission/finalize.md",
         "references/publication/peer-review-reliability.md"
       ],
-      "allowed_tools": [
-        "file_read",
-        "shell",
-        "task"
-      ],
-      "writes_allowed": [],
       "produced_state": [
         "latest review gate state",
         "submission clearance state"
@@ -262,7 +261,6 @@
       "loaded_authorities": [
         "workflows/arxiv-submission/package.md"
       ],
-      "conditional_authorities": [],
       "must_not_eager_load": [
         "workflows/arxiv-submission.md",
         "workflows/arxiv-submission/finalize.md",
@@ -309,14 +307,8 @@
       "loaded_authorities": [
         "workflows/arxiv-submission/finalize.md"
       ],
-      "conditional_authorities": [],
       "must_not_eager_load": [
         "workflows/arxiv-submission.md"
-      ],
-      "allowed_tools": [
-        "file_read",
-        "shell",
-        "task"
       ],
       "writes_allowed": [
         "GPD/publication/{subject_slug}/arxiv"

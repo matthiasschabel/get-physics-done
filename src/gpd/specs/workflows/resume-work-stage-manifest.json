@@ -130,6 +130,21 @@
       "project_contract_gate"
     ]
   },
+  "authority_groups": {
+    "state_schema": [
+      "templates/state-json-schema.md"
+    ]
+  },
+  "stage_defaults": {
+    "allowed_tools": [
+      "ask_user",
+      "file_read",
+      "file_write",
+      "shell"
+    ],
+    "conditional_authorities": [],
+    "writes_allowed": []
+  },
   "stages": [
     {
       "id": "resume_bootstrap",
@@ -152,23 +167,17 @@
         "workflows/resume-work/resume-bootstrap.md",
         "references/orchestration/resume-vocabulary.md"
       ],
-      "conditional_authorities": [],
       "must_not_eager_load": [
         "workflows/resume-work.md",
         "workflows/resume-work/state-restore.md",
         "workflows/resume-work/derivation-restore.md",
         "workflows/resume-work/resume-routing.md",
         "references/orchestration/continuation-format.md",
-        "references/orchestration/state-portability.md",
-        "templates/state-json-schema.md"
+        "references/orchestration/state-portability.md"
       ],
-      "allowed_tools": [
-        "ask_user",
-        "file_read",
-        "file_write",
-        "shell"
+      "must_not_eager_load_groups": [
+        "state_schema"
       ],
-      "writes_allowed": [],
       "produced_state": [
         "reentry selection",
         "recovery summary"
@@ -199,21 +208,15 @@
         "workflows/resume-work/state-restore.md",
         "references/orchestration/state-portability.md"
       ],
-      "conditional_authorities": [],
       "must_not_eager_load": [
         "workflows/resume-work.md",
         "workflows/resume-work/derivation-restore.md",
         "workflows/resume-work/resume-routing.md",
-        "references/orchestration/continuation-format.md",
-        "templates/state-json-schema.md"
+        "references/orchestration/continuation-format.md"
       ],
-      "allowed_tools": [
-        "ask_user",
-        "file_read",
-        "file_write",
-        "shell"
+      "must_not_eager_load_groups": [
+        "state_schema"
       ],
-      "writes_allowed": [],
       "produced_state": [
         "state authority summary",
         "contract repair gate"
@@ -242,17 +245,17 @@
         "workflows/resume-work/derivation-restore.md",
         "references/orchestration/continuation-format.md"
       ],
-      "conditional_authorities": [],
       "must_not_eager_load": [
         "workflows/resume-work.md",
-        "workflows/resume-work/resume-routing.md",
-        "templates/state-json-schema.md"
+        "workflows/resume-work/resume-routing.md"
+      ],
+      "must_not_eager_load_groups": [
+        "state_schema"
       ],
       "allowed_tools": [
         "file_read",
         "shell"
       ],
-      "writes_allowed": [],
       "produced_state": [
         "derivation restoration summary",
         "continuity anchor summary"
@@ -291,14 +294,10 @@
       ],
       "must_not_eager_load": [
         "workflows/resume-work.md",
-        "references/orchestration/continuation-format.md",
-        "templates/state-json-schema.md"
+        "references/orchestration/continuation-format.md"
       ],
-      "allowed_tools": [
-        "ask_user",
-        "file_read",
-        "file_write",
-        "shell"
+      "must_not_eager_load_groups": [
+        "state_schema"
       ],
       "writes_allowed": [
         "GPD/state.json",

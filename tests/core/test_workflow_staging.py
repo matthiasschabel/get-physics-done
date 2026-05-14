@@ -94,6 +94,13 @@ def _workflow_payload(workflow_id: str) -> dict[str, object]:
     return json.loads(manifest_path.read_text(encoding="utf-8"))
 
 
+def _stage_source_with_defaults(payload: dict[str, object], raw_stage: dict[str, object]) -> dict[str, object]:
+    defaults = payload.get("stage_defaults", {})
+    merged = dict(defaults) if isinstance(defaults, dict) else {}
+    merged.update(raw_stage)
+    return merged
+
+
 def _with_protocol_bundle_load_manifest(fields: list[str]) -> list[str]:
     if "protocol_bundle_context" not in fields or "protocol_bundle_load_manifest" in fields:
         return fields
@@ -615,7 +622,8 @@ def test_workflow_allowed_tool_defaults_cover_all_stage_manifests() -> None:
 def test_workflow_allowed_tool_defaults_reject_policy_forbidden_canonical_tool() -> None:
     payload = _workflow_payload("quick")
     stage = payload["stages"][0]
-    stage["allowed_tools"] = [*stage["allowed_tools"], "web_search"]
+    stage_source = _stage_source_with_defaults(payload, stage)
+    stage["allowed_tools"] = [*stage_source["allowed_tools"], "web_search"]
 
     with pytest.raises(ValueError, match="unknown tool name"):
         validate_workflow_stage_manifest_payload(payload, expected_workflow_id="quick")
@@ -922,7 +930,8 @@ def test_stage_manifests_use_real_required_init_field_groups(workflow_id: str) -
     grouped_stage_count = 0
     for raw_stage in payload["stages"]:
         assert isinstance(raw_stage, dict)
-        group_names = raw_stage.get("required_init_field_groups", [])
+        stage_source = _stage_source_with_defaults(payload, raw_stage)
+        group_names = stage_source.get("required_init_field_groups", [])
         if group_names:
             grouped_stage_count += 1
         assert isinstance(group_names, list)
@@ -931,7 +940,7 @@ def test_stage_manifests_use_real_required_init_field_groups(workflow_id: str) -
         for group_name in group_names:
             assert isinstance(group_name, str)
             expanded_fields.extend(groups[group_name])
-        expanded_fields.extend(raw_stage.get("required_init_fields", []))
+        expanded_fields.extend(stage_source.get("required_init_fields", []))
 
         assert manifest.stage(str(raw_stage["id"])).required_init_fields == tuple(
             _with_protocol_bundle_load_manifest(expanded_fields)
@@ -965,10 +974,7 @@ def test_load_workflow_stage_manifest_from_path_validates_inferred_workflow_init
     tmp_path: Path,
 ) -> None:
     payload = _workflow_payload("execute-phase")
-    payload["stages"][0]["required_init_fields"] = [
-        *payload["stages"][0]["required_init_fields"],
-        "not_an_execute_phase_field",
-    ]
+    payload["stages"][0].setdefault("required_init_fields", []).append("not_an_execute_phase_field")
     manifest_path = tmp_path / "custom-stage-manifest.json"
     manifest_path.write_text(json.dumps(payload), encoding="utf-8")
 
@@ -991,6 +997,7 @@ def test_known_init_fields_for_verify_work_include_proof_gate_and_artifact_conte
     known_init_fields = known_init_fields_for_workflow("verify-work")
 
     assert known_init_fields is not None
+    assert known_init_fields <= context_module._VERIFY_WORK_INIT_FIELDS
     assert "phase_proof_review_status" in known_init_fields
     assert "project_contract_gate" in known_init_fields
     assert "project_contract_load_info" in known_init_fields
@@ -1002,9 +1009,7 @@ def test_known_init_fields_for_verify_work_include_proof_gate_and_artifact_conte
     assert "verification_report_finalizer_bridge" in known_init_fields
     assert "verification_report_skeleton_bridge" in known_init_fields
     assert "verification_report_status_payload" in known_init_fields
-    assert "derived_manuscript_proof_review_status" in known_init_fields
     assert "reference_artifact_files" in known_init_fields
-    assert "reference_artifacts_content" in known_init_fields
 
 
 @pytest.mark.parametrize(
@@ -1044,11 +1049,13 @@ def test_staged_init_payloads_match_manifest_required_fields_and_loading_metadat
         )
 
 
-def test_new_milestone_known_init_fields_match_context_assembly_fields() -> None:
+def test_new_milestone_known_init_fields_are_manifest_subset_of_context_assembly_fields() -> None:
     known_init_fields = known_init_fields_for_workflow("new-milestone")
+    fields_by_stage = expanded_required_init_fields_by_stage(load_workflow_stage_manifest("new-milestone"))
 
-    assert known_init_fields == context_module._NEW_MILESTONE_INIT_FIELDS
-    assert "init_root_policy" in known_init_fields
+    assert known_init_fields == frozenset(_stable_field_union(fields for _, fields in fields_by_stage))
+    assert known_init_fields <= context_module._NEW_MILESTONE_INIT_FIELDS
+    assert "init_root_policy" in context_module._NEW_MILESTONE_INIT_FIELDS
 
 
 def test_validate_workflow_stage_manifest_payload_loads_plan_phase_manifest() -> None:
@@ -1340,16 +1347,13 @@ def test_known_init_fields_for_write_paper_cover_bootstrap_and_deferred_publicat
     known_init_fields = known_init_fields_for_workflow("write-paper")
 
     assert known_init_fields is not None
-    assert "commit_docs" in known_init_fields
+    assert known_init_fields <= context_module._WRITE_PAPER_INIT_FIELDS
     assert "project_root" in known_init_fields
     assert "project_contract_gate" in known_init_fields
     assert "project_contract_load_info" in known_init_fields
     assert "project_contract_validation" in known_init_fields
     assert "selected_protocol_bundle_ids" in known_init_fields
     assert "protocol_bundle_load_manifest" in known_init_fields
-    assert "protocol_bundle_context" in known_init_fields
-    assert "active_reference_context" in known_init_fields
-    assert "contract_intake" in known_init_fields
     assert "effective_reference_intake" in known_init_fields
     assert "publication_subject_status" in known_init_fields
     assert "publication_subject_slug" in known_init_fields
@@ -1362,9 +1366,6 @@ def test_known_init_fields_for_write_paper_cover_bootstrap_and_deferred_publicat
     assert "publication_intake_root" in known_init_fields
     assert "managed_publication_root" in known_init_fields
     assert "managed_manuscript_root" in known_init_fields
-    assert "reference_artifacts_content" in known_init_fields
-    assert "state_content" in known_init_fields
-    assert "requirements_content" in known_init_fields
 
 
 def test_publication_workflow_bootstrap_manifests_keep_project_root_in_required_fields() -> None:
@@ -1406,12 +1407,12 @@ def test_known_init_fields_for_quick_cover_task_bootstrap_and_reference_context(
     manifest = load_workflow_stage_manifest("quick")
 
     assert known_init_fields is not None
+    assert known_init_fields <= context_module._QUICK_INIT_FIELDS
     assert "executor_model" in known_init_fields
     assert "next_num" in known_init_fields
     assert "task_dir" in known_init_fields
     assert "project_contract_gate" in known_init_fields
     assert "contract_intake" in known_init_fields
-    assert "reference_artifacts_content" in known_init_fields
     assert "protocol_bundle_load_manifest" in known_init_fields
     assert "contract_intake" not in manifest.stage("task_authoring").required_init_fields
     assert "reference_artifacts_content" not in manifest.stage("task_authoring").required_init_fields
@@ -1467,11 +1468,8 @@ def test_quick_reference_context_is_only_bundle_capable_stage() -> None:
             {
                 "researcher_model",
                 "synthesizer_model",
-                "commit_docs",
                 "autonomy",
-                "init_root_policy",
                 "research_mode",
-                "research_enabled",
                 "current_milestone",
                 "current_milestone_name",
                 "project_exists",
@@ -1483,23 +1481,9 @@ def test_quick_reference_context_is_only_bundle_capable_stage() -> None:
                 "project_contract_validation",
                 "contract_intake",
                 "effective_reference_intake",
-                "active_reference_context",
                 "reference_artifact_files",
-                "reference_artifacts_content",
                 "literature_review_files",
-                "literature_review_count",
                 "research_map_reference_files",
-                "research_map_reference_count",
-                "derived_convention_lock",
-                "derived_convention_lock_count",
-                "derived_intermediate_results",
-                "derived_intermediate_result_count",
-                "derived_approximations",
-                "derived_approximation_count",
-                "project_content",
-                "state_content",
-                "milestones_content",
-                "platform",
             },
         ),
         (
@@ -1509,9 +1493,9 @@ def test_quick_reference_context_is_only_bundle_capable_stage() -> None:
                 "research_map_dir",
                 "existing_maps",
                 "project_contract_gate",
-                "active_reference_context",
-                "reference_artifacts_content",
-                "derived_manuscript_proof_review_status",
+                "reference_artifact_files",
+                "selected_protocol_bundle_ids",
+                "protocol_bundle_load_manifest",
             },
         ),
     ],
@@ -1781,7 +1765,6 @@ def test_known_init_fields_for_execute_phase_include_bootstrap_and_wave_context(
     assert "selected_task_overlay_ids" in known_init_fields
     assert "task_overlay_load_manifest" in known_init_fields
     assert "task_overlay_policy_summary" in known_init_fields
-    assert "reference_artifacts_content" in known_init_fields
     assert "current_execution" in known_init_fields
     assert "verification_report_skeleton_bridge" in known_init_fields
     assert "verification_report_finalizer_bridge" in known_init_fields

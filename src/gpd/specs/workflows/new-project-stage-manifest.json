@@ -52,6 +52,30 @@
       "platform"
     ]
   },
+  "authority_groups": {
+    "new_project_contract_templates": [
+      "references/shared/canonical-schema-discipline.md",
+      "templates/project.md",
+      "templates/requirements.md",
+      "templates/state.md",
+      "templates/project-contract-grounding-linkage.md",
+      "templates/project-contract-schema.md"
+    ],
+    "new_project_ui_brand": [
+      "references/ui/ui-brand.md"
+    ]
+  },
+  "stage_defaults": {
+    "allowed_tools": [
+      "file_read",
+      "shell",
+      "file_write",
+      "task",
+      "ask_user"
+    ],
+    "conditional_authorities": [],
+    "writes_allowed": []
+  },
   "stages": [
     {
       "id": "scope_intake",
@@ -81,13 +105,10 @@
         "workflows/new-project.md",
         "workflows/new-project/scope-approval.md",
         "references/research/questioning.md",
-        "references/ui/ui-brand.md",
-        "references/shared/canonical-schema-discipline.md",
-        "templates/project.md",
-        "templates/requirements.md",
-        "templates/state.md",
-        "templates/project-contract-grounding-linkage.md",
-        "templates/project-contract-schema.md"
+        "references/ui/ui-brand.md"
+      ],
+      "must_not_eager_load_groups": [
+        "new_project_contract_templates"
       ],
       "allowed_tools": [
         "file_read",
@@ -134,20 +155,10 @@
       "must_not_eager_load": [
         "workflows/new-project.md",
         "references/research/questioning.md",
-        "references/ui/ui-brand.md",
-        "references/shared/canonical-schema-discipline.md",
-        "templates/project.md",
-        "templates/requirements.md",
-        "templates/state.md",
-        "templates/project-contract-grounding-linkage.md",
-        "templates/project-contract-schema.md"
+        "references/ui/ui-brand.md"
       ],
-      "allowed_tools": [
-        "file_read",
-        "shell",
-        "file_write",
-        "task",
-        "ask_user"
+      "must_not_eager_load_groups": [
+        "new_project_contract_templates"
       ],
       "writes_allowed": [
         "GPD/state.json",
@@ -183,20 +194,14 @@
       "loaded_authorities": [
         "workflows/new-project/minimal-artifacts.md"
       ],
-      "conditional_authorities": [],
       "must_not_eager_load": [
         "workflows/new-project.md",
         "workflows/new-project/literature-survey.md",
         "workflows/new-project/roadmap-authoring.md",
-        "workflows/new-project/conventions-handoff.md",
-        "references/ui/ui-brand.md"
+        "workflows/new-project/conventions-handoff.md"
       ],
-      "allowed_tools": [
-        "file_read",
-        "shell",
-        "file_write",
-        "task",
-        "ask_user"
+      "must_not_eager_load_groups": [
+        "new_project_ui_brand"
       ],
       "writes_allowed": [
         "GPD/PROJECT.md",
@@ -235,20 +240,14 @@
       "loaded_authorities": [
         "workflows/new-project/workflow-preferences.md"
       ],
-      "conditional_authorities": [],
       "must_not_eager_load": [
         "workflows/new-project.md",
         "workflows/new-project/literature-survey.md",
         "workflows/new-project/roadmap-authoring.md",
-        "workflows/new-project/conventions-handoff.md",
-        "references/ui/ui-brand.md"
+        "workflows/new-project/conventions-handoff.md"
       ],
-      "allowed_tools": [
-        "file_read",
-        "shell",
-        "file_write",
-        "task",
-        "ask_user"
+      "must_not_eager_load_groups": [
+        "new_project_ui_brand"
       ],
       "writes_allowed": [
         "GPD/config.json"
@@ -279,19 +278,13 @@
       "loaded_authorities": [
         "workflows/new-project/project-artifacts.md"
       ],
-      "conditional_authorities": [],
       "must_not_eager_load": [
         "workflows/new-project.md",
         "workflows/new-project/roadmap-authoring.md",
-        "workflows/new-project/conventions-handoff.md",
-        "references/ui/ui-brand.md"
+        "workflows/new-project/conventions-handoff.md"
       ],
-      "allowed_tools": [
-        "file_read",
-        "shell",
-        "file_write",
-        "task",
-        "ask_user"
+      "must_not_eager_load_groups": [
+        "new_project_ui_brand"
       ],
       "writes_allowed": [
         "GPD/PROJECT.md",
@@ -326,19 +319,13 @@
       "loaded_authorities": [
         "workflows/new-project/literature-survey.md"
       ],
-      "conditional_authorities": [],
       "must_not_eager_load": [
         "workflows/new-project.md",
         "workflows/new-project/roadmap-authoring.md",
-        "workflows/new-project/conventions-handoff.md",
-        "references/ui/ui-brand.md"
+        "workflows/new-project/conventions-handoff.md"
       ],
-      "allowed_tools": [
-        "file_read",
-        "shell",
-        "file_write",
-        "task",
-        "ask_user"
+      "must_not_eager_load_groups": [
+        "new_project_ui_brand"
       ],
       "writes_allowed": [
         "GPD/literature/PRIOR-WORK.md",
@@ -374,19 +361,13 @@
       "loaded_authorities": [
         "workflows/new-project/requirements-authoring.md"
       ],
-      "conditional_authorities": [],
       "must_not_eager_load": [
         "workflows/new-project.md",
         "workflows/new-project/roadmap-authoring.md",
-        "workflows/new-project/conventions-handoff.md",
-        "references/ui/ui-brand.md"
+        "workflows/new-project/conventions-handoff.md"
       ],
-      "allowed_tools": [
-        "file_read",
-        "shell",
-        "file_write",
-        "task",
-        "ask_user"
+      "must_not_eager_load_groups": [
+        "new_project_ui_brand"
       ],
       "writes_allowed": [
         "GPD/REQUIREMENTS.md",
@@ -418,18 +399,12 @@
       "loaded_authorities": [
         "workflows/new-project/roadmap-authoring.md"
       ],
-      "conditional_authorities": [],
       "must_not_eager_load": [
         "workflows/new-project.md",
-        "workflows/new-project/conventions-handoff.md",
-        "references/ui/ui-brand.md"
+        "workflows/new-project/conventions-handoff.md"
       ],
-      "allowed_tools": [
-        "file_read",
-        "shell",
-        "file_write",
-        "task",
-        "ask_user"
+      "must_not_eager_load_groups": [
+        "new_project_ui_brand"
       ],
       "writes_allowed": [
         "GPD/ROADMAP.md",
@@ -465,17 +440,11 @@
       "loaded_authorities": [
         "workflows/new-project/conventions-handoff.md"
       ],
-      "conditional_authorities": [],
       "must_not_eager_load": [
-        "workflows/new-project.md",
-        "references/ui/ui-brand.md"
+        "workflows/new-project.md"
       ],
-      "allowed_tools": [
-        "file_read",
-        "shell",
-        "file_write",
-        "task",
-        "ask_user"
+      "must_not_eager_load_groups": [
+        "new_project_ui_brand"
       ],
       "writes_allowed": [
         "GPD/CONVENTIONS.md",
@@ -511,16 +480,8 @@
       "loaded_authorities": [
         "workflows/new-project/completion.md"
       ],
-      "conditional_authorities": [],
       "must_not_eager_load": [
         "workflows/new-project.md"
-      ],
-      "allowed_tools": [
-        "file_read",
-        "shell",
-        "file_write",
-        "task",
-        "ask_user"
       ],
       "writes_allowed": [
         "GPD/init-progress.json"

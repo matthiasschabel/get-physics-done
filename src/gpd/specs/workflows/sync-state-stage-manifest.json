@@ -43,6 +43,21 @@
       "platform"
     ]
   },
+  "authority_groups": {
+    "state_schema": [
+      "templates/state-json-schema.md"
+    ]
+  },
+  "stage_defaults": {
+    "allowed_tools": [
+      "file_read",
+      "file_write",
+      "find_files",
+      "search_files",
+      "shell"
+    ],
+    "writes_allowed": []
+  },
   "stages": [
     {
       "id": "sync_bootstrap",
@@ -65,17 +80,11 @@
         "workflows/sync-state.md",
         "workflows/sync-state/single-source-recovery.md",
         "workflows/sync-state/conflict-analysis.md",
-        "workflows/sync-state/reconcile-and-validate.md",
-        "templates/state-json-schema.md"
+        "workflows/sync-state/reconcile-and-validate.md"
       ],
-      "allowed_tools": [
-        "file_read",
-        "file_write",
-        "find_files",
-        "search_files",
-        "shell"
+      "must_not_eager_load_groups": [
+        "state_schema"
       ],
-      "writes_allowed": [],
       "produced_state": [
         "reconciliation path",
         "bootstrap integrity summary"
@@ -113,15 +122,10 @@
         }
       ],
       "must_not_eager_load": [
-        "workflows/sync-state.md",
-        "templates/state-json-schema.md"
+        "workflows/sync-state.md"
       ],
-      "allowed_tools": [
-        "file_read",
-        "file_write",
-        "find_files",
-        "search_files",
-        "shell"
+      "must_not_eager_load_groups": [
+        "state_schema"
       ],
       "writes_allowed": [
         "GPD/STATE.md",
@@ -164,17 +168,11 @@
         }
       ],
       "must_not_eager_load": [
-        "workflows/sync-state.md",
-        "templates/state-json-schema.md"
+        "workflows/sync-state.md"
       ],
-      "allowed_tools": [
-        "file_read",
-        "file_write",
-        "find_files",
-        "search_files",
-        "shell"
+      "must_not_eager_load_groups": [
+        "state_schema"
       ],
-      "writes_allowed": [],
       "produced_state": [
         "conflict matrix",
         "reconciliation decision"
@@ -211,15 +209,10 @@
         }
       ],
       "must_not_eager_load": [
-        "workflows/sync-state.md",
-        "templates/state-json-schema.md"
+        "workflows/sync-state.md"
       ],
-      "allowed_tools": [
-        "file_read",
-        "file_write",
-        "find_files",
-        "search_files",
-        "shell"
+      "must_not_eager_load_groups": [
+        "state_schema"
       ],
       "writes_allowed": [
         "GPD/STATE.md",

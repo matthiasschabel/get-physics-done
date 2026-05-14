@@ -2081,6 +2081,18 @@ def test_validate_workflow_stage_manifest_payload_rejects_bad_entries(
         validate_workflow_stage_manifest_payload(payload)
 
 
+def test_validate_workflow_stage_manifest_payload_rejects_duplicate_must_not_eager_load_entries() -> None:
+    payload = _workflow_payload("new-project")
+    duplicate_authority = payload["stages"][0]["must_not_eager_load"][0]
+    payload["stages"][0]["must_not_eager_load"] = [duplicate_authority, f" {duplicate_authority} "]
+
+    with pytest.raises(
+        ValueError,
+        match=r"stages\[0\]\.must_not_eager_load must not contain duplicate entries",
+    ):
+        validate_workflow_stage_manifest_payload(payload)
+
+
 def test_validate_workflow_stage_manifest_payload_rejects_unknown_next_stages_before_order_checks() -> None:
     payload = _workflow_payload("new-project")
     payload["stages"][0]["next_stages"] = ["does_not_exist"]

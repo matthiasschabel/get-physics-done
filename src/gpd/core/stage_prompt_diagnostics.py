@@ -6,7 +6,7 @@ from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Literal, Protocol, cast
+from typing import TYPE_CHECKING, Literal, Protocol, cast
 
 from gpd.adapters.install_utils import (
     expand_at_includes,
@@ -20,6 +20,9 @@ from gpd.core.workflow_staging import (
     load_workflow_stage_manifest_from_path,
 )
 
+if TYPE_CHECKING:
+    pass
+
 _body_without_frontmatter = _prompt_markdown_scan.body_without_frontmatter
 _count_raw_includes = _prompt_markdown_scan.count_raw_includes
 _iter_unfenced_lines = _prompt_markdown_scan.iter_unfenced_lines
@@ -30,6 +33,9 @@ _top_limit = _prompt_markdown_scan.top_limit
 StageAuthorityRole = Literal["stage_eager", "conditional", "lazy"]
 FirstTurnAuthorityRole = Literal["active", "prior_stage_residue", "unexpected", "not_first_turn"]
 MustNotEagerLoadViolationClassification = Literal["eager_load_violation", "prior_stage_residue"]
+MustNotEagerLoadViolationSource = Literal[
+    "manifest_overlap", "first_turn_direct_include", "first_turn_transitive_include", "stage_eager_transitive_include"
+]
 StageInitFieldKind = Literal[
     "content", "context", "contract", "report", "schema_bridge", "artifacts", "file_list", "status_payload", "scalar"
 ]
@@ -90,12 +96,7 @@ class MustNotEagerLoadViolation:
     workflow_id: str
     stage_id: str
     authority: str
-    violation_source: Literal[
-        "manifest_overlap",
-        "first_turn_direct_include",
-        "first_turn_transitive_include",
-        "stage_eager_transitive_include",
-    ]
+    violation_source: MustNotEagerLoadViolationSource
     eager_via: tuple[str, ...]
     classification: MustNotEagerLoadViolationClassification = "eager_load_violation"
 
@@ -190,46 +191,6 @@ def build_stage_diagnostics(
             continue
         diagnostics.append(metric)
     return tuple(sorted(diagnostics, key=lambda metric: (metric.workflow_id, metric.command_name)))
-
-
-def stage_diagnostics_totals(stage_diagnostics: Sequence[StageAwareWorkflowPromptMetric]) -> dict[str, int]:
-    stages = [stage for workflow in stage_diagnostics for stage in workflow.stages]
-    actionable_violation_count = sum(stage.must_not_eager_load_actionable_violation_count for stage in stages)
-    prior_stage_residue_count = sum(stage.must_not_eager_load_prior_stage_residue_count for stage in stages)
-    return {
-        "workflow_count": len(stage_diagnostics),
-        "stage_count": len(stages),
-        "first_turn_char_count": sum(workflow.first_turn_char_count for workflow in stage_diagnostics),
-        "first_turn_line_count": sum(workflow.first_turn_line_count for workflow in stage_diagnostics),
-        "first_turn_active_char_count": sum(stage.first_turn_active_char_count for stage in stages),
-        "first_turn_active_line_count": sum(stage.first_turn_active_line_count for stage in stages),
-        "prior_stage_residue_char_count": sum(stage.prior_stage_residue_char_count for stage in stages),
-        "prior_stage_residue_line_count": sum(stage.prior_stage_residue_line_count for stage in stages),
-        "eager_char_count": sum(stage.eager_char_count for stage in stages),
-        "eager_line_count": sum(stage.eager_line_count for stage in stages),
-        "stage_eager_char_count": sum(stage.eager_char_count for stage in stages),
-        "stage_eager_line_count": sum(stage.eager_line_count for stage in stages),
-        "conditional_char_count": sum(stage.conditional_char_count for stage in stages),
-        "conditional_line_count": sum(stage.conditional_line_count for stage in stages),
-        "lazy_char_count": sum(stage.lazy_char_count for stage in stages),
-        "lazy_line_count": sum(stage.lazy_line_count for stage in stages),
-        "must_not_eager_load_violation_count": actionable_violation_count,
-        "must_not_eager_load_actionable_violation_count": actionable_violation_count,
-        "must_not_eager_load_prior_stage_residue_count": prior_stage_residue_count,
-        "prior_stage_residue_count": prior_stage_residue_count,
-        "must_not_eager_load_record_count": sum(len(stage.must_not_eager_load_violations) for stage in stages),
-        "selected_init_field_count": sum(stage.required_init_field_count for stage in stages),
-        "required_init_field_count": sum(stage.required_init_field_count for stage in stages),
-        "selected_init_content_field_count": sum(
-            1
-            for stage in stages
-            for metric in stage.required_init_field_metrics
-            if metric.field_kind_guess == "content"
-        ),
-        "high_pressure_init_field_count": sum(stage.high_pressure_init_field_count for stage in stages),
-        "likely_bulky_init_field_count": sum(stage.likely_bulky_init_field_count for stage in stages),
-        "likely_bulky_field_count": sum(stage.likely_bulky_init_field_count for stage in stages),
-    }
 
 
 def top_stage_diagnostics(
@@ -725,7 +686,10 @@ def _is_prior_stage_first_turn_residue(
 ) -> bool:
     if authority in prior_stage_authorities:
         return True
-    return any(chain and chain[0] in prior_stage_authorities for chain in first_turn_trace.chains_by_authority.get(authority, ()))
+    return any(
+        chain and chain[0] in prior_stage_authorities
+        for chain in first_turn_trace.chains_by_authority.get(authority, ())
+    )
 
 
 def _stage_init_field_usage_metrics(stage: WorkflowStage) -> tuple[StageInitFieldUsageMetric, ...]:
@@ -884,13 +848,7 @@ def _must_not_violation(
     workflow_id: str,
     stage_id: str,
     authority: str,
-    violation_source: Literal[
-        "manifest_overlap",
-        "first_turn_direct_include",
-        "first_turn_transitive_include",
-        "stage_eager_transitive_include",
-    ]
-    | str,
+    violation_source: MustNotEagerLoadViolationSource | str,
     *,
     eager_via: tuple[str, ...],
     classification: MustNotEagerLoadViolationClassification = "eager_load_violation",
@@ -899,15 +857,7 @@ def _must_not_violation(
         workflow_id=workflow_id,
         stage_id=stage_id,
         authority=authority,
-        violation_source=cast(
-            Literal[
-                "manifest_overlap",
-                "first_turn_direct_include",
-                "first_turn_transitive_include",
-                "stage_eager_transitive_include",
-            ],
-            violation_source,
-        ),
+        violation_source=cast(MustNotEagerLoadViolationSource, violation_source),
         eager_via=eager_via,
         classification=classification,
     )
@@ -1108,32 +1058,34 @@ def _authority_bucket_metrics_to_dict(metric: WorkflowStagePromptMetric) -> list
 
 
 def _stage_authority_usage_metric_to_dict(metric: StageAuthorityUsageMetric) -> dict[str, object]:
-    return {
-        "workflow_id": metric.workflow_id,
-        "stage_id": metric.stage_id,
-        "order": metric.order,
+    fields = (
+        "workflow_id",
+        "stage_id",
+        "order",
+        "authority",
+        "path",
+        "first_turn_role",
+        "raw_line_count",
+        "raw_char_count",
+        "raw_include_count",
+        "expanded_line_count",
+        "expanded_char_count",
+        "violation_count",
+    )
+    return {field: getattr(metric, field) for field in fields} | {
         "stage_order": metric.order,
-        "authority": metric.authority,
-        "path": metric.path,
         "bucket": _primary_stage_authority_bucket(metric),
         "loading_kind": _loading_kind_for_authority_metric(metric),
         "buckets": list(_stage_authority_buckets(metric)),
         "roles": list(metric.roles),
         "conditional_when": list(metric.conditional_when),
-        "first_turn_role": metric.first_turn_role,
         "first_turn_chains": [list(chain) for chain in metric.first_turn_chains],
         "violation_source": _authority_usage_violation_source(metric),
         "eager_via": list(_authority_usage_eager_via(metric)),
         "classification": _authority_usage_classification(metric),
         "first_turn_chain_count": len(metric.first_turn_chains),
-        "raw_line_count": metric.raw_line_count,
-        "raw_char_count": metric.raw_char_count,
-        "raw_include_count": metric.raw_include_count,
-        "expanded_line_count": metric.expanded_line_count,
-        "expanded_char_count": metric.expanded_char_count,
         "transitive_include_authorities": list(metric.transitive_include_authorities),
         "transitive_include_count": len(metric.transitive_include_authorities),
-        "violation_count": metric.violation_count,
     }
 
 
@@ -1154,7 +1106,11 @@ def _primary_stage_authority_bucket(metric: StageAuthorityUsageMetric) -> str:
 
 def _loading_kind_for_authority_metric(metric: StageAuthorityUsageMetric) -> str:
     return next(
-        (label for role, label in (("stage_eager", "eager"), ("conditional", "conditional"), ("lazy", "lazy")) if role in metric.roles),
+        (
+            label
+            for role, label in (("stage_eager", "eager"), ("conditional", "conditional"), ("lazy", "lazy"))
+            if role in metric.roles
+        ),
         _primary_stage_authority_bucket(metric),
     )
 
@@ -1164,7 +1120,11 @@ def _authority_usage_violation_source(metric: StageAuthorityUsageMetric) -> str:
         return "prior_stage_residue"
     if metric.violation_count:
         return "violation"
-    return metric.first_turn_role if metric.first_turn_role != "not_first_turn" else _primary_stage_authority_bucket(metric)
+    return (
+        metric.first_turn_role
+        if metric.first_turn_role != "not_first_turn"
+        else _primary_stage_authority_bucket(metric)
+    )
 
 
 def _authority_usage_eager_via(metric: StageAuthorityUsageMetric) -> tuple[str, ...]:
@@ -1172,11 +1132,25 @@ def _authority_usage_eager_via(metric: StageAuthorityUsageMetric) -> tuple[str, 
 
 
 def _authority_usage_classification(metric: StageAuthorityUsageMetric) -> str:
-    return "prior_stage_residue" if metric.first_turn_role == "prior_stage_residue" else "eager_load_violation" if metric.violation_count else ""
+    return (
+        "prior_stage_residue"
+        if metric.first_turn_role == "prior_stage_residue"
+        else "eager_load_violation"
+        if metric.violation_count
+        else ""
+    )
 
 
 def _authority_prompt_metric_to_dict(metric: AuthorityPromptMetric) -> dict[str, object]:
-    fields = ("authority", "path", "raw_line_count", "raw_char_count", "raw_include_count", "expanded_line_count", "expanded_char_count")
+    fields = (
+        "authority",
+        "path",
+        "raw_line_count",
+        "raw_char_count",
+        "raw_include_count",
+        "expanded_line_count",
+        "expanded_char_count",
+    )
     return {field: getattr(metric, field) for field in fields} | {
         "transitive_include_authorities": list(metric.transitive_include_authorities)
     }
@@ -1195,8 +1169,20 @@ def _must_not_eager_load_violation_to_dict(violation: MustNotEagerLoadViolation)
 
 def _runtime_projection_metric_to_dict(metric: RuntimeProjectionLike) -> dict[str, object]:
     fields = (
-        "runtime", "native_include_support", "expanded_line_count", "expanded_char_count", "line_count", "char_count",
-        "line_delta", "char_delta", "char_delta_percent", "include_count", "runtime_note_count", "runtime_note_chars",
-        "shell_fence_count", "shell_rewrite_count", "bridge_command_occurrences",
+        "runtime",
+        "native_include_support",
+        "expanded_line_count",
+        "expanded_char_count",
+        "line_count",
+        "char_count",
+        "line_delta",
+        "char_delta",
+        "char_delta_percent",
+        "include_count",
+        "runtime_note_count",
+        "runtime_note_chars",
+        "shell_fence_count",
+        "shell_rewrite_count",
+        "bridge_command_occurrences",
     )
     return {field: getattr(metric, field) for field in fields}

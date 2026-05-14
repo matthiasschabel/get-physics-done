@@ -56,6 +56,7 @@ from gpd.core.prompt_diagnostics_types import (
     SemanticDuplicateGroup,
     SemanticDuplicateOccurrence,
     StageAwareWorkflowPromptMetric,
+    StageMechanicsProseMention,
     WorkflowStagePromptMetric,
 )
 from gpd.core.prompt_exactness_diagnostics import (
@@ -68,10 +69,31 @@ from gpd.core.prompt_exactness_diagnostics import (
     scan_exact_assertion_diagnostics as _scan_exact_assertion_diagnostics,
 )
 from gpd.core.prompt_stage_diagnostics import (
+    build_manifest_must_not_duplicate_entries as _build_manifest_must_not_duplicate_entries,
+)
+from gpd.core.prompt_stage_diagnostics import (
     build_stage_diagnostics as _build_stage_diagnostics,
 )
 from gpd.core.prompt_stage_diagnostics import (
+    manifest_must_not_duplicate_entries_totals as _manifest_must_not_duplicate_entries_totals,
+)
+from gpd.core.prompt_stage_diagnostics import (
     stage_diagnostics_totals as _stage_diagnostics_totals,
+)
+from gpd.core.prompt_surface_phase1_measurement import (
+    measure_review_contract_frontload as _measure_review_contract_frontload,
+)
+from gpd.core.prompt_surface_phase1_measurement import (
+    scan_stage_mechanics_prose_mentions as _scan_stage_mechanics_prose_mentions,
+)
+from gpd.core.prompt_surface_phase1_measurement import (
+    stage_mechanics_prose_by_category as _stage_mechanics_prose_by_category,
+)
+from gpd.core.prompt_surface_phase1_measurement import (
+    stage_mechanics_prose_by_kind as _stage_mechanics_prose_by_kind,
+)
+from gpd.core.prompt_surface_phase1_measurement import (
+    stage_mechanics_scan_paths as _stage_mechanics_scan_paths,
 )
 
 _count_raw_includes = _prompt_markdown_scan.count_raw_includes
@@ -106,6 +128,7 @@ __all__ = [
     "SemanticDuplicateGroup",
     "SemanticDuplicateOccurrence",
     "StageAwareWorkflowPromptMetric",
+    "StageMechanicsProseMention",
     "WorkflowStagePromptMetric",
     "build_prompt_surface_report",
     "iter_prompt_sources",
@@ -176,6 +199,11 @@ def measure_prompt_file(
     shell_fence_count = _count_shell_fences(measured_text)
     shell_parsing_line_count = _count_shell_parsing_lines(measured_text)
     unresolved_include_count = len(_UNRESOLVED_INCLUDE_RE.findall(expanded_text))
+    (
+        review_contract_frontload_section_count,
+        review_contract_frontload_line_count,
+        review_contract_frontload_char_count,
+    ) = _measure_review_contract_frontload(source, measured_text)
 
     runtime_projection: tuple[RuntimeProjectionMetric, ...] = ()
     if include_runtime_projections and source.kind in {"command", "agent"}:
@@ -218,6 +246,9 @@ def measure_prompt_file(
         shell_parsing_line_count=shell_parsing_line_count,
         rigidity_index=rigidity_index,
         runtime_projection=runtime_projection,
+        review_contract_frontload_section_count=review_contract_frontload_section_count,
+        review_contract_frontload_line_count=review_contract_frontload_line_count,
+        review_contract_frontload_char_count=review_contract_frontload_char_count,
     )
 
 
@@ -260,12 +291,17 @@ def build_prompt_surface_report(
     return_field_mentions = _scan_return_field_mentions_for_repo(root, include_tests=include_tests)
     disallowed_return_field_mentions = _disallowed_return_field_mentions(return_field_mentions)
     forbidden_child_return_synthesis_mentions = _scan_forbidden_child_return_synthesis_mentions(sources)
+    stage_mechanics_prose_mentions = _scan_stage_mechanics_prose_mentions(
+        _stage_mechanics_scan_paths(_source_root_for_repo(root)),
+        repo_root=root,
+    )
     stage_diagnostics = _build_stage_diagnostics(
         sources,
         items,
         report_warnings=warnings,
         path_prefix=DEFAULT_PATH_PREFIX,
     )
+    manifest_must_not_duplicate_entries = _build_manifest_must_not_duplicate_entries(sources)
 
     return PromptSurfaceReport(
         schema_version=PROMPT_SURFACE_REPORT_SCHEMA_VERSION,
@@ -275,6 +311,8 @@ def build_prompt_surface_report(
             stage_diagnostics=stage_diagnostics,
             return_field_mentions=return_field_mentions,
             forbidden_child_return_synthesis_mentions=forbidden_child_return_synthesis_mentions,
+            stage_mechanics_prose_mentions=stage_mechanics_prose_mentions,
+            manifest_must_not_duplicate_entries=manifest_must_not_duplicate_entries,
         ),
         items=items,
         stage_diagnostics=stage_diagnostics,
@@ -288,6 +326,8 @@ def build_prompt_surface_report(
         exact_assertion_diagnostics=exact_assertion_diagnostics,
         exact_prose_assertion_files=exact_assertions,
         warnings=tuple(warnings),
+        stage_mechanics_prose_mentions=stage_mechanics_prose_mentions,
+        manifest_must_not_duplicate_entries=manifest_must_not_duplicate_entries,
     )
 
 
@@ -423,6 +463,8 @@ def _build_totals(
     stage_diagnostics: Sequence[StageAwareWorkflowPromptMetric] = (),
     return_field_mentions: Sequence[PromptReturnFieldMention] = (),
     forbidden_child_return_synthesis_mentions: Sequence[ForbiddenChildReturnSynthesisMention] = (),
+    stage_mechanics_prose_mentions: Sequence[StageMechanicsProseMention] = (),
+    manifest_must_not_duplicate_entries: Sequence[object] = (),
 ) -> dict[str, object]:
     numeric_fields = (
         "raw_line_count",
@@ -441,6 +483,9 @@ def _build_totals(
         "shell_fence_count",
         "shell_parsing_line_count",
         "rigidity_index",
+        "review_contract_frontload_section_count",
+        "review_contract_frontload_line_count",
+        "review_contract_frontload_char_count",
     )
     totals: dict[str, object] = {"item_count": len(items)}
     for field in numeric_fields:
@@ -464,9 +509,14 @@ def _build_totals(
         totals["negative_return_field_mention_count"] = 0
         totals["allowed_return_field_mention_count"] = 0
     totals["forbidden_child_return_synthesis_mention_count"] = len(forbidden_child_return_synthesis_mentions)
+    totals["stage_mechanics_prose_count"] = len(stage_mechanics_prose_mentions)
+    totals["stage_mechanics_prose_by_kind"] = _stage_mechanics_prose_by_kind(stage_mechanics_prose_mentions)
+    totals["stage_mechanics_prose_by_category"] = _stage_mechanics_prose_by_category(stage_mechanics_prose_mentions)
     totals["by_kind"] = by_kind
     totals["runtime_projection"] = _runtime_projection_totals(items)
-    totals["stage_diagnostics"] = _stage_diagnostics_totals(stage_diagnostics)
+    stage_totals = _stage_diagnostics_totals(stage_diagnostics)
+    stage_totals.update(_manifest_must_not_duplicate_entries_totals(manifest_must_not_duplicate_entries))
+    totals["stage_diagnostics"] = stage_totals
     return totals
 
 

@@ -67,6 +67,22 @@ def _source_line_count(path: Path) -> int:
     return len(path.read_text(encoding="utf-8").splitlines())
 
 
+def _frontmatter_from_markdown(path: Path) -> str:
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert lines and lines[0] == "---"
+    end_index = lines.index("---", 1)
+    return "\n".join(lines[1:end_index]) + "\n"
+
+
+def _extract_markdown_heading_section(text: str, heading: str) -> str:
+    marker = f"## {heading}\n"
+    start = text.index(marker)
+    next_heading = text.find("\n## ", start + len(marker))
+    if next_heading == -1:
+        return text[start:].rstrip("\r\n")
+    return text[start:next_heading].rstrip("\r\n")
+
+
 def test_report_includes_registered_command_agent_and_workflow_sources() -> None:
     report = _report(REPO_ROOT, runtime_names=())
 
@@ -106,16 +122,212 @@ def test_report_to_dict_exposes_stable_public_shape(tmp_path: Path) -> None:
     assert isinstance(payload["totals"], dict)
     assert isinstance(payload["items"], list)
     assert len(payload["items"]) == 1
-    assert payload["items"][0]["name"] == "probe"
-    assert payload["items"][0]["runtime_projection"] == []
+    item = payload["items"][0]
+    assert item["name"] == "probe"
+    assert item["runtime_projection"] == []
+    assert item["review_contract_frontload_section_count"] == 0
+    assert item["review_contract_frontload_line_count"] == 0
+    assert item["review_contract_frontload_char_count"] == 0
+    assert payload["totals"]["review_contract_frontload_section_count"] == 0
+    assert payload["totals"]["review_contract_frontload_line_count"] == 0
+    assert payload["totals"]["review_contract_frontload_char_count"] == 0
+    assert payload["totals"]["stage_mechanics_prose_count"] == 0
+    assert payload["totals"]["stage_mechanics_prose_by_kind"] == {"command": 0, "agent": 0, "workflow": 0}
+    assert payload["stage_mechanics_prose_mentions"] == []
     assert payload["runtime_top_prompts"] == {}
     assert payload["stage_diagnostics"] == []
+    stage_totals = payload["totals"]["stage_diagnostics"]
+    missing_manifest_fields = sorted(
+        {
+            "manifest_must_not_duplicate_entry_count",
+            "manifest_must_not_duplicate_stage_count",
+            "manifest_must_not_duplicate_authority_count",
+        }
+        - set(stage_totals)
+    )
+    assert missing_manifest_fields == [], (
+        f"stage diagnostics missing Phase 1 manifest duplicate totals: {missing_manifest_fields}"
+    )
+    assert stage_totals["manifest_must_not_duplicate_entry_count"] == 0
+    assert stage_totals["manifest_must_not_duplicate_stage_count"] == 0
+    assert stage_totals["manifest_must_not_duplicate_authority_count"] == 0
+    assert payload["manifest_must_not_duplicate_entries"] == []
     assert payload["invalid_gpd_return_examples"] == []
     assert payload["invalid_frontmatter_examples"] == []
     assert payload["disallowed_return_field_mentions"] == []
     assert payload["forbidden_child_return_synthesis_mentions"] == []
     assert payload["exact_assertion_diagnostics"]["schema_version"] == "exact_assertions.v1"
     assert payload["exact_assertion_diagnostics"]["totals"]["exact_assertion_count"] == 0
+
+
+def test_report_measures_review_contract_frontload_from_rendered_visibility(tmp_path: Path) -> None:
+    command_path = _write(
+        tmp_path,
+        "src/gpd/commands/probe-review.md",
+        """
+        ---
+        name: gpd:probe-review
+        description: Probe review command
+        review-contract:
+          schema_version: 1
+          review_mode: review
+          required_outputs:
+            - GPD/review/probe-review.json
+          required_evidence:
+            - target artifact
+          blocking_conditions:
+            - missing target artifact
+          preflight_checks:
+            - command_context
+          stage_artifacts:
+            - GPD/review/probe-review.json
+        ---
+        Probe review body.
+        """,
+    )
+
+    frontmatter = _frontmatter_from_markdown(command_path)
+    visibility = registry.render_command_visibility_sections_from_frontmatter(
+        frontmatter,
+        command_name="probe-review",
+    )
+    expected_section = _extract_markdown_heading_section(visibility, "Review Contract")
+
+    payload = _diagnostics().report_to_dict(_report(tmp_path, surfaces=("command",), runtime_names=()))
+    item = payload["items"][0]
+
+    assert item["review_contract_frontload_section_count"] == 1
+    assert item["review_contract_frontload_line_count"] == len(expected_section.splitlines())
+    assert item["review_contract_frontload_char_count"] == len(expected_section)
+    assert payload["totals"]["review_contract_frontload_section_count"] == 1
+    assert payload["totals"]["review_contract_frontload_line_count"] == item["review_contract_frontload_line_count"]
+    assert payload["totals"]["review_contract_frontload_char_count"] == item["review_contract_frontload_char_count"]
+    assert payload["totals"]["by_kind"]["command"]["review_contract_frontload_section_count"] == 1
+    assert payload["totals"]["by_kind"]["agent"]["review_contract_frontload_section_count"] == 0
+    assert payload["totals"]["by_kind"]["workflow"]["review_contract_frontload_section_count"] == 0
+
+
+def test_stage_mechanics_prose_mentions_are_reported_by_category_and_kind(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "src/gpd/commands/probe.md",
+        """
+        ---
+        name: gpd:probe
+        description: Probe command
+        ---
+        Call `gpd --raw init probe --stage bootstrap` before loading the active stage.
+        Use `gpd --raw stage field-access probe bootstrap --style instruction` for field access.
+        """,
+    )
+    _write(
+        tmp_path,
+        "src/gpd/specs/workflows/probe/bootstrap.md",
+        """
+        Read only `staged_loading.required_init_fields`; ignore stale staged-init values from older stages.
+        After each staged reload, follow only `staged_loading.eager_authorities` for the active stage.
+        """,
+    )
+
+    payload = _diagnostics().report_to_dict(
+        _report(tmp_path, surfaces=("command", "workflow"), runtime_names=()),
+        top=20,
+    )
+    totals = payload["totals"]
+
+    assert totals["stage_mechanics_prose_count"] == len(payload["stage_mechanics_prose_mentions"])
+    assert totals["stage_mechanics_prose_by_kind"] == {"command": 2, "agent": 0, "workflow": 2}
+    category_totals = totals["stage_mechanics_prose_by_category"]
+    for category in (
+        "staged_init_command",
+        "field_access_instruction",
+        "selected_field_gate",
+        "stale_payload_rejection",
+        "stage_reload_transition",
+        "eager_authority_follow",
+    ):
+        assert category_totals[category] >= 1
+
+    rows = payload["stage_mechanics_prose_mentions"]
+    assert {row["severity"] for row in rows} == {"info"}
+    assert all({"path", "line", "categories", "snippet"} <= set(row) for row in rows)
+    assert any(row["path"].endswith("src/gpd/commands/probe.md") for row in rows)
+    assert any(row["path"].endswith("src/gpd/specs/workflows/probe/bootstrap.md") for row in rows)
+
+
+def test_stage_diagnostics_report_manifest_must_not_duplicates_even_when_loader_rejects(
+    tmp_path: Path,
+) -> None:
+    _write(
+        tmp_path,
+        "src/gpd/commands/probe.md",
+        """
+        ---
+        name: gpd:probe
+        description: Probe command
+        ---
+        @{GPD_INSTALL_DIR}/workflows/probe.md
+        """,
+    )
+    _write(tmp_path, "src/gpd/specs/workflows/probe.md", "Probe body.\n")
+    _write(tmp_path, "src/gpd/specs/workflows/later.md", "Later-stage body.\n")
+    _write(tmp_path, "src/gpd/specs/templates/deferred.md", "Deferred body.\n")
+    _write(
+        tmp_path,
+        "src/gpd/specs/workflows/probe-stage-manifest.json",
+        """
+        {
+          "schema_version": 1,
+          "workflow_id": "probe",
+          "stages": [
+            {
+              "id": "bootstrap",
+              "order": 1,
+              "purpose": "Load the probe bootstrap.",
+              "mode_paths": ["workflows/probe.md"],
+              "required_init_fields": [],
+              "loaded_authorities": ["workflows/probe.md"],
+              "conditional_authorities": [],
+              "must_not_eager_load": [
+                "templates/deferred.md",
+                " templates/deferred.md ",
+                "workflows/later.md"
+              ],
+              "allowed_tools": [],
+              "writes_allowed": [],
+              "produced_state": [],
+              "next_stages": [],
+              "checkpoints": []
+            }
+          ]
+        }
+        """,
+    )
+
+    payload = _diagnostics().report_to_dict(_report(tmp_path, surfaces=("command",), runtime_names=()))
+
+    assert payload["stage_diagnostics"] == []
+    assert any("must_not_eager_load must not contain duplicate entries" in warning for warning in payload["warnings"])
+    rows = payload["manifest_must_not_duplicate_entries"]
+    assert len(rows) == 1, "duplicate manifest diagnostics should survive strict loader rejection"
+    row = rows[0]
+    assert row["workflow_id"] == "probe"
+    assert row["stage_id"] == "bootstrap"
+    assert row["field_name"] == "must_not_eager_load"
+    assert row["raw_entry_count"] == 3
+    assert row["effective_unique_entry_count"] == 2
+    assert row["duplicate_entry_count"] == 1
+    assert row["duplicate_entries"] == [
+        {
+            "value": "templates/deferred.md",
+            "raw_occurrence_count": 2,
+            "first_index": 0,
+            "duplicate_indexes": [1],
+        }
+    ]
+    assert payload["totals"]["stage_diagnostics"]["manifest_must_not_duplicate_entry_count"] == 1
+    assert payload["totals"]["stage_diagnostics"]["manifest_must_not_duplicate_stage_count"] == 1
+    assert payload["totals"]["stage_diagnostics"]["manifest_must_not_duplicate_authority_count"] == 1
 
 
 def test_stage_diagnostics_detect_transitive_eager_loading_violations(tmp_path: Path) -> None:

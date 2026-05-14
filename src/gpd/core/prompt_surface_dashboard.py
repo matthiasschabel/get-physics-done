@@ -57,11 +57,14 @@ def render_prompt_surface_dashboard(report: PromptSurfaceReport, top: int | None
         f"- Top rows: {_top_label(top)}",
     ]
     lines.extend(_prompt_totals_section(report))
+    lines.extend(_review_contract_frontload_section(report, top))
     lines.extend(_safety_floors_section(report))
     lines.extend(_stage_loading_totals_section(report))
+    lines.extend(_stage_mechanics_prose_section(report, top))
     lines.extend(_top_stage_eager_loads_section(report, top))
     lines.extend(_prior_stage_residue_section(report, top))
     lines.extend(_staged_init_pressure_section(report, top))
+    lines.extend(_manifest_must_not_duplicate_section(report, top))
     lines.extend(_exactness_section(report, top))
     lines.extend(_semantic_duplicate_counts_section(report, top))
     lines.extend(_runtime_projection_section(report))
@@ -100,6 +103,74 @@ def _prompt_totals_section(report: PromptSurfaceReport) -> list[str]:
     )
 
 
+def _review_contract_frontload_section(report: PromptSurfaceReport, top: int | None) -> list[str]:
+    totals = report.totals
+    by_kind = _mapping(totals.get("by_kind"))
+    total_rows: list[Sequence[object]] = []
+    for kind in _PROMPT_KINDS:
+        source = totals if kind == "all" else _mapping(by_kind.get(kind))
+        total_rows.append(
+            (
+                kind,
+                _int(source, "review_contract_frontload_section_count"),
+                _int(source, "review_contract_frontload_line_count"),
+                _int(source, "review_contract_frontload_char_count"),
+            )
+        )
+    lines = _table(
+        "Review-contract frontload (Review Contract Frontload)",
+        (
+            "Kind",
+            "Sections (review_contract_frontload_section_count)",
+            "Lines (review_contract_frontload_line_count)",
+            "Chars (review_contract_frontload_char_count)",
+        ),
+        total_rows,
+    )
+    item_rows = [
+        (
+            item.kind,
+            item.name,
+            getattr(item, "review_contract_frontload_section_count", 0),
+            getattr(item, "review_contract_frontload_line_count", 0),
+            getattr(item, "review_contract_frontload_char_count", 0),
+            item.path,
+        )
+        for item in _top_review_contract_frontload_items(report, top)
+    ]
+    if item_rows:
+        lines.extend(
+            _table(
+                "Top review-contract frontload commands (Top Review Contract Frontload Commands)",
+                ("Kind", "Name", "Sections", "Lines", "Chars", "Path"),
+                item_rows,
+            )
+        )
+    return lines
+
+
+def _top_review_contract_frontload_items(report: PromptSurfaceReport, top: int | None):
+    rows = [
+        item
+        for item in report.items
+        if (
+            getattr(item, "review_contract_frontload_section_count", 0)
+            or getattr(item, "review_contract_frontload_line_count", 0)
+            or getattr(item, "review_contract_frontload_char_count", 0)
+        )
+    ]
+    sorted_rows = sorted(
+        rows,
+        key=lambda item: (
+            -getattr(item, "review_contract_frontload_char_count", 0),
+            -getattr(item, "review_contract_frontload_line_count", 0),
+            item.kind,
+            item.name,
+        ),
+    )
+    return _limit_rows(sorted_rows, top)
+
+
 def _safety_floors_section(report: PromptSurfaceReport) -> list[str]:
     totals = report.totals
     stage_totals = _mapping(totals.get("stage_diagnostics"))
@@ -119,6 +190,16 @@ def _safety_floors_section(report: PromptSurfaceReport) -> list[str]:
         (
             "prior_stage_residue_records",
             _int(stage_totals, "must_not_eager_load_prior_stage_residue_count", "prior_stage_residue_count"),
+        ),
+        (
+            "manifest_must_not_duplicate_entries",
+            _int(stage_totals, "manifest_must_not_duplicate_entry_count")
+            or _int(totals, "manifest_must_not_duplicate_entry_count"),
+        ),
+        (
+            "manifest_must_not_duplicate_stages",
+            _int(stage_totals, "manifest_must_not_duplicate_stage_count")
+            or _int(totals, "manifest_must_not_duplicate_stage_count"),
         ),
     )
     return _table("Safety floors (Safety Floors)", ("Floor", "Value"), rows)
@@ -147,8 +228,39 @@ def _stage_loading_totals_section(report: PromptSurfaceReport) -> list[str]:
         ("likely_bulky_init_field_count", _int(stage_totals, "likely_bulky_init_field_count")),
         ("must_not_eager_load_violation_count", _int(stage_totals, "must_not_eager_load_violation_count")),
         ("prior_stage_residue_count", _int(stage_totals, "prior_stage_residue_count")),
+        ("stage_mechanics_prose_count", _int(report.totals, "stage_mechanics_prose_count")),
+        (
+            "manifest_must_not_duplicate_entry_count",
+            _int(stage_totals, "manifest_must_not_duplicate_entry_count")
+            or _int(report.totals, "manifest_must_not_duplicate_entry_count"),
+        ),
+        (
+            "manifest_must_not_duplicate_stage_count",
+            _int(stage_totals, "manifest_must_not_duplicate_stage_count")
+            or _int(report.totals, "manifest_must_not_duplicate_stage_count"),
+        ),
     )
     return _table("Stage loading totals (Stage Loading Totals)", ("Metric", "Value"), rows)
+
+
+def _stage_mechanics_prose_section(report: PromptSurfaceReport, top: int | None) -> list[str]:
+    rows = [
+        (
+            _object_text(mention, "path"),
+            _object_int(mention, "line"),
+            ", ".join(str(category) for category in _object_sequence(_object_get(mention, "categories", ()))),
+            _object_text(mention, "severity"),
+            _object_text(mention, "snippet"),
+        )
+        for mention in _limit_rows(_object_sequence(getattr(report, "stage_mechanics_prose_mentions", ())), top)
+    ]
+    if not rows:
+        return []
+    return _table(
+        "Top stage mechanics prose (Top Stage Mechanics Prose)",
+        ("Path", "Line", "Categories", "Severity", "Snippet"),
+        rows,
+    )
 
 
 def _top_stage_eager_loads_section(report: PromptSurfaceReport, top: int | None) -> list[str]:
@@ -353,6 +465,32 @@ def _staged_init_pressure_stage_rows(
     return tuple(_limit_rows(sorted_rows, top))
 
 
+def _manifest_must_not_duplicate_section(report: PromptSurfaceReport, top: int | None) -> list[str]:
+    rows = []
+    for diagnostic in _limit_rows(_object_sequence(getattr(report, "manifest_must_not_duplicate_entries", ())), top):
+        duplicate_values = ", ".join(
+            _object_text(entry, "value") for entry in _object_sequence(_object_get(diagnostic, "duplicate_entries", ()))
+        )
+        rows.append(
+            (
+                _object_text(diagnostic, "workflow_id"),
+                _object_text(diagnostic, "stage_id"),
+                _object_int(diagnostic, "raw_entry_count"),
+                _object_int(diagnostic, "effective_unique_entry_count"),
+                _object_int(diagnostic, "duplicate_entry_count"),
+                duplicate_values,
+                _object_text(diagnostic, "manifest_path"),
+            )
+        )
+    if not rows:
+        return []
+    return _table(
+        "Manifest must_not_eager_load duplicates (Manifest Must Not Eager Load Duplicates)",
+        ("Workflow", "Stage", "Raw entries", "Unique entries", "Duplicate entries", "Values", "Manifest"),
+        rows,
+    )
+
+
 def _exactness_section(report: PromptSurfaceReport, top: int | None) -> list[str]:
     diagnostics = _mapping(report.exact_assertion_diagnostics)
     totals = _mapping(diagnostics.get("totals"))
@@ -402,6 +540,130 @@ def _exactness_section(report: PromptSurfaceReport, top: int | None) -> list[str
     else:
         lines.extend(
             _empty_section("Top exact/brittle files (Top Exact/Brittle Files)", "No exact assertion files found.")
+        )
+    lines.extend(_exactness_migration_section(diagnostics, top))
+    return lines
+
+
+def _exactness_migration_section(diagnostics: Mapping[str, object], top: int | None) -> list[str]:
+    migration = _mapping(diagnostics.get("migration")) or _mapping(diagnostics.get("exactness_migration"))
+    if not migration:
+        return []
+
+    rows = _exactness_migration_rows(migration, top)
+    migration_totals = _mapping(migration.get("totals"))
+    if not migration_totals and rows:
+        migration_totals = {
+            "machine_exact_assertions": sum(
+                _int(row, "machine_exact_assertions", "machine_exact_keep_count", "machine_contract_exact_assertions")
+                for row in rows
+            ),
+            "public_exact_assertions": sum(
+                _int(row, "public_exact_assertions", "public_exact_keep_count", "public_ux_exact_assertions")
+                for row in rows
+            ),
+            "semantic_concept_candidate_assertions": sum(
+                _int(row, "semantic_concept_candidate_assertions", "semantic_concept_candidate_count") for row in rows
+            ),
+            "raw_brittle_prose_assertions": sum(
+                _int(row, "raw_brittle_prose_assertions", "raw_brittle_prose_count", "brittle_prose_assertions")
+                for row in rows
+            ),
+        }
+
+    lines: list[str] = []
+    if migration_totals:
+        lines.extend(
+            _table(
+                "Exactness migration totals (Exactness Migration Totals)",
+                ("Metric", "Value"),
+                (
+                    (
+                        "machine_exact_assertions",
+                        _int(
+                            migration_totals,
+                            "machine_exact_assertions",
+                            "machine_exact_keep_count",
+                            "machine_contract_exact_assertions",
+                        ),
+                    ),
+                    (
+                        "public_exact_assertions",
+                        _int(
+                            migration_totals,
+                            "public_exact_assertions",
+                            "public_exact_keep_count",
+                            "public_ux_exact_assertions",
+                        ),
+                    ),
+                    (
+                        "semantic_concept_candidate_assertions",
+                        _int(
+                            migration_totals,
+                            "semantic_concept_candidate_assertions",
+                            "semantic_concept_candidate_count",
+                        ),
+                    ),
+                    (
+                        "raw_brittle_prose_assertions",
+                        _int(
+                            migration_totals,
+                            "raw_brittle_prose_assertions",
+                            "raw_brittle_prose_count",
+                            "brittle_prose_assertions",
+                        ),
+                    ),
+                    ("taxonomy_helper_file_count", _int(migration_totals, "taxonomy_helper_file_count")),
+                    (
+                        "taxonomy_helper_brittle_file_count",
+                        _int(migration_totals, "taxonomy_helper_brittle_file_count"),
+                    ),
+                    (
+                        "taxonomy_helper_brittle_assertions",
+                        _int(migration_totals, "taxonomy_helper_brittle_assertions"),
+                    ),
+                ),
+            )
+        )
+    if rows:
+        lines.extend(
+            _table(
+                "Exactness migration rows (Exactness Migration Rows)",
+                (
+                    "File",
+                    "Machine exact",
+                    "Public exact",
+                    "Semantic candidate",
+                    "Raw brittle",
+                    "Helper calls",
+                    "Semantic helpers",
+                    "Baseline",
+                    "Delta",
+                    "Gate",
+                ),
+                tuple(
+                    (
+                        _text(row, "path"),
+                        _int(
+                            row,
+                            "machine_exact_assertions",
+                            "machine_exact_keep_count",
+                            "machine_contract_exact_assertions",
+                        ),
+                        _int(row, "public_exact_assertions", "public_exact_keep_count", "public_ux_exact_assertions"),
+                        _int(row, "semantic_concept_candidate_assertions", "semantic_concept_candidate_count"),
+                        _int(
+                            row, "raw_brittle_prose_assertions", "raw_brittle_prose_count", "brittle_prose_assertions"
+                        ),
+                        _int(row, "taxonomy_helper_call_count"),
+                        _int(row, "semantic_helper_call_count"),
+                        _maybe_text(row, "taxonomy_helper_brittle_baseline"),
+                        _maybe_text(row, "taxonomy_helper_brittle_delta"),
+                        _text(row, "taxonomy_helper_brittle_gate", "gate"),
+                    )
+                    for row in rows
+                ),
+            )
         )
     return lines
 
@@ -573,11 +835,56 @@ def _float(row: Mapping[str, object], key: str) -> float:
     return 0.0
 
 
-def _text(row: Mapping[str, object], key: str) -> str:
+def _text(row: Mapping[str, object], *keys: str) -> str:
+    for key in keys:
+        value = row.get(key)
+        if value is not None:
+            return str(value)
+    return ""
+
+
+def _maybe_text(row: Mapping[str, object], key: str) -> str:
     value = row.get(key)
     if value is None:
         return ""
     return str(value)
+
+
+def _object_get(value: object, key: str, default: object = None) -> object:
+    if isinstance(value, Mapping):
+        return value.get(key, default)
+    return getattr(value, key, default)
+
+
+def _object_int(value: object, *keys: str) -> int:
+    for key in keys:
+        raw = _object_get(value, key)
+        if isinstance(raw, int) and not isinstance(raw, bool):
+            return raw
+    return 0
+
+
+def _object_text(value: object, *keys: str) -> str:
+    for key in keys:
+        raw = _object_get(value, key)
+        if raw is not None:
+            return str(raw)
+    return ""
+
+
+def _object_sequence(value: object) -> tuple[object, ...]:
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return tuple(value)
+    return ()
+
+
+def _exactness_migration_rows(
+    migration: Mapping[str, object],
+    top: int | None,
+) -> tuple[Mapping[str, object], ...]:
+    rows = _object_sequence(migration.get("files")) or _object_sequence(migration.get("rows"))
+    normalized_rows = tuple(dict(row) for row in rows if isinstance(row, Mapping))
+    return tuple(_limit_rows(normalized_rows, top))
 
 
 def _limit_rows(rows: Sequence[_T], top: int | None) -> Sequence[_T]:

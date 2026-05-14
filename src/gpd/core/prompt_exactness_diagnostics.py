@@ -9,6 +9,15 @@ from pathlib import Path
 from typing import Literal, NamedTuple, cast
 
 from gpd.core import prompt_markdown_scan as _prompt_markdown_scan
+from gpd.core.prompt_exactness_migration import (
+    bounded_exactness_migration as _bounded_exactness_migration,
+)
+from gpd.core.prompt_exactness_migration import (
+    exactness_migration_diagnostics as _exactness_migration_diagnostics,
+)
+from gpd.core.prompt_exactness_migration import (
+    exactness_migration_file_row as _exactness_migration_file_row,
+)
 
 _relative_path = _prompt_markdown_scan.relative_path
 
@@ -107,6 +116,7 @@ def scan_exact_assertion_diagnostics(repo_root: Path) -> dict[str, object]:
 
     file_rows: list[dict[str, object]] = []
     taxonomy_usage_rows: list[dict[str, object]] = []
+    migration_rows: list[dict[str, object]] = []
     files_scanned = 0
     for path in sorted(tests_root.rglob("*.py")):
         if path.is_symlink() or not path.is_file():
@@ -118,10 +128,21 @@ def scan_exact_assertion_diagnostics(repo_root: Path) -> dict[str, object]:
 
         files_scanned += 1
         relative_path = _relative_path(path, repo_root)
-        if taxonomy_usage := _taxonomy_helper_usage_for_tree(tree, path=relative_path):
+        taxonomy_usage = _taxonomy_helper_usage_for_tree(tree, path=relative_path)
+        if taxonomy_usage:
             taxonomy_usage_rows.append(taxonomy_usage)
-        if assertions := _prompt_exact_assertions(tree):
+        assertions = _prompt_exact_assertions(tree)
+        if assertions:
             file_rows.append(_file_row(relative_path, assertions))
+        if assertions or taxonomy_usage:
+            migration_rows.append(
+                _exactness_migration_file_row(
+                    relative_path,
+                    [_exact_assertion_to_dict(assertion, path=relative_path) for assertion in assertions],
+                    taxonomy_usage,
+                    examples_per_category=_EXACT_ASSERTION_EXAMPLES_PER_CATEGORY,
+                )
+            )
 
     file_rows.sort(
         key=lambda entry: (
@@ -131,11 +152,11 @@ def scan_exact_assertion_diagnostics(repo_root: Path) -> dict[str, object]:
             cast(str, entry["path"]),
         )
     )
-    return _diagnostics_payload(files_scanned, file_rows, taxonomy_usage_rows)
+    return _diagnostics_payload(files_scanned, file_rows, taxonomy_usage_rows, migration_rows)
 
 
 def empty_exact_assertion_diagnostics() -> dict[str, object]:
-    return _diagnostics_payload(0, (), ())
+    return _diagnostics_payload(0, (), (), ())
 
 
 def exact_prose_assertion_files_from_diagnostics(
@@ -196,6 +217,9 @@ def bounded_exact_assertion_diagnostics(
     taxonomy_helper_usage = diagnostics.get("taxonomy_helper_usage")
     if isinstance(taxonomy_helper_usage, Mapping):
         payload["taxonomy_helper_usage"] = _bounded_taxonomy_helper_usage(taxonomy_helper_usage, top)
+    migration = diagnostics.get("migration")
+    if isinstance(migration, Mapping):
+        payload["migration"] = _bounded_exactness_migration(migration, top)
     return payload
 
 
@@ -203,6 +227,7 @@ def _diagnostics_payload(
     files_scanned: int,
     file_rows: Sequence[Mapping[str, object]],
     taxonomy_usage_rows: Sequence[Mapping[str, object]],
+    migration_rows: Sequence[Mapping[str, object]],
 ) -> dict[str, object]:
     return {
         "schema_version": "exact_assertions.v1",
@@ -210,6 +235,7 @@ def _diagnostics_payload(
         "thresholds": EXACT_ASSERTION_THRESHOLDS,
         "files": list(file_rows),
         "taxonomy_helper_usage": _taxonomy_helper_usage_diagnostics(files_scanned, taxonomy_usage_rows),
+        "migration": _exactness_migration_diagnostics(migration_rows),
     }
 
 

@@ -72,9 +72,19 @@ def test_prompt_surface_diagnostics_raw_json_shape() -> None:
     assert payload["stage_diagnostics"]
     assert len(payload["stage_diagnostics"]) <= 3
     assert payload["items"][0]["runtime_projection"] == []
+    for key in (
+        "review_contract_frontload_section_count",
+        "review_contract_frontload_line_count",
+        "review_contract_frontload_char_count",
+    ):
+        assert isinstance(payload["items"][0][key], int)
+        assert payload["items"][0][key] >= 0
     assert isinstance(payload["invalid_gpd_return_examples"], list)
     assert isinstance(payload["invalid_frontmatter_examples"], list)
     assert isinstance(payload["disallowed_return_field_mentions"], list)
+    assert isinstance(payload["stage_mechanics_prose_mentions"], list)
+    assert isinstance(payload["manifest_must_not_duplicate_entries"], list)
+    assert isinstance(payload["exactness_migration_rows"], list)
     assert len(payload["duplicate_invariants"]) <= 3
     assert isinstance(payload["semantic_duplicate_invariants"], list)
     assert len(payload["semantic_duplicate_invariants"]) <= 3
@@ -238,6 +248,7 @@ def test_prompt_surface_diagnostics_include_tests_exactness_summary() -> None:
     assert exactness["taxonomy_helper_usage"]["schema_version"] == "taxonomy_helper_usage.v1"
     assert exactness["taxonomy_helper_usage"]["totals"]["taxonomy_helper_call_count"] > 0
     assert len(exactness["taxonomy_helper_usage"]["files"]) == 1
+    assert isinstance(payload["exactness_migration_rows"], list)
     assert len(payload["exact_prose_assertion_files"]) == 1
 
 

@@ -112,6 +112,17 @@ PHASE4_STAGED_JIT_ADVISORY_BUDGETS = {
     "must_not_eager_load_actionable_violation_count": 0,
     "must_not_eager_load_prior_stage_residue_count": 10,
 }
+PHASE1_REVIEW_CONTRACT_FRONTLOAD_ADVISORY_BUDGET = {
+    "review_contract_frontload_section_count": 6,
+    "review_contract_frontload_line_count": 360,
+    "review_contract_frontload_char_count": 21_000,
+}
+PHASE1_STAGE_MECHANICS_PROSE_ADVISORY_BUDGET = 155
+PHASE1_MANIFEST_MUST_NOT_DUPLICATE_ADVISORY_BUDGETS = {
+    "manifest_must_not_duplicate_entry_count": 0,
+    "manifest_must_not_duplicate_stage_count": 0,
+    "manifest_must_not_duplicate_authority_count": 0,
+}
 SHELL_PARSING_LINE_BUDGET = 350
 SHELL_MIGRATION_TARGET_WORKFLOWS = frozenset(
     {
@@ -292,6 +303,67 @@ def _required_stage_diagnostic_count(stage_diagnostics: dict[str, object], field
     return value
 
 
+def _required_total_count(totals: dict[str, object], field_name: str) -> int:
+    value = totals[field_name]
+    assert isinstance(value, int)
+    return value
+
+
+def _format_phase1_budget_failure(
+    metric: str,
+    observed: int,
+    budget: int,
+    contributors: list[str],
+) -> str:
+    remaining = budget - observed
+    preview = "; ".join(contributors[:5]) if contributors else "no contributor rows"
+    return (
+        f"Phase 1 advisory budget exceeded for {metric}: "
+        f"observed={observed} max={budget} remaining={remaining}; top contributors: {preview}"
+    )
+
+
+def _review_contract_frontload_contributors(payload: dict[str, object]) -> list[str]:
+    items = payload["items"]
+    assert isinstance(items, list)
+    rows = [item for item in items if isinstance(item, dict) and item.get("review_contract_frontload_char_count", 0)]
+    rows.sort(key=lambda item: int(item["review_contract_frontload_char_count"]), reverse=True)
+    return [
+        (
+            f"{item['kind']}:{item['name']} "
+            f"chars={item['review_contract_frontload_char_count']} "
+            f"lines={item['review_contract_frontload_line_count']} "
+            f"path={item['path']}"
+        )
+        for item in rows
+    ]
+
+
+def _stage_mechanics_prose_contributors(payload: dict[str, object]) -> list[str]:
+    rows = payload["stage_mechanics_prose_mentions"]
+    assert isinstance(rows, list)
+    return [
+        (f"{row['path']}:{row['line']} categories={','.join(row['categories'])} snippet={row['snippet']}")
+        for row in rows
+        if isinstance(row, dict)
+    ]
+
+
+def _manifest_duplicate_contributors(payload: dict[str, object]) -> list[str]:
+    rows = payload["manifest_must_not_duplicate_entries"]
+    assert isinstance(rows, list)
+    return [
+        (
+            f"{row['workflow_id']}.{row['stage_id']} "
+            f"duplicates={row['duplicate_entry_count']} "
+            f"raw={row['raw_entry_count']} unique={row['effective_unique_entry_count']} "
+            f"path={row['manifest_path']}"
+        )
+        for row in rows
+        if isinstance(row, dict)
+    ]
+
+
 def _workflow_stage_diagnostics(payload: dict[str, object], workflow_id: str) -> dict[str, object]:
     workflows = payload["stage_diagnostics"]
     assert isinstance(workflows, list)
@@ -390,6 +462,50 @@ def test_prompt_surface_safety_floors_stay_within_current_budgets() -> None:
         "must_not_eager_load_prior_stage_residue_count",
     )
     assert prior_stage_residue_count <= MUST_NOT_EAGER_LOAD_PRIOR_STAGE_RESIDUE_BUDGET
+
+
+def test_phase1_pressure_counters_stay_within_advisory_budgets() -> None:
+    payload = _prompt_surface_payload(("all",), (), False)
+    totals = payload["totals"]
+    assert isinstance(totals, dict)
+
+    review_contributors = _review_contract_frontload_contributors(payload)
+    for field_name, advisory_budget in PHASE1_REVIEW_CONTRACT_FRONTLOAD_ADVISORY_BUDGET.items():
+        observed = _required_total_count(totals, field_name)
+        assert observed <= advisory_budget, _format_phase1_budget_failure(
+            field_name,
+            observed,
+            advisory_budget,
+            review_contributors,
+        )
+
+    stage_mechanics_count = _required_total_count(totals, "stage_mechanics_prose_count")
+    stage_mechanics_rows = _stage_mechanics_prose_contributors(payload)
+    assert stage_mechanics_count == len(stage_mechanics_rows)
+    assert stage_mechanics_count <= PHASE1_STAGE_MECHANICS_PROSE_ADVISORY_BUDGET, _format_phase1_budget_failure(
+        "stage_mechanics_prose_count",
+        stage_mechanics_count,
+        PHASE1_STAGE_MECHANICS_PROSE_ADVISORY_BUDGET,
+        stage_mechanics_rows,
+    )
+
+    stage_diagnostics = totals["stage_diagnostics"]
+    assert isinstance(stage_diagnostics, dict)
+    missing_manifest_fields = sorted(set(PHASE1_MANIFEST_MUST_NOT_DUPLICATE_ADVISORY_BUDGETS) - set(stage_diagnostics))
+    assert missing_manifest_fields == [], (
+        f"stage diagnostics missing Phase 1 manifest duplicate totals: {missing_manifest_fields}"
+    )
+
+    manifest_duplicate_rows = _manifest_duplicate_contributors(payload)
+    for field_name, advisory_budget in PHASE1_MANIFEST_MUST_NOT_DUPLICATE_ADVISORY_BUDGETS.items():
+        observed = _required_stage_diagnostic_count(stage_diagnostics, field_name)
+        assert observed <= advisory_budget, _format_phase1_budget_failure(
+            field_name,
+            observed,
+            advisory_budget,
+            manifest_duplicate_rows,
+        )
+    assert manifest_duplicate_rows == []
 
 
 def test_staged_init_field_pressure_totals_do_not_grow_from_phase6_baseline() -> None:

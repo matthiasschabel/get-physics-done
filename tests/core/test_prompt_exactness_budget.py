@@ -6,8 +6,7 @@ import textwrap
 from functools import lru_cache
 from pathlib import Path
 
-from gpd.core.prompt_diagnostics import build_prompt_surface_report, report_to_dict
-from gpd.core.prompt_exactness_diagnostics import scan_exact_assertion_diagnostics
+from gpd.core.prompt_exactness_diagnostics import bounded_exact_assertion_diagnostics, scan_exact_assertion_diagnostics
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -16,25 +15,55 @@ EXACTNESS_TOTAL_BUDGETS = {
     "exact_assertion_count": 5_460,
 }
 HIGH_SEVERITY_BASELINES: dict[str, dict[str, int]] = {}
+TAXONOMY_HELPER_BRITTLE_BASELINES = {
+    "tests/adapters/test_install_roundtrip.py": 5,
+    "tests/core/test_assertion_taxonomy_support.py": 6,
+    "tests/core/test_literature_review_workflow_seams.py": 6,
+    "tests/core/test_map_research_stage_contract.py": 1,
+    "tests/core/test_new_project_project_contract_visibility.py": 1,
+    "tests/core/test_new_project_stage_contract.py": 2,
+    "tests/core/test_plan_checker_bibliographer_prompt_cleanup.py": 1,
+    "tests/core/test_planner_prompt_budget.py": 9,
+    "tests/core/test_prompt_cli_consistency.py": 3,
+    "tests/core/test_quick_typed_return_routing.py": 1,
+    "tests/core/test_review_agent_prompt_cleanup.py": 2,
+    "tests/core/test_review_contract_prompt_visibility.py": 6,
+    "tests/core/test_start_prompt.py": 2,
+    "tests/core/test_verifier_prompt_contract_visibility.py": 1,
+    "tests/core/test_write_paper_handoff_artifact_gates.py": 2,
+    "tests/doc_surface_contracts.py": 1,
+    "tests/mcp/test_servers.py": 10,
+    "tests/mcp/test_tool_contract_visibility.py": 4,
+    "tests/test_registry.py": 9,
+    "tests/test_release_consistency.py": 13,
+}
 
 
 @lru_cache
 def _exactness_payload() -> dict[str, object]:
-    report = build_prompt_surface_report(
-        REPO_ROOT,
-        runtime_names=(),
-        include_tests=True,
-        include_runtime_projections=False,
-    )
-    payload = report_to_dict(report)
-    exactness = payload["exact_assertion_diagnostics"]
-    assert isinstance(exactness, dict)
-    return exactness
+    return scan_exact_assertion_diagnostics(REPO_ROOT)
 
 
 def _exactness_files_by_path() -> dict[str, dict[str, object]]:
     exactness = _exactness_payload()
     rows = exactness["files"]
+    assert isinstance(rows, list)
+    return {str(row["path"]): row for row in rows if isinstance(row, dict)}
+
+
+def _taxonomy_helper_usage_files_by_path() -> dict[str, dict[str, object]]:
+    exactness = _exactness_payload()
+    usage = exactness["taxonomy_helper_usage"]
+    assert isinstance(usage, dict)
+    rows = usage["files"]
+    assert isinstance(rows, list)
+    return {str(row["path"]): row for row in rows if isinstance(row, dict)}
+
+
+def _migration_files_by_path(exactness: dict[str, object]) -> dict[str, dict[str, object]]:
+    migration = exactness["migration"]
+    assert isinstance(migration, dict)
+    rows = migration["files"]
     assert isinstance(rows, list)
     return {str(row["path"]): row for row in rows if isinstance(row, dict)}
 
@@ -92,6 +121,70 @@ def test_taxonomy_helper_usage_tracks_semantic_concept_without_hiding_raw_exactn
     assert usage_totals["semantic_anchor"] == 1
     assert usage_totals["semantic_concept"] == 1
 
+    migration = exactness["migration"]
+    assert isinstance(migration, dict)
+    migration_totals = migration["totals"]
+    assert isinstance(migration_totals, dict)
+    migration_rows = _migration_files_by_path(exactness)
+    migration_row = migration_rows["tests/test_prompt_contracts.py"]
+    assert migration["schema_version"] == "exactness_migration.v1"
+    assert migration_totals["taxonomy_helper_file_count"] == 1
+    assert migration_totals["taxonomy_helper_brittle_file_count"] == 0
+    assert migration_totals["taxonomy_helper_brittle_assertions"] == 0
+    assert migration_row["machine_exact_keep_assertions"] == 1
+    assert migration_row["public_exact_keep_assertions"] == 1
+    assert migration_row["semantic_concept_candidate_assertions"] == 0
+    assert migration_row["raw_brittle_prose_assertions"] == 0
+    assert migration_row["taxonomy_helper_call_count"] == 5
+    assert migration_row["semantic_helper_call_count"] == 2
+    assert migration_row["taxonomy_helper_brittle_gate"] == "ok"
+
+
+def test_exactness_migration_ledger_marks_helper_raw_brittle_candidates(tmp_path: Path) -> None:
+    test_file = tmp_path / "tests" / "test_prompt_contracts.py"
+    test_file.parent.mkdir(parents=True)
+    test_file.write_text(
+        textwrap.dedent(
+            """
+            from tests.assertion_taxonomy_support import assert_prompt_contracts, semantic_concept
+
+            PROMPT = "stable semantic anchor\\n"
+
+            def test_prompt_contracts():
+                assert "This internal sentence should migrate toward conceptual coverage" in PROMPT
+                assert_prompt_contracts(
+                    PROMPT,
+                    *semantic_concept("meaning", required=("stable semantic anchor",)),
+                )
+            """
+        ).lstrip(),
+        encoding="utf-8",
+    )
+
+    exactness = scan_exact_assertion_diagnostics(tmp_path)
+    totals = exactness["totals"]
+    assert isinstance(totals, dict)
+    assert totals["exact_assertion_count"] == 1
+    assert totals["brittle_prose_assertions"] == 1
+
+    migration = exactness["migration"]
+    assert isinstance(migration, dict)
+    migration_totals = migration["totals"]
+    assert isinstance(migration_totals, dict)
+    migration_row = _migration_files_by_path(exactness)["tests/test_prompt_contracts.py"]
+    assert migration_totals["semantic_concept_candidate_assertions"] == 1
+    assert migration_totals["raw_brittle_prose_assertions"] == 1
+    assert migration_totals["taxonomy_helper_brittle_file_count"] == 1
+    assert migration_totals["taxonomy_helper_brittle_assertions"] == 1
+    assert migration_row["semantic_concept_candidate_assertions"] == 1
+    assert migration_row["raw_brittle_prose_assertions"] == 1
+    assert migration_row["taxonomy_helper_brittle_gate"] == "soft_warn"
+    examples = migration_row["examples"]
+    assert isinstance(examples, dict)
+    semantic_candidates = examples["semantic_concept_candidate"]
+    assert isinstance(semantic_candidates, list)
+    assert semantic_candidates[0]["migration_reason"] == "taxonomy_helper_file_brittle_prose"
+
 
 def test_exactness_totals_do_not_grow_past_baseline() -> None:
     exactness = _exactness_payload()
@@ -102,6 +195,45 @@ def test_exactness_totals_do_not_grow_past_baseline() -> None:
         observed = totals[field]
         assert isinstance(observed, int)
         assert observed <= budget, f"{field} budget exceeded: observed={observed} max={budget}"
+
+
+def test_exactness_migration_ledger_preserves_existing_exactness_totals() -> None:
+    exactness = _exactness_payload()
+    totals = exactness["totals"]
+    migration = exactness["migration"]
+    assert isinstance(totals, dict)
+    assert isinstance(migration, dict)
+    migration_totals = migration["totals"]
+    assert isinstance(migration_totals, dict)
+
+    assert migration_totals["machine_exact_keep_assertions"] == totals["machine_contract_exact_assertions"]
+    assert migration_totals["public_exact_keep_assertions"] == totals["public_ux_exact_assertions"]
+    assert migration_totals["raw_brittle_prose_assertions"] == totals["brittle_prose_assertions"]
+
+
+def test_exactness_migration_bounded_top_limits_file_rows() -> None:
+    bounded = bounded_exact_assertion_diagnostics(_exactness_payload(), 1)
+    migration = bounded["migration"]
+    assert isinstance(migration, dict)
+    migration_rows = migration["files"]
+    assert isinstance(migration_rows, list)
+    assert len(migration_rows) == 1
+
+
+def test_taxonomy_helper_files_do_not_gain_raw_brittle_prose() -> None:
+    rows_by_path = _exactness_files_by_path()
+    helper_rows = _taxonomy_helper_usage_files_by_path()
+    failures: list[str] = []
+
+    for path, usage in sorted(helper_rows.items()):
+        row = rows_by_path.get(path, {})
+        brittle_count = row.get("brittle_prose_assertions", 0)
+        assert isinstance(brittle_count, int)
+        baseline = TAXONOMY_HELPER_BRITTLE_BASELINES.get(path, 0)
+        if brittle_count > baseline:
+            failures.append(f"{path}: observed={brittle_count} max={baseline} helpers={usage.get('helpers', {})}")
+
+    assert failures == []
 
 
 def test_exactness_has_no_new_high_severity_files() -> None:

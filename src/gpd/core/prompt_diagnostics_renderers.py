@@ -8,21 +8,9 @@ from pathlib import Path
 from typing import cast
 
 from gpd.core import prompt_semantic_duplicate_diagnostics
-from gpd.core.prompt_diagnostics_types import (
-    ForbiddenChildReturnSynthesisMention,
-    InvalidFrontmatterExample,
-    InvalidGpdReturnExample,
-    PromptReturnFieldMention,
-    PromptSurfaceItem,
-    PromptSurfaceReport,
-    RuntimeProjectionMetric,
-    StageAwareWorkflowPromptMetric,
-)
+from gpd.core.prompt_diagnostics_types import PromptSurfaceItem, PromptSurfaceReport, StageAwareWorkflowPromptMetric
 from gpd.core.prompt_exactness_diagnostics import (
     EXACT_ASSERTION_THRESHOLDS as _EXACT_ASSERTION_THRESHOLDS,
-)
-from gpd.core.prompt_exactness_diagnostics import (
-    bounded_exact_assertion_diagnostics as _bounded_exact_assertion_diagnostics,
 )
 from gpd.core.prompt_exactness_diagnostics import (
     exact_assertion_file_rows as _exact_assertion_file_rows,
@@ -43,6 +31,48 @@ from gpd.core.prompt_stage_diagnostics import (
 from gpd.core.prompt_stage_diagnostics import (
     top_stage_diagnostics as _top_stage_diagnostics,
 )
+from gpd.core.prompt_surface_phase1_rendering import (
+    bounded_exactness_diagnostics as _bounded_exactness_diagnostics,
+)
+from gpd.core.prompt_surface_phase1_rendering import (
+    exactness_migration_markdown as _exactness_migration_markdown,
+)
+from gpd.core.prompt_surface_phase1_rendering import (
+    exactness_migration_rows as _exactness_migration_rows,
+)
+from gpd.core.prompt_surface_phase1_rendering import (
+    exactness_migration_table_section as _exactness_migration_table_section,
+)
+from gpd.core.prompt_surface_phase1_rendering import (
+    manifest_must_not_duplicate_rows as _manifest_must_not_duplicate_rows,
+)
+from gpd.core.prompt_surface_phase1_rendering import (
+    phase1_markdown_sections as _phase1_markdown_sections,
+)
+from gpd.core.prompt_surface_phase1_rendering import (
+    phase1_summary_lines as _phase1_summary_lines,
+)
+from gpd.core.prompt_surface_phase1_rendering import (
+    phase1_table_sections as _phase1_table_sections,
+)
+from gpd.core.prompt_surface_phase1_rendering import (
+    stage_mechanics_prose_rows as _stage_mechanics_prose_rows,
+)
+from gpd.core.prompt_surface_serialization import (
+    forbidden_child_return_synthesis_mention_to_dict as _forbidden_child_return_synthesis_mention_to_dict,
+)
+from gpd.core.prompt_surface_serialization import (
+    invalid_frontmatter_example_to_dict as _invalid_frontmatter_example_to_dict,
+)
+from gpd.core.prompt_surface_serialization import (
+    invalid_gpd_return_example_to_dict as _invalid_gpd_return_example_to_dict,
+)
+from gpd.core.prompt_surface_serialization import prompt_item_to_dict as _prompt_item_to_dict
+from gpd.core.prompt_surface_serialization import (
+    return_field_mention_to_dict as _return_field_mention_to_dict,
+)
+from gpd.core.prompt_surface_serialization import runtime_top_prompt_rows as _runtime_top_prompt_rows
+from gpd.core.prompt_surface_serialization import runtime_top_prompts_to_dict as _runtime_top_prompts_to_dict
 
 
 def report_to_dict(report: PromptSurfaceReport, top: int | None = None) -> dict[str, object]:
@@ -52,6 +82,9 @@ def report_to_dict(report: PromptSurfaceReport, top: int | None = None) -> dict[
     semantic_example_limit = prompt_semantic_duplicate_diagnostics.semantic_example_limit(top)
     stage_authority_rows = _stage_authority_top_prompt_rows(report.stage_diagnostics, top)
     stage_init_field_rows = _stage_init_field_pressure_rows(report.stage_diagnostics, top)
+    stage_mechanics_rows = _stage_mechanics_prose_rows(report, top)
+    manifest_duplicate_rows = _manifest_must_not_duplicate_rows(report, top)
+    exactness = _bounded_exactness_diagnostics(report.exact_assertion_diagnostics, top)
     return {
         "schema_version": report.schema_version,
         "repo_root": report.repo_root,
@@ -65,6 +98,8 @@ def report_to_dict(report: PromptSurfaceReport, top: int | None = None) -> dict[
         "stage_authority_top": list(stage_authority_rows),
         "stage_init_field_diagnostics": list(stage_init_field_rows),
         "stage_field_payload_pressure": list(stage_init_field_rows),
+        "stage_mechanics_prose_mentions": list(stage_mechanics_rows),
+        "manifest_must_not_duplicate_entries": list(manifest_duplicate_rows),
         "invalid_gpd_return_examples": [
             _invalid_gpd_return_example_to_dict(example) for example in report.invalid_gpd_return_examples
         ],
@@ -113,7 +148,8 @@ def report_to_dict(report: PromptSurfaceReport, top: int | None = None) -> dict[
             }
             for group in report.semantic_duplicate_invariants[:limit]
         ],
-        "exact_assertion_diagnostics": _bounded_exact_assertion_diagnostics(report.exact_assertion_diagnostics, top),
+        "exact_assertion_diagnostics": exactness,
+        "exactness_migration_rows": _exactness_migration_rows(exactness, top),
         "exact_prose_assertion_files": [dict(entry) for entry in report.exact_prose_assertion_files[:limit]],
         "warnings": list(report.warnings),
     }
@@ -192,6 +228,7 @@ def render_prompt_surface_markdown(report: PromptSurfaceReport, top: int | None 
         f"{len(report.forbidden_child_return_synthesis_mentions)}",
         f"- Hard-gate lines: {totals.get('hard_gate_line_count', 0)}",
         f"- Shell parsing lines: {totals.get('shell_parsing_line_count', 0)}",
+        *_phase1_summary_lines(totals),
         "",
         "## Top Prompt Sources",
         "",
@@ -207,6 +244,8 @@ def render_prompt_surface_markdown(report: PromptSurfaceReport, top: int | None 
             f"{item.disallowed_return_field_mention_count} | "
             f"{item.rigidity_index} |"
         )
+
+    lines.extend(_phase1_markdown_sections(report, top))
 
     if report.invalid_gpd_return_examples:
         lines.extend(
@@ -443,6 +482,8 @@ def render_prompt_surface_markdown(report: PromptSurfaceReport, top: int | None 
                 f"{brittle_density:.1f}% | {entry.get('severity', 'info')} |"
             )
 
+    lines.extend(_exactness_migration_markdown(report.exact_assertion_diagnostics, top))
+
     if report.warnings:
         lines.extend(["", "## Warnings", ""])
         lines.extend(f"- {warning}" for warning in report.warnings)
@@ -483,6 +524,7 @@ def render_prompt_surface_table(report: PromptSurfaceReport, top: int | None = N
         "rigidity",
     )
     lines = _fixed_table_lines(headers, rows)
+    lines.extend(_phase1_table_sections(report, top))
     runtime_rows = [
         (
             str(row["runtime"]),
@@ -597,6 +639,7 @@ def render_prompt_surface_table(report: PromptSurfaceReport, top: int | None = N
     ]
     exact_headers = ("file", "exact", "machine", "public_ux", "brittle", "brittle_pct", "severity")
     lines.extend(_fixed_table_section_lines("prompt-test exactness", exact_headers, exact_rows))
+    lines.extend(_exactness_migration_table_section(report.exact_assertion_diagnostics, top))
     outside_top_disallowed = _disallowed_return_field_mentions_outside_top_rows(report, top)
     if outside_top_disallowed:
         lines.extend(("", f"disallowed return field mentions outside top prompt rows: {outside_top_disallowed}"))
@@ -624,168 +667,6 @@ def _top_items(items: Sequence[PromptSurfaceItem], top: int | None) -> tuple[Pro
 def _disallowed_return_field_mentions_outside_top_rows(report: PromptSurfaceReport, top: int | None) -> int:
     top_paths = {item.path for item in _top_items(report.items, top)}
     return sum(1 for mention in report.disallowed_return_field_mentions if mention.path not in top_paths)
-
-
-def _runtime_top_prompt_rows(
-    items: Sequence[PromptSurfaceItem],
-    top: int | None,
-) -> tuple[dict[str, object], ...]:
-    rows_by_runtime: dict[str, list[dict[str, object]]] = defaultdict(list)
-    for item in items:
-        for metric in item.runtime_projection:
-            rows_by_runtime[metric.runtime].append(
-                {
-                    "runtime": metric.runtime,
-                    "native_include_support": metric.native_include_support,
-                    "kind": item.kind,
-                    "name": item.name,
-                    "path": item.path,
-                    "projected_line_count": metric.line_count,
-                    "projected_char_count": metric.char_count,
-                    "expanded_line_count": metric.expanded_line_count,
-                    "expanded_char_count": metric.expanded_char_count,
-                    "line_delta": metric.line_delta,
-                    "char_delta": metric.char_delta,
-                    "char_delta_percent": metric.char_delta_percent,
-                    "include_count": metric.include_count,
-                    "runtime_note_count": metric.runtime_note_count,
-                    "runtime_note_chars": metric.runtime_note_chars,
-                    "shell_fence_count": metric.shell_fence_count,
-                    "shell_rewrite_count": metric.shell_rewrite_count,
-                    "bridge_command_occurrences": metric.bridge_command_occurrences,
-                }
-            )
-
-    limit = top if top is not None and top > 0 else None
-    rows: list[dict[str, object]] = []
-    for runtime in sorted(rows_by_runtime):
-        runtime_rows = sorted(
-            rows_by_runtime[runtime],
-            key=lambda row: (
-                -cast(int, row["projected_char_count"]),
-                -cast(int, row["expanded_char_count"]),
-                cast(str, row["kind"]),
-                cast(str, row["name"]),
-                cast(str, row["path"]),
-            ),
-        )
-        rows.extend(runtime_rows[:limit])
-    return tuple(rows)
-
-
-def _runtime_top_prompts_to_dict(
-    items: Sequence[PromptSurfaceItem],
-    top: int | None,
-) -> dict[str, list[dict[str, object]]]:
-    rows_by_runtime: dict[str, list[dict[str, object]]] = {}
-    for row in _runtime_top_prompt_rows(items, top):
-        rows_by_runtime.setdefault(cast(str, row["runtime"]), []).append(dict(row))
-    return rows_by_runtime
-
-
-def _runtime_projection_metric_to_dict(metric: RuntimeProjectionMetric) -> dict[str, object]:
-    return {
-        "runtime": metric.runtime,
-        "native_include_support": metric.native_include_support,
-        "expanded_line_count": metric.expanded_line_count,
-        "expanded_char_count": metric.expanded_char_count,
-        "line_count": metric.line_count,
-        "char_count": metric.char_count,
-        "line_delta": metric.line_delta,
-        "char_delta": metric.char_delta,
-        "char_delta_percent": metric.char_delta_percent,
-        "include_count": metric.include_count,
-        "runtime_note_count": metric.runtime_note_count,
-        "runtime_note_chars": metric.runtime_note_chars,
-        "shell_fence_count": metric.shell_fence_count,
-        "shell_rewrite_count": metric.shell_rewrite_count,
-        "bridge_command_occurrences": metric.bridge_command_occurrences,
-    }
-
-
-def _prompt_item_to_dict(item: PromptSurfaceItem) -> dict[str, object]:
-    return {
-        "kind": item.kind,
-        "name": item.name,
-        "path": item.path,
-        "raw_line_count": item.raw_line_count,
-        "raw_char_count": item.raw_char_count,
-        "raw_include_count": item.raw_include_count,
-        "expanded_line_count": item.expanded_line_count,
-        "expanded_char_count": item.expanded_char_count,
-        "expanded_include_count": item.expanded_include_count,
-        "unresolved_include_count": item.unresolved_include_count,
-        "visible_schema_example_count": item.visible_schema_example_count,
-        "invalid_gpd_return_example_count": item.invalid_gpd_return_example_count,
-        "invalid_gpd_return_examples": [
-            _invalid_gpd_return_example_to_dict(example) for example in item.invalid_gpd_return_examples
-        ],
-        "invalid_frontmatter_example_count": item.invalid_frontmatter_example_count,
-        "invalid_frontmatter_examples": [
-            _invalid_frontmatter_example_to_dict(example) for example in item.invalid_frontmatter_examples
-        ],
-        "return_field_mention_count": item.return_field_mention_count,
-        "disallowed_return_field_mention_count": item.disallowed_return_field_mention_count,
-        "disallowed_return_field_mentions": [
-            _return_field_mention_to_dict(mention) for mention in item.disallowed_return_field_mentions
-        ],
-        "hard_gate_line_count": item.hard_gate_line_count,
-        "hard_gate_density": item.hard_gate_density,
-        "shell_fence_count": item.shell_fence_count,
-        "shell_parsing_line_count": item.shell_parsing_line_count,
-        "rigidity_index": item.rigidity_index,
-        "runtime_projection": [_runtime_projection_metric_to_dict(metric) for metric in item.runtime_projection],
-    }
-
-
-def _invalid_gpd_return_example_to_dict(example: InvalidGpdReturnExample) -> dict[str, object]:
-    return {
-        "path": example.path,
-        "start_line": example.start_line,
-        "end_line": example.end_line,
-        "errors": list(example.errors),
-        "preview": example.preview,
-    }
-
-
-def _invalid_frontmatter_example_to_dict(example: InvalidFrontmatterExample) -> dict[str, object]:
-    return {
-        "path": example.path,
-        "start_line": example.start_line,
-        "end_line": example.end_line,
-        "schema_name": example.schema_name,
-        "fields": list(example.fields),
-        "errors": list(example.errors),
-        "preview": example.preview,
-    }
-
-
-def _return_field_mention_to_dict(mention: PromptReturnFieldMention) -> dict[str, object]:
-    return {
-        "path": mention.path,
-        "line": mention.line,
-        "field": mention.field,
-        "mention_kind": mention.mention_kind,
-        "polarity": mention.polarity,
-        "allowed": mention.allowed,
-        "allowed_source": mention.allowed_source,
-        "severity": mention.severity,
-        "snippet": mention.snippet,
-        "suggestion": mention.suggestion,
-    }
-
-
-def _forbidden_child_return_synthesis_mention_to_dict(
-    mention: ForbiddenChildReturnSynthesisMention,
-) -> dict[str, object]:
-    return {
-        "path": mention.path,
-        "line": mention.line,
-        "action": mention.action,
-        "polarity": mention.polarity,
-        "severity": mention.severity,
-        "snippet": mention.snippet,
-    }
 
 
 def _markdown_table_cell(value: str) -> str:

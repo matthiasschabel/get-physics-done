@@ -106,6 +106,36 @@ class ForbiddenChildReturnSynthesisMention:
 
 
 @dataclass(frozen=True, slots=True)
+class StageMechanicsProseMention:
+    path: str
+    line: int
+    categories: tuple[str, ...]
+    severity: Literal["info", "warn"]
+    snippet: str
+
+
+@dataclass(frozen=True, slots=True)
+class ManifestMustNotDuplicateEntry:
+    value: str
+    raw_occurrence_count: int
+    first_index: int
+    duplicate_indexes: tuple[int, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ManifestMustNotDuplicateEntriesDiagnostic:
+    workflow_id: str
+    manifest_path: str
+    stage_id: str
+    stage_index: int
+    field_name: Literal["must_not_eager_load"]
+    raw_entry_count: int
+    effective_unique_entry_count: int
+    duplicate_entry_count: int
+    duplicate_entries: tuple[ManifestMustNotDuplicateEntry, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class PromptSurfaceItem:
     kind: PromptSurfaceKind
     name: str
@@ -131,6 +161,9 @@ class PromptSurfaceItem:
     shell_parsing_line_count: int
     rigidity_index: int
     runtime_projection: tuple[RuntimeProjectionMetric, ...]
+    review_contract_frontload_section_count: int = 0
+    review_contract_frontload_line_count: int = 0
+    review_contract_frontload_char_count: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,6 +192,8 @@ class PromptSurfaceReport:
     exact_assertion_diagnostics: Mapping[str, object]
     exact_prose_assertion_files: tuple[Mapping[str, object], ...]
     warnings: tuple[str, ...]
+    stage_mechanics_prose_mentions: tuple[StageMechanicsProseMention, ...] = ()
+    manifest_must_not_duplicate_entries: tuple[ManifestMustNotDuplicateEntriesDiagnostic, ...] = ()
 
 
 __all__ = [
@@ -170,6 +205,8 @@ __all__ = [
     "ForbiddenChildReturnSynthesisMention",
     "InvalidFrontmatterExample",
     "InvalidGpdReturnExample",
+    "ManifestMustNotDuplicateEntriesDiagnostic",
+    "ManifestMustNotDuplicateEntry",
     "MustNotEagerLoadViolation",
     "PromptSource",
     "PromptReturnFieldMention",
@@ -180,5 +217,6 @@ __all__ = [
     "SemanticDuplicateGroup",
     "SemanticDuplicateOccurrence",
     "StageAwareWorkflowPromptMetric",
+    "StageMechanicsProseMention",
     "WorkflowStagePromptMetric",
 ]

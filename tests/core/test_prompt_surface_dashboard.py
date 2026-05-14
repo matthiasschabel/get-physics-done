@@ -4,9 +4,15 @@ from __future__ import annotations
 
 import importlib
 import textwrap
+from dataclasses import replace
 from pathlib import Path
 
 from gpd.adapters.runtime_catalog import iter_runtime_descriptors
+from gpd.core.prompt_diagnostics_types import (
+    ManifestMustNotDuplicateEntriesDiagnostic,
+    ManifestMustNotDuplicateEntry,
+    StageMechanicsProseMention,
+)
 from gpd.core.prompt_surface_dashboard import render_prompt_surface_dashboard
 from tests.assertion_taxonomy_support import MatchMode, assert_prompt_contracts, machine_exact, semantic_anchor
 
@@ -171,6 +177,108 @@ def _report(root: Path, **kwargs):
     return _diagnostics().build_prompt_surface_report(root, **options)
 
 
+def _with_phase1_rendering_probe_data(report):
+    items = tuple(report.items)
+    assert items
+    first_item = replace(
+        items[0],
+        review_contract_frontload_section_count=1,
+        review_contract_frontload_line_count=7,
+        review_contract_frontload_char_count=321,
+    )
+    items = (first_item, *items[1:])
+
+    totals = dict(report.totals)
+    totals["review_contract_frontload_section_count"] = 1
+    totals["review_contract_frontload_line_count"] = 7
+    totals["review_contract_frontload_char_count"] = 321
+    totals["stage_mechanics_prose_count"] = 1
+    totals["stage_mechanics_prose_by_kind"] = {"command": 1, "agent": 0, "workflow": 0}
+
+    by_kind = {
+        str(kind): dict(value) if isinstance(value, dict) else {}
+        for kind, value in dict(totals.get("by_kind", {})).items()
+    }
+    for kind in ("command", "agent", "workflow"):
+        by_kind.setdefault(kind, {})
+        by_kind[kind].setdefault("item_count", 0)
+        by_kind[kind]["review_contract_frontload_section_count"] = 1 if kind == "command" else 0
+        by_kind[kind]["review_contract_frontload_line_count"] = 7 if kind == "command" else 0
+        by_kind[kind]["review_contract_frontload_char_count"] = 321 if kind == "command" else 0
+    totals["by_kind"] = by_kind
+
+    stage_totals = dict(totals.get("stage_diagnostics", {}))
+    stage_totals["manifest_must_not_duplicate_entry_count"] = 1
+    stage_totals["manifest_must_not_duplicate_stage_count"] = 1
+    stage_totals["manifest_must_not_duplicate_authority_count"] = 1
+    totals["stage_diagnostics"] = stage_totals
+
+    exactness = dict(report.exact_assertion_diagnostics)
+    exactness["migration"] = {
+        "schema_version": "exactness_migration.v1",
+        "totals": {
+            "machine_exact_assertions": 2,
+            "public_exact_assertions": 1,
+            "semantic_concept_candidate_assertions": 3,
+            "raw_brittle_prose_assertions": 4,
+            "taxonomy_helper_file_count": 1,
+            "taxonomy_helper_brittle_file_count": 1,
+            "taxonomy_helper_brittle_assertions": 4,
+        },
+        "files": [
+            {
+                "path": "tests/test_prompt_contracts.py",
+                "machine_exact_assertions": 2,
+                "public_exact_assertions": 1,
+                "semantic_concept_candidate_assertions": 3,
+                "raw_brittle_prose_assertions": 4,
+                "uses_taxonomy_helpers": True,
+                "taxonomy_helper_call_count": 5,
+                "semantic_helper_call_count": 2,
+                "taxonomy_helper_brittle_baseline": 1,
+                "taxonomy_helper_brittle_delta": 3,
+                "taxonomy_helper_brittle_gate": "soft_warn",
+            }
+        ],
+    }
+
+    return replace(
+        report,
+        totals=totals,
+        items=items,
+        exact_assertion_diagnostics=exactness,
+        stage_mechanics_prose_mentions=(
+            StageMechanicsProseMention(
+                path="src/gpd/commands/probe.md",
+                line=8,
+                categories=("field_access_instruction", "selected_field_gate"),
+                severity="info",
+                snippet="Use gpd --raw stage field-access for selected fields.",
+            ),
+        ),
+        manifest_must_not_duplicate_entries=(
+            ManifestMustNotDuplicateEntriesDiagnostic(
+                workflow_id="probe",
+                manifest_path="src/gpd/specs/workflows/probe-stage-manifest.json",
+                stage_id="phase_bootstrap",
+                stage_index=1,
+                field_name="must_not_eager_load",
+                raw_entry_count=3,
+                effective_unique_entry_count=2,
+                duplicate_entry_count=1,
+                duplicate_entries=(
+                    ManifestMustNotDuplicateEntry(
+                        value="templates/deferred.md",
+                        raw_occurrence_count=2,
+                        first_index=0,
+                        duplicate_indexes=(2,),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+
 def _section_text(output: str, section_label: str) -> str:
     folded_output = output.casefold()
     folded_section_label = section_label.casefold()
@@ -234,6 +342,62 @@ def test_dashboard_renders_required_phase0_sections(tmp_path: Path) -> None:
     assert_prompt_contracts(
         _section_text(runtime_dashboard, "Runtime projection totals"),
         machine_exact("runtime projection row", ("Runtime", "Projected chars", runtime_name)),
+    )
+
+
+def test_dashboard_renders_phase1_diagnostics_without_measurement_dependency(tmp_path: Path) -> None:
+    _write_dashboard_probe_project(tmp_path)
+    report = _with_phase1_rendering_probe_data(_report(tmp_path, include_tests=True, include_runtime_projections=False))
+
+    payload = _diagnostics().report_to_dict(report, top=1)
+    assert payload["items"][0]["review_contract_frontload_char_count"] == 321
+    assert payload["stage_mechanics_prose_mentions"][0]["categories"] == [
+        "field_access_instruction",
+        "selected_field_gate",
+    ]
+    assert payload["manifest_must_not_duplicate_entries"][0]["duplicate_entry_count"] == 1
+    assert payload["exactness_migration_rows"][0]["taxonomy_helper_brittle_gate"] == "soft_warn"
+
+    dashboard = render_prompt_surface_dashboard(report, top=1)
+
+    assert_prompt_contracts(
+        _section_text(dashboard, "Review-contract frontload"),
+        machine_exact(
+            "review-contract frontload rows",
+            ("review_contract_frontload_char_count", "command", "321"),
+        ),
+    )
+    assert_prompt_contracts(
+        _section_text(dashboard, "Stage loading totals"),
+        machine_exact(
+            "stage loading phase1 counters",
+            (
+                "stage_mechanics_prose_count",
+                "manifest_must_not_duplicate_entry_count",
+                "manifest_must_not_duplicate_stage_count",
+            ),
+        ),
+    )
+    assert_prompt_contracts(
+        _section_text(dashboard, "Top stage mechanics prose"),
+        machine_exact(
+            "stage mechanics prose row",
+            ("field_access_instruction", "selected_field_gate", "src/gpd/commands/probe.md"),
+        ),
+    )
+    assert_prompt_contracts(
+        _section_text(dashboard, "Manifest must_not_eager_load duplicates"),
+        machine_exact(
+            "manifest duplicate row",
+            ("probe", "phase_bootstrap", "templates/deferred.md", "1"),
+        ),
+    )
+    assert_prompt_contracts(
+        _section_text(dashboard, "Exactness migration rows"),
+        machine_exact(
+            "exactness migration row",
+            ("Semantic candidate", "tests/test_prompt_contracts.py", "soft_warn"),
+        ),
     )
 
 

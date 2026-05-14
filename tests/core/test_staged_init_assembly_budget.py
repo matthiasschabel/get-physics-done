@@ -8,7 +8,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 STAGED_INIT_ASSEMBLY_PATH = REPO_ROOT / "src" / "gpd" / "core" / "staged_init_assembly.py"
-STAGED_INIT_ASSEMBLY_LOC_CAP = 200
+STAGED_INIT_ASSEMBLY_LOC_CAP = 170
 FORBIDDEN_IMPORT_PREFIXES = (
     "gpd.adapters",
     "gpd.cli",

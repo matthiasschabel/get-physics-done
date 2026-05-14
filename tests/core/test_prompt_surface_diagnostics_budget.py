@@ -22,10 +22,10 @@ STAGE_FIRST_TURN_BUDGET = {"lines": 3_460, "chars": 134_999}
 # Phase 3 strict target uses <= assertions, so char caps are one below the
 # acceptance threshold.
 STAGE_FIRST_TURN_ACTIVE_BUDGET = {"lines": 2_430, "chars": 103_999}
-STAGE_EAGER_CHAR_BUDGET = 864_999
+STAGE_EAGER_CHAR_BUDGET = 855_000
 STAGE_SELECTED_INIT_FIELD_BUDGET = 2_499
-STAGE_SELECTED_INIT_CONTENT_FIELD_BUDGET = 16
-REFERENCE_ARTIFACTS_CONTENT_SELECTION_BUDGET = 4
+STAGE_SELECTED_INIT_CONTENT_FIELD_BUDGET = 14
+REFERENCE_ARTIFACTS_CONTENT_SELECTION_BUDGET = 3
 STAGE_HIGH_PRESSURE_INIT_FIELD_BUDGET = 525
 STAGE_LIKELY_BULKY_INIT_FIELD_BUDGET = 525
 EXECUTE_PHASE_FIRST_TURN_CHAR_BUDGET = 6_000
@@ -99,12 +99,12 @@ ROOT_AUTHORITY_FREE_WORKFLOWS = frozenset(
         "write-paper",
     }
 )
-PHASE4_STAGED_ROOT_INDEX_SOURCE_BUDGET = {"lines": 700, "chars": 36_000}
-PHASE4_STAGED_COMMAND_WRAPPER_SOURCE_BUDGET = {"lines": 1_400, "chars": 55_000}
+PHASE4_STAGED_ROOT_INDEX_SOURCE_BUDGET = {"lines": 625, "chars": 32_000}
+PHASE4_STAGED_COMMAND_WRAPPER_SOURCE_BUDGET = {"lines": 1_300, "chars": 51_000}
 PHASE4_STAGED_JIT_ADVISORY_BUDGETS = {
     "first_turn_char_count": 160_000,
     "first_turn_active_char_count": 130_000,
-    "stage_eager_char_count": 940_000,
+    "stage_eager_char_count": 855_000,
     "selected_init_field_count": 2_750,
     "selected_init_content_field_count": 28,
     "high_pressure_init_field_count": 575,

@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 from gpd.core.workflow_staging import validate_workflow_stage_manifest_payload
-from tests.assertion_taxonomy_support import assert_prompt_contracts, semantic_anchor
+from tests.assertion_taxonomy_support import assert_prompt_contracts, machine_exact, semantic_anchor
 from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -73,9 +73,12 @@ def test_map_research_workflow_uses_project_rooted_map_targets_for_side_effects(
     assert "option_id: refresh_archive" in text
     assert "option_id: update_selected" in text
     assert "option_id: skip_existing" in text
-    assert "route by exact `option_id`, not option number or label" in text
     assert_prompt_contracts(
         text,
+        machine_exact(
+            "map-research menu routes by option_id field",
+            "route by exact `option_id`, not option number or label",
+        ),
         semantic_anchor(
             "update-selected route only delegates selected map documents",
             (

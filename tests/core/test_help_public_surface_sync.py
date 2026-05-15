@@ -15,6 +15,7 @@ from scripts.render_help_surface import (
     help_surface_markers,
     replace_help_surface_text,
 )
+from tests.assertion_taxonomy_support import assert_prompt_contracts, machine_exact
 
 _HELP_MARKERS = help_surface_block_ids()
 
@@ -231,10 +232,24 @@ def test_help_detail_reference_inventory_detects_missing_and_duplicate_marker() 
 
     missing = check_help_surface_text(missing_reference, path=detail_path)
     assert len(missing) == 1
-    assert "help surface marker inventory mismatch" in missing[0].diff
-    assert "missing 1 expected marker(s) for 'detailed-command-reference'" in missing[0].diff
+    assert_prompt_contracts(
+        missing[0].diff,
+        machine_exact(
+            "help detail reference missing marker diagnostic",
+            (
+                "help surface marker inventory mismatch",
+                "missing 1 expected marker(s) for 'detailed-command-reference'",
+            ),
+        ),
+    )
 
     duplicate = check_help_surface_text(detail_reference + "\n" + detail_region, path=detail_path)
     assert len(duplicate) == 1
     assert "found 2 marker(s) for 'detailed-command-reference', expected 1" in duplicate[0].diff
-    assert "duplicate marker for 'detailed-command-reference' is not allowed" in duplicate[0].diff
+    assert_prompt_contracts(
+        duplicate[0].diff,
+        machine_exact(
+            "help detail reference duplicate marker diagnostic",
+            "duplicate marker for 'detailed-command-reference' is not allowed",
+        ),
+    )

@@ -6,7 +6,6 @@ import json
 from pathlib import Path
 
 import pytest
-from typer.testing import CliRunner
 
 from gpd.adapters import get_adapter
 from gpd.adapters.runtime_catalog import iter_runtime_descriptors
@@ -15,16 +14,10 @@ from gpd.core.commands import cmd_apply_return_updates
 from gpd.core.phase_lifecycle import phase_lifecycle_decision
 from gpd.core.state import default_state_dict, generate_state_markdown
 from gpd.core.suggest import suggest_next
+from tests.helpers.cli import StableCliRunner, cli_text, json_output_from_result
 from tests.runtime_install_helpers import seed_complete_runtime_install
 
-
-class _StableCliRunner(CliRunner):
-    def invoke(self, *args, **kwargs):
-        kwargs.setdefault("color", False)
-        return super().invoke(*args, **kwargs)
-
-
-RUNNER = _StableCliRunner()
+RUNNER = StableCliRunner()
 _RUNTIME_NAMES = tuple(descriptor.runtime_name for descriptor in iter_runtime_descriptors())
 _FORBIDDEN_NEXT_UP_RELOAD_FRAGMENTS = (
     "gpd --raw init",
@@ -204,8 +197,7 @@ def test_apply_return_updates_completes_last_plan_from_ready_to_execute_state(tm
         ],
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["passed"] is True
     assert "advance_plan:last_plan" in payload["applied_state_operations"]
     state = json.loads((tmp_path / "GPD" / "state.json").read_text(encoding="utf-8"))
@@ -229,8 +221,7 @@ def test_phase_complete_without_canonical_verification_fails_closed_without_muta
         ],
     )
 
-    assert result.exit_code == 1
-    failure_text = result.output + (str(result.exception) if result.exception else "")
+    failure_text = cli_text(result, expect_exit=1) + (str(result.exception) if result.exception else "")
     assert "canonical verification report missing" in failure_text
     assert not (tmp_path / "GPD" / "ROADMAP.md.lock").exists()
     assert not (tmp_path / "GPD" / "CHECKPOINTS.md").exists()
@@ -258,8 +249,7 @@ def test_phase_complete_with_non_passing_verification_fails_closed_without_mutat
         ],
     )
 
-    assert result.exit_code == 1
-    failure_text = result.output + (str(result.exception) if result.exception else "")
+    failure_text = cli_text(result, expect_exit=1) + (str(result.exception) if result.exception else "")
     assert "canonical verification report must have top-level frontmatter status 'passed'" in failure_text
     assert not (tmp_path / "GPD" / "ROADMAP.md.lock").exists()
     assert verification_report.read_text(encoding="utf-8") == before_report
@@ -285,8 +275,7 @@ def test_apply_return_updates_rejects_report_without_gpd_return_without_mutating
         ],
     )
 
-    assert result.exit_code == 1
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result, expect_exit=1)
     assert payload["passed"] is False
     assert payload["errors"] == ["No gpd_return YAML block found"]
     assert payload["primary_failure_class"] == "return_missing"
@@ -320,8 +309,7 @@ def test_apply_return_updates_rejects_malformed_required_fields_as_repairable_wi
         ],
     )
 
-    assert result.exit_code == 1
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result, expect_exit=1)
     assert payload["passed"] is False
     assert payload["mutated"] is False
     assert payload["primary_failure_class"] == "return_malformed_repairable"
@@ -375,8 +363,7 @@ def test_apply_return_updates_rejects_multiple_gpd_returns_without_mutating_stat
         ],
     )
 
-    assert result.exit_code == 1
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result, expect_exit=1)
     assert payload["passed"] is False
     assert payload["mutated"] is False
     assert payload["errors"] == ["Multiple gpd_return YAML blocks found: expected exactly one, got 2"]
@@ -402,8 +389,7 @@ def test_malformed_child_return_retry_then_stop_chain_preserves_state_bytes(tmp_
 
     retry_result = _invoke_apply_return(tmp_path, "GPD/phases/02-analysis/FIRST-BAD-RETURN.md")
 
-    assert retry_result.exit_code == 1
-    retry_payload = json.loads(retry_result.output)
+    retry_payload = json_output_from_result(retry_result, expect_exit=1)
     assert retry_payload["passed"] is False
     assert retry_payload["mutated"] is False
     assert retry_payload["primary_failure_class"] == "return_missing"
@@ -435,8 +421,7 @@ def test_malformed_child_return_retry_then_stop_chain_preserves_state_bytes(tmp_
 
     stop_result = _invoke_apply_return(tmp_path, "GPD/phases/02-analysis/SECOND-BAD-RETURN.md")
 
-    assert stop_result.exit_code == 1
-    stop_payload = json.loads(stop_result.output)
+    stop_payload = json_output_from_result(stop_result, expect_exit=1)
     assert stop_payload["passed"] is False
     assert stop_payload["mutated"] is False
     assert stop_payload["primary_failure_class"] == "return_malformed_blocking"
@@ -486,8 +471,7 @@ def test_apply_return_updates_rejects_intermediate_plan_direct_phase_completion_
         ],
     )
 
-    assert result.exit_code == 1
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result, expect_exit=1)
     assert payload["passed"] is False
     assert payload["mutated"] is False
     assert payload["primary_failure_class"] == "applicator_failed"
@@ -530,8 +514,7 @@ def test_checkpoint_intent_core_apply_updates_exposes_bounded_segment_resume(tmp
     assert apply_result.passed is True
     assert apply_result.applied_continuation_operations == ["set_bounded_segment"]
     resume_result = RUNNER.invoke(app, ["--raw", "--cwd", str(tmp_path), "init", "resume"])
-    assert resume_result.exit_code == 0, resume_result.output
-    payload = json.loads(resume_result.output)
+    payload = json_output_from_result(resume_result)
     assert payload["active_resume_kind"] == "bounded_segment"
     assert payload["active_resume_pointer"] == "GPD/phases/02-analysis/.continue-here.md"
     assert payload["active_bounded_segment"]["checkpoint_reason"] == "first_result_gate"
@@ -563,8 +546,7 @@ def test_record_verification_maps_non_passing_report_to_blocked_and_keeps_state_
         ],
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["recorded"] is True
     assert payload["status"] == "Blocked"
     assert payload["previous_status"] == initial_status
@@ -589,8 +571,7 @@ def test_record_verification_maps_non_passing_report_to_blocked_and_keeps_state_
     assert decision.closeout_readiness.closeout_command is None
 
     validation = RUNNER.invoke(app, ["--raw", "--cwd", str(tmp_path), "state", "validate"])
-    assert validation.exit_code == 0, validation.output
-    validation_payload = json.loads(validation.output)
+    validation_payload = json_output_from_result(validation)
     assert validation_payload["valid"] is True
     assert validation_payload["integrity_status"] == "healthy"
 
@@ -622,8 +603,7 @@ def test_record_verification_invalid_status_transition_preserves_state_bytes(
         ],
     )
 
-    assert result.exit_code == 1
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result, expect_exit=1)
     assert payload["recorded"] is False
     assert payload["previous_status"] == initial_status
     assert "state_record_verification requires Status" in payload["error"]
@@ -655,8 +635,7 @@ def test_record_verification_maps_passing_report_to_verified_and_keeps_state_sur
         ],
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["recorded"] is True
     assert payload["status"] == "Verified"
     assert payload["previous_status"] == initial_status
@@ -668,8 +647,7 @@ def test_record_verification_maps_passing_report_to_verified_and_keeps_state_sur
     assert "**Status:** Verified" in markdown
 
     validation = RUNNER.invoke(app, ["--raw", "--cwd", str(tmp_path), "state", "validate"])
-    assert validation.exit_code == 0, validation.output
-    validation_payload = json.loads(validation.output)
+    validation_payload = json_output_from_result(validation)
     assert validation_payload["valid"] is True
     assert validation_payload["integrity_status"] == "healthy"
 
@@ -696,8 +674,7 @@ def test_record_verification_manual_status_override_requires_admin_flag(tmp_path
         ],
     )
 
-    assert blocked_result.exit_code == 1
-    blocked_payload = json.loads(blocked_result.output)
+    blocked_payload = json_output_from_result(blocked_result, expect_exit=1)
     assert blocked_payload["recorded"] is False
     assert "admin_override=True" in blocked_payload["error"]
     assert state_path.read_text(encoding="utf-8") == before_state
@@ -720,8 +697,7 @@ def test_record_verification_manual_status_override_requires_admin_flag(tmp_path
         ],
     )
 
-    assert admin_result.exit_code == 0, admin_result.output
-    admin_payload = json.loads(admin_result.output)
+    admin_payload = json_output_from_result(admin_result)
     assert admin_payload["recorded"] is True
     assert admin_payload["status"] == "Verified"
     assert not any(path.name.endswith("VERIFICATION.md") for path in phase_dir.iterdir())
@@ -746,8 +722,7 @@ def test_closeout_readiness_raw_closed_phase_missing_next_context_routes_to_disc
         ],
     )
 
-    assert result.exit_code == 1, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result, expect_exit=1)
     assert payload["ready"] is False
     assert payload["read_only"] is True
     assert payload["mutated"] is False
@@ -793,8 +768,7 @@ def test_closeout_readiness_raw_closed_phase_with_next_context_routes_to_plan(tm
         ],
     )
 
-    assert result.exit_code == 1, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result, expect_exit=1)
     assert "next_up" in payload
     route = payload["lifecycle_route"]
     assert route["status"] == "closed"
@@ -831,8 +805,7 @@ def test_full_lifecycle_chain_checks_closeout_readiness_before_phase_complete(tm
         ],
     )
 
-    assert apply_result.exit_code == 0, apply_result.output
-    apply_payload = json.loads(apply_result.output)
+    apply_payload = json_output_from_result(apply_result)
     assert apply_payload["passed"] is True
     assert "advance_plan:last_plan" in apply_payload["applied_state_operations"]
     state = json.loads((tmp_path / "GPD" / "state.json").read_text(encoding="utf-8"))
@@ -853,8 +826,7 @@ def test_full_lifecycle_chain_checks_closeout_readiness_before_phase_complete(tm
         ],
     )
 
-    assert record_result.exit_code == 0, record_result.output
-    record_payload = json.loads(record_result.output)
+    record_payload = json_output_from_result(record_result)
     assert record_payload["recorded"] is True
     assert record_payload["status"] == "Verified"
 
@@ -872,8 +844,7 @@ def test_full_lifecycle_chain_checks_closeout_readiness_before_phase_complete(tm
         ],
     )
 
-    assert readiness_result.exit_code == 0, readiness_result.output
-    readiness_payload = json.loads(readiness_result.output)
+    readiness_payload = json_output_from_result(readiness_result)
     assert readiness_payload["ready"] is True
     assert readiness_payload["read_only"] is True
     assert readiness_payload["mutated"] is False
@@ -908,8 +879,7 @@ def test_full_lifecycle_chain_checks_closeout_readiness_before_phase_complete(tm
         ],
     )
 
-    assert complete_result.exit_code == 0, complete_result.output
-    complete_payload = json.loads(complete_result.output)
+    complete_payload = json_output_from_result(complete_result)
     assert complete_payload["completed_phase"] == "02"
     assert complete_payload["all_plans_complete"] is True
     assert complete_payload["next_phase"] == "03"

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tests.assertion_taxonomy_support import assert_prompt_contracts, machine_exact, semantic_concept
 from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -22,17 +23,28 @@ def test_literature_review_workflow_routes_on_typed_status_and_artifact_gate() -
     assert "GPD/literature/{slug}-CITATION-SOURCES.json" in workflow
     assert "GPD/literature/{slug}-CITATION-AUDIT.md" in workflow
     assert "all three paths are named in `files_written` and present/readable on disk" in workflow
-    assert "checkpoint: include the decision question" in workflow
+    assert_prompt_contracts(
+        workflow,
+        machine_exact("literature-review checkpoint route", "checkpoint: include the decision question"),
+    )
     assert "blocked/failed: list the missing artifact" in workflow
 
 
 def test_literature_reviewer_shows_base_return_fields_and_one_shot_checkpointing() -> None:
     agent = _read(AGENTS_DIR / "gpd-literature-reviewer.md")
 
-    assert "The markdown `## REVIEW COMPLETE` heading is presentation only." in agent
-    assert "The `## CHECKPOINT REACHED` heading below is presentation only." in agent
+    assert_prompt_contracts(
+        agent,
+        *semantic_concept(
+            "literature reviewer headings are presentation only",
+            required=(
+                "The markdown `## REVIEW COMPLETE` heading is presentation only.",
+                "The `## CHECKPOINT REACHED` heading below is presentation only.",
+                "stop at the continuation boundary",
+            ),
+        ),
+    )
     assert "When reaching a checkpoint, return a typed `gpd_return` checkpoint and stop." in agent
-    assert "stop at the continuation boundary" in agent
     assert "Use `gpd_return.status: completed` for a finished review." in agent
 
     completed_block = agent.split("Use `gpd_return.status: completed` for a finished review.", 1)[1]

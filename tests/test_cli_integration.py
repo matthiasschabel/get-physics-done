@@ -28,6 +28,7 @@ from gpd.core.costs import UsageRecord, _profile_tier_mix, usage_ledger_path
 from gpd.core.recent_projects import record_recent_project
 from gpd.core.resume_surface import RESUME_BACKEND_ONLY_FIELDS
 from gpd.core.state import default_state_dict, generate_state_markdown
+from tests.helpers.cli import assert_cli_human_contract, assert_result_exit, json_output_from_result
 from tests.helpers.cli import assert_no_top_level_resume_aliases as _assert_no_top_level_resume_aliases
 from tests.hooks.helpers import clear_runtime_env
 from tests.manuscript_test_support import (
@@ -180,7 +181,7 @@ def test_paper_build_surfaces_reference_bibtex_bridge(tmp_path: Path) -> None:
         result = runner.invoke(app, ["--raw", "--cwd", str(nested_cwd), "paper-build"], catch_exceptions=False)
 
     assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["config_path"] == "../paper/PAPER-CONFIG.json"
     assert payload["output_dir"] == "../paper"
     assert payload["reference_bibtex_bridge"] == [
@@ -311,8 +312,7 @@ def test_result_upsert_reuses_unique_equation_match_when_preferred_id_is_new(gpd
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["action"] == "updated"
     assert payload["matched_by"] == "equation"
     assert payload["result"]["id"] == "R-01"
@@ -360,8 +360,7 @@ def test_result_upsert_reuses_unique_description_match_when_preferred_id_is_new(
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["action"] == "updated"
     assert payload["matched_by"] == "description"
     assert payload["result"]["id"] == "R-01"
@@ -465,8 +464,7 @@ def test_result_upsert_refreshes_live_execution_caches_for_active_anchor(gpd_pro
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["action"] == "updated"
     assert payload["matched_by"] == "equation"
     assert payload["result"]["id"] == "R-01"
@@ -518,8 +516,7 @@ def test_result_persist_derived_bridge_reuses_unique_equation_match_when_preferr
         "01",
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["action"] == "updated"
     assert payload["requested_result_id"] == "R-new"
     assert payload["result"]["id"] == "R-01"
@@ -621,8 +618,7 @@ def test_result_update_refreshes_live_execution_caches_for_active_anchor(gpd_pro
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["id"] == "R-01"
     assert payload["description"] == "Canonical description"
 
@@ -722,8 +718,7 @@ def test_result_persist_derived_bridge_seeds_canonical_continuity_for_later_reco
         "01",
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["requested_result_id"] == "R-new"
     assert payload["result_id"] == "R-01"
     assert payload["requested_result_redirected"] is True
@@ -753,8 +748,7 @@ def test_result_persist_derived_bridge_seeds_canonical_continuity_for_later_reco
         catch_exceptions=False,
     )
 
-    assert record_session_result.exit_code == 0, record_session_result.output
-    record_session_payload = json.loads(record_session_result.output)
+    record_session_payload = json_output_from_result(record_session_result)
     assert record_session_payload["recorded"] is True
 
     reread = json.loads(state_path.read_text(encoding="utf-8"))
@@ -815,8 +809,7 @@ def test_result_persist_derived_bridge_does_not_fabricate_live_execution_caches_
         "01",
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["result_id"] == "R-01"
     assert payload["continuity_last_result_id"] == "R-01"
     assert payload["continuity_recorded"] is True
@@ -905,8 +898,7 @@ def test_result_persist_derived_bridge_leaves_conflicting_live_execution_caches_
         "01",
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["result_id"] == "R-01"
     assert payload["continuity_last_result_id"] == "R-01"
 
@@ -944,12 +936,11 @@ def test_result_persist_derived_bridge_surfaces_persisted_result_in_init_progres
         "01",
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["result"]["id"] == "R-bridge-01"
 
     init_result = _invoke("--raw", "init", "progress", "--include", "state,config")
-    init_payload = json.loads(init_result.output)
+    init_payload = json_output_from_result(init_result)
     assert init_payload["derived_intermediate_result_count"] == 1
     assert [entry["id"] for entry in init_payload["derived_intermediate_results"]] == ["R-bridge-01"]
 
@@ -973,8 +964,7 @@ def test_result_persist_derived_bridge_reports_requested_result_id_from_slug(gpd
         "01",
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["status"] == "persisted"
     assert payload["requested_result_id"] == "R-01-effective-mass"
     assert payload["result_id"] == "R-01-effective-mass"
@@ -1025,8 +1015,7 @@ def test_result_deps_raw_surfaces_transitive_dependency_tree(gpd_project: Path) 
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["result"]["id"] == "R-03"
     assert payload["result"]["equation"] == "C"
     assert payload["depends_on"] == ["R-02"]
@@ -1075,8 +1064,7 @@ def test_result_show_raw_surfaces_result_and_dependency_chain(gpd_project: Path)
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["result"]["id"] == "R-03"
     assert payload["result"]["equation"] == "C"
     assert payload["result"]["description"] == "Target result"
@@ -1124,8 +1112,7 @@ def test_state_record_session_persists_last_result_id_in_session_and_handoff(gpd
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["recorded"] is True
 
     state = json.loads((gpd_project / "GPD" / "state.json").read_text(encoding="utf-8"))
@@ -1165,7 +1152,7 @@ def test_state_record_session_rejects_unknown_last_result_id_and_leaves_state_un
         ],
     )
 
-    assert result.exit_code == 1, result.output
+    assert_result_exit(result, 1)
 
     assert state_path.read_text(encoding="utf-8") == before_state
     assert state_md_path.read_text(encoding="utf-8") == before_state_md
@@ -1181,7 +1168,7 @@ def _invoke(*args: str, expect_ok: bool = True) -> object:
     """Invoke a gpd CLI command and return the CliRunner result."""
     result = runner.invoke(app, list(args), catch_exceptions=False)
     if expect_ok:
-        assert result.exit_code == 0, f"gpd {' '.join(args)} failed (exit {result.exit_code}):\n{result.output}"
+        assert_result_exit(result)
     return result
 
 
@@ -1309,7 +1296,7 @@ class TestResume:
         state_path.write_text(json.dumps(state), encoding="utf-8")
 
         result = _invoke("--raw", "resume")
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result)
 
         assert parsed["active_resume_kind"] == "continuity_handoff"
         assert parsed["active_resume_origin"] == "canonical_continuation"
@@ -1361,7 +1348,7 @@ class TestResume:
         nested_cwd.mkdir(parents=True, exist_ok=True)
 
         result = _invoke("--raw", "--cwd", str(nested_cwd), "resume")
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result)
 
         assert parsed["project_root"] == gpd_project.resolve(strict=False).as_posix()
         assert parsed["project_root_source"] == "current_workspace"
@@ -1394,7 +1381,7 @@ class TestResume:
         state_path.write_text(json.dumps(state), encoding="utf-8")
 
         result = _invoke("--raw", "resume")
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result)
 
         _assert_no_top_level_resume_aliases(parsed)
         assert parsed["active_resume_kind"] is None
@@ -1451,7 +1438,7 @@ class TestResume:
         state_path.write_text(json.dumps(state), encoding="utf-8")
 
         result = _invoke("--raw", "resume")
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result)
 
         assert parsed["active_bounded_segment"]["resume_file"] == canonical_resume_file
         assert parsed["active_bounded_segment"]["segment_id"] == "seg-canonical"
@@ -1522,7 +1509,7 @@ class TestResume:
         )
 
         result = _invoke("--raw", "resume")
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result)
 
         assert parsed["active_bounded_segment"]["resume_file"] == canonical_resume_file
         assert parsed["active_resume_kind"] == "bounded_segment"
@@ -1552,21 +1539,24 @@ class TestResume:
         state_path.write_text(json.dumps(state), encoding="utf-8")
 
         result = _invoke("resume")
-        normalized = " ".join(result.output.split())
-
-        assert "Resume Summary" in result.output
-        assert "Read-only local recovery snapshot for this workspace." in result.output
+        normalized = assert_cli_human_contract(
+            result,
+            required_all=[
+                "Resume Summary",
+                "Read-only local recovery snapshot for this workspace.",
+                "Canonical candidate kinds",
+                "continuity_handoff",
+                "Continuity handoff",
+                "gpd resume",
+                "gpd resume --recent",
+                "gpd --raw resume",
+                "resume-work",
+                "suggest-next",
+            ],
+        )
         assert "handoff is available" in normalized.lower()
         assert "no resumable" in normalized.lower()
         assert "currently active" in normalized.lower()
-        assert "Canonical candidate kinds" in normalized
-        assert "continuity_handoff" in normalized
-        assert "Continuity handoff" in result.output
-        assert "gpd resume" in result.output
-        assert "gpd resume --recent" in result.output
-        assert "gpd --raw resume" in result.output
-        assert "resume-work" in result.output
-        assert "suggest-next" in result.output
 
     def test_resume_human_output_surfaces_hydrated_resume_result_from_nested_cwd(
         self, gpd_project: Path, monkeypatch: pytest.MonkeyPatch
@@ -1605,12 +1595,17 @@ class TestResume:
 
         result = _invoke("--cwd", str(nested_cwd), "resume")
 
-        assert "Resume Summary" in result.output
-        assert "Read-only local recovery snapshot for this workspace." in result.output
-        assert "Resume result" in result.output
-        assert "Benchmark reproduction" in result.output
-        assert "F = ma" in result.output
-        assert "R-bridge-01" in result.output
+        assert_cli_human_contract(
+            result,
+            required_all=[
+                "Resume Summary",
+                "Read-only local recovery snapshot for this workspace.",
+                "Resume result",
+                "Benchmark reproduction",
+                "F = ma",
+                "R-bridge-01",
+            ],
+        )
 
     def test_resume_human_output_does_not_promote_session_only_handoff_state(self, gpd_project: Path) -> None:
         state_path = gpd_project / "GPD" / "state.json"
@@ -1620,10 +1615,10 @@ class TestResume:
         state_path.write_text(json.dumps(state), encoding="utf-8")
 
         result = _invoke("resume")
+        text = assert_cli_human_contract(result, required_all=["Canonical candidate kinds"])
 
-        assert "Canonical candidate kinds" in result.output
-        assert "handoff is missing" not in result.output.lower()
-        assert "./GPD/phases/01-test-phase/.continue-here.md" not in result.output
+        assert "handoff is missing" not in text.lower()
+        assert "./GPD/phases/01-test-phase/.continue-here.md" not in text
 
     def test_resume_raw_promotes_auto_selected_recent_bounded_segment_over_same_pointer_handoff(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -1631,7 +1626,7 @@ class TestResume:
         project, outside, resume_file = _setup_auto_selected_recent_bounded_segment(tmp_path, monkeypatch)
 
         result = _invoke("--raw", "--cwd", str(outside), "resume")
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result)
 
         _assert_no_top_level_resume_aliases(parsed)
         assert parsed["project_root"] == project.resolve(strict=False).as_posix()
@@ -1667,21 +1662,24 @@ class TestResume:
         _project, outside, resume_file = _setup_auto_selected_recent_bounded_segment(tmp_path, monkeypatch)
 
         result = _invoke("--cwd", str(outside), "resume")
-        normalized = " ".join(result.output.split())
-
-        assert "Resume Summary" in result.output
-        assert "Read-only local recovery snapshot for this workspace." in result.output
+        normalized = assert_cli_human_contract(
+            result,
+            required_all=[
+                "Resume Summary",
+                "Read-only local recovery snapshot for this workspace.",
+                "auto-selected recent project",
+                "Bounded segment",
+                "Primary pointer",
+                f"./{resume_file}",
+                "Canonical candidate kinds",
+                "gpd resume --recent",
+                "gpd --raw resume",
+                "resume-work",
+                "suggest-next",
+            ],
+        )
         assert "A bounded segment is resumable from an auto-selected recent project." in normalized
-        assert "auto-selected recent project" in result.output
-        assert "Bounded segment" in result.output
-        assert "Primary pointer" in result.output
-        assert f"./{resume_file}" in result.output
-        assert "Canonical candidate kinds" in result.output
         assert "continuity handoff is available" not in normalized.lower()
-        assert "gpd resume --recent" in result.output
-        assert "gpd --raw resume" in result.output
-        assert "resume-work" in result.output
-        assert "suggest-next" in result.output
 
     def test_resume_recent_lists_recent_projects_in_recency_order(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -1727,9 +1725,8 @@ class TestResume:
 
         beta_marker = "Beta stop"
         alpha_marker = "Alpha stop"
-        assert beta_marker in result.output
-        assert alpha_marker in result.output
-        assert result.output.index(beta_marker) < result.output.index(alpha_marker)
+        text = assert_cli_human_contract(result, required_all=[beta_marker, alpha_marker])
+        assert text.index(beta_marker) < text.index(alpha_marker)
 
     def test_resume_recent_surfaces_recent_project_index_errors(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -1746,8 +1743,7 @@ class TestResume:
 
         result = runner.invoke(app, ["--raw", "resume", "--recent"], catch_exceptions=False)
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         assert "Malformed recent-project index" in payload["error"]
 
     def test_resume_outside_project_hints_recent_selector(
@@ -1759,7 +1755,7 @@ class TestResume:
 
         result = _invoke("resume")
 
-        assert "gpd resume --recent" in result.output
+        assert_cli_human_contract(result, required_all=["gpd resume --recent"])
 
 
 class TestObserveExecution:
@@ -1785,7 +1781,7 @@ class TestObserveExecution:
         snapshot_before = _target_file_snapshot(gpd_project / "GPD")
 
         result = _invoke("--raw", "observe", "execution")
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result)
 
         assert parsed["found"] is True
         assert parsed["current_state"] == "active"
@@ -1824,7 +1820,7 @@ class TestObserveExecution:
         snapshot_before = _target_file_snapshot(gpd_project / "GPD")
 
         result = _invoke("--raw", "observe", "execution")
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result)
 
         assert parsed["found"] is True
         assert parsed["status_classification"] == "waiting"
@@ -1862,7 +1858,7 @@ class TestSuggest:
         nested_cwd.mkdir(parents=True, exist_ok=True)
 
         result = _invoke("--raw", "--cwd", str(nested_cwd), "suggest")
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result)
 
         assert parsed["top_action"]["action"] == "resume"
         assert parsed["top_action"]["command"] == "gpd resume"
@@ -1885,7 +1881,7 @@ class TestSuggest:
         monkeypatch.setenv("GPD_DATA_DIR", str(workspace / "gpd-data"))
 
         result = _invoke("--raw", "--cwd", str(workspace), "suggest")
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result)
 
         assert parsed["total_suggestions"] == 1
         assert parsed["suggestion_count"] == 1
@@ -1911,7 +1907,7 @@ class TestSuggest:
         monkeypatch.setenv("GPD_DATA_DIR", str(workspace / "gpd-data"))
 
         result = _invoke("--raw", "--cwd", str(workspace), "suggest-next")
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result)
 
         assert parsed["top_action"]["action"] == "new-project"
         assert parsed["top_action"]["command"] == "gpd init new-project"
@@ -1960,7 +1956,7 @@ class TestSuggest:
         nested_cwd.mkdir(parents=True, exist_ok=True)
 
         result = _invoke("--raw", "--cwd", str(nested_cwd), "suggest")
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result)
 
         assert parsed["total_suggestions"] == 2
         assert parsed["suggestion_count"] == 2
@@ -2001,7 +1997,7 @@ class TestObserve:
             "timestamp",
         )
         result = _invoke("--raw", "observe", "sessions", "--command", "timestamp")
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result)
         assert parsed["count"] >= 1
         assert all(session["command"] == "timestamp" for session in parsed["sessions"])
 
@@ -2019,12 +2015,12 @@ class TestObserve:
             "--command",
             "timestamp",
         )
-        event_payload = json.loads(event_result.output)
-        sessions = json.loads(_invoke("--raw", "observe", "sessions", "--command", "timestamp").output)
+        event_payload = json_output_from_result(event_result)
+        sessions = json_output_from_result(_invoke("--raw", "observe", "sessions", "--command", "timestamp"))
         assert any(session["session_id"] == event_payload["session_id"] for session in sessions["sessions"])
         session_id = sessions["sessions"][0]["session_id"]
         result = _invoke("--raw", "observe", "show", "--session", session_id, "--category", "cli")
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result)
         assert parsed["count"] >= 1
         assert all(event["session_id"] == session_id for event in parsed["events"])
         assert all(event["category"] == "cli" for event in parsed["events"])
@@ -2049,7 +2045,7 @@ class TestObserve:
             "--data",
             '{"wave": 1}',
         )
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result)
         assert parsed["category"] == "workflow"
         assert parsed["name"] == "wave-start"
         observed = json.loads(
@@ -2077,8 +2073,7 @@ class TestFrontmatterValidate:
             expect_ok=False,
         )
 
-        assert result.exit_code == 1
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         assert payload["valid"] is False
         assert sorted(payload["missing"]) == ["completed", "depth", "provides"]
 
@@ -2091,7 +2086,7 @@ class TestFrontmatterValidate:
 class TestInitIncludeParsing:
     def test_init_progress_include_trims_whitespace_and_drops_empty_entries(self) -> None:
         result = _invoke("--raw", "init", "progress", "--include", " state, roadmap, , ")
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
 
         assert payload["state_content"] is not None
         assert payload["roadmap_content"] is not None
@@ -2105,7 +2100,7 @@ class TestInitIncludeParsing:
         (research_dir / "notes.tex").write_text("\\section{Recovered context}\n", encoding="utf-8")
 
         result = _invoke("--raw", "--cwd", str(tmp_path), "init", "new-project")
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
 
         assert payload["has_research_files"] is True
         assert "has_existing_project" not in payload.keys()
@@ -2148,7 +2143,7 @@ class TestInitIncludeParsing:
         snapshot_before = _target_file_snapshot(planning)
 
         result = _invoke("--raw", "init", "resume")
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
 
         _assert_no_top_level_resume_aliases(payload)
         assert payload["active_bounded_segment"] is None
@@ -2188,7 +2183,7 @@ class TestInitIncludeParsing:
         )
 
         result = _invoke("--raw", "observe", "execution")
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
 
         assert payload["found"] is True
         assert payload["status_classification"] == "waiting"
@@ -2214,7 +2209,7 @@ class TestInitIncludeParsing:
         )
 
         result = _invoke("--raw", "observe", "execution")
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
 
         assert payload["found"] is True
         assert payload["status_classification"] == "paused-or-resumable"
@@ -2223,7 +2218,7 @@ class TestInitIncludeParsing:
 
     def test_observe_execution_without_snapshot_reports_idle(self, gpd_project: Path) -> None:
         result = _invoke("--raw", "observe", "execution")
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
 
         assert payload["found"] is False
         assert payload["status_classification"] == "idle"
@@ -2255,7 +2250,7 @@ class TestReturnSkeleton:
         return_file.write_text(skeleton_result.output, encoding="utf-8")
 
         validate_result = _invoke("--raw", "validate-return", str(return_file))
-        parsed = json.loads(validate_result.output)
+        parsed = json_output_from_result(validate_result)
 
         assert parsed["passed"] is True
         assert parsed["fields"]["status"] == "completed"
@@ -2265,7 +2260,7 @@ class TestReturnSkeleton:
     def test_return_profiles_raw_exposes_skeleton_registry(self, gpd_project: Path) -> None:
         """Profile discovery should expose role/status metadata without writes."""
         result = _invoke("--raw", "return", "profiles", "--role", "executor", "--status", "checkpoint")
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result)
 
         assert parsed["mutated"] is False
         assert [profile["profile_id"] for profile in parsed["profiles"]] == ["executor"]
@@ -2286,7 +2281,7 @@ class TestValidateReturn:
             encoding="utf-8",
         )
         result = _invoke("--raw", "validate-return", str(return_file))
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result)
         assert parsed["passed"] is True
         assert len(parsed["errors"]) == 0
 
@@ -2306,7 +2301,7 @@ class TestValidateReturn:
         )
 
         result = _invoke("--raw", "return", "classify", str(return_file))
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result)
         assert parsed["passed"] is True
         assert parsed["status"] == "completed"
         assert parsed["required_status"] is None
@@ -2335,7 +2330,7 @@ class TestValidateReturn:
             "--require-status",
             " CHECKPOINT ",
         )
-        checkpoint_payload = json.loads(checkpoint_result.output)
+        checkpoint_payload = json_output_from_result(checkpoint_result)
         assert checkpoint_payload["passed"] is True
         assert checkpoint_payload["accepted_for_success"] is True
         assert checkpoint_payload["status"] == "checkpoint"
@@ -2343,7 +2338,7 @@ class TestValidateReturn:
         assert checkpoint_payload["mutated"] is False
 
         any_result = _invoke("--raw", "return", "classify", str(return_file), "--require-status", "any")
-        any_payload = json.loads(any_result.output)
+        any_payload = json_output_from_result(any_result)
         assert any_payload["passed"] is True
         assert any_payload["accepted_for_success"] is True
         assert any_payload["status"] == "checkpoint"
@@ -2359,8 +2354,7 @@ class TestValidateReturn:
             ["--raw", "validate-return", str(return_file)],
             catch_exceptions=False,
         )
-        assert result.exit_code == 1
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result, expect_exit=1)
         assert parsed["passed"] is False
         assert len(parsed["errors"]) > 0
 
@@ -2373,8 +2367,7 @@ class TestValidateReturn:
             ["--raw", "validate-return", str(return_file)],
             catch_exceptions=False,
         )
-        assert result.exit_code == 1
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result, expect_exit=1)
         assert parsed["passed"] is False
         assert any("No gpd_return" in e for e in parsed["errors"])
 
@@ -2393,8 +2386,7 @@ class TestValidateReturn:
             ["--raw", "validate-return", str(return_file)],
             catch_exceptions=False,
         )
-        assert result.exit_code == 1
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result, expect_exit=1)
         assert parsed["passed"] is False
         assert any("Invalid status" in e for e in parsed["errors"])
 
@@ -2409,7 +2401,7 @@ class TestValidateReturn:
             encoding="utf-8",
         )
         result = _invoke("--raw", "validate-return", str(return_file))
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result)
         assert parsed["passed"] is True
         assert parsed["warning_count"] > 0
 
@@ -2439,7 +2431,7 @@ class TestValidateReturn:
             encoding="utf-8",
         )
         result = _invoke("--raw", "validate-return", str(return_file))
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result)
         assert parsed["passed"] is True
         assert parsed["fields"]["state_updates"]["advance_plan"] is True
         assert parsed["fields"]["state_updates"]["update_progress"] is True
@@ -2463,8 +2455,7 @@ class TestValidateReturn:
             encoding="utf-8",
         )
         result = _invoke("--raw", "validate-return", str(return_file), expect_ok=False)
-        assert result.exit_code == 1
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result, expect_exit=1)
         assert parsed["passed"] is False
         assert any("continuation_update" in error and "execution_segment" in error for error in parsed["errors"])
 
@@ -2487,8 +2478,7 @@ class TestValidateReturn:
             ["--raw", "validate-return", str(return_file)],
             catch_exceptions=False,
         )
-        assert result.exit_code == 1
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result, expect_exit=1)
         assert parsed["passed"] is False
         assert any("continuation_update" in error for error in parsed["errors"])
 
@@ -2518,7 +2508,7 @@ class TestValidateReturn:
         )
 
         result = _invoke("--raw", "apply-return-updates", str(return_file))
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result)
         assert parsed["passed"] is True
         assert parsed["status"] == "checkpoint"
         assert parsed["applied_decisions"] == 1
@@ -2547,8 +2537,7 @@ class TestValidateReturn:
         )
 
         result = _invoke("--raw", "apply-return-updates", str(return_file), expect_ok=False)
-        assert result.exit_code == 1
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result, expect_exit=1)
         assert parsed["passed"] is False
         assert parsed["status"] == "failed"
         assert any("state_updates" in error and "unexpected_operation" in error for error in parsed["errors"])
@@ -2582,8 +2571,7 @@ class TestValidateReturn:
             catch_exceptions=False,
         )
 
-        payload = json.loads(result.output)
-        assert result.exit_code == 1
+        payload = json_output_from_result(result, expect_exit=1)
         assert payload["passed"] is False
         if not any(key in payload for key in ("failure_classes", "finding_codes", "failures")):
             pytest.skip("handoff artifact failure classes are not available in this core checkout")
@@ -2599,13 +2587,13 @@ class TestValidateReturn:
 class TestConfigCommands:
     def test_config_get_existing_key(self) -> None:
         result = _invoke("--raw", "config", "get", "autonomy")
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result)
         assert parsed["found"] is True
         assert parsed["value"] == "yolo"
 
     def test_config_get_missing_key(self) -> None:
         result = _invoke("--raw", "config", "get", "nonexistent")
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result)
         assert parsed["found"] is False
 
     def test_config_get_alias_key_reads_effective_value(self, gpd_project: Path) -> None:
@@ -2616,7 +2604,7 @@ class TestConfigCommands:
         config_path.write_text(json.dumps(config), encoding="utf-8")
 
         result = _invoke("--raw", "config", "get", "planning.commit_docs")
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result)
         assert parsed["found"] is True
         assert parsed["value"] is False
 
@@ -2624,14 +2612,14 @@ class TestConfigCommands:
         (gpd_project / "GPD" / "config.json").unlink()
 
         result = _invoke("--raw", "config", "get", "autonomy")
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result)
 
         assert parsed["found"] is True
         assert parsed["value"] == "supervised"
 
     def test_config_set_rejects_unsupported_key(self, gpd_project: Path) -> None:
         result = _invoke("--raw", "config", "set", "new_key", "new_value", expect_ok=False)
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result, expect_exit=1)
         assert "Unsupported config key" in parsed["error"]
 
         config = json.loads((gpd_project / "GPD" / "config.json").read_text(encoding="utf-8"))
@@ -2644,7 +2632,7 @@ class TestConfigCommands:
         assert "planning" not in config
 
         get_result = _invoke("--raw", "config", "get", "planning.commit_docs")
-        parsed = json.loads(get_result.output)
+        parsed = json_output_from_result(get_result)
         assert parsed["found"] is True
         assert parsed["value"] is False
 
@@ -2674,7 +2662,7 @@ class TestConfigCommands:
         config_path.write_text(json.dumps(config), encoding="utf-8")
 
         result = _invoke("--raw", "config", "set", key, clear_token)
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result)
 
         written = json.loads(config_path.read_text(encoding="utf-8"))
         assert parsed["canonical_key"] == field
@@ -2716,7 +2704,7 @@ class TestConfigCommands:
             "--tier-3",
             "",
         )
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result)
 
         written = json.loads(config_path.read_text(encoding="utf-8"))
         assert parsed["runtime"] == descriptor.runtime_name
@@ -2751,7 +2739,7 @@ class TestConfigCommands:
             descriptor.runtime_name,
             "--clear",
         )
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result)
 
         written = json.loads(config_path.read_text(encoding="utf-8"))
         assert parsed["cleared"] is True
@@ -2763,7 +2751,7 @@ class TestConfigCommands:
     def test_config_set_rejects_stale_autonomy_value(self, gpd_project: Path) -> None:
         result = _invoke("--raw", "config", "set", "autonomy", "guided", expect_ok=False)
 
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result, expect_exit=1)
         assert "Invalid config.json values" in parsed["error"]
 
         config = json.loads((gpd_project / "GPD" / "config.json").read_text(encoding="utf-8"))
@@ -2772,14 +2760,14 @@ class TestConfigCommands:
     def test_config_ensure_section_exists(self) -> None:
         """ensure-section with existing config.json should report created=False."""
         result = _invoke("--raw", "config", "ensure-section")
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result)
         assert parsed["created"] is False
 
     def test_config_ensure_section_creates(self, gpd_project: Path) -> None:
         """ensure-section without config.json should create defaults."""
         (gpd_project / "GPD" / "config.json").unlink()
         result = _invoke("--raw", "config", "ensure-section")
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result)
         assert parsed["created"] is True
         config_path = gpd_project / "GPD" / "config.json"
         assert config_path.exists()
@@ -2799,7 +2787,7 @@ class TestConfigCommands:
         result = _invoke(
             "--raw", "permissions", "sync", "--runtime", _ENV_OVERRIDE_DESCRIPTOR.runtime_name, "--autonomy", "yolo"
         )
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result)
         status = adapter.runtime_permissions_status(target, autonomy="yolo")
 
         assert parsed["runtime"] == _ENV_OVERRIDE_DESCRIPTOR.runtime_name
@@ -2824,7 +2812,7 @@ class TestConfigCommands:
             "--autonomy",
             "yolo",
         )
-        sync_payload = json.loads(sync_result.output)
+        sync_payload = json_output_from_result(sync_result)
 
         status_result = _invoke(
             "--raw",
@@ -2836,11 +2824,10 @@ class TestConfigCommands:
             "yolo",
             expect_ok=False,
         )
-        status_payload = json.loads(status_result.output)
+        status_payload = json_output_from_result(status_result, expect_exit=1)
 
         assert sync_payload["runtime"] == _ENV_OVERRIDE_DESCRIPTOR.runtime_name
         assert sync_payload["sync_applied"] is True
-        assert status_result.exit_code == 1
         assert status_payload["runtime"] == _ENV_OVERRIDE_DESCRIPTOR.runtime_name
         assert status_payload["readiness"] == "relaunch-required"
         assert status_payload["ready"] is False
@@ -2861,7 +2848,7 @@ class TestConfigCommands:
         result = _invoke(
             "--raw", "permissions", "sync", "--runtime", _ENV_OVERRIDE_DESCRIPTOR.display_name, "--autonomy", "yolo"
         )
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result)
         status = adapter.runtime_permissions_status(target, autonomy="yolo")
 
         assert parsed["runtime"] == _ENV_OVERRIDE_DESCRIPTOR.runtime_name
@@ -2878,7 +2865,7 @@ class TestConfigCommands:
         _set_runtime_config_override(monkeypatch, _ENV_OVERRIDE_DESCRIPTOR, target)
 
         status_result = _invoke("--raw", "permissions", "status", "--runtime", _ENV_OVERRIDE_DESCRIPTOR.runtime_name)
-        parsed_status = json.loads(status_result.output)
+        parsed_status = json_output_from_result(status_result)
         expected_status = adapter.runtime_permissions_status(target, autonomy="yolo")
         doctor_result = _invoke(
             "--raw",
@@ -2888,7 +2875,7 @@ class TestConfigCommands:
             "--target-dir",
             str(target),
         )
-        parsed_doctor = json.loads(doctor_result.output)
+        parsed_doctor = json_output_from_result(doctor_result)
         runtime_target_check = next(
             check for check in parsed_doctor["checks"] if check["label"] == "Runtime Config Target"
         )
@@ -2902,7 +2889,7 @@ class TestConfigCommands:
         sync_result = _invoke(
             "--raw", "permissions", "sync", "--runtime", _ENV_OVERRIDE_DESCRIPTOR.runtime_name, "--autonomy", "yolo"
         )
-        parsed_sync = json.loads(sync_result.output)
+        parsed_sync = json_output_from_result(sync_result)
         synced_status = adapter.runtime_permissions_status(target, autonomy="yolo")
 
         assert parsed_sync["runtime"] == _ENV_OVERRIDE_DESCRIPTOR.runtime_name
@@ -2928,8 +2915,7 @@ class TestConfigCommands:
                 "balanced",
                 expect_ok=False,
             )
-            absent_payload = json.loads(absent_result.output)
-            assert absent_result.exit_code == 1
+            absent_payload = json_output_from_result(absent_result, expect_exit=1)
             assert absent_payload["error"] == (
                 f"No GPD install found for runtime '{_ENV_OVERRIDE_DESCRIPTOR.runtime_name}'. "
                 f"Run `gpd install {_ENV_OVERRIDE_DESCRIPTOR.runtime_name}` first."
@@ -2948,9 +2934,8 @@ class TestConfigCommands:
                 "balanced",
                 expect_ok=False,
             )
-            incomplete_payload = json.loads(incomplete_result.output)
+            incomplete_payload = json_output_from_result(incomplete_result, expect_exit=1)
 
-        assert incomplete_result.exit_code == 1
         assert incomplete_payload["error"] != absent_payload["error"]
         assert "No GPD install found" not in incomplete_payload["error"]
         assert "incomplete" in incomplete_payload["error"].lower() or "repair" in incomplete_payload["error"].lower()
@@ -3001,7 +2986,7 @@ class TestConfigCommands:
             "--autonomy",
             "balanced",
         )
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result)
 
         assert validation_calls == [(target.resolve(strict=False), "inspect runtime permissions on")]
         assert parsed["runtime"] == descriptor.runtime_name
@@ -3020,7 +3005,7 @@ class TestConfigCommands:
             "--autonomy",
             "yolo",
         )
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result)
 
         assert parsed["runtime"] == _ENV_OVERRIDE_DESCRIPTOR.runtime_name
         assert parsed["config_aligned"] is False
@@ -3043,7 +3028,7 @@ class TestConfigCommands:
             "--autonomy",
             "yolo",
         )
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result)
 
         assert parsed["runtime"] == _ENV_OVERRIDE_DESCRIPTOR.runtime_name
         assert parsed["target"] == str(target)
@@ -3078,9 +3063,8 @@ class TestConfigCommands:
             "yolo",
             expect_ok=False,
         )
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result, expect_exit=1)
 
-        assert result.exit_code == 1
         assert parsed["error"].startswith(f"Refusing to {action} runtime permissions on")
         assert f"`{_ENV_OVERRIDE_DESCRIPTOR.runtime_name}`" in parsed["error"]
         assert f"`{_SECONDARY_PERMISSIONS_DESCRIPTOR.runtime_name}`" in parsed["error"]
@@ -3096,7 +3080,7 @@ class TestConfigCommands:
         monkeypatch.setenv("GPD_ACTIVE_RUNTIME", _ENV_OVERRIDE_DESCRIPTOR.runtime_name)
 
         result = _invoke("--raw", "config", "set", "autonomy", "balanced")
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result)
         status = adapter.runtime_permissions_status(target, autonomy="balanced")
 
         assert parsed["value"] == "balanced"
@@ -3116,7 +3100,7 @@ class TestConfigCommands:
         with patch("pathlib.Path.home", return_value=fake_home):
             result = _invoke("--raw", "permissions", "sync", "--autonomy", "yolo")
 
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result)
         status = adapter.runtime_permissions_status(target, autonomy="yolo")
 
         assert parsed["runtime"] == _SECONDARY_PERMISSIONS_DESCRIPTOR.runtime_name
@@ -3217,7 +3201,7 @@ class TestJsonCommands:
             "--out",
             str(out),
         )
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result)
         assert parsed["merged"] == 2
         merged_data = json.loads(out.read_text())
         assert merged_data == {"a": 1, "b": 2, "c": 3, "d": 4}
@@ -3254,7 +3238,7 @@ class TestSummaryExtractCommand:
             "summary-extract",
             "GPD/phases/01-test-phase/01-SUMMARY.md",
         )
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result)
         assert parsed["one_liner"] == "Set up project"
         assert "src/main.py" in parsed["key_files"]
 
@@ -3266,7 +3250,7 @@ class TestSummaryExtractCommand:
             "--field",
             "one_liner",
         )
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result)
         assert "one_liner" in parsed
         assert parsed["one_liner"] == "Set up project"
 
@@ -3278,7 +3262,7 @@ class TestResolveModelCommand:
 
     def test_resolve_tier_rejects_unknown_agent(self) -> None:
         result = _invoke("--raw", "resolve-tier", "not-an-agent", expect_ok=False)
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result, expect_exit=1)
         assert parsed["error"] == "Unknown agent 'not-an-agent'"
 
     @pytest.mark.parametrize("descriptor", (_RUNTIME_DESCRIPTORS[0],), ids=lambda descriptor: descriptor.runtime_name)
@@ -3323,7 +3307,7 @@ class TestResolveModelCommand:
         fake_home.mkdir()
         with patch("pathlib.Path.home", return_value=fake_home):
             result = _invoke("--raw", "init", "execute-phase", "1")
-            payload = json.loads(result.output)
+            payload = json_output_from_result(result)
 
             assert payload["executor_model"] == f"{descriptor.runtime_name}-executor-model"
             assert payload["verifier_model"] == f"{descriptor.runtime_name}-planner-model"
@@ -3337,7 +3321,7 @@ class TestResolveModelCommand:
             _RUNTIME_DESCRIPTORS[0].runtime_name,
             expect_ok=False,
         )
-        parsed = json.loads(result.output)
+        parsed = json_output_from_result(result, expect_exit=1)
         assert parsed["error"] == "Unknown agent 'not-an-agent'"
 
 
@@ -3353,17 +3337,21 @@ def test_cost_human_output_without_usage_ledger_stays_read_only_and_advisory(
     config_before = config_path.read_text(encoding="utf-8")
 
     result = _invoke("cost")
-    normalized_output = " ".join(result.output.split())
+    normalized_output = assert_cli_human_contract(
+        result,
+        required_all=[
+            "Cost Summary",
+            "Budget guardrails",
+            "No optional USD budget guardrails are configured for this workspace.",
+            "Profile tier mix",
+            "Advisory only; counts profile-to-tier assignments",
+            "No measured usage telemetry is recorded for this workspace yet.",
+        ],
+    )
 
-    assert "Cost Summary" in result.output
     assert "Read-only machine-local usage/cost summary." in normalized_output
     assert "GPD reports measured telemetry when available" in normalized_output
     assert "clearly labels estimates or unavailable values." in normalized_output
-    assert "Budget guardrails" in result.output
-    assert "No optional USD budget guardrails are configured for this workspace." in result.output
-    assert "Profile tier mix" in result.output
-    assert "Advisory only; counts profile-to-tier assignments" in result.output
-    assert "No measured usage telemetry is recorded for this workspace yet." in result.output
     assert not ledger_path.exists()
     assert config_path.read_text(encoding="utf-8") == config_before
 
@@ -3397,7 +3385,7 @@ def test_cost_raw_keeps_tokens_measured_but_usd_unavailable_without_pricing_snap
     ledger_before = ledger_path.read_text(encoding="utf-8")
 
     result = _invoke("--raw", "cost", "--last-sessions", "1")
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
 
     assert payload["project_root"] == workspace_root
     assert "workspace_root" not in payload

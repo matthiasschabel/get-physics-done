@@ -22,11 +22,18 @@ __all__ = [
     "MatchMode",
     "assert_fragments",
     "assert_prompt_contracts",
+    "checkpoint_stop_boundary",
+    "fail_closed_before_writes",
     "forbidden_duplicate",
     "fragment_count",
+    "fresh_artifact_required",
+    "handle_before_content",
     "machine_exact",
     "marker_range",
+    "no_synthesized_child_return",
     "public_exact",
+    "runtime_label_native",
+    "schema_averse_first_useful_action",
     "semantic_anchor",
     "semantic_concept",
 ]
@@ -268,6 +275,294 @@ def semantic_concept(
     return tuple(assertions)
 
 
+def fail_closed_before_writes(
+    blocker_anchor: str,
+    write_anchor: str,
+    *,
+    safe_stop_anchor: str | None = None,
+    forbidden: FragmentInput | None = None,
+    machine_fragments: FragmentInput | None = None,
+    public_fragments: FragmentInput | None = None,
+    section: str | None = None,
+    markers: MarkerInput | None = None,
+    context: str | None = None,
+) -> tuple[FragmentAssertion, ...]:
+    """Build a semantic pack for surfacing a blocker before mutation routes."""
+
+    assertions = [
+        semantic_anchor(
+            "fail_closed_before_writes blocker before write route",
+            (blocker_anchor, write_anchor),
+            mode=FragmentMode.ORDERED,
+            match=MatchMode.CASEFOLD_NORMALIZED,
+            section=section,
+            markers=markers,
+            context=context,
+        )
+    ]
+    _extend_semantic_concept(
+        assertions,
+        "fail_closed_before_writes",
+        required=safe_stop_anchor,
+        forbidden=forbidden,
+        section=section,
+        markers=markers,
+        context=context,
+    )
+    _append_machine_exact(assertions, "fail_closed_before_writes machine anchors", machine_fragments, section, markers)
+    _append_public_exact(assertions, "fail_closed_before_writes public anchors", public_fragments, section, markers)
+    return tuple(assertions)
+
+
+def fresh_artifact_required(
+    artifact_paths: FragmentInput,
+    freshness_anchor: str,
+    *,
+    files_written_field: str | None = None,
+    status: str | None = None,
+    freshness_marker: str | None = None,
+    cli_flags: FragmentInput | None = None,
+    required: FragmentInput | None = None,
+    forbidden: FragmentInput | None = None,
+    section: str | None = None,
+    markers: MarkerInput | None = None,
+    context: str | None = None,
+) -> tuple[FragmentAssertion, ...]:
+    """Build a pack for fresh artifact gates while keeping paths and flags exact."""
+
+    assertions = [
+        machine_exact(
+            "fresh_artifact_required artifact paths",
+            artifact_paths,
+            section=section,
+            markers=markers,
+            context=context,
+        )
+    ]
+    _append_machine_exact(
+        assertions,
+        "fresh_artifact_required machine contract",
+        _fragment_tuple(files_written_field, status, freshness_marker, cli_flags),
+        section,
+        markers,
+    )
+    assertions.extend(
+        semantic_concept(
+            "fresh_artifact_required",
+            required=_fragment_tuple(freshness_anchor, required),
+            forbidden=forbidden,
+            section=section,
+            markers=markers,
+            context=context,
+        )
+    )
+    return tuple(assertions)
+
+
+def no_synthesized_child_return(
+    child_return_field: str,
+    rejection_anchor: str,
+    *,
+    schema_fields: FragmentInput | None = None,
+    required: FragmentInput | None = None,
+    forbidden: FragmentInput | None = None,
+    section: str | None = None,
+    markers: MarkerInput | None = None,
+    context: str | None = None,
+) -> tuple[FragmentAssertion, ...]:
+    """Build a pack for child-return provenance without weakening schema literals."""
+
+    assertions = [
+        machine_exact(
+            "no_synthesized_child_return schema fields",
+            _fragment_tuple(child_return_field, schema_fields),
+            section=section,
+            markers=markers,
+            context=context,
+        )
+    ]
+    assertions.extend(
+        semantic_concept(
+            "no_synthesized_child_return",
+            required=_fragment_tuple(rejection_anchor, required),
+            forbidden=forbidden,
+            section=section,
+            markers=markers,
+            context=context,
+        )
+    )
+    return tuple(assertions)
+
+
+def handle_before_content(
+    handle_field: str,
+    content_field: str,
+    *,
+    behavior_anchor: str | None = None,
+    required: FragmentInput | None = None,
+    forbidden: FragmentInput | None = None,
+    section: str | None = None,
+    markers: MarkerInput | None = None,
+    context: str | None = None,
+) -> tuple[FragmentAssertion, ...]:
+    """Build a pack for handle-first staged-init or behavior contracts."""
+
+    assertions = [
+        machine_exact(
+            "handle_before_content field order",
+            (handle_field, content_field),
+            mode=FragmentMode.ORDERED,
+            section=section,
+            markers=markers,
+            context=context,
+        )
+    ]
+    _extend_semantic_concept(
+        assertions,
+        "handle_before_content",
+        required=_fragment_tuple(behavior_anchor, required),
+        forbidden=forbidden,
+        section=section,
+        markers=markers,
+        context=context,
+    )
+    return tuple(assertions)
+
+
+def runtime_label_native(
+    runtime_label: str,
+    native_rule_anchor: str,
+    *,
+    command_labels: FragmentInput | None = None,
+    source_labels: FragmentInput | None = None,
+    wrong_runtime_labels: FragmentInput | None = None,
+    required: FragmentInput | None = None,
+    forbidden: FragmentInput | None = None,
+    section: str | None = None,
+    markers: MarkerInput | None = None,
+    context: str | None = None,
+) -> tuple[FragmentAssertion, ...]:
+    """Build a pack for native runtime labels while keeping visible labels exact."""
+
+    assertions = [
+        public_exact(
+            "runtime_label_native visible labels",
+            _fragment_tuple(runtime_label, command_labels, source_labels),
+            section=section,
+            markers=markers,
+            context=context,
+        )
+    ]
+    _append_public_exact(
+        assertions,
+        "runtime_label_native wrong labels absent",
+        wrong_runtime_labels,
+        section,
+        markers,
+        mode=FragmentMode.ABSENT,
+    )
+    assertions.extend(
+        semantic_concept(
+            "runtime_label_native",
+            required=_fragment_tuple(native_rule_anchor, required),
+            forbidden=forbidden,
+            section=section,
+            markers=markers,
+            context=context,
+        )
+    )
+    return tuple(assertions)
+
+
+def checkpoint_stop_boundary(
+    checkpoint_status: str,
+    stop_anchor: str,
+    *,
+    bounded_fields: FragmentInput | None = None,
+    resume_command: str | None = None,
+    machine_fragments: FragmentInput | None = None,
+    public_fragments: FragmentInput | None = None,
+    required: FragmentInput | None = None,
+    forbidden: FragmentInput | None = None,
+    section: str | None = None,
+    markers: MarkerInput | None = None,
+    context: str | None = None,
+) -> tuple[FragmentAssertion, ...]:
+    """Build a pack for one-shot checkpoint stop and resume boundaries."""
+
+    assertions = [
+        machine_exact(
+            "checkpoint_stop_boundary machine contract",
+            _fragment_tuple(checkpoint_status, bounded_fields, machine_fragments),
+            section=section,
+            markers=markers,
+            context=context,
+        )
+    ]
+    _append_public_exact(
+        assertions,
+        "checkpoint_stop_boundary public continuation",
+        _fragment_tuple(resume_command, public_fragments),
+        section,
+        markers,
+    )
+    assertions.extend(
+        semantic_concept(
+            "checkpoint_stop_boundary",
+            required=_fragment_tuple(stop_anchor, required),
+            forbidden=forbidden,
+            section=section,
+            markers=markers,
+            context=context,
+        )
+    )
+    return tuple(assertions)
+
+
+def schema_averse_first_useful_action(
+    useful_action_anchor: str,
+    schema_anchor: str,
+    *,
+    metric_keys: FragmentInput | None = None,
+    allowed_classes: FragmentInput | None = None,
+    required: FragmentInput | None = None,
+    forbidden: FragmentInput | None = None,
+    section: str | None = None,
+    markers: MarkerInput | None = None,
+    context: str | None = None,
+) -> tuple[FragmentAssertion, ...]:
+    """Build a pack for useful action before schema-heavy interaction."""
+
+    assertions = [
+        semantic_anchor(
+            "schema_averse_first_useful_action useful before schema",
+            (useful_action_anchor, schema_anchor),
+            mode=FragmentMode.ORDERED,
+            match=MatchMode.CASEFOLD_NORMALIZED,
+            section=section,
+            markers=markers,
+            context=context,
+        )
+    ]
+    _append_machine_exact(
+        assertions,
+        "schema_averse_first_useful_action metric contract",
+        _fragment_tuple(metric_keys, allowed_classes),
+        section,
+        markers,
+    )
+    _extend_semantic_concept(
+        assertions,
+        "schema_averse_first_useful_action",
+        required=required,
+        forbidden=forbidden,
+        section=section,
+        markers=markers,
+        context=context,
+    )
+    return tuple(assertions)
+
+
 def fragment_count(
     label: str,
     fragments: FragmentInput,
@@ -460,6 +755,66 @@ def _normalize_optional_fragments(fragments: FragmentInput | None) -> tuple[str,
     if fragments is None:
         return ()
     return _normalize_fragments(fragments)
+
+
+def _fragment_tuple(*groups: FragmentInput | None) -> tuple[str, ...]:
+    fragments: list[str] = []
+    for group in groups:
+        fragments.extend(_normalize_optional_fragments(group))
+    return tuple(fragments)
+
+
+def _append_machine_exact(
+    assertions: list[FragmentAssertion],
+    label: str,
+    fragments: FragmentInput | None,
+    section: str | None,
+    markers: MarkerInput | None,
+    *,
+    mode: FragmentMode | str = FragmentMode.ALL,
+) -> None:
+    normalized = _normalize_optional_fragments(fragments)
+    if normalized:
+        assertions.append(machine_exact(label, normalized, mode=mode, section=section, markers=markers))
+
+
+def _append_public_exact(
+    assertions: list[FragmentAssertion],
+    label: str,
+    fragments: FragmentInput | None,
+    section: str | None,
+    markers: MarkerInput | None,
+    *,
+    mode: FragmentMode | str = FragmentMode.ALL,
+) -> None:
+    normalized = _normalize_optional_fragments(fragments)
+    if normalized:
+        assertions.append(public_exact(label, normalized, mode=mode, section=section, markers=markers))
+
+
+def _extend_semantic_concept(
+    assertions: list[FragmentAssertion],
+    label: str,
+    *,
+    required: FragmentInput | None,
+    forbidden: FragmentInput | None,
+    section: str | None,
+    markers: MarkerInput | None,
+    context: str | None,
+) -> None:
+    required_fragments = _normalize_optional_fragments(required)
+    forbidden_fragments = _normalize_optional_fragments(forbidden)
+    if required_fragments or forbidden_fragments:
+        assertions.extend(
+            semantic_concept(
+                label,
+                required=required_fragments,
+                forbidden=forbidden_fragments,
+                section=section,
+                markers=markers,
+                context=context,
+            )
+        )
 
 
 def _coerce_marker_scope(markers: MarkerInput | None) -> MarkerScope | None:

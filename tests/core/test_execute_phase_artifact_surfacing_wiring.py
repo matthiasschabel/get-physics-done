@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 
 from gpd.core.workflow_staging import load_workflow_stage_manifest
+from tests.assertion_taxonomy_support import assert_prompt_contracts, machine_exact, semantic_concept
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
@@ -24,8 +25,14 @@ def test_execute_phase_loads_artifact_surfacing_before_using_it() -> None:
         for group in manifest.stage("wave_return_checkpoint").conditional_authorities
     )
     assert later_reference in execute_phase
-    assert "contract deliverable that is the `subject` of an acceptance test" in execute_phase
-    assert "contract deliverable tagged as an acceptance test" not in execute_phase
+    assert_prompt_contracts(
+        execute_phase,
+        *semantic_concept(
+            "wave return checkpoint uses subject-based acceptance deliverables",
+            required=("contract deliverable that is the `subject` of an acceptance test",),
+            forbidden=("contract deliverable tagged as an acceptance test",),
+        ),
+    )
 
 
 def test_artifact_surfacing_uses_canonical_paths_and_contract_terms() -> None:
@@ -40,7 +47,13 @@ def test_artifact_surfacing_uses_canonical_paths_and_contract_terms() -> None:
     assert "GPD/REFEREE-REPORT{round_suffix}.tex" in artifact_surfacing
     assert "GPD/review/REVIEW-LEDGER{round_suffix}.json" in artifact_surfacing
     assert "`.md`, `.tex`, `.json`" in artifact_surfacing
-    assert "Contract deliverables that are the `subject` of an acceptance test" in artifact_surfacing
+    assert_prompt_contracts(
+        artifact_surfacing,
+        *semantic_concept(
+            "artifact surfacing contract deliverables use subject-based acceptance",
+            required=("Contract deliverables that are the `subject` of an acceptance test",),
+        ),
+    )
     assert ".gpd/" not in artifact_surfacing
 
 
@@ -81,7 +94,13 @@ def test_execute_plan_uses_staged_execution_bootstrap_and_late_context_refreshes
     assert "segment_execution" not in requested_stage_ids
     assert "summary_finalize" not in requested_stage_ids
     assert 'gpd --raw init execute-phase "${phase}" --include state,config' not in execute_plan
-    assert "summary-schema loads until the stage that actually consumes them" in execute_plan
+    assert_prompt_contracts(
+        execute_plan,
+        machine_exact(
+            "execute-plan defers summary schema to consuming stage",
+            "summary-schema loads until the stage that actually consumes them",
+        ),
+    )
 
 
 def test_execute_phase_loader_does_not_silently_fallback_to_full_init() -> None:

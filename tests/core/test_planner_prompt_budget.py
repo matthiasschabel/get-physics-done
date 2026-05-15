@@ -130,7 +130,10 @@ def test_planner_return_surface_uses_profile_and_role_kits() -> None:
     assert (
         "Completed returns name only fresh PLAN.md files that passed `gpd validate plan-preflight <PLAN.md>`" in returns
     )
-    assert "a YAML envelope is required" not in returns
+    assert_prompt_contracts(
+        returns,
+        semantic_anchor("planner stale yaml-envelope wording absent", "a YAML envelope is required", mode="absent"),
+    )
     assert "gpd_return:\n  status: completed" in returns
     assert "plans_created: 1" in returns
 
@@ -175,7 +178,13 @@ def test_removed_planner_includes_are_late_loaded_by_path_not_body() -> None:
     approximations = _between(planner, "<approximation_tracking>", "</approximation_tracking>")
 
     assert "@{GPD_INSTALL_DIR}" not in conventions
-    assert "Every plan must establish or inherit conventions before task decomposition." in conventions
+    assert_prompt_contracts(
+        conventions,
+        semantic_anchor(
+            "planner convention gate before task decomposition",
+            "Every plan must establish or inherit conventions before task decomposition.",
+        ),
+    )
     assert (
         "Load `{GPD_INSTALL_DIR}/references/planning/planner-conventions.md` when conventions are missing"
         in conventions
@@ -183,7 +192,13 @@ def test_removed_planner_includes_are_late_loaded_by_path_not_body() -> None:
     assert "convention_lock" in conventions
 
     assert "@{GPD_INSTALL_DIR}" not in approximations
-    assert "identify active approximations, expansion parameters, neglected terms" in approximations
+    assert_prompt_contracts(
+        approximations,
+        semantic_anchor(
+            "planner approximation tracking stays concise and active",
+            "identify active approximations, expansion parameters, neglected terms",
+        ),
+    )
     assert "Load `{GPD_INSTALL_DIR}/references/planning/planner-approximations.md` when selecting" in approximations
     assert "`name`, `parameter`, `validity`, `breaks_when`, and `check`" in approximations
 
@@ -244,7 +259,13 @@ def test_planner_policy_detail_lives_in_jit_modules_not_base_prompt() -> None:
     assert "Planning Decision Matrix" in autonomy
 
     research_mode = _read_reference("research_mode")
-    assert "Research mode controls breadth, not correctness." in research_mode
+    assert_prompt_contracts(
+        research_mode,
+        semantic_anchor(
+            "planner research mode does not relax correctness",
+            "Research mode controls breadth, not correctness.",
+        ),
+    )
     assert "Explore Mode" in research_mode
     assert "Exploit Mode" in research_mode
     assert "Adaptive Mode" in research_mode
@@ -293,7 +314,13 @@ def test_planner_prompt_delegates_raw_plan_template_to_canonical_template() -> N
     planner = _read_planner_prompt()
 
     assert "## PLAN.md Source Of Truth" in planner
-    assert "Do not inline, paraphrase, or reconstruct a second raw PLAN template here." in planner
+    assert_prompt_contracts(
+        planner,
+        semantic_anchor(
+            "planner delegates raw plan template to canonical source",
+            "Do not inline, paraphrase, or reconstruct a second raw PLAN template here.",
+        ),
+    )
     assert "## PLAN.md Structure" not in planner
     assert "```markdown\n---\nphase: XX-name" not in planner
     assert "claim-polarization" not in planner
@@ -309,11 +336,20 @@ def test_planner_delegates_checkpoint_examples_to_canonical_reference() -> None:
 
     assert "references/orchestration/checkpoints.md" in checkpoint_section
     assert "references/orchestration/checkpoint-ux-convention.md" in checkpoint_section
-    assert "Do not inline a second checkpoint template here." in checkpoint_section
+    assert_prompt_contracts(
+        checkpoint_section,
+        semantic_anchor(
+            "planner delegates checkpoint examples to canonical reference",
+            "Do not inline a second checkpoint template here.",
+        ),
+        semantic_anchor(
+            "planner inline checkpoint examples stay absent",
+            ("Bad -- Checkpointing every derivation step", "Good -- Single verification at logical boundary"),
+            mode="absent",
+        ),
+    )
     assert '<task type="checkpoint:human-verify"' not in checkpoint_section
     assert '<task type="checkpoint:decision"' not in checkpoint_section
-    assert "Bad -- Checkpointing every derivation step" not in checkpoint_section
-    assert "Good -- Single verification at logical boundary" not in checkpoint_section
 
 
 def test_planner_optional_heuristics_and_checker_examples_live_in_late_refs() -> None:
@@ -340,4 +376,10 @@ def test_planner_optional_heuristics_and_checker_examples_live_in_late_refs() ->
     assert "User Decision Fidelity" in procedure
     assert "Completion Checklists" in procedure
     assert "Checker Feedback Examples" in gap_revision
-    assert "Convention mismatch between imported reference and lock" in gap_revision
+    assert_prompt_contracts(
+        gap_revision,
+        semantic_anchor(
+            "planner gap revision keeps convention mismatch example",
+            "Convention mismatch between imported reference and lock",
+        ),
+    )

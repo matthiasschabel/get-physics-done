@@ -92,6 +92,11 @@ _write_recoverable_result_state = cli_helpers.write_recoverable_result_state
 _write_stale_refresh_skeleton_plan = cli_helpers.write_stale_refresh_skeleton_plan
 _write_verification_body_file = cli_helpers.write_verification_body_file
 _write_write_paper_authoring_input = cli_helpers.write_write_paper_authoring_input
+assert_cli_human_contract = cli_helpers.assert_cli_human_contract
+assert_cli_help_contract = cli_helpers.assert_cli_help_contract
+assert_cli_success = cli_helpers.assert_cli_success
+assert_no_traceback = cli_helpers.assert_no_traceback
+assert_result_exit = cli_helpers.assert_result_exit
 invoke_help_text = cli_helpers.invoke_help_text
 json_output_from_result = cli_helpers.json_output_from_result
 
@@ -138,14 +143,12 @@ class _ExecutionSnapshot(SimpleNamespace):
 
 def test_version():
     result = runner.invoke(app, ["--version"])
-    assert result.exit_code == 0
-    assert "gpd" in result.output
+    assert_cli_human_contract(result, required_all=("gpd",))
 
 
 def test_version_subcommand():
     result = runner.invoke(app, ["version"])
-    assert result.exit_code == 0
-    assert "gpd" in result.output
+    assert_cli_human_contract(result, required_all=("gpd",))
 
 
 def test_version_subcommand_prefers_checkout_version(tmp_path: Path):
@@ -153,20 +156,17 @@ def test_version_subcommand_prefers_checkout_version(tmp_path: Path):
 
     result = runner.invoke(app, ["--cwd", str(checkout), "version"])
 
-    assert result.exit_code == 0
-    assert "9.9.9" in result.output
+    assert_cli_human_contract(result, required_all=("9.9.9",))
 
 
 def test_raw_version_option_outputs_json():
     result = runner.invoke(app, ["--raw", "--version"])
-    assert result.exit_code == 0
-    assert json.loads(result.output)["result"].startswith("gpd ")
+    assert json_output_from_result(result)["result"].startswith("gpd ")
 
 
 def test_raw_version_subcommand_outputs_json():
     result = runner.invoke(app, ["--raw", "version"])
-    assert result.exit_code == 0
-    assert json.loads(result.output)["result"].startswith("gpd ")
+    assert json_output_from_result(result)["result"].startswith("gpd ")
 
 
 def test_entrypoint_reexecs_from_checkout_when_running_outside_checkout(tmp_path: Path, monkeypatch) -> None:
@@ -210,11 +210,13 @@ def test_entrypoint_reexecs_from_checkout_when_running_outside_checkout(tmp_path
 
 def test_help_surfaces_core_and_auxiliary_commands() -> None:
     result = runner.invoke(app, ["--help"])
-    assert result.exit_code == 0
     # fmt: off
-    _assert_contains_lines(result.output, "observe | state | phase | health | paper-build | doctor | Check GPD installation and environment health | inspect runtime readiness | install | Install GPD skills, agents, and hooks into runtime | uninstall | Remove GPD skills, agents, and hooks from runtime | init | validate | readiness | observability")
+    normalized_output = assert_cli_help_contract(
+        result,
+        commands=("observe", "state", "phase", "health", "paper-build", "doctor", "install", "uninstall", "init", "validate", "readiness", "observability"),
+        sections=("Check GPD installation and environment health", "inspect runtime readiness", "Install GPD skills, agents, and hooks into runtime", "Remove GPD skills, agents, and hooks from runtime"),
+    )
     # fmt: on
-    normalized_output = _normalize_cli_output(result.output)
     # fmt: off
     _assert_contains_lines(normalized_output, f"permissions | Runtime permission readiness and sync | gpd doctor | {local_cli_unattended_readiness_command()} | {local_cli_permissions_status_command()} | {local_cli_permissions_sync_command()} | gpd observe execution | {local_cli_resume_recent_command()} | {local_cli_install_local_example_command()} | {local_cli_doctor_local_command()} | {local_cli_validate_command_context_command()} | presets | Workflow presets for local CLI preview | application | integrations | Optional shared capability integrations")
     # fmt: on
@@ -280,10 +282,7 @@ def test_help_surfaces_public_fragments(
 
 def test_workflow_presets_surface_lists_catalog() -> None:
     result = runner.invoke(app, ["presets", "list"])
-    assert result.exit_code == 0
-    assert "Workflow Presets" in result.output
-    assert "core-research" in result.output
-    assert "Core research" in result.output
+    assert_cli_human_contract(result, required_all=("Workflow Presets", "core-research", "Core research"))
 
 
 def test_integrations_status_reports_effective_project_local_state_and_plan_readiness(tmp_path: Path) -> None:
@@ -374,7 +373,11 @@ def test_integrations_status_rejects_unsupported_api_key_env_field(tmp_path: Pat
     result = runner.invoke(app, ["--cwd", str(tmp_path), "--raw", "integrations", "status", "wolfram"])
 
     assert result.exit_code != 0
-    assert "integrations.wolfram contains unsupported keys: api_key_env" in _normalize_cli_output(result.output)
+    assert_cli_human_contract(
+        result,
+        required_all=("integrations.wolfram contains unsupported keys: api_key_env",),
+        expect_exit=None,
+    )
 
 
 @pytest.mark.parametrize(
@@ -603,7 +606,7 @@ def test_workflow_preset_apply_dry_run_projectless_does_not_create_gpd_dir(tmp_p
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0, result.output
+    assert_cli_success(result)
     assert not (tmp_path / "GPD").exists()
 
 
@@ -660,23 +663,27 @@ def test_cost_human_output_stays_read_only_and_advisory(tmp_path: Path) -> None:
     with patch("gpd.core.costs.build_cost_summary", return_value=summary):
         result = runner.invoke(app, ["--cwd", str(tmp_path), "cost", "--last-sessions", "1"])
 
-    assert result.exit_code == 0
-    assert "Cost Summary" in result.output
-    assert "Read-only machine-local usage/cost summary." in result.output
-    assert "clearly labels estimates or unavailable values" in result.output
-    assert "best-effort via notify-hook" in result.output
-    assert "Scope" in result.output
-    assert "Used" in result.output
-    assert "85.00%" in result.output
-    assert "Configured project USD budget is nearing budget" in result.output
-    assert "Pricing snapshot" in result.output
-    assert "not configured" in result.output
-    assert "Current project" in result.output
-    assert "Recent sessions" in result.output
-    assert "Interpretation" in result.output
-    assert "tokens measured; USD unavailable" in result.output
-    assert "Measured tokens are available, but no pricing snapshot is configured" not in result.output
-    _assert_cost_posture_semantics(result.output)
+    output = assert_cli_human_contract(
+        result,
+        required_all=(
+            "Cost Summary",
+            "Read-only machine-local usage/cost summary.",
+            "clearly labels estimates or unavailable values",
+            "best-effort via notify-hook",
+            "Scope",
+            "Used",
+            "85.00%",
+            "Configured project USD budget is nearing budget",
+            "Pricing snapshot",
+            "not configured",
+            "Current project",
+            "Recent sessions",
+            "Interpretation",
+            "tokens measured; USD unavailable",
+        ),
+        forbidden=("Measured tokens are available, but no pricing snapshot is configured",),
+    )
+    _assert_cost_posture_semantics(output)
 
 
 def test_permissions_status_raw_includes_runtime_capabilities(tmp_path: Path) -> None:
@@ -1056,7 +1063,7 @@ def test_resume_recent_raw_surfaces_machine_local_recent_projects(tmp_path: Path
     monkeypatch.delenv("GPD_DATA_DIR", raising=False)
 
     result = runner.invoke(app, ["--raw", "resume", "--recent"])
-    parsed = json.loads(result.output)
+    parsed = json_output_from_result(result)
 
     assert parsed["count"] == 2
     assert parsed["projects"][0]["project_root"] == resumable_root.as_posix()
@@ -1094,20 +1101,22 @@ def test_resume_recent_human_output_surfaces_command_and_missing_projects(tmp_pa
 
     result = runner.invoke(app, ["resume", "--recent"])
 
-    assert result.exit_code == 0
-    normalized = " ".join(result.output.split())
-    assert "Recent Projects" in result.output
-    assert "Next here" in result.output
-    assert "Resume:" in result.output
-    assert "gpd --cwd" in result.output
-    assert "continue there with `resume-work`" in result.output
-    assert "resume-work" in result.output
-    assert "suggest-next" in result.output
-    assert "Why shown: shown because it still has a usable handoff target" in result.output
-    assert "ready to reopen" in result.output
-    assert "Inspect:" not in result.output
-    assert "inspect the selected workspace" not in normalized
-    assert "project root missing" in result.output or "project unavailable on this machine" in result.output
+    assert_cli_human_contract(
+        result,
+        required_all=(
+            "Recent Projects",
+            "Next here",
+            "Resume:",
+            "gpd --cwd",
+            "continue there with `resume-work`",
+            "resume-work",
+            "suggest-next",
+            "Why shown: shown because it still has a usable handoff target",
+            "ready to reopen",
+        ),
+        required_any=("project root missing", "project unavailable on this machine"),
+        forbidden=("Inspect:", "inspect the selected workspace"),
+    )
 
 
 def test_resume_recent_human_output_tolerates_path_resolution_permission_errors(
@@ -1148,9 +1157,7 @@ def test_resume_recent_human_output_tolerates_path_resolution_permission_errors(
 
     result = runner.invoke(app, ["resume", "--recent"])
 
-    assert result.exit_code == 0
-    assert "project unavailable on this machine" in result.output
-    assert "gpd --cwd" in result.output
+    assert_cli_human_contract(result, required_all=("project unavailable on this machine", "gpd --cwd"))
 
 
 def test_resume_recent_raw_downgrades_missing_handoff_rows_to_non_resumable(tmp_path: Path, monkeypatch) -> None:
@@ -1181,7 +1188,7 @@ def test_resume_recent_raw_downgrades_missing_handoff_rows_to_non_resumable(tmp_
     monkeypatch.delenv("GPD_DATA_DIR", raising=False)
 
     result = runner.invoke(app, ["--raw", "resume", "--recent"])
-    parsed = json.loads(result.output)
+    parsed = json_output_from_result(result)
 
     assert parsed["count"] == 1
     assert parsed["projects"][0]["project_root"] == project_root.as_posix()
@@ -1214,9 +1221,10 @@ def test_resume_plain_output_hints_recent_when_workspace_is_missing(tmp_path: Pa
 
     result = runner.invoke(app, ["resume"])
 
-    assert result.exit_code == 0
-    assert "No GPD planning directory" in result.output
-    assert local_cli_resume_recent_command() in result.output
+    assert_cli_human_contract(
+        result,
+        required_all=("No GPD planning directory", local_cli_resume_recent_command()),
+    )
 
 
 def test_resume_plain_output_surfaces_ambiguous_recent_project_reason(tmp_path: Path, monkeypatch) -> None:
@@ -1270,11 +1278,14 @@ def test_resume_plain_output_surfaces_ambiguous_recent_project_reason(tmp_path: 
 
     result = runner.invoke(app, ["resume"])
 
-    assert result.exit_code == 0
-    output = _normalize_cli_output(result.output)
-    assert "GPD found 2 recoverable recent projects on this machine, so you need to choose one." in output
-    assert "2 recoverable choices require explicit selection" in output
-    assert local_cli_resume_recent_command() in output
+    assert_cli_human_contract(
+        result,
+        required_all=(
+            "GPD found 2 recoverable recent projects on this machine, so you need to choose one.",
+            "2 recoverable choices require explicit selection",
+            local_cli_resume_recent_command(),
+        ),
+    )
 
 
 def test_resume_plain_output_surfaces_auto_selected_recent_project(tmp_path: Path, monkeypatch) -> None:
@@ -1337,12 +1348,16 @@ def test_resume_plain_output_surfaces_auto_selected_recent_project(tmp_path: Pat
 
     result = runner.invoke(app, ["resume"])
 
-    assert result.exit_code == 0
-    assert "Project" in result.output
-    assert "Project label" in result.output
-    assert "Project summary" in result.output
-    assert "auto-selected recent project" in result.output
-    assert "machine-local recent-project index" in result.output
+    assert_cli_human_contract(
+        result,
+        required_all=(
+            "Project",
+            "Project label",
+            "Project summary",
+            "auto-selected recent project",
+            "machine-local recent-project index",
+        ),
+    )
 
 
 def test_resume_plain_output_keeps_recent_project_selection_explicit_when_not_auto_selected(
@@ -1398,10 +1413,11 @@ def test_resume_plain_output_keeps_recent_project_selection_explicit_when_not_au
 
     result = runner.invoke(app, ["resume"])
 
-    assert result.exit_code == 0
-    assert "Project" in result.output
-    assert "auto-selected recent project" not in result.output
-    assert "recent project selected explicitly" in result.output
+    assert_cli_human_contract(
+        result,
+        required_all=("Project", "recent project selected explicitly"),
+        forbidden=("auto-selected recent project",),
+    )
 
 
 def test_load_recent_projects_rows_returns_canonical_display_rows(tmp_path: Path, monkeypatch) -> None:
@@ -1635,14 +1651,14 @@ def test_resume_and_command_context_resume_work_do_not_migrate_root_planning_fil
     )
 
     resume_result = runner.invoke(app, ["--raw", "--cwd", str(workspace), "resume"], catch_exceptions=False)
-    assert resume_result.exit_code == 0, resume_result.output
+    assert_cli_success(resume_result)
 
     command_context_result = runner.invoke(
         app,
         ["--raw", "--cwd", str(workspace), "validate", "command-context", "resume-work"],
         catch_exceptions=False,
     )
-    assert command_context_result.exit_code == 1, command_context_result.output
+    assert_result_exit(command_context_result, 1)
 
     assert not (workspace / "GPD" / "PROJECT.md").exists()
     assert not (workspace / "GPD" / "ROADMAP.md").exists()
@@ -1686,9 +1702,9 @@ def test_read_only_state_progress_and_suggest_resolve_ancestor_without_migration
             catch_exceptions=False,
         )
 
-    assert snapshot_result.exit_code == 0, snapshot_result.output
-    assert progress_result.exit_code == 0, progress_result.output
-    assert suggest_result.exit_code == 0, suggest_result.output
+    assert_cli_success(snapshot_result)
+    assert_cli_success(progress_result)
+    assert_cli_success(suggest_result)
     mock_snapshot.assert_called_once_with(project_root.resolve())
     mock_progress.assert_called_once_with(project_root.resolve(), "json")
     mock_suggest.assert_called_once_with(project_root.resolve())
@@ -1766,12 +1782,15 @@ def test_resume_plain_output_surfaces_session_handoff_status(tmp_path: Path, mon
 
     result = runner.invoke(app, ["resume"])
 
-    assert result.exit_code == 0
-    normalized = " ".join(result.output.split())
-    assert "A continuity handoff is available" in normalized
-    assert "continuity_handoff" in result.output
-    assert "no resumable bounded segment is currently active." in normalized
-    assert "Recovery context is available, but no live bounded segment is currently resumable." not in result.output
+    assert_cli_human_contract(
+        result,
+        required_all=(
+            "A continuity handoff is available",
+            "continuity_handoff",
+            "no resumable bounded segment is currently active.",
+        ),
+        forbidden=("Recovery context is available, but no live bounded segment is currently resumable.",),
+    )
 
 
 def test_resume_candidate_rerun_anchor_uses_last_result_id() -> None:
@@ -1861,12 +1880,15 @@ def test_resume_plain_output_surfaces_hydrated_last_result_context(
 
     result = runner.invoke(app, ["resume"])
 
-    assert result.exit_code == 0
-    normalized = " ".join(result.output.split())
-    assert "Resume Summary" in result.output
-    assert "Benchmark reproduction" in result.output
-    assert "R-bridge-01" in result.output
-    assert "A continuity handoff is available" in normalized
+    assert_cli_human_contract(
+        result,
+        required_all=(
+            "Resume Summary",
+            "Benchmark reproduction",
+            "R-bridge-01",
+            "A continuity handoff is available",
+        ),
+    )
 
 
 def test_resume_plain_output_surfaces_bounded_segment_status_from_canonical_resume_mode(
@@ -1912,11 +1934,14 @@ def test_resume_plain_output_surfaces_bounded_segment_status_from_canonical_resu
 
     result = runner.invoke(app, ["resume"])
 
-    assert result.exit_code == 0
-    normalized = " ".join(result.output.split())
-    assert "A bounded segment is resumable from the current workspace state." in normalized
-    assert "resume-work" in result.output
-    assert "suggest-next" in result.output
+    assert_cli_human_contract(
+        result,
+        required_all=(
+            "A bounded segment is resumable from the current workspace state.",
+            "resume-work",
+            "suggest-next",
+        ),
+    )
 
 
 def test_resume_plain_output_surfaces_canonical_bounded_segment_without_live_snapshot(
@@ -1962,11 +1987,14 @@ def test_resume_plain_output_surfaces_canonical_bounded_segment_without_live_sna
 
     result = runner.invoke(app, ["resume"])
 
-    assert result.exit_code == 0
-    normalized = " ".join(result.output.split())
-    assert "A bounded segment is resumable from the current workspace state." in normalized
-    assert "resume-work" in result.output
-    assert "suggest-next" in result.output
+    assert_cli_human_contract(
+        result,
+        required_all=(
+            "A bounded segment is resumable from the current workspace state.",
+            "resume-work",
+            "suggest-next",
+        ),
+    )
 
 
 def test_resume_plain_output_surfaces_interrupted_agent_status_from_candidate(tmp_path: Path, monkeypatch) -> None:
@@ -1996,9 +2024,10 @@ def test_resume_plain_output_surfaces_interrupted_agent_status_from_candidate(tm
 
     result = runner.invoke(app, ["resume"])
 
-    assert result.exit_code == 0
-    normalized = " ".join(result.output.split())
-    assert "An interrupted agent marker is present, but no bounded resume segment is active." in normalized
+    assert_cli_human_contract(
+        result,
+        required_all=("An interrupted agent marker is present, but no bounded resume segment is active.",),
+    )
 
 
 def test_resume_plain_output_surfaces_machine_change_as_advisory_status(tmp_path: Path, monkeypatch) -> None:
@@ -2025,14 +2054,19 @@ def test_resume_plain_output_surfaces_machine_change_as_advisory_status(tmp_path
 
     result = runner.invoke(app, ["resume"])
 
-    assert result.exit_code == 0
-    normalized = " ".join(result.output.split())
-    assert "A machine change was detected" in normalized
-    assert "the project state is portable and does not require repair." in normalized
-    assert "Rerun the installer" in normalized
-    assert "resume-work" not in result.output
-    assert "suggest-next" not in result.output
-    assert "No recent local recovery target is currently recorded." not in result.output
+    assert_cli_human_contract(
+        result,
+        required_all=(
+            "A machine change was detected",
+            "the project state is portable and does not require repair.",
+            "Rerun the installer",
+        ),
+        forbidden=(
+            "resume-work",
+            "suggest-next",
+            "No recent local recovery target is currently recorded.",
+        ),
+    )
 
 
 def test_resume_plain_output_keeps_machine_change_notice_when_session_handoff_is_primary(
@@ -2075,13 +2109,16 @@ def test_resume_plain_output_keeps_machine_change_notice_when_session_handoff_is
 
     result = runner.invoke(app, ["resume"])
 
-    assert result.exit_code == 0
-    normalized = " ".join(result.output.split())
-    assert "A continuity handoff is available" in normalized
-    assert "continuity_handoff" in result.output
-    assert "Rerun the installer" in normalized
-    assert "resume-work" in result.output
-    assert "suggest-next" in result.output
+    assert_cli_human_contract(
+        result,
+        required_all=(
+            "A continuity handoff is available",
+            "continuity_handoff",
+            "Rerun the installer",
+            "resume-work",
+            "suggest-next",
+        ),
+    )
 
 
 def test_resume_plain_output_surfaces_advisory_live_execution_status(tmp_path: Path, monkeypatch) -> None:
@@ -2109,12 +2146,14 @@ def test_resume_plain_output_surfaces_advisory_live_execution_status(tmp_path: P
 
     result = runner.invoke(app, ["resume"])
 
-    assert result.exit_code == 0
-    normalized = " ".join(result.output.split())
-    assert "A live execution snapshot exists" in normalized
-    assert "it is advisory only and does not expose a portable bounded-segment target." in normalized
-    assert "resume-work" not in result.output
-    assert "suggest-next" not in result.output
+    assert_cli_human_contract(
+        result,
+        required_all=(
+            "A live execution snapshot exists",
+            "it is advisory only and does not expose a portable bounded-segment target.",
+        ),
+        forbidden=("resume-work", "suggest-next"),
+    )
 
 
 def test_resume_plain_output_surfaces_missing_handoff_status(tmp_path: Path, monkeypatch) -> None:
@@ -2147,13 +2186,15 @@ def test_resume_plain_output_surfaces_missing_handoff_status(tmp_path: Path, mon
 
     result = runner.invoke(app, ["resume"])
 
-    assert result.exit_code == 0
-    normalized = " ".join(result.output.split())
-    assert "Canonical recovery metadata exists" in normalized
-    assert "continuity_handoff" in result.output
-    assert "the continuity handoff file is missing." in normalized
-    assert "resume-work" not in result.output
-    assert "suggest-next" not in result.output
+    assert_cli_human_contract(
+        result,
+        required_all=(
+            "Canonical recovery metadata exists",
+            "continuity_handoff",
+            "the continuity handoff file is missing.",
+        ),
+        forbidden=("resume-work", "suggest-next"),
+    )
 
 
 def test_resume_raw_adds_canonical_recovery_projection_fields(tmp_path: Path, monkeypatch) -> None:
@@ -4756,13 +4797,13 @@ def test_raw_json_output(mock_load):
 def test_raw_json_get_outputs_literal_json_value():
     result = runner.invoke(app, ["--raw", "json", "get", ".x"], input='{"x": 1}\n')
     assert result.exit_code == 0
-    assert json.loads(result.output) == "1"
+    assert json_output_from_result(result) == "1"
 
 
 def test_raw_json_get_error_outputs_json():
     result = runner.invoke(app, ["--raw", "json", "get", ".x"], input="not json\n")
     assert result.exit_code == 1
-    assert "Invalid JSON input" in json.loads(result.output)["error"]
+    assert "Invalid JSON input" in json_output_from_result(result, expect_exit=1)["error"]
 
 
 def test_normalize_global_cli_options_moves_trailing_root_options(tmp_path: Path) -> None:
@@ -6145,7 +6186,7 @@ def test_doctor_live_executable_probes_pass_through(monkeypatch: pytest.MonkeyPa
     result = runner.invoke(app, ["--cwd", str(tmp_path), "--raw", "doctor", "--live-executable-probes"])
 
     assert result.exit_code == 0
-    assert json.loads(result.output) == {"mode": "runtime-readiness", "overall": "ok"}
+    assert json_output_from_result(result) == {"mode": "runtime-readiness", "overall": "ok"}
     assert captured["kwargs"] == {
         "specs_dir": SPECS_DIR,
         "version": None,
@@ -6168,7 +6209,7 @@ def test_doctor_runtime_mode_uses_run_doctor(mock_doctor, tmp_path: Path) -> Non
     result = runner.invoke(app, ["--cwd", str(tmp_path), "--raw", "doctor", "--runtime", PRIMARY_RUNTIME, "--local"])
 
     assert result.exit_code == 0
-    assert json.loads(result.output) == {"mode": "runtime-readiness", "overall": "ok"}
+    assert json_output_from_result(result) == {"mode": "runtime-readiness", "overall": "ok"}
     mock_doctor.assert_called_once_with(
         specs_dir=SPECS_DIR,
         runtime=PRIMARY_RUNTIME,
@@ -6191,7 +6232,7 @@ def test_doctor_runtime_readiness_mode(mock_doctor, tmp_path: Path):
     result = runner.invoke(app, ["--cwd", str(tmp_path), "--raw", "doctor", "--runtime", runtime_name, "--global"])
 
     assert result.exit_code == 0
-    assert json.loads(result.output) == {"mode": "runtime-readiness", "overall": "ok"}
+    assert json_output_from_result(result) == {"mode": "runtime-readiness", "overall": "ok"}
     mock_doctor.assert_called_once_with(
         specs_dir=SPECS_DIR,
         runtime=runtime_name,
@@ -6219,7 +6260,7 @@ def test_doctor_target_dir_infers_install_scope(mock_doctor, tmp_path: Path) -> 
         )
 
     assert result.exit_code == 0
-    assert json.loads(result.output) == {"mode": "runtime-readiness", "overall": "ok"}
+    assert json_output_from_result(result) == {"mode": "runtime-readiness", "overall": "ok"}
     mock_matches_global.assert_called_once_with(runtime_name, str(target_dir), action="doctor")
     mock_doctor.assert_called_once_with(
         specs_dir=SPECS_DIR,
@@ -6248,7 +6289,7 @@ def test_doctor_target_dir_stays_local_when_target_is_not_global(mock_doctor, tm
         )
 
     assert result.exit_code == 0
-    assert json.loads(result.output) == {"mode": "runtime-readiness", "overall": "ok"}
+    assert json_output_from_result(result) == {"mode": "runtime-readiness", "overall": "ok"}
     mock_matches_global.assert_called_once_with(runtime_name, str(target_dir), action="doctor")
     mock_doctor.assert_called_once_with(
         specs_dir=SPECS_DIR,
@@ -6277,7 +6318,7 @@ def test_doctor_runtime_mode_defaults_to_local_target_when_scope_is_unspecified(
         result = runner.invoke(app, ["--cwd", str(tmp_path), "--raw", "doctor", "--runtime", runtime_name])
 
     assert result.exit_code == 0
-    assert json.loads(result.output) == {"mode": "runtime-readiness", "overall": "ok"}
+    assert json_output_from_result(result) == {"mode": "runtime-readiness", "overall": "ok"}
     mock_doctor.assert_called_once_with(
         specs_dir=SPECS_DIR,
         runtime=runtime_name,
@@ -6833,7 +6874,7 @@ def test_suggest_forwards_limit_and_serializes_raw_output_from_nested_cwd(mock_s
     assert result.exit_code == 0
     mock_suggest.assert_called_once_with(project_root.resolve(), limit=2)
     mock_result.model_dump.assert_called_once_with(mode="json", by_alias=True)
-    assert json.loads(result.output) == payload
+    assert json_output_from_result(result) == payload
 
 
 @patch("gpd.core.suggest.suggest_next")
@@ -6914,7 +6955,7 @@ def test_init_execute_phase_raw_invalid_stage_reports_clean_json_error(mock_init
 
     payload = json_output_from_result(result, expect_exit=1)
     assert payload["error"] == "Unknown execute-phase stage 'bad'."
-    assert "Traceback" not in result.output
+    assert_no_traceback(result)
     mock_init.assert_called_once()
 
 

@@ -10,6 +10,7 @@ from unittest.mock import patch
 import gpd.registry as registry_module
 from gpd.core.workflow_staging import WorkflowStage, WorkflowStageConditionalAuthority, WorkflowStageManifest
 from gpd.registry import AgentDef, CommandDef, SkillDef
+from tests.assertion_taxonomy_support import assert_prompt_contracts, semantic_concept
 
 _TASK_OVERLAY_BODY_KEYS = frozenset(
     {"body", "content", "markdown", "text", "overlay_body", "overlay_content", "overlay_markdown", "overlay_text"}
@@ -715,14 +716,21 @@ def test_get_skill_verify_work_surfaces_staged_loading_sidecar() -> None:
     ]
     assert result["staged_loading"]["workflow_id"] == "verify-work"
     assert result["staged_loading"]["stages"][0]["loaded_authorities"] == ["workflows/verify-work/session-router.md"]
-    assert "Follow the included first-stage authority exactly" in result["content"]
-    assert (
-        "The staged workflow authorities own the detailed check taxonomy; this wrapper only bootstraps the canonical "
-        "verification surface and delegates the physics checks." in result["content"]
+    assert_prompt_contracts(
+        result["content"],
+        *semantic_concept(
+            "verify-work skill delegates detailed checks to staged authorities",
+            required=(
+                "Follow the included first-stage authority exactly",
+                "The staged workflow authorities own the detailed check taxonomy; this wrapper only bootstraps the canonical verification surface and delegates the physics checks.",
+            ),
+            forbidden=(
+                "One check at a time, plain text responses, no interrogation.",
+                "Physics verification is not binary:",
+            ),
+        ),
     )
     assert "Severity Classification" not in result["content"]
-    assert "One check at a time, plain text responses, no interrogation." not in result["content"]
-    assert "Physics verification is not binary:" not in result["content"]
     assert "For deeper focused analysis" not in result["content"]
     inventory_build = result["staged_loading"]["stages"][2]
     assert inventory_build["loaded_authorities"] == ["workflows/verify-work/inventory-build.md"]

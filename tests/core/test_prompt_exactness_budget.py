@@ -11,8 +11,14 @@ from gpd.core.prompt_exactness_diagnostics import bounded_exact_assertion_diagno
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 EXACTNESS_TOTAL_BUDGETS = {
-    "brittle_prose_assertions": 720,
-    "exact_assertion_count": 5_460,
+    # Phase 8 observed 548/5184 after long-tail taxonomy-helper migration.
+    "brittle_prose_assertions": 560,
+    "exact_assertion_count": 5_210,
+}
+TAXONOMY_HELPER_TOTAL_FLOORS = {
+    # Phase 8 observed 80 files and 735 helper calls; keep a small call-count cushion.
+    "taxonomy_helper_file_count": 80,
+    "taxonomy_helper_call_count": 725,
 }
 HIGH_SEVERITY_BASELINES: dict[str, dict[str, int]] = {}
 TAXONOMY_HELPER_BRITTLE_BASELINES = {
@@ -195,6 +201,19 @@ def test_exactness_totals_do_not_grow_past_baseline() -> None:
         observed = totals[field]
         assert isinstance(observed, int)
         assert observed <= budget, f"{field} budget exceeded: observed={observed} max={budget}"
+
+
+def test_taxonomy_helper_usage_reaches_phase8_floor() -> None:
+    exactness = _exactness_payload()
+    usage = exactness["taxonomy_helper_usage"]
+    assert isinstance(usage, dict)
+    totals = usage["totals"]
+    assert isinstance(totals, dict)
+
+    for field, floor in TAXONOMY_HELPER_TOTAL_FLOORS.items():
+        observed = totals[field]
+        assert isinstance(observed, int)
+        assert observed >= floor, f"{field} floor missed: observed={observed} min={floor}"
 
 
 def test_exactness_migration_ledger_preserves_existing_exactness_totals() -> None:

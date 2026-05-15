@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from gpd.core.workflow_staging import load_workflow_stage_manifest
+from tests.assertion_taxonomy_support import assert_prompt_contracts, semantic_anchor
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COMMAND_PATH = REPO_ROOT / "src" / "gpd" / "commands" / "plan-phase.md"
@@ -41,8 +42,13 @@ def test_plan_phase_command_bootstraps_only_first_stage_authority() -> None:
 
     assert "@{GPD_INSTALL_DIR}/workflows/plan-phase/phase-bootstrap.md" in command
     assert "@{GPD_INSTALL_DIR}/workflows/plan-phase.md" not in command
-    assert "Later stage loading is manifest-owned" in command
-    assert "do not duplicate the stage manifest here" in command
+    assert_prompt_contracts(
+        command,
+        semantic_anchor(
+            "plan-phase command delegates later stage loading",
+            ("Later stage loading is manifest-owned", "do not duplicate the stage manifest here"),
+        ),
+    )
 
 
 def test_plan_phase_bootstrap_defers_late_authorities() -> None:
@@ -77,7 +83,14 @@ def test_plan_phase_bootstrap_defers_late_authorities() -> None:
         "**Dirty worktree safety gate:**"
     )
     assert "Bootstrap proof invariant: `--skip-verify` never waives proof-bearing plan" in bootstrap_text
-    assert "Required 4-way tangent decision model" not in bootstrap_text
+    assert_prompt_contracts(
+        bootstrap_text,
+        semantic_anchor(
+            "plan-phase bootstrap omits late tangent decision model",
+            "Required 4-way tangent decision model",
+            mode="absent",
+        ),
+    )
 
 
 def test_plan_phase_research_routing_defers_phase_file_content_to_authoring() -> None:

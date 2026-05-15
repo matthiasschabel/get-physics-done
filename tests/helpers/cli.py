@@ -7,7 +7,7 @@ import re
 import subprocess
 import sys
 import zipfile
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from click.testing import Result
@@ -66,6 +66,136 @@ def assert_result_exit(result: Result, expected_exit: int = 0) -> None:
     assert result.exit_code == expected_exit, _result_failure_message(result, expected_exit)
 
 
+def assert_cli_success(result: Result, expected_exit: int = 0) -> Result:
+    """Assert a CLI result exited successfully and return it for chaining."""
+
+    assert_result_exit(result, expected_exit)
+    return result
+
+
+def cli_text(result: Result, *, normalized: bool = True, expect_exit: int | None = None) -> str:
+    """Return CLI output with optional exit validation and normalization."""
+
+    if expect_exit is not None:
+        assert_result_exit(result, expect_exit)
+    text = _ANSI_ESCAPE_RE.sub("", result.output)
+    return normalize_cli_output(text) if normalized else text
+
+
+def assert_cli_human_contract(
+    result_or_text: Result | str,
+    *,
+    required_all: Sequence[str] = (),
+    required_any: Sequence[str] = (),
+    forbidden: Sequence[str] = (),
+    normalize: bool = True,
+    expect_exit: int | None = 0,
+) -> str:
+    """Assert normalized human CLI text contains required fragments and excludes stale ones."""
+
+    text = _text_from_result_or_text(result_or_text, normalize=normalize, expect_exit=expect_exit)
+    required_all_pairs = _contract_fragment_pairs(required_all, normalize=normalize)
+    required_any_pairs = _contract_fragment_pairs(required_any, normalize=normalize)
+    forbidden_pairs = _contract_fragment_pairs(forbidden, normalize=normalize)
+
+    failures: list[str] = []
+    missing_all = [fragment for fragment, needle in required_all_pairs if needle not in text]
+    if missing_all:
+        failures.append(f"missing required fragments: {missing_all!r}")
+    if required_any_pairs and not any(needle in text for _fragment, needle in required_any_pairs):
+        failures.append(f"missing any required fragment from: {[fragment for fragment, _needle in required_any_pairs]!r}")
+    unexpected = [fragment for fragment, needle in forbidden_pairs if needle in text]
+    if unexpected:
+        failures.append(f"unexpected forbidden fragments: {unexpected!r}")
+    if failures:
+        raise AssertionError("CLI human contract failed:\n" + "\n".join(failures) + f"\n\noutput:\n{text}")
+    return text
+
+
+def assert_cli_json_subset(
+    result_or_payload: Result | object,
+    expected_subset: object,
+    *,
+    expected_exit: int | None = 0,
+) -> object:
+    """Assert a CLI JSON payload contains ``expected_subset`` recursively."""
+
+    payload = _json_from_result_or_payload(result_or_payload, expected_exit=expected_exit)
+    _assert_json_subset(payload, expected_subset, path="$")
+    return payload
+
+
+def assert_cli_json_contract(
+    result_or_payload: Result | object,
+    *,
+    expected_subset: object | None = None,
+    required_keys: Sequence[str] = (),
+    forbidden_keys: Sequence[str] = (),
+    expected_exit: int | None = 0,
+) -> dict[str, object]:
+    """Assert top-level JSON object shape without relaxing exact contracts by default."""
+
+    payload = _json_from_result_or_payload(result_or_payload, expected_exit=expected_exit)
+    if not isinstance(payload, dict):
+        raise AssertionError(f"expected JSON object payload, got {type(payload).__name__}: {payload!r}")
+
+    if expected_subset is not None:
+        _assert_json_subset(payload, expected_subset, path="$")
+    missing = [key for key in required_keys if key not in payload]
+    if missing:
+        raise AssertionError(f"missing required JSON keys: {missing!r}\n\npayload:\n{payload!r}")
+    unexpected = [key for key in forbidden_keys if key in payload]
+    if unexpected:
+        raise AssertionError(f"unexpected forbidden JSON keys: {unexpected!r}\n\npayload:\n{payload!r}")
+    return payload
+
+
+def assert_cli_help_contract(
+    text_or_result: Result | str,
+    *,
+    commands: Sequence[str] = (),
+    options: Sequence[str] = (),
+    sections: Sequence[str] = (),
+    forbidden: Sequence[str] = (),
+    normalize: bool = True,
+    expect_exit: int | None = 0,
+) -> str:
+    """Assert common CLI help surface fragments with grouped diagnostics."""
+
+    text = _text_from_result_or_text(text_or_result, normalize=normalize, expect_exit=expect_exit)
+    failures: list[str] = []
+    for label, fragments in (
+        ("commands", commands),
+        ("options", options),
+        ("sections", sections),
+    ):
+        missing = [
+            fragment
+            for fragment, needle in _contract_fragment_pairs(fragments, normalize=normalize)
+            if needle not in text
+        ]
+        if missing:
+            failures.append(f"missing help {label}: {missing!r}")
+    unexpected = [
+        fragment
+        for fragment, needle in _contract_fragment_pairs(forbidden, normalize=normalize)
+        if needle in text
+    ]
+    if unexpected:
+        failures.append(f"unexpected help fragments: {unexpected!r}")
+    if failures:
+        raise AssertionError("CLI help contract failed:\n" + "\n".join(failures) + f"\n\noutput:\n{text}")
+    return text
+
+
+def assert_no_traceback(result: Result) -> Result:
+    """Assert a CLI result did not print a Python traceback."""
+
+    combined = f"{result.output}\n{_safe_stderr(result)}"
+    assert "Traceback" not in combined, f"unexpected traceback in CLI output:\n{combined}"
+    return result
+
+
 def invoke_cli(
     runner: CliRunner,
     app: object,
@@ -119,6 +249,78 @@ def invoke_help_text(
 ) -> str:
     result = invoke_cli(runner, app, [*args, "--help"], expect_exit=expect_exit, **kwargs)
     return normalize_cli_output(result.output)
+
+
+def _text_from_result_or_text(
+    result_or_text: Result | str,
+    *,
+    normalize: bool,
+    expect_exit: int | None,
+) -> str:
+    if isinstance(result_or_text, Result):
+        return cli_text(result_or_text, normalized=normalize, expect_exit=expect_exit)
+    text = _ANSI_ESCAPE_RE.sub("", result_or_text)
+    return normalize_cli_output(text) if normalize else text
+
+
+def _contract_fragment_pairs(fragments: Sequence[str], *, normalize: bool) -> tuple[tuple[str, str], ...]:
+    pairs: list[tuple[str, str]] = []
+    for fragment in fragments:
+        needle = normalize_cli_output(fragment) if normalize else _ANSI_ESCAPE_RE.sub("", fragment)
+        if needle == "":
+            raise AssertionError("CLI contract fragments must be non-empty after normalization")
+        pairs.append((fragment, needle))
+    return tuple(pairs)
+
+
+def _json_from_result_or_payload(result_or_payload: Result | object, *, expected_exit: int | None) -> object:
+    if not isinstance(result_or_payload, Result):
+        return result_or_payload
+    if expected_exit is not None:
+        assert_result_exit(result_or_payload, expected_exit)
+    candidates = [result_or_payload.output]
+    stderr = _safe_stderr(result_or_payload)
+    if stderr:
+        candidates.append(stderr)
+    for candidate in candidates:
+        text = candidate.strip()
+        if not text:
+            continue
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            continue
+    raise AssertionError(f"result did not contain JSON:\n{result_or_payload.output}")
+
+
+def _assert_json_subset(actual: object, expected: object, *, path: str) -> None:
+    if isinstance(expected, Mapping):
+        if not isinstance(actual, Mapping):
+            raise AssertionError(f"{path}: expected JSON object subset, got {type(actual).__name__}: {actual!r}")
+        for key, expected_value in expected.items():
+            if key not in actual:
+                raise AssertionError(f"{_json_child_path(path, key)}: missing key; available keys: {list(actual)!r}")
+            _assert_json_subset(actual[key], expected_value, path=_json_child_path(path, key))
+        return
+
+    if isinstance(expected, list):
+        if not isinstance(actual, list):
+            raise AssertionError(f"{path}: expected JSON list subset, got {type(actual).__name__}: {actual!r}")
+        if len(actual) < len(expected):
+            raise AssertionError(f"{path}: expected at least {len(expected)} list item(s), got {len(actual)}")
+        for index, expected_item in enumerate(expected):
+            _assert_json_subset(actual[index], expected_item, path=f"{path}[{index}]")
+        return
+
+    if actual != expected:
+        raise AssertionError(f"{path}: expected {expected!r}, got {actual!r}")
+
+
+def _json_child_path(path: str, key: object) -> str:
+    key_text = str(key)
+    if key_text.isidentifier():
+        return f"{path}.{key_text}"
+    return f"{path}[{key_text!r}]"
 
 
 def checks_by_name(payload: dict[str, object], *, key: str = "checks") -> dict[str, dict[str, object]]:

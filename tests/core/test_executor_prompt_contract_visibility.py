@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tests.assertion_taxonomy_support import assert_prompt_contracts, machine_exact, semantic_concept
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 AGENTS_DIR = REPO_ROOT / "src/gpd/agents"
 EXECUTION_REFERENCE_DIR = REPO_ROOT / "src/gpd/specs/references/execution"
@@ -44,7 +46,13 @@ def test_executor_summary_creation_requires_loading_contract_schema_before_front
     assert "@{GPD_INSTALL_DIR}/templates/summary.md" not in summary_creation
     assert "templates/contract-results-schema.md" in summary_creation
     assert "templates/summary.md" in summary_creation
-    assert "follow the canonical ledger fields literally" in summary_creation
+    assert_prompt_contracts(
+        summary_creation,
+        *semantic_concept(
+            "executor summary creation follows canonical ledger fields",
+            required=("follow the canonical ledger fields literally",),
+        ),
+    )
     assert "detailed SUMMARY schema" in summary_creation
     _assert_contract_schema_tokens_visible(completion)
     assert "gpd validate summary-contract" in completion
@@ -75,7 +83,16 @@ def test_executor_reference_examples_keep_uncertainty_markers_explicit_and_non_e
         assert "unvalidated_assumptions: []" not in text
         assert "competing_explanations: []" not in text
         assert "disconfirming_observations: []" not in text
-        assert 'weakest_anchors: ["finite-term mass matching"]' in text
+        assert_prompt_contracts(
+            text,
+            machine_exact(
+                "executor uncertainty marker examples stay non-empty",
+                (
+                    'weakest_anchors: ["finite-term mass matching"]',
+                    'unvalidated_assumptions: ["general-gauge-independence"]',
+                    'competing_explanations: ["on-shell vs MS-bar finite-part conventions"]',
+                    'disconfirming_observations: ["no independent gauge-parameter scan"]',
+                ),
+            ),
+        )
         assert 'unvalidated_assumptions: ["general-gauge-independence"]' in text
-        assert 'competing_explanations: ["on-shell vs MS-bar finite-part conventions"]' in text
-        assert 'disconfirming_observations: ["no independent gauge-parameter scan"]' in text

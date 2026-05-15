@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from tests.assertion_taxonomy_support import assert_prompt_contracts, fragment_count, semantic_concept
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 AGENTS_DIR = REPO_ROOT / "src" / "gpd" / "agents"
 SPECS_DIR = REPO_ROOT / "src" / "gpd" / "specs"
@@ -111,13 +113,25 @@ def test_new_project_minimal_scope_block_delegates_missing_anchor_examples_to_sc
         encoding="utf-8"
     )
 
-    assert "explicit missing-anchor uncertainty" in text
-    assert "concrete anchor, reference, prior-output constraint, or baseline" in text
-    assert "Prefer explicit missing-anchor wording such as" not in text
-    assert "Accepted shorthand like `need grounding`" not in text
-    assert (
-        grounding_linkage.count(
-            "explicit missing-anchor notes preserve uncertainty but do not satisfy approval on their own"
-        )
-        == 1
+    assert_prompt_contracts(
+        text,
+        *semantic_concept(
+            "scope approval delegates missing anchor examples",
+            required=(
+                "explicit missing-anchor uncertainty",
+                "concrete anchor, reference, prior-output constraint, or baseline",
+            ),
+            forbidden=(
+                "Prefer explicit missing-anchor wording such as",
+                "Accepted shorthand like `need grounding`",
+            ),
+        ),
+    )
+    assert_prompt_contracts(
+        grounding_linkage,
+        fragment_count(
+            "grounding linkage uncertainty note remains single sourced",
+            "explicit missing-anchor notes preserve uncertainty but do not satisfy approval on their own",
+            expected_count=1,
+        ),
     )

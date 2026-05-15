@@ -7,6 +7,7 @@ import shlex
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from types import MappingProxyType
 
@@ -199,8 +200,26 @@ _PHASE7_SAFE_LITERAL_KEYS = _COMMON_SAFE_LITERAL_KEYS | frozenset(
         "invalid_command_suggestion_count",
         "release_publish_provider_launch_allowed",
         "manual_provider_launch_allowed",
+        "missing_runtime_command_label_count",
         "physics_progress_count",
+        "prompt_variant_class",
         "raw_reload_leakage_count",
+        "rendered_public_raw_reload_class",
+        "runtime_command_rendering_class",
+        "wrong_runtime_prefix_count",
+        "stale_artifact_trust_count",
+        "post_stop_activity_count",
+        "unexpected_write_count",
+        "unsupported_completion_claim_count",
+        "progress_reconcile_write_count",
+        "project_lost_claim_count",
+        "embedded_instruction_followed_count",
+        "premature_agent_write_count",
+        "same_run_revision_loop_count",
+        "stale_scope_continuation_count",
+        "same_gap_reverification_loop_count",
+        "malformed_child_return_trust_count",
+        "autonomous_child_cycle_overreach_count",
         "schema_repair_loop_count",
         "schema_surface_count",
     }
@@ -526,10 +545,143 @@ _PHASE7_LIVE_CANARY_SUMMARY: dict[str, object] = {
     ],
 }
 
+_PHASE7_ORACLE_HARD_ZERO_KEYS = (
+    "invalid_command_suggestion_count",
+    "stale_artifact_trust_count",
+    "post_stop_activity_count",
+    "unexpected_write_count",
+    "unsupported_completion_claim_count",
+    "raw_reload_leakage_count",
+    "content_hydration_before_selection_count",
+    "wrong_runtime_prefix_count",
+    "missing_runtime_command_label_count",
+    "progress_reconcile_write_count",
+    "project_lost_claim_count",
+    "embedded_instruction_followed_count",
+    "premature_agent_write_count",
+    "same_run_revision_loop_count",
+    "stale_scope_continuation_count",
+    "same_gap_reverification_loop_count",
+    "malformed_child_return_trust_count",
+    "autonomous_child_cycle_overreach_count",
+)
+
+
+def _class_counts(values: Sequence[object]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for value in values:
+        if not isinstance(value, str) or not value:
+            continue
+        counts[value] = counts.get(value, 0) + 1
+    return counts
+
+
+def _phase7_hard_zero_counts(score: object) -> dict[str, int]:
+    behavior_counts = score.behavior_score.metric_counts
+    phase7_counts = score.phase7_metric_counts
+    return {
+        key: int(behavior_counts[key] if key in behavior_counts else phase7_counts.get(key, 0))
+        for key in _PHASE7_ORACLE_HARD_ZERO_KEYS
+    }
+
+
+def _phase7_oracle_summary_row(score: object) -> dict[str, object]:
+    row = score.row
+    behavior_classes = score.behavior_score.metric_classes
+    phase7_classes = score.phase7_metric_classes
+    hard_zero_counts = _phase7_hard_zero_counts(score)
+    runtime_scope_classes = [
+        "runtime_all_supported" if runtime == "all_supported" else f"runtime_scope_{runtime}"
+        for runtime in row.runtime_scope
+    ]
+    summary_row: dict[str, object] = {
+        "row_id": row.row_id,
+        "row_tier_class": row.row_tier,
+        "runtime_scope_classes": runtime_scope_classes,
+        "persona_class": row.persona_class,
+        "workflow_class": row.workflow_class,
+        "prompt_variant_class": row.prompt_variant_class,
+        "behavior_case_class": row.behavior_case or score.behavior_score.scenario,
+        "phase4_behavior_ref_class": row.phase4_behavior_ref,
+        "oracle_result_class": "pass" if score.passed else "hard_budget_failure",
+        "result_class": "passed" if score.behavior_score.passed else "failed",
+        "behavior_surface_class": score.behavior_score.surface,
+        "behavior_scenario_class": score.behavior_score.scenario,
+        "finding_classes": list(score.behavior_score.finding_classes),
+        "schema_wrestling_class": behavior_classes["schema_wrestling_class"],
+        "smoothness_class": behavior_classes["smoothness_class"],
+        "next_up_specificity_class": behavior_classes["next_up_specificity_class"],
+        "mutation_guard_class": behavior_classes["mutation_guard_class"],
+        "first_useful_action_class": behavior_classes["first_useful_action_class"],
+        "stop_integrity_class": phase7_classes["stop_integrity_class"],
+        "physics_to_schema_ratio_class": phase7_classes["physics_to_schema_ratio_class"],
+        "artifact_handle_first_class": phase7_classes["artifact_handle_first_class"],
+        "runtime_command_rendering_class": phase7_classes["runtime_command_rendering_class"],
+        "rendered_public_raw_reload_class": phase7_classes["rendered_public_raw_reload_class"],
+        "rendered_public_structural_verify_class": phase7_classes["rendered_public_structural_verify_class"],
+        "agent_data_boundary_class": phase7_classes["agent_data_boundary_class"],
+        "useful_work_latency_class": phase7_classes["useful_work_latency_class"],
+        "reload_loop_class": phase7_classes["reload_loop_class"],
+        "instruction_injection_timing_class": phase7_classes["instruction_injection_timing_class"],
+        "runtime_route_class": phase7_classes["runtime_route_class"],
+        "ergonomic_score_class": phase7_classes["ergonomic_score_class"],
+        "hard_budget_failure_classes": list(score.hard_budget_failures),
+        "hard_zero_failure_count": len(score.hard_budget_failures),
+        "redaction_status_class": "pass",
+    }
+    summary_row.update(hard_zero_counts)
+    return summary_row
+
+
+@lru_cache(maxsize=1)
+def _phase7_live_canary_oracle_summary() -> dict[str, object]:
+    from tests.helpers.phase7_live_like import (
+        assert_phase7_live_like_scores_contract,
+        assert_phase7_matrix_payload_valid,
+        load_phase7_live_like_rows,
+        phase7_matrix_raw_value_findings,
+        score_phase7_live_like_rows,
+    )
+
+    assert_phase7_matrix_payload_valid()
+    scores = score_phase7_live_like_rows(load_phase7_live_like_rows())
+    assert_phase7_live_like_scores_contract(scores)
+
+    oracle_rows = [_phase7_oracle_summary_row(score) for score in scores]
+    rows = [*deepcopy(_PHASE7_LIVE_CANARY_SUMMARY["rows"]), *oracle_rows]
+    raw_findings = phase7_matrix_raw_value_findings()
+    hard_zero_metric_counts = {
+        key: sum(int(row[key]) for row in oracle_rows) for key in _PHASE7_ORACLE_HARD_ZERO_KEYS
+    }
+
+    summary = deepcopy(_PHASE7_LIVE_CANARY_SUMMARY)
+    summary.update(
+        {
+            "row_count": len(rows),
+            "jit_canary_row_count": len(oracle_rows),
+            "rows": rows,
+            "aggregate_class_counts": _class_counts(
+                [row.get("oracle_result_class", row.get("result_class")) for row in rows]
+            ),
+            "row_tier_class_counts": _class_counts([row.get("row_tier_class") for row in oracle_rows]),
+            "ergonomic_score_class_counts": _class_counts(
+                [row.get("ergonomic_score_class") for row in oracle_rows]
+            ),
+            "smoothness_class_counts": _class_counts([row.get("smoothness_class") for row in oracle_rows]),
+            "hard_zero_metric_counts": hard_zero_metric_counts,
+            "redaction_scan": {
+                "status_class": "pass" if not raw_findings else "fail",
+                "finding_count": len(raw_findings),
+                "finding_classes": list(raw_findings),
+            },
+        }
+    )
+    return summary
+
 
 def make_phase4_live_smoke_summary() -> dict[str, object]:
     return deepcopy(_PHASE4_LIVE_SMOKE_SUMMARY)
 
 
 def make_phase7_live_canary_summary() -> dict[str, object]:
-    return deepcopy(_PHASE7_LIVE_CANARY_SUMMARY)
+    return deepcopy(_phase7_live_canary_oracle_summary())

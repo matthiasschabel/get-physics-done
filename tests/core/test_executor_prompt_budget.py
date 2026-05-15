@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from gpd.adapters.install_utils import expand_at_includes
+from tests.assertion_taxonomy_support import assert_prompt_contracts, semantic_anchor
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 AGENTS_DIR = REPO_ROOT / "src/gpd/agents"
@@ -56,7 +57,13 @@ def test_executor_prompt_does_not_self_bootstrap_execute_phase() -> None:
     assert "execute-plan command" not in executor
     assert "init execute-phase" not in executor
     assert 'gpd --raw init execute-phase "${PHASE}"' not in executor
-    assert "Do not bootstrap phase state from inside the executor." in executor
+    assert_prompt_contracts(
+        executor,
+        semantic_anchor(
+            "executor does not self-bootstrap execute-phase state",
+            "Do not bootstrap phase state from inside the executor.",
+        ),
+    )
 
 
 def test_expanded_executor_prompt_stays_under_budget_and_excludes_late_publication_artifacts() -> None:
@@ -142,16 +149,36 @@ def test_executor_jit_modules_hold_extracted_execution_detail() -> None:
     assert "[UNVERIFIED - training data]" in numerical
 
     assert "gpd validate plan-preflight <PLAN.md path>" in tool_preflight
-    assert "`required: true` specialized tool is blocking" in tool_preflight
+    assert_prompt_contracts(
+        tool_preflight,
+        semantic_anchor(
+            "executor tool preflight blocks on required specialized tools",
+            "`required: true` specialized tool is blocking",
+        ),
+    )
     assert "use `wolfram`" in tool_preflight
     assert "External Tool Failure Table" in tool_preflight
 
-    assert "Load only selected asset paths" in bundle_execution
-    assert "additive specialized guidance only" in bundle_execution
-    assert "Keep unselected bundle catalogs absent" in bundle_execution
+    assert_prompt_contracts(
+        bundle_execution,
+        semantic_anchor(
+            "executor protocol bundle loads only selected assets",
+            (
+                "Load only selected asset paths",
+                "additive specialized guidance only",
+                "Keep unselected bundle catalogs absent",
+            ),
+        ),
+    )
 
     assert "Final Self-Check" in completion
-    assert "profiles and autonomy modes do NOT relax contract-result emission" in completion
+    assert_prompt_contracts(
+        completion,
+        semantic_anchor(
+            "executor completion contract result is invariant across profiles",
+            "profiles and autonomy modes do NOT relax contract-result emission",
+        ),
+    )
 
 
 def test_executor_guard_catalogs_are_on_demand_assets_not_base_prompt() -> None:
@@ -172,8 +199,20 @@ def test_executor_guard_catalogs_are_on_demand_assets_not_base_prompt() -> None:
     assert "references/execution/guards/core-computation-guards.md" in executor
     assert "references/execution/guards/domain-post-step-guards.md" in executor
     assert "references/execution/guards/final-verification-guards.md" in executor
-    assert "Prefer selected bundle `execution_guides`" in executor
-    assert "Prefer `execution_guides` listed in the selected protocol bundle context" in guard_index
+    assert_prompt_contracts(
+        executor,
+        semantic_anchor(
+            "executor prefers selected execution guide handles",
+            "Prefer selected bundle `execution_guides`",
+        ),
+    )
+    assert_prompt_contracts(
+        guard_index,
+        semantic_anchor(
+            "guard catalog prefers selected protocol bundle guides",
+            "Prefer `execution_guides` listed in the selected protocol bundle context",
+        ),
+    )
 
     assert "Angular momentum / CG coefficients" in core_guards
     assert "Lattice Boltzmann method" in core_guards
@@ -212,14 +251,21 @@ def test_executor_context_pressure_thresholds_match_canonical_forced_checkpoint_
     assert "context-pressure-thresholds.md" in executor
     assert "forced checkpoint starts at 50%" in executor
     assert "ORANGE still starts at 55%" in executor
-    assert "If running total exceeds 50%, you are in ORANGE" not in executor
+    assert_prompt_contracts(
+        executor,
+        semantic_anchor(
+            "executor stale context pressure threshold wording absent",
+            "If running total exceeds 50%, you are in ORANGE",
+            mode="absent",
+        ),
+    )
     assert ">50% context consumed" not in executor
 
 
 def test_executor_base_defers_checkpoint_return_and_completion_event_protocols() -> None:
     executor = _read_executor_prompt()
 
-    assert "type=\"checkpoint:*\"" in executor
+    assert 'type="checkpoint:*"' in executor
     assert "gpd_return.status: checkpoint" in executor
     assert "execute-plan-checkpoints.md" in executor
     assert "continuation-boundary.md" in executor
@@ -227,8 +273,15 @@ def test_executor_base_defers_checkpoint_return_and_completion_event_protocols()
 
     assert "bounded execution segment envelope" not in executor
     assert "Pattern A: Checkpoint-free" not in executor
-    assert "type, plan, progress, completed tasks plus hashes" not in executor
-    assert "gpd commit \"execute(${phase_number})" not in executor
+    assert_prompt_contracts(
+        executor,
+        semantic_anchor(
+            "executor inline checkpoint envelope fields absent",
+            "type, plan, progress, completed tasks plus hashes",
+            mode="absent",
+        ),
+    )
+    assert 'gpd commit "execute(${phase_number})' not in executor
 
 
 def test_executor_event_references_own_deferred_protocols() -> None:
@@ -237,7 +290,13 @@ def test_executor_event_references_own_deferred_protocols() -> None:
     completion = _read_execution_reference("executor-completion.md")
 
     assert "one-shot" in continuation
-    assert "must not wait for the user" in continuation
+    assert_prompt_contracts(
+        continuation,
+        semantic_anchor(
+            "executor checkpoint continuation stops instead of waiting",
+            "must not wait for the user",
+        ),
+    )
     assert "Checkpoint Return (For Orchestrator)" in checkpoints
     assert "execution_segment" in checkpoints
     assert "gpd validate summary-contract" in completion

@@ -476,8 +476,6 @@ def test_new_project_notation_spawn_model_and_recovery_contract_are_conditional(
     assert 'model="{NOTATION_MODEL}"' not in workflow_text
     assert 'model="$NOTATION_MODEL"' in workflow_text
     assert 'task(prompt=NOTATION_PROMPT, subagent_type="gpd-notation-coordinator", readonly=false' in workflow_text
-    assert "write the returned content in the main context" not in workflow_text
-    assert "re-execute the convention-establishment task in the main context" not in workflow_text
     assert_prompt_contracts(
         workflow_text,
         semantic_anchor(

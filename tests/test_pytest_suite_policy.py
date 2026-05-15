@@ -37,6 +37,14 @@ PHASE8_LARGE_TEST_FILE_LOC_BUDGETS = {
     "tests/core/test_prompt_wiring.py": 7_200,
     "tests/core/test_context.py": 5_500,
 }
+PHASE8_DIRECT_RESULT_OUTPUT_MENTION_BUDGETS = {
+    # Phase 8 observed 99/15/24/29/0; these ratchets keep the direct-output helper migration from regressing.
+    "tests/core/test_cli.py": 100,
+    "tests/test_cli_commands.py": 16,
+    "tests/test_cli_integration.py": 25,
+    "tests/core/test_cli_install.py": 30,
+    "tests/core/test_phase_lifecycle_live_contract.py": 0,
+}
 PHASE6_CROSS_RUNTIME_ACCEPTANCE_TEST_RELPATHS = (
     "adapters/test_runtime_projected_prompt_parity.py",
     "adapters/test_runtime_projected_command_requirement_coverage.py",
@@ -252,6 +260,13 @@ def test_phase8_large_test_files_stay_under_loc_targets() -> None:
         observed = len((REPO_ROOT / relpath).read_text(encoding="utf-8").splitlines())
 
         assert observed <= budget, f"{relpath} LOC budget exceeded: observed={observed} max={budget}"
+
+
+def test_phase8_large_cli_files_do_not_regress_direct_result_output_mentions() -> None:
+    for relpath, budget in PHASE8_DIRECT_RESULT_OUTPUT_MENTION_BUDGETS.items():
+        observed = (REPO_ROOT / relpath).read_text(encoding="utf-8").count("result.output")
+
+        assert observed <= budget, f"{relpath} direct result.output mentions exceeded: observed={observed} max={budget}"
 
 
 def _assert_hotspot_metadata_references_live_relpaths(all_relpaths: tuple[str, ...]) -> None:

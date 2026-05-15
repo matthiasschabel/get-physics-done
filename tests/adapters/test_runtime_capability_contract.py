@@ -19,6 +19,7 @@ from gpd.adapters.runtime_catalog import (
 )
 from gpd.core.costs import build_cost_summary, record_usage_from_runtime_payload
 from gpd.core.surface_phrases import cost_summary_surface_note
+from tests.assertion_taxonomy_support import assert_prompt_contracts, public_exact, semantic_concept
 from tests.doc_surface_contracts import assert_settings_local_terminal_follow_up_contract
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -333,7 +334,13 @@ def test_public_runtime_surfaces_stay_conservative_when_capabilities_differ() ->
 
     if any(descriptor.capabilities.permissions_surface != "unsupported" for descriptor in descriptors):
         assert "gpd validate unattended-readiness --runtime <runtime> --autonomy <mode>" in readme
-        assert "Use `supervised` unless you intentionally selected a different autonomy mode." in readme
+        assert_prompt_contracts(
+            readme,
+            public_exact(
+                "runtime unattended readiness default autonomy copy",
+                "Use `supervised` unless you intentionally selected a different autonomy mode.",
+            ),
+        )
         assert "relaunch-required" in readme
         assert_settings_local_terminal_follow_up_contract(settings_workflow)
         assert "requires_relaunch" in settings_workflow
@@ -343,8 +350,22 @@ def test_runtime_facing_docs_keep_typed_command_policy_vocabulary_generic() -> N
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
     help_workflow = (REPO_ROOT / "src/gpd/specs/workflows/help.md").read_text(encoding="utf-8")
 
-    assert "Typed command metadata is not review-only." in readme
-    assert "shared command applicability surface for public commands" in readme
-    assert "generic typed command-policy check for the public runtime surface" in help_workflow
+    assert_prompt_contracts(
+        readme,
+        *semantic_concept(
+            "runtime docs keep typed command policy generic",
+            required=(
+                "Typed command metadata is not review-only.",
+                "shared command applicability surface for public commands",
+            ),
+        ),
+    )
+    assert_prompt_contracts(
+        help_workflow,
+        *semantic_concept(
+            "runtime help keeps typed command policy generic",
+            required=("generic typed command-policy check for the public runtime surface",),
+        ),
+    )
     for content in (readme, help_workflow):
         assert "specialized typed surfaces for commands that expose review/publication contracts" in content

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tests.assertion_taxonomy_support import assert_prompt_contracts, semantic_concept
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PLANNER_PATH = REPO_ROOT / "src" / "gpd" / "agents" / "gpd-planner.md"
 
@@ -33,6 +35,14 @@ def test_planner_keeps_schema_template_file_read_gate_visible_before_plan_exampl
     assert "@{GPD_INSTALL_DIR}/templates/phase-prompt.md" not in role
     assert "@{GPD_INSTALL_DIR}/templates/plan-contract-schema.md" not in role
     assert "Before emitting or revising any `PLAN.md`" in role
-    assert "If the template cannot be loaded" in role
-    assert "do not reconstruct the schema from memory" in role
-    assert "Return structured results to the orchestrator." in role
+    assert_prompt_contracts(
+        role,
+        *semantic_concept(
+            "planner schema template file-read gate fails closed",
+            required=(
+                "If the template cannot be loaded",
+                "do not reconstruct the schema from memory",
+                "Return structured results to the orchestrator.",
+            ),
+        ),
+    )

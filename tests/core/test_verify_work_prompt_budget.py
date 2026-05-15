@@ -6,6 +6,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from gpd.core.prompt_diagnostics import build_prompt_surface_report, report_to_dict
+from tests.assertion_taxonomy_support import assert_prompt_contracts, semantic_concept
 from tests.prompt_metrics_support import measure_prompt_surface
 from tests.workflow_authority_support import workflow_authority_text
 
@@ -86,6 +87,14 @@ def test_verify_work_interactive_and_gap_stages_keep_schema_packs_conditional() 
 def test_verify_work_gap_repair_keeps_reference_bodies_deferred_to_targeted_reads() -> None:
     workflow_text = workflow_authority_text(WORKFLOWS_DIR, "verify-work")
 
-    assert "reference artifact handles, not embedded bodies" in workflow_text
-    assert "read or quote a listed artifact file only when a diagnosed gap cites that exact artifact" in workflow_text
-    assert "Do not require rendered `protocol_bundle_context`" in workflow_text
+    assert_prompt_contracts(
+        workflow_text,
+        *semantic_concept(
+            "verify-work gap repair defers reference bodies to targeted reads",
+            required=(
+                "reference artifact handles, not embedded bodies",
+                "read or quote a listed artifact file only when a diagnosed gap cites that exact artifact",
+                "Do not require rendered `protocol_bundle_context`",
+            ),
+        ),
+    )

@@ -12,6 +12,7 @@ from gpd.cli import app
 from gpd.core.phase_closeout import phase_closeout_readiness
 from gpd.core.proof_redteam import build_proof_redteam_skeleton
 from gpd.core.state import default_state_dict
+from tests.assertion_taxonomy_support import assert_prompt_contracts, machine_exact, semantic_concept
 
 
 class _StableCliRunner(CliRunner):
@@ -327,7 +328,13 @@ def test_closeout_readiness_blocks_proof_bearing_work_without_passed_proof_redte
     assert result.ready is False
     assert result.proof_redteam_required is True
     assert result.proof_redteam_ready is False
-    assert "proof-bearing work requires a passed proof-redteam artifact" in result.blockers
+    assert_prompt_contracts(
+        "\n".join(result.blockers),
+        *semantic_concept(
+            "closeout readiness blocks proof-bearing work without passed proof-redteam",
+            required=("proof-bearing work requires a passed proof-redteam artifact",),
+        ),
+    )
     route = result.lifecycle_next_up
     assert route is not None
     _assert_route(
@@ -400,8 +407,20 @@ def test_execute_phase_closeout_spec_is_readiness_transition_only() -> None:
         authority for condition in closeout_stage["conditional_authorities"] for authority in condition["authorities"]
     }
 
-    assert "does not spawn verifiers, close gaps, run consistency checks, or decide scientific status" in workflow
-    assert "It is the authority for verification, proof-redteam, consistency, bounded-segment, and closeout readiness" in workflow
+    assert_prompt_contracts(
+        workflow,
+        *semantic_concept(
+            "execute-phase closeout stage remains readiness transition only",
+            required=(
+                "does not spawn verifiers, close gaps, run consistency checks, or decide scientific status",
+                "It is the authority for verification, proof-redteam, consistency, bounded-segment, and closeout readiness",
+            ),
+        ),
+        machine_exact(
+            "execute-phase closeout readiness statuses stay distinct",
+            "`ready-to-execute` and `ready-for-verification` are not `ready-for-closeout`",
+        ),
+    )
     assert "gpd --raw phase closeout-readiness" in workflow
     assert "--require-verification" in workflow
     assert 'gpd phase complete "${phase_number}"' in workflow
@@ -410,7 +429,6 @@ def test_execute_phase_closeout_spec_is_readiness_transition_only() -> None:
     assert workflow.index('if [ "$CLOSEOUT_READY" != "true" ]; then') < workflow.index(
         'gpd phase complete "${phase_number}"'
     )
-    assert "`ready-to-execute` and `ready-for-verification` are not `ready-for-closeout`" in workflow
     assert "Do not repair blockers, update roadmap/state, or clean checkpoints from this stage." in workflow
     assert closeout_stage["loaded_authorities"] == ["workflows/execute-phase/closeout.md"]
     assert {"workflows/transition.md", "templates/state-machine.md"} <= conditional_authorities

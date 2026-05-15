@@ -79,5 +79,10 @@ def test_quick_workflow_routes_on_typed_gpd_return_and_applies_child_returns() -
         "blocked": "retry executor, main-context execution, or abort",
         "failed": "retry executor, main-context execution, or abort",
     }
-    assert "recovery evidence only" in workflow
-    assert "explicit main-context fallback with its own return" in workflow
+    assert_prompt_contracts(
+        workflow,
+        semantic_anchor(
+            "quick child-gate fallback separates recovery evidence from success",
+            ("recovery evidence only", "explicit main-context fallback with its own return"),
+        ),
+    )

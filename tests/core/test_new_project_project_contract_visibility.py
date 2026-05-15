@@ -136,34 +136,37 @@ def test_new_project_prompt_surfaces_the_canonical_contract_schema_for_project_c
 
     assert "staged_loading.field_access_instruction" in new_project_text
     assert "Parse JSON for:" not in scope_intake_text
-    assert tuple(
-        field
-        for field in (
-            "commit_docs",
-            "autonomy",
-            "research_mode",
-            "project_exists",
-            "state_exists",
-            "roadmap_exists",
-            "recoverable_project_exists",
-            "partial_project_exists",
-            "project_recovery_status",
-            "init_progress_status",
-            "has_research_map",
-            "planning_exists",
-            "has_research_files",
-            "research_file_samples",
-            "has_project_manifest",
-            "needs_research_map",
-            "has_git",
-            "platform",
-            "project_contract",
-            "project_contract_gate",
-            "project_contract_load_info",
-            "project_contract_validation",
+    assert (
+        tuple(
+            field
+            for field in (
+                "commit_docs",
+                "autonomy",
+                "research_mode",
+                "project_exists",
+                "state_exists",
+                "roadmap_exists",
+                "recoverable_project_exists",
+                "partial_project_exists",
+                "project_recovery_status",
+                "init_progress_status",
+                "has_research_map",
+                "planning_exists",
+                "has_research_files",
+                "research_file_samples",
+                "has_project_manifest",
+                "needs_research_map",
+                "has_git",
+                "platform",
+                "project_contract",
+                "project_contract_gate",
+                "project_contract_load_info",
+                "project_contract_validation",
+            )
+            if field not in scope_intake.required_init_fields
         )
-        if field not in scope_intake.required_init_fields
-    ) == ()
+        == ()
+    )
     assert "researcher_model" not in scope_intake.required_init_fields
     assert "synthesizer_model" not in scope_intake.required_init_fields
     assert "researcher_model" in literature_survey.required_init_fields
@@ -228,8 +231,12 @@ def test_new_project_contract_rule_block_is_not_duplicated() -> None:
     )
     assert "context_intake" in scope_approval_text
     assert "uncertainty_markers" in scope_approval_text
-    assert "`schema_version` must be the integer `1`." in contract_schema_text
-    assert "`must_surface` is a boolean scalar." in contract_schema_text
+    machine_exact(
+        "contract schema version and must_surface scalar rules stay exact",
+        ("`schema_version` must be the integer `1`.", "`must_surface` is a boolean scalar."),
+        owner=PROJECT_CONTRACT_OWNER,
+        rationale="schema version and must_surface scalar rules are validator-facing",
+    ).check(contract_schema_text)
 
 
 def test_project_contract_schema_slice_keeps_contract_critical_rules_visible() -> None:

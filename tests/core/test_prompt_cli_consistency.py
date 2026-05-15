@@ -734,13 +734,16 @@ def test_suggest_next_prompt_uses_real_cli_subcommand() -> None:
         f"If you still need to rediscover the project first, do that in your normal terminal with `{local_cli_resume_command()}` for the current workspace or `{local_cli_resume_recent_command()}` for the explicit multi-project picker before reopening the runtime."
         in suggest_prompt
     )
-    assert (
-        "Start the recommended command in a fresh context window; do not treat the fresh context reset as project recovery."
-        in suggest_prompt
+    _assert_semantic_fragments(
+        suggest_prompt,
+        "suggest-next fresh context and renderer contract",
+        (
+            "Start the recommended command in a fresh context window; do not treat the fresh context reset as project recovery.",
+            "Use the shared renderer shape for this single-recommendation block.",
+            "Do not use a separate bold-only command block.",
+        ),
     )
-    assert "Use the shared renderer shape for this single-recommendation block." in suggest_prompt
     assert "Primary: `{command}`" in suggest_prompt
-    assert "Do not use a separate bold-only command block." in suggest_prompt
     assert "/clear" not in suggest_prompt
     assert (
         f"`/clear` first -> fresh context window, then `{{command}}`; if you still need to rediscover the project, use `{local_cli_resume_recent_command()}` before reopening the runtime"

@@ -10,11 +10,18 @@ from tests.assertion_taxonomy_support import (
     FragmentMode,
     MatchMode,
     assert_prompt_contracts,
+    checkpoint_stop_boundary,
+    fail_closed_before_writes,
     forbidden_duplicate,
     fragment_count,
+    fresh_artifact_required,
+    handle_before_content,
     machine_exact,
     marker_range,
+    no_synthesized_child_return,
     public_exact,
+    runtime_label_native,
+    schema_averse_first_useful_action,
     semantic_anchor,
     semantic_concept,
 )
@@ -182,6 +189,118 @@ def test_semantic_concept_failure_preserves_required_and_forbidden_failure_detai
 def test_semantic_concept_rejects_empty_concepts() -> None:
     with pytest.raises(ValueError, match="requires at least one required or forbidden fragment"):
         semantic_concept("empty concept")
+
+
+def test_phase8_concept_pack_helpers_keep_domain_tokens_exact() -> None:
+    text = """
+Dirty worktree blocker
+Fail closed before files_modified write route
+recovery command: gpd status
+gpd_return.files_written
+status: completed
+artifacts/phase1/result.json
+fresh-after marker flex-pass10-marker-123
+validator flag --fresh-after
+Do not synthesize child return; retry child worker.
+gpd_return
+continuation_update.bounded_segment.resume_file
+reference_artifact_files
+reference_artifacts_content
+handle first behavior
+Runtime label: Show /gpd:start as native labels;
+source label gpd:start
+checkpoint
+stop immediately after returning checkpoint; resume with gpd resume-work
+first useful action
+schema fields after action
+first_useful_action_class
+immediate_command
+"""
+
+    assertions = (
+        *fail_closed_before_writes(
+            "Dirty worktree blocker",
+            "files_modified write route",
+            safe_stop_anchor="Fail closed",
+            public_fragments="gpd status",
+        ),
+        *fresh_artifact_required(
+            "artifacts/phase1/result.json",
+            "fresh-after marker",
+            files_written_field="gpd_return.files_written",
+            status="completed",
+            freshness_marker="flex-pass10-marker-123",
+            cli_flags="--fresh-after",
+        ),
+        *no_synthesized_child_return(
+            "gpd_return",
+            "Do not synthesize child return",
+            required="retry child worker",
+            forbidden="parent-authored success",
+        ),
+        *handle_before_content(
+            "reference_artifact_files",
+            "reference_artifacts_content",
+            behavior_anchor="handle first behavior",
+        ),
+        *runtime_label_native(
+            "/gpd:start",
+            "native labels",
+            command_labels="gpd:start",
+            wrong_runtime_labels="$gpd-start",
+        ),
+        *checkpoint_stop_boundary(
+            "checkpoint",
+            "stop immediately",
+            bounded_fields="continuation_update.bounded_segment.resume_file",
+            resume_command="gpd resume-work",
+        ),
+        *schema_averse_first_useful_action(
+            "first useful action",
+            "schema fields",
+            metric_keys="first_useful_action_class",
+            allowed_classes="immediate_command",
+        ),
+    )
+
+    assert_prompt_contracts(text, *assertions)
+    assert any(
+        assertion.kind is AssertionKind.MACHINE_EXACT and "artifacts/phase1/result.json" in assertion.fragments
+        for assertion in assertions
+    )
+    assert any(
+        assertion.kind is AssertionKind.PUBLIC_EXACT and "/gpd:start" in assertion.fragments
+        for assertion in assertions
+    )
+    assert any(
+        assertion.label == "handle_before_content field order" and assertion.mode is FragmentMode.ORDERED
+        for assertion in assertions
+    )
+
+
+def test_phase8_runtime_label_helper_keeps_wrong_labels_public_exact_absent() -> None:
+    assertions = runtime_label_native(
+        "/gpd:resume-work",
+        "native labels",
+        command_labels="/gpd:progress",
+        wrong_runtime_labels=("$gpd-resume-work", "/gpd:set-profile"),
+    )
+
+    wrong_label_assertion = next(
+        assertion for assertion in assertions if assertion.label == "runtime_label_native wrong labels absent"
+    )
+
+    assert wrong_label_assertion.kind is AssertionKind.PUBLIC_EXACT
+    assert wrong_label_assertion.mode is FragmentMode.ABSENT
+    assert wrong_label_assertion.fragments == ("$gpd-resume-work", "/gpd:set-profile")
+
+
+def test_phase8_concept_pack_helpers_reject_empty_domain_anchors() -> None:
+    with pytest.raises(ValueError, match="at least one non-empty fragment"):
+        fail_closed_before_writes("", "write route")
+
+    with pytest.raises(ValueError, match="at least one non-empty fragment"):
+        fresh_artifact_required((), "fresh marker")
 
 
 def test_match_modes_apply_to_ordered_absent_and_count_modes() -> None:

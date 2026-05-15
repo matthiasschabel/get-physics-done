@@ -6,6 +6,11 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers.persona_summary import (
+    assert_persona_summary_valid,
+    make_phase7_live_canary_summary,
+    phase7_live_canary_policy,
+)
 from tests.helpers.phase4_persona.behavior_metrics import BehaviorScore, assert_behavior_contract
 from tests.helpers.phase4_persona.completion import completion_replay_rows, score_completion_replay_row
 from tests.helpers.phase4_persona.execution import execution_replay_rows, score_execution_replay_row
@@ -17,6 +22,7 @@ from tests.helpers.phase4_persona.user_steering import (
     user_steering_rows,
 )
 from tests.helpers.phase7_live_like import (
+    REQUIRED_JIT_ROW_IDS,
     assert_phase7_live_like_scores_contract,
     load_phase7_live_like_rows,
     score_phase7_live_like_rows,
@@ -46,6 +52,38 @@ def test_provider_free_persona_canary_scores_obey_hard_budgets(
         _assert_score_hard_budgets(score)
 
     assert_phase7_live_like_scores_contract(phase7_scores)
+
+
+def test_phase7_public_persona_oracle_projects_scored_jit_rows() -> None:
+    phase7_scores = score_phase7_live_like_rows(load_phase7_live_like_rows())
+    summary = make_phase7_live_canary_summary()
+    summary_rows = summary["rows"]
+    assert isinstance(summary_rows, list)
+    summary_rows_by_id = {row["row_id"]: row for row in summary_rows if isinstance(row, dict)}
+    scored_ids = {score.row.row_id for score in phase7_scores}
+
+    assert_persona_summary_valid(summary, phase7_live_canary_policy())
+    assert summary["jit_canary_row_count"] == len(scored_ids)
+    assert scored_ids <= set(summary_rows_by_id)
+    assert REQUIRED_JIT_ROW_IDS <= set(summary_rows_by_id)
+    hard_zero_metric_counts = summary["hard_zero_metric_counts"]
+    assert isinstance(hard_zero_metric_counts, dict)
+    assert {
+        "content_hydration_before_selection_count",
+        "missing_runtime_command_label_count",
+        "malformed_child_return_trust_count",
+    } <= set(hard_zero_metric_counts)
+    assert all(count == 0 for count in hard_zero_metric_counts.values())
+
+    for score in phase7_scores:
+        row = summary_rows_by_id[score.row.row_id]
+        assert row["oracle_result_class"] == "pass"
+        assert row["hard_budget_failure_classes"] == []
+        assert row["hard_zero_failure_count"] == 0
+        assert row["smoothness_class"] == score.behavior_score.metric_classes["smoothness_class"]
+        assert row["ergonomic_score_class"] == score.phase7_metric_classes["ergonomic_score_class"]
+        for metric_key in (*HARD_ZERO_METRIC_KEYS, "raw_reload_leakage_count"):
+            assert row[metric_key] == 0
 
 
 def _phase4_behavior_scores(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[BehaviorScore, ...]:

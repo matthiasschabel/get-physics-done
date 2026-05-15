@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from tests.assertion_taxonomy_support import assert_prompt_contracts, machine_exact
 from tests.markdown_test_support import (
     MarkdownSection,
     assert_contract_finding,
@@ -212,7 +213,10 @@ def test_required_fragments_failure_lists_missing_fragments() -> None:
         assert_required_fragments("alpha beta", ("alpha", "gamma"), context="sample")
 
     message = str(excinfo.value)
-    assert "missing required fragments in sample" in message
+    assert_prompt_contracts(
+        message,
+        machine_exact("required fragment failure context", "missing required fragments in sample"),
+    )
     assert "- 'gamma'" in message
     assert "alpha" not in message
 
@@ -222,7 +226,10 @@ def test_forbidden_fragments_failure_lists_present_fragments() -> None:
         assert_forbidden_fragments("alpha stale_alias beta", ("stale_alias", "other"), context="sample")
 
     message = str(excinfo.value)
-    assert "forbidden fragments present in sample" in message
+    assert_prompt_contracts(
+        message,
+        machine_exact("forbidden fragment failure context", "forbidden fragments present in sample"),
+    )
     assert "- 'stale_alias'" in message
     assert "other" not in message
 
@@ -297,7 +304,10 @@ def test_ordered_fragments_failure_distinguishes_out_of_order_fragment() -> None
         assert_ordered_fragments("beta alpha", ("alpha", "beta"), context="sample")
 
     message = str(excinfo.value)
-    assert "fragment appears out of order in sample" in message
+    assert_prompt_contracts(
+        message,
+        machine_exact("ordered fragment failure context", "fragment appears out of order in sample"),
+    )
     assert "'beta' appears before 'alpha'" in message
 
 
@@ -361,7 +371,10 @@ name: second
         parse_yaml_fences(markdown, context="prompt")
 
     message = str(excinfo.value)
-    assert "invalid YAML fence in prompt at lines 3-6" in message
+    assert_prompt_contracts(
+        message,
+        machine_exact("yaml fence failure context", "invalid YAML fence in prompt at lines 3-6"),
+    )
     assert "duplicate key" in message
 
 

@@ -18,7 +18,6 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-from typer.testing import CliRunner
 
 from gpd.adapters import get_adapter
 from gpd.adapters.install_utils import MANIFEST_NAME
@@ -35,21 +34,14 @@ from gpd.core.public_surface_contract import beginner_onboarding_hub_url
 from tests.doc_surface_contracts import (
     assert_install_summary_runtime_follow_up_contract,
 )
+from tests.helpers.cli import (
+    StableCliRunner,
+    assert_cli_help_contract,
+    assert_cli_human_contract,
+    json_output_from_result,
+)
 
-
-class _StableCliRunner(CliRunner):
-    def invoke(self, *args, **kwargs):
-        kwargs.setdefault("color", False)
-        return super().invoke(*args, **kwargs)
-
-
-runner = _StableCliRunner()
-
-_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
-
-
-def _normalize_cli_output(text: str) -> str:
-    return " ".join(_ANSI_ESCAPE_RE.sub("", text).split())
+runner = StableCliRunner()
 
 
 _INSTALL_TEST_DESCRIPTORS = iter_runtime_descriptors()
@@ -363,13 +355,16 @@ def test_install_all_continues_on_failure(tmp_path: Path):
 
         result = runner.invoke(app, ["install", "--all", "--local"])
 
-    # Should exit with code 1 because some runtimes failed
-    assert result.exit_code == 1
-    assert "Install Summary" in result.output
-    assert "Install failures:" in result.output
-    assert "After install" not in result.output
-    assert "Docs hub:" not in result.output
-    assert "Diagnostics: use gpd --help for local diagnostics and later setup." not in result.output
+    assert_cli_human_contract(
+        result,
+        expect_exit=1,
+        required_all=["Install Summary", "Install failures:"],
+        forbidden=[
+            "After install",
+            "Docs hub:",
+            "Diagnostics: use gpd --help for local diagnostics and later setup.",
+        ],
+    )
 
 
 def test_install_all_success_exits_0(tmp_path: Path):
@@ -407,12 +402,16 @@ def test_install_banner_uses_display_names(tmp_path: Path):
             app, ["--cwd", str(tmp_path), "install", _PRIMARY_INSTALL_DESCRIPTOR.runtime_name, "--local"]
         )
 
-    assert result.exit_code == 0
-    assert "GPD v" in result.output
-    assert "© 2026 Physical Superintelligence PBC (PSI)" in result.output
-    assert "██████" in result.output
-    assert f"Installing GPD (local) for: {_PRIMARY_INSTALL_DESCRIPTOR.display_name}" in result.output
-    assert f"Installing GPD (local) for: {_PRIMARY_INSTALL_DESCRIPTOR.runtime_name}" not in result.output
+    assert_cli_human_contract(
+        result,
+        required_all=[
+            "GPD v",
+            "© 2026 Physical Superintelligence PBC (PSI)",
+            "██████",
+            f"Installing GPD (local) for: {_PRIMARY_INSTALL_DESCRIPTOR.display_name}",
+        ],
+        forbidden=[f"Installing GPD (local) for: {_PRIMARY_INSTALL_DESCRIPTOR.runtime_name}"],
+    )
 
 
 def test_format_install_header_lines_uses_psi_branding() -> None:
@@ -528,35 +527,37 @@ def test_install_summary_lists_compact_runtime_next_steps_for_multi_runtime_inst
 def test_install_help_surfaces_interactive_batch_and_targeting_guidance() -> None:
     """Install help should keep local/global targeting and interactive guidance visible."""
     result = runner.invoke(app, ["install", "--help"])
-    normalized_output = _normalize_cli_output(result.output)
-
-    assert result.exit_code == 0
-    assert "Install GPD skills, agents, and hooks into runtime config directories." in normalized_output
-    assert "Run without arguments for interactive mode." in normalized_output
-    assert "Specify runtime name(s) or --all for batch mode." in normalized_output
-    assert "gpd install --all --global" in normalized_output
-    assert "Runtime(s) to install. Omit for interactive" in normalized_output
-    assert "--local" in normalized_output
-    assert "--global" in normalized_output
-    assert "--target-dir" in normalized_output
-    assert "Override the runtime config directory;" in normalized_output
-    assert "defaults" in normalized_output
-    assert "local scope" in normalized_output
-    assert "runtime's canonical" in normalized_output
-    assert "global config dir" in normalized_output
+    assert_cli_help_contract(
+        result,
+        sections=[
+            "Install GPD skills, agents, and hooks into runtime config directories.",
+            "Run without arguments for interactive mode.",
+            "Specify runtime name(s) or --all for batch mode.",
+            "gpd install --all --global",
+            "Runtime(s) to install. Omit for interactive",
+            "Override the runtime config directory;",
+            "defaults",
+            "local scope",
+            "runtime's canonical",
+            "global config dir",
+        ],
+        options=["--local", "--global", "--target-dir"],
+    )
 
 
 def test_uninstall_help_aligns_target_dir_wording() -> None:
     result = runner.invoke(app, ["uninstall", "--help"])
-    normalized_output = _normalize_cli_output(result.output)
-
-    assert result.exit_code == 0
-    assert "--target-dir" in normalized_output
-    assert "Override the runtime config directory;" in normalized_output
-    assert "defaults" in normalized_output
-    assert "local scope" in normalized_output
-    assert "runtime's canonical" in normalized_output
-    assert "global config dir" in normalized_output
+    assert_cli_help_contract(
+        result,
+        options=["--target-dir"],
+        sections=[
+            "Override the runtime config directory;",
+            "defaults",
+            "local scope",
+            "runtime's canonical",
+            "global config dir",
+        ],
+    )
 
 
 # ─── 4. Uninstall without manifest ──────────────────────────────────────────
@@ -620,8 +621,7 @@ def test_uninstall_missing_codex_target_still_removes_marker_backed_skills(tmp_p
         ["--raw", "uninstall", descriptor.runtime_name, "--local", "--target-dir", str(target)],
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     outcome = payload["uninstalled"][0]
     assert outcome["runtime"] == descriptor.runtime_name
     assert outcome["status"] == "removed"
@@ -661,12 +661,17 @@ def test_uninstall_all_continues_after_one_runtime_failure(tmp_path: Path) -> No
     ):
         result = runner.invoke(app, ["uninstall", "--all", "--local"], input="y\n")
 
-    assert result.exit_code == 1
     primary_adapter.uninstall.assert_called_once_with(removed_target)
     secondary_adapter.uninstall.assert_called_once_with(failed_target)
-    assert "boom" in result.output
-    assert _PRIMARY_INSTALL_DESCRIPTOR.display_name in result.output
-    assert _SECONDARY_INSTALL_DESCRIPTOR.display_name in result.output
+    assert_cli_human_contract(
+        result,
+        expect_exit=1,
+        required_all=[
+            "boom",
+            _PRIMARY_INSTALL_DESCRIPTOR.display_name,
+            _SECONDARY_INSTALL_DESCRIPTOR.display_name,
+        ],
+    )
 
 
 def test_uninstall_raw_outputs_structured_outcomes(tmp_path: Path) -> None:
@@ -713,8 +718,7 @@ def test_uninstall_raw_outputs_structured_outcomes(tmp_path: Path) -> None:
     ):
         result = runner.invoke(app, ["--raw", "uninstall", "--all", "--local"])
 
-    assert result.exit_code == 1
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result, expect_exit=1)
     assert payload["uninstalled"][0] == {
         "runtime": _PRIMARY_INSTALL_DESCRIPTOR.runtime_name,
         "status": "removed",
@@ -757,8 +761,7 @@ def test_uninstall_raw_continues_after_adapter_lookup_failure(tmp_path: Path) ->
     ):
         result = runner.invoke(app, ["--raw", "uninstall", "--all", "--local"])
 
-    assert result.exit_code == 1
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result, expect_exit=1)
     assert payload["uninstalled"] == [
         {
             "runtime": _SECONDARY_INSTALL_DESCRIPTOR.runtime_name,
@@ -808,16 +811,20 @@ def test_install_no_args_uses_interactive_defaults(tmp_path: Path):
         # CliRunner provides input='1\n1\n' to simulate interactive choices
         result = runner.invoke(app, ["install"], input="1\n1\n")
 
-    assert result.exit_code == 0
-    assert "GPD v" in result.output
-    assert "© 2026 Physical Superintelligence PBC (PSI)" in result.output
-    assert f"[1] {_PRIMARY_INSTALL_DESCRIPTOR.display_name}" in result.output
-    assert f"· {_PRIMARY_INSTALL_DESCRIPTOR.runtime_name}" in result.output
-    assert "Enter choice [1]" in result.output
-    assert "[1] Local" in result.output
-    assert "· current project only ·" in result.output
-    assert "Get Physics Done, by Physical Superintelligence PBC (PSI)" not in result.output
-    assert "██████" in result.output
+    assert_cli_human_contract(
+        result,
+        required_all=[
+            "GPD v",
+            "© 2026 Physical Superintelligence PBC (PSI)",
+            f"[1] {_PRIMARY_INSTALL_DESCRIPTOR.display_name}",
+            f"· {_PRIMARY_INSTALL_DESCRIPTOR.runtime_name}",
+            "Enter choice [1]",
+            "[1] Local",
+            "· current project only ·",
+            "██████",
+        ],
+        forbidden=["Get Physics Done, by Physical Superintelligence PBC (PSI)"],
+    )
 
 
 # ─── 6. --raw output ────────────────────────────────────────────────────────
@@ -839,12 +846,9 @@ def test_install_raw_outputs_json(tmp_path: Path):
 
         result = runner.invoke(app, ["--raw", "install", _PRIMARY_INSTALL_DESCRIPTOR.runtime_name, "--local"])
 
-    assert result.exit_code == 0
-    # Output should contain valid JSON with "installed" key
-    assert '"installed"' in result.output
-    # Should NOT contain rich table formatting
-    assert "Install Summary" not in result.output
-    assert "GPD v" not in result.output
+    payload = json_output_from_result(result)
+    assert "installed" in payload
+    assert_cli_human_contract(result, forbidden=["Install Summary", "GPD v"], expect_exit=0)
 
 
 def test_install_raw_includes_failures(tmp_path: Path):
@@ -872,10 +876,9 @@ def test_install_raw_includes_failures(tmp_path: Path):
 
         result = runner.invoke(app, ["--raw", "install", "--all", "--local"])
 
-    assert result.exit_code == 1
-    # Should report both installed and failed
-    assert '"installed"' in result.output
-    assert '"failed"' in result.output
+    payload = json_output_from_result(result, expect_exit=1)
+    assert "installed" in payload
+    assert "failed" in payload
 
 
 def test_install_raw_finalize_failure_not_reported_as_installed(tmp_path: Path):
@@ -897,8 +900,7 @@ def test_install_raw_finalize_failure_not_reported_as_installed(tmp_path: Path):
     ):
         result = runner.invoke(app, ["--raw", "install", _PRIMARY_INSTALL_DESCRIPTOR.runtime_name, "--local"])
 
-    assert result.exit_code == 1
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result, expect_exit=1)
     assert payload["installed"] == []
     assert payload["failed"] == [{"runtime": _PRIMARY_INSTALL_DESCRIPTOR.runtime_name, "error": "finalize boom"}]
 
@@ -936,8 +938,7 @@ def test_install_raw_finalize_failure_rolls_back_new_cli_target(gpd_root: Path, 
             ],
         )
 
-    assert result.exit_code == 1
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result, expect_exit=1)
     assert payload["installed"] == []
     failure = payload["failed"][0]
     assert failure["runtime"] == descriptor.runtime_name
@@ -983,8 +984,7 @@ def test_install_raw_finalize_failure_restores_existing_cli_target(gpd_root: Pat
             ],
         )
 
-    assert result.exit_code == 1
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result, expect_exit=1)
     assert payload["installed"] == []
     assert "Rolled back partial install" in payload["failed"][0]["error"]
     assert (target / MANIFEST_NAME).read_text(encoding="utf-8") == manifest_before
@@ -1035,8 +1035,7 @@ def test_install_raw_finalizes_same_adapter_instance_used_for_install(tmp_path: 
             catch_exceptions=False,
         )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["failed"] == []
     assert "__gpd_install_adapter_instance__" not in json.dumps(payload)
     assert any(
@@ -1059,12 +1058,13 @@ def test_install_human_reports_failures_after_progress_exits(tmp_path: Path):
     ):
         result = runner.invoke(app, ["install", _PRIMARY_INSTALL_DESCRIPTOR.runtime_name, "--local"])
 
-    assert result.exit_code == 1
-    normalized_output = _normalize_cli_output(result.output)
-    assert "Install failures:" in normalized_output
-    assert (
-        f"{_PRIMARY_INSTALL_DESCRIPTOR.display_name} ({_PRIMARY_INSTALL_DESCRIPTOR.runtime_name}): install boom"
-        in normalized_output
+    assert_cli_human_contract(
+        result,
+        expect_exit=1,
+        required_all=[
+            "Install failures:",
+            f"{_PRIMARY_INSTALL_DESCRIPTOR.display_name} ({_PRIMARY_INSTALL_DESCRIPTOR.runtime_name}): install boom",
+        ],
     )
 
 
@@ -1086,8 +1086,7 @@ def test_install_raw_reports_preflight_failures_without_changing_raw_schema(mock
     with patch("gpd.cli._install_single_runtime") as mock_install_single:
         result = runner.invoke(app, ["--raw", "install", _PRIMARY_INSTALL_DESCRIPTOR.runtime_name, "--local"])
 
-    assert result.exit_code == 1
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result, expect_exit=1)
     assert payload == {
         "installed": [],
         "failed": [{"runtime": _PRIMARY_INSTALL_DESCRIPTOR.runtime_name, "error": "launcher missing"}],
@@ -1131,11 +1130,13 @@ def test_install_preflight_aggregates_blockers_and_skips_all_runtime_installs(mo
     ):
         result = runner.invoke(app, ["install", "--all", "--local"])
 
-    assert result.exit_code == 1
     mock_install_single.assert_not_called()
-    assert _SECONDARY_INSTALL_DESCRIPTOR.display_name in result.output
-    assert "secondary target not writable" in result.output
-    assert "readiness check passed" not in result.output
+    assert_cli_human_contract(
+        result,
+        expect_exit=1,
+        required_all=[_SECONDARY_INSTALL_DESCRIPTOR.display_name, "secondary target not writable"],
+        forbidden=["readiness check passed"],
+    )
 
 
 @patch("gpd.core.health.run_doctor")
@@ -1176,8 +1177,7 @@ def test_install_raw_reports_all_preflight_failures_for_multi_runtime_install(mo
     ):
         result = runner.invoke(app, ["--raw", "install", "--all", "--local"])
 
-    assert result.exit_code == 1
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result, expect_exit=1)
     assert payload == {
         "installed": [],
         "failed": [
@@ -1231,10 +1231,12 @@ def test_install_skip_readiness_check_reports_skipped_not_passed(mock_run_doctor
         mock_get.return_value = _mock_install_adapter(_PRIMARY_INSTALL_DESCRIPTOR)
         result = runner.invoke(app, ["install", runtime_name, "--local", "--skip-readiness-check"])
 
-    assert result.exit_code == 0
     mock_run_doctor.assert_not_called()
-    assert "readiness check skipped" in result.output
-    assert "readiness check passed" not in result.output
+    assert_cli_human_contract(
+        result,
+        required_all=["readiness check skipped"],
+        forbidden=["readiness check passed"],
+    )
 
 
 def test_uninstall_raw_outputs_json(tmp_path: Path):
@@ -1248,7 +1250,7 @@ def test_uninstall_raw_outputs_json(tmp_path: Path):
     )
 
     assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["uninstalled"][0]["runtime"] == _PRIMARY_INSTALL_DESCRIPTOR.runtime_name
     assert payload["uninstalled"][0]["status"] == "skipped"
     assert payload["uninstalled"][0]["target"] == str(target)
@@ -1265,9 +1267,7 @@ def test_uninstall_human_reports_managed_mcp_server_removal(gpd_root: Path, tmp_
 
         result = runner.invoke(app, ["uninstall", descriptor.runtime_name, "--target-dir", str(target), "--yes"])
 
-        assert result.exit_code == 0
-        assert "GPD" in result.output
-        assert "MCP servers" in result.output
+        assert_cli_human_contract(result, required_all=["GPD", "MCP servers"])
 
 
 def test_uninstall_raw_reports_managed_mcp_server_removal(gpd_root: Path, tmp_path: Path) -> None:
@@ -1280,7 +1280,7 @@ def test_uninstall_raw_reports_managed_mcp_server_removal(gpd_root: Path, tmp_pa
         result = runner.invoke(app, ["--raw", "uninstall", descriptor.runtime_name, "--target-dir", str(target)])
 
         assert result.exit_code == 0
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         outcome = payload["uninstalled"][0]
         assert any("GPD MCP servers" in item for item in outcome["removed"])
         assert outcome["mcpServers"] > 0
@@ -1299,7 +1299,7 @@ def test_doctor_raw_outputs_structured_readiness_payload(mock_doctor) -> None:
     result = runner.invoke(app, ["--raw", "doctor"])
 
     assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload == {
         "ok": True,
         "checks": [{"label": "Python", "status": "ok"}],

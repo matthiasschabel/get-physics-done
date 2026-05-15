@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from gpd.core.workflow_staging import validate_workflow_stage_manifest_payload
+from tests.assertion_taxonomy_support import assert_prompt_contracts, semantic_anchor
 from tests.prompt_metrics_support import expanded_prompt_text, measure_prompt_surface
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -29,8 +30,13 @@ def test_plan_phase_command_stays_thin_and_only_eagerly_loads_the_workflow() -> 
     assert "@{GPD_INSTALL_DIR}/templates/plan-contract-schema.md" not in command_text
     assert "@{GPD_INSTALL_DIR}/references/ui/ui-brand.md" not in command_text
     assert "@{GPD_INSTALL_DIR}/templates/planner-subagent-prompt.md" not in command_text
-    assert "Later stage loading is manifest-owned" in command_text
-    assert "do not duplicate the stage manifest here" in command_text
+    assert_prompt_contracts(
+        command_text,
+        semantic_anchor(
+            "plan-phase command delegates later stage loading",
+            ("Later stage loading is manifest-owned", "do not duplicate the stage manifest here"),
+        ),
+    )
 
     expanded = expanded_prompt_text(
         COMMANDS_DIR / "plan-phase.md",
@@ -51,7 +57,10 @@ def test_plan_phase_root_is_index_not_lifecycle_authority() -> None:
     root_text = (WORKFLOWS_DIR / "plan-phase.md").read_text(encoding="utf-8")
     manifest_payload = json.loads((WORKFLOWS_DIR / "plan-phase-stage-manifest.json").read_text(encoding="utf-8"))
 
-    assert "This root is only the stage map." in root_text
+    assert_prompt_contracts(
+        root_text,
+        semantic_anchor("plan-phase root is only the stage index", "This root is only the stage map."),
+    )
     for stage in manifest_payload["stages"]:
         assert f"`{stage['id']}`" in root_text
         assert stage["mode_paths"][0] in root_text
@@ -156,4 +165,10 @@ def test_plan_phase_clean_non_autonomous_planning_reports_green_with_no_checkpoi
     assert "clean bounded non-autonomous planning" in workflow_text
     assert "has `checkpoint: none`" in workflow_text
     assert "report `status: green`" in workflow_text
-    assert "Execution remaining as the next command is not by itself a yellow condition." in workflow_text
+    assert_prompt_contracts(
+        workflow_text,
+        semantic_anchor(
+            "plan-phase clean status does not warn only because execution remains",
+            "Execution remaining as the next command is not by itself a yellow condition.",
+        ),
+    )

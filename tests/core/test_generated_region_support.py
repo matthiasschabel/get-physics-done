@@ -15,6 +15,7 @@ from scripts.generated_region_support import (
     unified_diff_text,
     write_stale_check_result,
 )
+from tests.assertion_taxonomy_support import assert_prompt_contracts, machine_exact
 
 
 def _region_spec() -> GeneratedRegionSpec:
@@ -103,9 +104,17 @@ def test_marker_inventory_reports_missing_unexpected_and_duplicate_markers() -> 
     assert diffs[0].path == Path("target.md")
     assert diffs[0].block_id == "alpha, delta"
     assert "target.md: test marker inventory mismatch:" in diffs[0].diff
-    assert "missing 1 expected marker(s) for 'delta'" in diffs[0].diff
+    assert_prompt_contracts(
+        diffs[0].diff,
+        machine_exact(
+            "generated region missing and duplicate marker diagnostics",
+            (
+                "missing 1 expected marker(s) for 'delta'",
+                "duplicate marker for 'alpha' is not allowed",
+            ),
+        ),
+    )
     assert "found 2 marker(s) for 'alpha', expected 1" in diffs[0].diff
-    assert "duplicate marker for 'alpha' is not allowed" in diffs[0].diff
     assert "unexpected marker for 'beta'" in diffs[0].diff
 
 
@@ -131,7 +140,10 @@ def test_region_block_inventory_accepts_replace_region_block_ids() -> None:
 
     diffs = check_region_inventory(("alpha",), spec=spec, required_blocks=("alpha", "beta"))
     assert len(diffs) == 1
-    assert "missing 1 expected marker(s) for 'beta'" in diffs[0].diff
+    assert_prompt_contracts(
+        diffs[0].diff,
+        machine_exact("generated region missing beta marker diagnostic", "missing 1 expected marker(s) for 'beta'"),
+    )
 
     with pytest.raises(ValueError, match="Unknown required test generated block 'missing'"):
         check_region_inventory(("alpha",), spec=spec, required_blocks=("alpha", "missing"))

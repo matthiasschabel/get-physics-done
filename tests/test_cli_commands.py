@@ -38,6 +38,7 @@ from tests.helpers.cli import (
     StableCliRunner,
     assert_check,
     assert_checks_pass,
+    assert_no_traceback,
     checks_by_name,
     invoke_cli,
     invoke_help_text,
@@ -578,7 +579,7 @@ class TestInitCommands:
 
         payload = json_output_from_result(result, expect_exit=1)
         assert payload["error"].startswith("Unknown resume-work stage 'bogus'.")
-        assert "Traceback" not in result.output
+        assert_no_traceback(result)
 
     def test_init_verify_work_raw_missing_phase_reports_clean_error(self, gpd_project: Path) -> None:
         result = runner.invoke(
@@ -589,7 +590,7 @@ class TestInitCommands:
 
         payload = json_output_from_result(result, expect_exit=1)
         assert payload["error"].startswith("phase is required for init verify-work.")
-        assert "Traceback" not in result.output
+        assert_no_traceback(result)
 
     def test_init_verify_work_raw_unknown_stage_reports_clean_error(self, gpd_project: Path) -> None:
         result = runner.invoke(
@@ -600,7 +601,7 @@ class TestInitCommands:
 
         payload = json_output_from_result(result, expect_exit=1)
         assert payload["error"].startswith("Unknown verify-work stage 'bogus'.")
-        assert "Traceback" not in result.output
+        assert_no_traceback(result)
 
     @pytest.mark.parametrize(
         ("command_args", "expected_keys"),
@@ -1483,8 +1484,7 @@ class TestRoadmapCommands:
             ["--raw", "--cwd", str(nested), "progress"],
             catch_exceptions=False,
         )
-        assert progress_result.exit_code == 0, progress_result.output
-        assert json.loads(progress_result.output) == {"cwd": str(project_root), "fmt": "json"}
+        assert json_output_from_result(progress_result) == {"cwd": str(project_root), "fmt": "json"}
         assert seen["progress"] == project_root
 
         analyze_result = runner.invoke(
@@ -1492,8 +1492,7 @@ class TestRoadmapCommands:
             ["--raw", "--cwd", str(nested), "roadmap", "analyze"],
             catch_exceptions=False,
         )
-        assert analyze_result.exit_code == 0, analyze_result.output
-        assert json.loads(analyze_result.output) == {"cwd": str(project_root)}
+        assert json_output_from_result(analyze_result) == {"cwd": str(project_root)}
         assert seen["analyze"] == project_root
 
         get_phase_result = runner.invoke(
@@ -1501,8 +1500,7 @@ class TestRoadmapCommands:
             ["--raw", "--cwd", str(nested), "roadmap", "get-phase", "01"],
             catch_exceptions=False,
         )
-        assert get_phase_result.exit_code == 0, get_phase_result.output
-        assert json.loads(get_phase_result.output) == {"cwd": str(project_root), "phase_num": "01"}
+        assert json_output_from_result(get_phase_result) == {"cwd": str(project_root), "phase_num": "01"}
         assert seen["get_phase"] == (project_root, "01")
 
 
@@ -2376,8 +2374,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert progress_result.exit_code == 0, progress_result.output
-        assert json.loads(progress_result.output) == {
+        assert json_output_from_result(progress_result) == {
             "cwd": project.resolve().as_posix(),
             "fmt": "json",
         }
@@ -2418,8 +2415,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert validate_result.exit_code == 1, validate_result.output
-        validate_payload = json.loads(validate_result.output)
+        validate_payload = json_output_from_result(validate_result, expect_exit=1)
         checks = checks_by_name(validate_payload)
         assert validate_payload["passed"] is False
         assert checks["project_reentry"]["passed"] is True
@@ -2452,8 +2448,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert progress_result.exit_code == 0, progress_result.output
-        assert json.loads(progress_result.output) == {
+        assert json_output_from_result(progress_result) == {
             "cwd": workspace.resolve().as_posix(),
             "fmt": "json",
         }
@@ -6630,12 +6625,9 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert command_context_result.exit_code == 0, command_context_result.output
-        assert review_preflight_result.exit_code == 0, review_preflight_result.output
-        assert staged_init_result.exit_code == 0, staged_init_result.output
-        command_context = json.loads(command_context_result.output)
-        review_preflight = json.loads(review_preflight_result.output)
-        staged_init = json.loads(staged_init_result.output)
+        command_context = json_output_from_result(command_context_result)
+        review_preflight = json_output_from_result(review_preflight_result)
+        staged_init = json_output_from_result(staged_init_result)
         managed_root = "GPD/publication/external-authoring-test"
 
         assert command_context["selected_publication_root"] == managed_root
@@ -6689,14 +6681,10 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert command_context_result.exit_code == 0, command_context_result.output
-        assert review_preflight_result.exit_code == 0, review_preflight_result.output
-        assert staged_bootstrap_result.exit_code == 0, staged_bootstrap_result.output
-        assert staged_preflight_result.exit_code == 0, staged_preflight_result.output
-        command_context = json.loads(command_context_result.output)
-        review_preflight = json.loads(review_preflight_result.output)
-        staged_bootstrap = json.loads(staged_bootstrap_result.output)
-        staged_preflight = json.loads(staged_preflight_result.output)
+        command_context = json_output_from_result(command_context_result)
+        review_preflight = json_output_from_result(review_preflight_result)
+        staged_bootstrap = json_output_from_result(staged_bootstrap_result)
+        staged_preflight = json_output_from_result(staged_preflight_result)
         managed_root = review_preflight["managed_publication_root"]
 
         assert review_preflight["publication_lane_kind"] == "external_artifact"
@@ -7079,8 +7067,8 @@ class TestReviewValidationCommands:
         assert preflight.exit_code == 0, preflight.output
         assert materialized.exit_code == 0, materialized.output
 
-        preflight_payload = json.loads(preflight.output)
-        materialized_payload = json.loads(materialized.output)
+        preflight_payload = json_output_from_result(preflight)
+        materialized_payload = json_output_from_result(materialized)
         checks = checks_by_name(preflight_payload)
 
         assert preflight_payload["passed"] is True
@@ -7606,7 +7594,7 @@ def test_install_command_smoke_error_paths_without_traceback(
 
     payload = json_output_from_result(result, expect_exit=1)
     assert payload["error"] == "Runtime catalog unavailable during install: catalog offline"
-    assert "Traceback" not in result.output
+    assert_no_traceback(result)
 
     def assert_raw_install_error(argv: list[str], expected_error: str, setup=None) -> None:
         if setup is not None:
@@ -7614,7 +7602,7 @@ def test_install_command_smoke_error_paths_without_traceback(
         result = runner.invoke(app, ["--raw", "--cwd", str(gpd_project), *argv], catch_exceptions=False)
         payload = json_output_from_result(result, expect_exit=1)
         assert payload["error"] == expected_error
-        assert "Traceback" not in result.output
+        assert_no_traceback(result)
 
     assert_raw_install_error(
         ["install"],
@@ -7652,7 +7640,7 @@ def test_cli_uninstall_and_resolution_paths(monkeypatch: pytest.MonkeyPatch, gpd
     )
     payload = json_output_from_result(result, expect_exit=1)
     assert payload["error"] == "Raw uninstall requires --local, --global, or --target-dir"
-    assert "Traceback" not in result.output
+    assert_no_traceback(result)
 
     monkeypatch.setattr(
         adapters_module,
@@ -7677,7 +7665,7 @@ def test_cli_uninstall_and_resolution_paths(monkeypatch: pytest.MonkeyPatch, gpd
         payload["error"]
         == f"Runtime adapter unavailable for '{_PRIMARY_RAW_RUNTIME_DESCRIPTOR.runtime_name}' during uninstall: adapter offline"
     )
-    assert "Traceback" not in result.output
+    assert_no_traceback(result)
 
     alias = next(
         value

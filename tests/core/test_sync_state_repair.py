@@ -11,6 +11,7 @@ from gpd.cli import app
 from gpd.core.context import init_new_project, init_sync_state
 from gpd.core.recent_projects import record_recent_project
 from gpd.core.state import default_state_dict, save_state_json, state_repair_sync
+from tests.assertion_taxonomy_support import assert_prompt_contracts, semantic_concept
 
 runner = CliRunner()
 FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "stage0"
@@ -105,7 +106,13 @@ def test_sync_state_repair_prefers_valid_backup_over_malformed_markdown_when_jso
     assert stored["position"]["status"] == "Paused"
     repaired_markdown = (planning / "STATE.md").read_text(encoding="utf-8")
     assert repaired_markdown.startswith("# Research State")
-    assert "not a canonical state document" not in repaired_markdown
+    assert_prompt_contracts(
+        repaired_markdown,
+        *semantic_concept(
+            "sync-state repair removes stale noncanonical state document body",
+            forbidden=("not a canonical state document",),
+        ),
+    )
 
 
 def test_sync_state_repair_fails_closed_on_backup_without_primary_state_surface(tmp_path: Path) -> None:
@@ -121,7 +128,13 @@ def test_sync_state_repair_fails_closed_on_backup_without_primary_state_surface(
     assert bootstrap["state_md_exists"] is False
     assert bootstrap["state_json_backup_exists"] is True
     assert bootstrap["state_load_source"] is None
-    assert "will not promote the backup automatically" in bootstrap["state_recovery_guidance"]
+    assert_prompt_contracts(
+        bootstrap["state_recovery_guidance"],
+        *semantic_concept(
+            "sync-state repair refuses lone backup promotion",
+            required=("will not promote the backup automatically",),
+        ),
+    )
     assert any(
         "state.json.bak exists without primary state.json or STATE.md" in issue
         for issue in bootstrap["state_integrity_issues"]
@@ -246,7 +259,13 @@ def test_sync_state_cli_repair_does_not_reenter_recent_project_from_wrong_folder
     assert bootstrap_payload["project_root"] == current.resolve().as_posix()
     assert bootstrap_payload["project_root_source"] == "current_workspace"
     assert bootstrap_payload["project_root_auto_selected"] is False
-    assert "will not inspect or repair a recent project" in bootstrap_payload["project_reentry_guidance"]
+    assert_prompt_contracts(
+        bootstrap_payload["project_reentry_guidance"],
+        *semantic_concept(
+            "sync-state repair does not reenter recent project",
+            required=("will not inspect or repair a recent project",),
+        ),
+    )
 
     assert repair.exit_code == 1, repair.output
     repair_payload = json.loads(repair.output)

@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 
 from gpd.core.workflow_staging import load_workflow_stage_manifest
+from tests.assertion_taxonomy_support import assert_prompt_contracts, semantic_anchor
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COMMAND_PATH = REPO_ROOT / "src" / "gpd" / "commands" / "execute-phase.md"
@@ -159,7 +160,10 @@ def test_execute_phase_heavy_authorities_are_conditional_or_lazy_not_uncondition
     assert "workflows/verify-phase.md" in verification_handoff.must_not_eager_load
     assert "references/verification/core/verification-core.md" in verification_handoff.must_not_eager_load
     assert "templates/recovery-plan.md" in aggregate.must_not_eager_load
-    assert "references/verification/core/proof-redteam-workflow-gate.md" in manifest.stage("wave_planning").must_not_eager_load
+    assert (
+        "references/verification/core/proof-redteam-workflow-gate.md"
+        in manifest.stage("wave_planning").must_not_eager_load
+    )
     assert "references/execution/github-lifecycle.md" in closeout.must_not_eager_load
     assert "references/execution/git-integration.md" in closeout.must_not_eager_load
     for authority in (
@@ -256,8 +260,13 @@ def test_execute_phase_command_bootstraps_only_first_stage_authority() -> None:
 
     assert "@{GPD_INSTALL_DIR}/workflows/execute-phase/phase-bootstrap.md" in command
     assert "@{GPD_INSTALL_DIR}/workflows/execute-phase.md" not in command
-    assert "Later stage loading and field" in command
-    assert "manifest-owned by the staged workflow" in command
+    assert_prompt_contracts(
+        command,
+        semantic_anchor(
+            "execute-phase command delegates later stages",
+            ("Later stage loading and field", "manifest-owned by the staged workflow"),
+        ),
+    )
     assert "staged_loading.eager_authorities" not in command
     assert "staged_loading.must_not_eager_load" not in command
 
@@ -325,7 +334,13 @@ def test_execute_phase_late_authorities_live_in_owning_stages() -> None:
     assert "{GPD_INSTALL_DIR}/workflows/verify-phase.md" in gap_reverification
     assert "{GPD_INSTALL_DIR}/templates/recovery-plan.md" in aggregate
     assert "lifecycle_next_up.rendered_markdown" in closeout
-    assert "The prompt must not decide whether the next runtime command is" in closeout
+    assert_prompt_contracts(
+        closeout,
+        semantic_anchor(
+            "execute closeout delegates next runtime command choice",
+            "The prompt must not decide whether the next runtime command is",
+        ),
+    )
 
 
 def test_execute_phase_closeout_names_readiness_before_safe_local_transition() -> None:
@@ -337,25 +352,48 @@ def test_execute_phase_closeout_names_readiness_before_safe_local_transition() -
     assert readiness in closeout
     assert transition in closeout
     assert closeout.index(readiness) < closeout.index(transition)
-    assert "The completion helper owns the roadmap/state transition and rechecks lifecycle readiness" in closeout
-    assert "Primary local transition" in closeout
-    assert "shared renderer shape" in closeout
-    assert "Read-only readiness and checkpoint cleanup are local helper context" in closeout
+    assert_prompt_contracts(
+        closeout,
+        semantic_anchor(
+            "execute closeout readiness before mutation",
+            (
+                "The completion helper owns the roadmap/state transition and rechecks lifecycle readiness",
+                "Primary local transition",
+                "shared renderer shape",
+                "Read-only readiness and checkpoint cleanup are local helper context",
+            ),
+        ),
+    )
 
 
 def test_execute_phase_closeout_delegates_post_transition_routes_to_lifecycle_payload() -> None:
     closeout = _stage_text("closeout.md")
-    offer_next = closeout[closeout.index('<step name="offer_next">') : closeout.index("</step>", closeout.index('<step name="offer_next">'))]
+    offer_next = closeout[
+        closeout.index('<step name="offer_next">') : closeout.index(
+            "</step>", closeout.index('<step name="offer_next">')
+        )
+    ]
 
     assert "POST_CLOSEOUT_ROUTE=$(gpd --raw phase closeout-readiness" in offer_next
     assert "lifecycle_next_up.rendered_markdown" in offer_next
     assert "next_up.rendered_markdown" in offer_next
     assert "lifecycle_next_up.stage_stop_*" in offer_next
     assert "next_up.stage_stop_*" in offer_next
-    assert "surface the helper JSON instead of\nhand-rendering a route" in offer_next
-    assert "The prompt must not decide" in offer_next
-    assert "If the next phase has no context" not in offer_next
-    assert "If the next phase already has context" not in offer_next
+    assert_prompt_contracts(
+        offer_next,
+        semantic_anchor(
+            "execute closeout uses lifecycle payload renderer",
+            (
+                "surface the helper JSON instead of\nhand-rendering a route",
+                "The prompt must not decide",
+            ),
+        ),
+        semantic_anchor(
+            "execute closeout stale branch prose absent",
+            ("If the next phase has no context", "If the next phase already has context"),
+            mode="absent",
+        ),
+    )
     assert 'next_runtime_command: "gpd:audit-milestone"' not in offer_next
     assert "Primary: `gpd:discuss-phase" not in offer_next
     assert "Primary: `gpd:plan-phase" not in offer_next

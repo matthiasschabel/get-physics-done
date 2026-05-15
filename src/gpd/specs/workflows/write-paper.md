@@ -1079,6 +1079,38 @@ When skipped, write a one-line note to `${PAPER_DIR}/CRITIQUE-LOG.md` recording 
 **Failure handling.** If a critic spawn fails (`status: failed` or `status: blocked`), record the failure in `CRITIQUE-LOG.md` and proceed to `pre_submission_review` rather than blocking the pipeline. The proactive loop is best-effort; the staged panel remains the gate.
 </step>
 
+<step name="reward_hacking_integrity_gate">
+## Mandatory Reward-Hacking Integrity Gate
+
+Run `{GPD_INSTALL_DIR}/references/shared/reward-hacking-self-check.md` against the manuscript before `pre_submission_review`. Distinct from `critique_revision_loop` (polish); this step is content integrity. Always runs, fail-closed, both lanes. Never skip for a finalized manuscript.
+
+**Procedure.**
+
+1. Resolve lane-aware `${gate_inputs}`:
+   - **project-backed:** `${artifact_manifest_path}`, `${bibliography_audit_path}`, `state.json` `contract_results`, `GPD/phases/*-SUMMARY.md`, `GPD/phases/*-VERIFICATION.md`.
+   - **external-authoring:** `${artifact_manifest_path}`, `${bibliography_audit_path}`, plus the bound intake manifest and its claim/evidence ledger under `GPD/publication/{subject_slug}/intake/`. Project-backed artifacts (`state.json`, phase summaries/verifications) are **not** required here; their absence must not block the gate. Fail-closed still holds: at least one bound evidence source per audited claim.
+
+2. Spawn `gpd-paper-writer` (`readonly=false`) using the canonical runtime delegation convention loaded above:
+
+   ```
+   task(
+     subagent_type="gpd-paper-writer",
+     model="{writer_model}",
+     readonly=false,
+     prompt="Read {GPD_AGENTS_DIR}/gpd-paper-writer.md and {GPD_INSTALL_DIR}/references/shared/reward-hacking-self-check.md. Apply items 1-5 plus S1-S4 to ${manuscript_entrypoint}, using ${gate_inputs}.\n\n<autonomy_mode>{AUTONOMY}</autonomy_mode>\n<research_mode>{RESEARCH_MODE}</research_mode>\n\nWrite ${PAPER_DIR}/INTEGRITY-GATE.json: items.{literal_vs_spirit,cheap_wins,adversarial_self_review,uncertainty_disclosure,revise_or_refuse} each {passed,notes}; scientific_writing_rules.{S1_speculative_pathways,S2_citation_confidence,S3_evidence_kind,S4_confidence_to_language} each {passed,violations}; overall_passed; required_revisions[] of {section,item,suggested_change}. S2/S4 fail-closed: any at_risk_citation or confidence mismatch sets overall_passed=false. suggested_change must be a concrete edit.",
+     description="Reward-hacking integrity gate"
+   )
+   ```
+
+3. Read `${PAPER_DIR}/INTEGRITY-GATE.json`. If `overall_passed: true`, append a one-line entry to `${PAPER_DIR}/CRITIQUE-LOG.md` and proceed.
+
+4. If `overall_passed: false`: spawn `gpd-paper-writer` (`readonly=false`) per `required_revisions` item using `suggested_change` as the directive — scoped, not broadened. Re-run the gate once. If still false:
+   - `autonomy=yolo`: do NOT proceed; record failures in `CRITIQUE-LOG.md` and `gpd_return.issues`; recommend dropping offending citations/claims or weakening prose to match verified evidence.
+   - `autonomy=supervised|balanced`: present remaining `required_revisions` with location, item, and suggested change; ask whether to (1) keep revising, (2) drop/weaken, or (3) accept as a known limitation.
+
+Never silently waive: a staged panel on a manuscript that failed the gate yields untrustworthy recommendations. This gate runs independently of `critique_revision_loop` skip conditions (e.g., `research_mode=exploit` + `autonomy=supervised`).
+</step>
+
 <step name="pre_submission_review">
 Branch by write-paper lane before finalizing:
 
@@ -1252,6 +1284,7 @@ Options:
 - [ ] All citations verified via gpd-bibliographer (no hallucinated references)
 - [ ] BibTeX formatting matches target journal requirements
 - [ ] Proactive critique loop ran (or its skip condition was recorded in `${PAPER_DIR}/CRITIQUE-LOG.md`) before staged peer review
+- [ ] Reward-hacking integrity gate ran before staged peer review, `${PAPER_DIR}/INTEGRITY-GATE.json` exists with `overall_passed: true`, or failures were explicitly user-accepted and logged in `${PAPER_DIR}/CRITIQUE-LOG.md`
 - [ ] Project-backed lane: pre-submission staged peer-review round completed, including final `gpd-referee` adjudication and proof-redteam artifacts when required
 - [ ] External-authoring lane: authored manuscript plus manuscript-root artifacts exist under `GPD/publication/{subject_slug}/manuscript`, and the workflow routed to standalone `gpd:peer-review`
 - [ ] Major staged-review issues were addressed or acknowledged before finalization for project-backed runs

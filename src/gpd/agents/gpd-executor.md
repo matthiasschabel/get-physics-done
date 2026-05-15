@@ -243,6 +243,8 @@ If no `<context_hint>` is provided, use `standard` allocation.
 @{GPD_INSTALL_DIR}/references/verification/errors/llm-physics-errors.md
 @{GPD_INSTALL_DIR}/references/orchestration/agent-infrastructure.md
 
+`{GPD_INSTALL_DIR}/references/shared/reward-hacking-self-check.md` -- required pre-finalization integrity gate (five items). Loaded on demand by `<integrity_gate>` below; do NOT skip the gate when returning `gpd_return.status: completed`.
+
 <protocol_loading>
 
 ## Dynamic Protocol Loading
@@ -1023,6 +1025,28 @@ If the plan type does not match any domain, skip this check. If multiple domains
 Do NOT skip. Do NOT proceed to state updates if self-check fails.
 </self_check>
 
+<integrity_gate>
+
+## Required Integrity Gate Before Plan Completion
+
+Before returning `gpd_return.status: completed`, run the reward-hacking self-check at `{GPD_INSTALL_DIR}/references/shared/reward-hacking-self-check.md`. The gate is required, runs after the contract self-check above, and is independent of the per-step self-critique checkpoints (sign / factor / convention / dimension) that fire during execution.
+
+The reference defines the five-item gate (literal-vs-spirit, cheap wins, adversarial self-review, uncertainty disclosure, revise-or-refuse). Apply it to the completed plan. Common executor-side failures: a convergence check that compared two adjacent resolutions without spanning the relevant regime; a "dimensional check" that confirmed dimensions but not the physics; a `[CONFIDENCE: HIGH]` tag on a result whose only independent check is dimensional analysis. If any are present, revise the SUMMARY confidence and uncertainty_markers before completing.
+
+This composes with `<self_check>` above: the contract self-check confirms every claim ID has a `contract_results` entry; the integrity gate confirms those entries actually mean what they appear to mean.
+
+Record the gate result in the structured return under the canonical `gpd_return` envelope defined in `<structured_returns>` below, by populating its `integrity_gate` extension field:
+
+```
+integrity_gate:
+  passed: true | false
+  items_failed: []
+```
+
+If `integrity_gate.passed` is false, `gpd_return.status` must be `blocked` or `checkpoint`, never `completed`. A failed gate is a hard block on completion.
+
+</integrity_gate>
+
 <state_updates_and_completion>
 
 ## State Updates, Final Commit, and Completion
@@ -1077,6 +1101,9 @@ gpd_return:
   tasks_completed: N
   tasks_total: M
   duration_seconds: NNN
+  integrity_gate:
+    passed: true | false   # required; never finalize when passed=false
+    items_failed: []       # named items from reward-hacking-self-check.md
 ```
 
 If the workflow asks for execution handoff or plan continuity, extend the same top-level envelope with the role-specific fields from `executor-completion.md`: `state_updates`, `contract_updates`, `decisions`, `blockers`, and `continuation_update`.
@@ -1153,6 +1180,7 @@ Plan execution complete when:
 - [ ] Expansion order declared (EXPANSION_ORDER) for perturbative calculations, all terms at declared order verified present
 - [ ] Computation-type mini-checklist applied after each major step, failures mapped to deviation rules
 - [ ] Domain post-step guards applied after each major step (matching project domain from config/STATE.md)
+- [ ] **Reward-hacking integrity gate ran and passed** (`{GPD_INSTALL_DIR}/references/shared/reward-hacking-self-check.md`): items 1-5 evaluated against the completed plan; result recorded in `gpd_return.integrity_gate`; never finalize when `integrity_gate.passed` is false
       </success_criteria>
 
 <worked_example>

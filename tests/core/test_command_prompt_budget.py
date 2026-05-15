@@ -96,10 +96,10 @@ COMMAND_BASELINES = {
     "update": (268, 7_672, 1),
     "validate-conventions": (266, 10_102, 1),
     "verify-work": (669, 36_091, 1),
-    "write-paper": (1_464, 92_746, 1),
+    "write-paper": (1_493, 96_218, 1),
 }
 WORST_COMMAND_HARD_CAPS = {
-    "write-paper": (1_600, 95_000),
+    "write-paper": (1_600, 98_000),
     "plan-phase": (1_110, 56_000),
     "execute-phase": (2_050, 106_000),
     "new-project": (2_150, 101_000),
@@ -196,11 +196,11 @@ WORKFLOW_BASELINES = {
     "validate-conventions": (225, 8911, 1),
     "verify-phase": (681, 41_946, 0),
     "verify-work": (596, 34201, 2),
-    "write-paper": (1316, 86789, 2),
+    "write-paper": (1345, 90246, 2),
 }
 WORST_WORKFLOW_HARD_CAPS = {
     "verify-phase": (720, 44_000),
-    "write-paper": (1_420, 89_000),
+    "write-paper": (1_420, 91_000),
     "respond-to-referees": (800, 46_000),
     "new-project": (2_020, 94_000),
     "execute-phase": (2_010, 104_500),

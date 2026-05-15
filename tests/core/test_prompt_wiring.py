@@ -175,6 +175,7 @@ AGENT_REFERENCE_TOKENS = {
     ],
     "gpd-executor.md": [
         "references/shared/shared-protocols.md",
+        "references/shared/reward-hacking-self-check.md",
         "references/orchestration/agent-infrastructure.md",
         "references/shared/cross-project-patterns.md",
         "references/tooling/tool-integration.md",
@@ -207,6 +208,7 @@ AGENT_REFERENCE_TOKENS = {
     ],
     "gpd-paper-writer.md": [
         "references/shared/shared-protocols.md",
+        "references/shared/reward-hacking-self-check.md",
         "references/orchestration/agent-infrastructure.md",
         "references/publication/publication-pipeline-modes.md",
         "references/publication/paper-writer-cookbook.md",
@@ -281,6 +283,7 @@ AGENT_REFERENCE_TOKENS = {
     ],
     "gpd-referee.md": [
         "references/shared/shared-protocols.md",
+        "references/shared/reward-hacking-self-check.md",
         "references/orchestration/agent-infrastructure.md",
         "references/physics-subfields.md",
         "references/verification/core/verification-core.md",
@@ -422,6 +425,60 @@ def test_paper_writer_keeps_cookbook_material_lazy_loaded() -> None:
     assert "Abstract And Section Shape" in cookbook
     assert "Equation And Figure Details" in cookbook
     assert "Supplemental Material Placement" in cookbook
+
+
+def test_reward_hacking_self_check_reference_exists_and_is_wired() -> None:
+    """The reward-hacking integrity gate is required by RES-904.
+
+    The spec must exist as a shared reference, be loaded by the agents that
+    finalize content (paper-writer, executor, referee), and be invoked as a
+    workflow step in write-paper before pre_submission_review.
+    """
+
+    spec_path = REFERENCES_DIR / "shared" / "reward-hacking-self-check.md"
+    assert spec_path.exists(), "reward-hacking-self-check.md missing"
+    spec_text = spec_path.read_text(encoding="utf-8")
+
+    # The spec must define the five-item gate and the four scientific-writing rules.
+    for fragment in (
+        "Literal vs. spirit",
+        "Cheap wins and loopholes",
+        "Adversarial self-review",
+        "Uncertainty disclosure",
+        "Revise or refuse",
+        "S1. Speculative pathways are not established feasibility",
+        "S2. Citation confidence threshold",
+        "S3. Distinguish analytic, numerical, and experimental evidence",
+        "S4. Confidence-to-language mapping",
+    ):
+        assert fragment in spec_text, f"reward-hacking spec missing fragment: {fragment}"
+
+    # Agents that finalize content must reference the gate.
+    for agent_name in ("gpd-paper-writer.md", "gpd-executor.md", "gpd-referee.md"):
+        agent_text = (AGENTS_DIR / agent_name).read_text(encoding="utf-8")
+        assert "references/shared/reward-hacking-self-check.md" in agent_text, (
+            f"{agent_name} does not reference the reward-hacking self-check"
+        )
+
+    # Paper-writer, executor, and referee must declare the gate is required before completion.
+    paper_writer = (AGENTS_DIR / "gpd-paper-writer.md").read_text(encoding="utf-8")
+    executor = (AGENTS_DIR / "gpd-executor.md").read_text(encoding="utf-8")
+    referee = (AGENTS_DIR / "gpd-referee.md").read_text(encoding="utf-8")
+    for surface in (paper_writer, executor, referee):
+        assert "<integrity_gate>" in surface
+        assert "integrity_gate:" in surface
+        assert "items_failed" in surface
+
+    # The write-paper workflow must run the integrity gate as a step before pre_submission_review.
+    write_paper = (WORKFLOWS_DIR / "write-paper.md").read_text(encoding="utf-8")
+    assert '<step name="reward_hacking_integrity_gate">' in write_paper
+    gate_idx = write_paper.index('<step name="reward_hacking_integrity_gate">')
+    review_idx = write_paper.index('<step name="pre_submission_review">')
+    assert gate_idx < review_idx, (
+        "reward_hacking_integrity_gate must run before pre_submission_review"
+    )
+    assert "INTEGRITY-GATE.json" in write_paper
+    assert "overall_passed" in write_paper
 
 
 def test_bibliographer_uses_lightweight_path_mentions_for_metadata_only_reference_packs() -> None:

@@ -45,6 +45,7 @@ If a polished PDF companion is requested and TeX is available, compile the lates
 - `{GPD_INSTALL_DIR}/references/verification/core/verification-core.md`
 - `{GPD_INSTALL_DIR}/references/orchestration/agent-infrastructure.md`
 - `{GPD_INSTALL_DIR}/references/publication/peer-review-panel.md`
+- `{GPD_INSTALL_DIR}/references/shared/reward-hacking-self-check.md`
 
 Reference notes:
 - Shared protocols: forbidden files, source hierarchy, convention tracking, physics verification
@@ -52,6 +53,7 @@ Reference notes:
 - Verification core: physics checks to apply during review
 - Agent infrastructure: data boundary, context pressure, and return envelope
 - Peer-review panel: staged review protocol, stage artifact contract, and recommendation guardrails
+- Reward-hacking self-check: the five-item integrity gate the author should have run before submitting. Look for its symptoms — citation padding, feasibility laundering, evidence blurring, confidence inflation, definition gaming — and flag them as referee objections when present.
 
 **On-demand references:**
 - `{GPD_INSTALL_DIR}/references/publication/publication-pipeline-modes.md` -- Mode adaptation for referee strictness, scope of critique, and recommendation thresholds by autonomy and research_mode (load when reviewing for paper submission)
@@ -950,6 +952,26 @@ Checkpoint ownership is orchestrator-side: when you stop, the orchestrator prese
 
 </checkpoint_behavior>
 
+<integrity_gate>
+
+## Required Integrity Gate Before Final Adjudication
+
+Before returning `gpd_return.status: completed` or writing the final `REFEREE-DECISION{round_suffix}.json`, run the reward-hacking self-check at `{GPD_INSTALL_DIR}/references/shared/reward-hacking-self-check.md` against this referee report. The gate is required, runs after panel adjudication, and is independent of the upstream staged-review artifact integrity checks.
+
+Apply the five-item gate (literal-vs-spirit, cheap wins, adversarial self-review, uncertainty disclosure, revise-or-refuse) to your own recommendation: does the recommendation reward-hack the request (e.g., a soft `minor_revision` to avoid the cost of a substantive critique, an over-confident `accept` on a paper whose evidence record does not support the prose, a `reject` justified by symptoms rather than the strongest defensible objection)?
+
+Record the gate result in the canonical `gpd_return` envelope below, by populating its `integrity_gate` extension field:
+
+```
+integrity_gate:
+  passed: true | false
+  items_failed: []  # e.g. ["item3: did not steelman the rejection case", "S4: accept-level prose for medium-confidence evidence"]
+```
+
+If `integrity_gate.passed` is false, `gpd_return.status` must be `blocked` or `checkpoint`, never `completed`. A failed gate is a hard block, not a soft warning.
+
+</integrity_gate>
+
 <structured_returns>
 
 The markdown headings `## REVIEW COMPLETE`, `## REVIEW INCOMPLETE`, and `## CHECKPOINT REACHED` are human-readable labels only. Route on `gpd_return.status` and the written review artifacts, not on heading text.
@@ -1023,6 +1045,9 @@ gpd_return:
   major_issues: N
   minor_issues: N
   dimensions_evaluated: N  # out of 10
+  integrity_gate:
+    passed: true | false      # required: never finalize with passed=false
+    items_failed: []           # named items from reward-hacking-self-check.md
 ```
 
 For all statuses, `files_written` must list only files actually written in this run from the Stage 6 allowlist. Do not include files you only read or validated, or unchanged preexisting artifacts.

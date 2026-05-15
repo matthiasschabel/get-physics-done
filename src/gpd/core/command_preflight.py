@@ -6,6 +6,7 @@ import dataclasses
 import hashlib
 import re
 from collections.abc import Callable, Mapping
+from difflib import SequenceMatcher
 from pathlib import Path
 
 from gpd.command_labels import canonical_command_label, parse_command_label
@@ -120,6 +121,50 @@ class CommandRuntimeSurfaceMetadata:
     public_runtime_command_prefix: str = ""
     init_command: str = "the active runtime's `new-project` command"
     dispatch_note: str = ""
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class CommandLookupSuggestion:
+    command: str
+    canonical_command: str
+    slug: str
+    reason: str = "closest registered command"
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class CommandLookupAction:
+    label: str
+    command: str
+    detail: str
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class CommandLookupErrorPayload:
+    ok: bool
+    passed: bool
+    error: str
+    requested_command: str
+    normalized_command: str
+    canonical_command: str
+    slug: str
+    known_command: bool
+    allowed_preview: list[str]
+    suggestions: list[CommandLookupSuggestion]
+    guidance: str
+    primary_action: CommandLookupAction
+    safe_alternatives: list[CommandLookupAction]
+    debug_actions: list[CommandLookupAction]
+    validated_surface: str = "public_runtime_command_surface"
+    public_runtime_command_prefix: str = ""
+    dispatch_note: str = ""
+
+
+class CommandLookupError(GPDError):
+    """User-facing registry lookup failure with machine-readable remediation."""
+
+    def __init__(self, payload: CommandLookupErrorPayload) -> None:
+        self.payload = payload
+        super().__init__(format_command_lookup_error(payload))
 
 
 _EXTERNAL_ARTIFACT_OPTIONAL_DETAILS = {
@@ -726,16 +771,161 @@ def command_supports_project_reentry(command: object) -> bool:
     return project_reentry_mode not in {"", "disallowed", "false", "none"}
 
 
+def _render_public_command_label(canonical_label: str, *, public_prefix: str) -> str:
+    parsed = parse_command_label(canonical_label)
+    if not parsed.slug:
+        return canonical_label
+    return f"{public_prefix}{parsed.slug}" if public_prefix else canonical_label
+
+
+def _allowed_command_preview(known_commands: list[str], *, limit: int) -> list[str]:
+    preview: list[str] = []
+    for command_name in ("gpd:help", *known_commands):
+        if command_name in preview:
+            continue
+        preview.append(command_name)
+        if len(preview) >= limit:
+            break
+    return preview
+
+
+def _lookup_suggestions(
+    parsed_command: str,
+    *,
+    known_commands: list[str],
+    public_prefix: str,
+    limit: int,
+) -> list[CommandLookupSuggestion]:
+    if not parsed_command:
+        return []
+
+    candidates: list[tuple[float, str, str]] = []
+    requested = parsed_command.casefold()
+    for canonical_label in known_commands:
+        parsed = parse_command_label(canonical_label)
+        candidate_values = (parsed.slug.casefold(), canonical_label.casefold())
+        score = max(SequenceMatcher(None, requested, candidate).ratio() for candidate in candidate_values)
+        if score >= 0.62:
+            candidates.append((score, canonical_label, parsed.slug))
+
+    suggestions: list[CommandLookupSuggestion] = []
+    seen: set[str] = set()
+    for _score, canonical_label, slug in sorted(candidates, key=lambda item: (-item[0], item[1])):
+        if canonical_label in seen:
+            continue
+        seen.add(canonical_label)
+        suggestions.append(
+            CommandLookupSuggestion(
+                command=_render_public_command_label(canonical_label, public_prefix=public_prefix),
+                canonical_command=canonical_label,
+                slug=slug,
+            )
+        )
+        if len(suggestions) >= limit:
+            break
+    return suggestions
+
+
+def build_command_lookup_error_payload(
+    command_name: str,
+    *,
+    runtime_surface_metadata: CommandRuntimeSurfaceMetadata | None = None,
+    preview_limit: int = 12,
+    suggestion_limit: int = 3,
+) -> CommandLookupErrorPayload:
+    """Return the shared fail-closed payload for an unknown registry command."""
+
+    from gpd import registry as content_registry
+
+    runtime = runtime_surface_metadata or CommandRuntimeSurfaceMetadata()
+    parsed = parse_command_label(command_name)
+    normalized_command = parsed.command or command_name.strip()
+    canonical_command = parsed.canonical_command
+    public_prefix = runtime.public_runtime_command_prefix or ""
+    known_commands = list(content_registry.list_commands(name_format="label"))
+    suggestions = _lookup_suggestions(
+        parsed.slug,
+        known_commands=known_commands,
+        public_prefix=public_prefix or "gpd:",
+        limit=suggestion_limit,
+    )
+    primary_command = f"{public_prefix}help --all" if public_prefix else "gpd --raw help --all"
+    guidance = f"Unknown GPD command. Run `{primary_command}` for the compact command index."
+    safe_alternatives = [
+        CommandLookupAction(
+            label="Inspect local raw help index",
+            command="gpd --raw help --all",
+            detail="Read the compact registry index without running any workflow.",
+        ),
+        CommandLookupAction(
+            label="Inspect local CLI help",
+            command="gpd --help",
+            detail="Check terminal-only `gpd` subcommands when the request may be local CLI syntax.",
+        ),
+    ]
+    if suggestions:
+        safe_alternatives.insert(
+            0,
+            CommandLookupAction(
+                label="Inspect closest command help",
+                command=f"gpd --raw help --command {suggestions[0].canonical_command}",
+                detail="Read detailed metadata for the closest registered command suggestion.",
+            ),
+        )
+    safe_alternatives = [action for action in safe_alternatives if action.command != primary_command]
+
+    debug_target = suggestions[0].canonical_command if suggestions else "gpd:help"
+    return CommandLookupErrorPayload(
+        ok=False,
+        passed=False,
+        error="unknown_command",
+        requested_command=command_name,
+        normalized_command=normalized_command,
+        canonical_command=canonical_command,
+        slug=parsed.slug,
+        known_command=False,
+        allowed_preview=_allowed_command_preview(known_commands, limit=preview_limit),
+        suggestions=suggestions,
+        guidance=guidance,
+        primary_action=CommandLookupAction(
+            label="Open compact command index",
+            command=primary_command,
+            detail="Use the registry-backed help index to choose one valid public runtime command.",
+        ),
+        safe_alternatives=safe_alternatives,
+        debug_actions=[
+            CommandLookupAction(
+                label="Replay lookup preflight",
+                command=f"gpd --raw validate command-context {canonical_command}",
+                detail="Confirm the command lookup failure through the read-only command-context validator.",
+            ),
+            CommandLookupAction(
+                label="Inspect known command fields",
+                command=f"gpd --raw command field-access {debug_target}",
+                detail="Inspect the stable command-context fields for a registered command.",
+            ),
+        ],
+        validated_surface=runtime.validated_surface,
+        public_runtime_command_prefix=runtime.public_runtime_command_prefix,
+        dispatch_note=runtime.dispatch_note,
+    )
+
+
+def format_command_lookup_error(payload: CommandLookupErrorPayload) -> str:
+    message = f"Unknown GPD command: {payload.canonical_command}. {payload.guidance}"
+    if payload.suggestions:
+        rendered = ", ".join(suggestion.command for suggestion in payload.suggestions)
+        message += f" Suggestions: {rendered}"
+    return message
+
+
 def resolve_registry_command(command_name: str) -> tuple[object, str]:
     from gpd import registry as content_registry
 
     try:
         return content_registry.get_command(command_name), canonical_command_label(command_name)
     except KeyError as exc:
-        requested_name = canonical_command_label(command_name)
-        known_commands = content_registry.list_commands()
-        preview = ", ".join(f"gpd:{name}" for name in known_commands[:8]) + (", ..." if len(known_commands) > 8 else "")
-        raise GPDError(f"Unknown GPD command: {requested_name}. Known commands include: {preview}") from exc
+        raise CommandLookupError(build_command_lookup_error_payload(command_name)) from exc
 
 
 def build_command_context_preflight(

@@ -161,6 +161,62 @@ def test_help_renderer_renders_quick_start_structure_without_freezing_marker_bod
     assert all(description.strip() for _command, description in rows)
 
 
+def test_help_renderer_renders_default_help_as_short_three_choice_chooser() -> None:
+    default_help = help_renderer.render_default_help_markdown()
+
+    assert default_help.startswith("## Quick Start")
+    assert len(default_help.splitlines()) <= 45
+    assert len(default_help) <= 3_500
+    for section_heading in ("**New folder**", "**Existing research folder**", "**Returning project**"):
+        assert section_heading in default_help
+
+    rows = _numbered_command_rows(default_help)
+    commands = {command for command, _description in rows}
+    assert commands == {
+        "gpd:start",
+        "gpd:new-project",
+        "gpd:new-project --minimal",
+        "gpd:map-research",
+        local_cli_resume_command(),
+        local_cli_resume_recent_command(),
+        "gpd:resume-work",
+    }
+    assert all(description.strip() for _command, description in rows)
+    _assert_contains_none(
+        default_help,
+        (
+            "`gpd:tour`",
+            "`gpd:progress`",
+            "`gpd:suggest-next`",
+            "`gpd:settings`",
+            "`gpd:set-tier-models`",
+            "`gpd:tangent`",
+            "`gpd:branch-hypothesis`",
+            f"`{local_cli_observe_execution_command()}`",
+            f"`{local_cli_cost_command()}`",
+        ),
+    )
+
+
+def test_help_renderer_default_help_rewrites_runtime_commands_for_public_prefix() -> None:
+    public_prefix = _descriptor_with_public_prefix_kind("dollar").public_command_surface_prefix
+    default_help = help_renderer.render_default_help_markdown(public_prefix=public_prefix)
+
+    _assert_contains_all(
+        default_help,
+        (
+            f"`{public_prefix}start`",
+            f"`{public_prefix}new-project`",
+            f"`{public_prefix}new-project --minimal`",
+            f"`{public_prefix}map-research`",
+            f"`{public_prefix}resume-work`",
+            f"`{local_cli_resume_command()}`",
+            f"`{local_cli_resume_recent_command()}`",
+        ),
+    )
+    _assert_contains_none(default_help, ("`gpd:start`", "`gpd:resume-work`", f"`{public_prefix}progress`"))
+
+
 def test_help_renderer_quick_start_rewrites_runtime_commands_for_public_prefix() -> None:
     public_prefix = _descriptor_with_public_prefix_kind("dollar").public_command_surface_prefix
     quick_start = help_renderer.render_quick_start_markdown(public_prefix=public_prefix)

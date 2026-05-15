@@ -154,6 +154,7 @@ __all__ = [
     "assert_docs_release_source_policy_contract",
     "assert_docs_semantic_anchor",
     "assert_local_heading_links_resolve",
+    "assert_default_recovery_note_hides_raw_reference_vocabulary",
     "assert_public_surface_generated_file_current",
     "assert_public_surface_generated_region",
     "assert_publication_lane_boundary_contract",
@@ -316,6 +317,24 @@ def _extract_generated_region(content: str, block_id: str, *, context: str) -> s
     return extract_marker_range(content, start_marker, end_marker, context=context).strip("\n")
 
 
+def _extract_generated_regions(content: str, block_id: str, *, context: str) -> tuple[str, ...]:
+    start_marker, end_marker = generated_region_markers(block_id)
+    starts = content.count(start_marker)
+    ends = content.count(end_marker)
+    if starts == 0:
+        raise AssertionError(f"missing generated public-surface block {block_id!r} in {context}")
+    if starts != ends:
+        raise AssertionError(
+            f"unbalanced generated public-surface block {block_id!r} in {context}: "
+            f"{starts} start marker(s), {ends} end marker(s)"
+        )
+    pattern = re.compile(f"{re.escape(start_marker)}(?P<body>.*?){re.escape(end_marker)}", re.S)
+    regions = tuple(match.group("body").strip("\n") for match in pattern.finditer(content))
+    if len(regions) != starts:
+        raise AssertionError(f"could not extract every generated public-surface block {block_id!r} in {context}")
+    return regions
+
+
 def assert_public_surface_generated_region(content: str, block_id: str, *, context: str) -> None:
     """Assert one checked-in generated public-surface region matches the renderer."""
 
@@ -335,6 +354,42 @@ def assert_public_surface_generated_file_current(content: str, *, context: str) 
     if diffs:
         rendered_diffs = "\n".join(diff.diff for diff in diffs)
         raise AssertionError(f"generated public-surface regions are stale in {context}:\n{rendered_diffs}")
+
+
+def assert_default_recovery_note_hides_raw_reference_vocabulary(content: str, *, context: str) -> None:
+    """Assert default recovery notes stay focused on commands, not raw resume schema vocabulary."""
+
+    forbidden_fragments = (
+        "Resume vocabulary fields",
+        "Canonical continuation fields define the public resume vocabulary",
+        "state.json",
+        "active_resume_",
+        "derived_execution_head",
+        "continuity_handoff_file",
+        "gpd_return",
+    )
+    for index, region in enumerate(_extract_generated_regions(content, "recovery-note", context=context), start=1):
+        missing_expected = tuple(
+            fragment
+            for fragment in (
+                recovery_local_snapshot_command(),
+                recovery_cross_workspace_command(),
+                "`resume-work`",
+                "`suggest-next`",
+                "`pause-work`",
+            )
+            if fragment not in region
+        )
+        if missing_expected:
+            raise AssertionError(
+                f"default recovery-note block {index} in {context} is missing expected command fragments: "
+                f"{missing_expected!r}"
+            )
+        present = tuple(fragment for fragment in forbidden_fragments if fragment in region)
+        if present:
+            raise AssertionError(
+                f"default recovery-note block {index} in {context} exposes raw reference vocabulary: {present!r}"
+            )
 
 
 def _markdown_heading_ids(content: str) -> set[str]:

@@ -19,7 +19,7 @@ Show available GPD commands and usage guide
 **`gpd:start [optional short goal]`**
 Choose the right first GPD action for this folder and route into the real workflow
 
-**`gpd:tour [optional short goal]`**
+**`gpd:tour [optional short goal | --all | --reference]`**
 Show a guided beginner walkthrough of the core GPD commands without taking action
 
 **`gpd:new-project`**

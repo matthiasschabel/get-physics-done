@@ -4356,8 +4356,9 @@ class TestReviewValidationCommands:
         assert payload["ok"] is True
         assert payload["default_sections"] == ["quick_start_extract", "wrapper_owned_all_hint"]
         assert payload["quick_start"]["heading"] == "Quick Start"
-        _assert_text_contains(payload["quick_start"]["markdown"], ("gpd:start",))
-        assert payload["quick_start"]["canonical_markdown"] == help_renderer.render_quick_start_markdown()
+        _assert_text_contains(payload["quick_start"]["markdown"], ("gpd:start", "Existing research folder"))
+        _assert_text_excludes(payload["quick_start"]["markdown"], ("gpd:progress", "gpd cost"))
+        assert payload["quick_start"]["canonical_markdown"] == help_renderer.render_default_help_markdown()
         _assert_text_excludes(payload["quick_start"]["markdown"], ("<!--",))
         assert payload["recommended_commands"] == ["gpd:help --all"]
         assert payload["canonical_recommended_commands"] == ["gpd:help --all"]
@@ -4396,8 +4397,9 @@ class TestReviewValidationCommands:
         assert payload["public_runtime_command_prefix"] == "$gpd-"
         _assert_text_contains(
             payload["quick_start"]["markdown"],
-            ("`$gpd-start`", "`$gpd-new-project --minimal`", "`$gpd-progress`"),
+            ("`$gpd-start`", "`$gpd-new-project --minimal`", "`$gpd-map-research`"),
         )
+        _assert_text_excludes(payload["quick_start"]["markdown"], ("`$gpd-progress`",))
         _assert_text_contains(payload["quick_start"]["canonical_markdown"], ("`gpd:start`",))
         assert payload["recommended_commands"] == ["$gpd-help --all"]
         assert payload["canonical_recommended_commands"] == ["gpd:help --all"]
@@ -4456,14 +4458,64 @@ class TestReviewValidationCommands:
         assert payload["canonical_command"] == "gpd:new-project"
         assert payload["command_context"]["command"] == "gpd:new-project"
 
-    def test_raw_help_bridge_unknown_command_fails_closed(self, tmp_path: Path) -> None:
+    def test_raw_help_bridge_unknown_command_fails_closed(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr("gpd.cli.detect_runtime_for_gpd_use", lambda cwd=None: None)
         payload = _raw_json(
             ["--raw", "--cwd", str(tmp_path), "help", "--command", "does-not-exist"],
             expect_exit=1,
         )
         assert payload["ok"] is False
+        assert payload["passed"] is False
         assert payload["error"] == "unknown_command"
+        assert payload["requested_command"] == "does-not-exist"
+        assert payload["normalized_command"] == "does-not-exist"
         assert payload["canonical_command"] == "gpd:does-not-exist"
+        assert payload["known_command"] is False
+        assert "gpd:help" in payload["allowed_preview"]
+        assert isinstance(payload["primary_action"], dict)
+        assert "primary_actions" not in payload
+        assert payload["primary_action"]["command"] == "gpd --raw help --all"
+        assert payload["safe_alternatives"]
+        assert payload["debug_actions"]
+
+    def test_raw_help_bridge_unknown_command_uses_active_runtime_prefix(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        descriptor = _DOLLAR_COMMAND_DESCRIPTOR
+        monkeypatch.setattr("gpd.cli.detect_runtime_for_gpd_use", lambda cwd=None: descriptor.runtime_name)
+
+        payload = _raw_json(
+            ["--raw", "--cwd", str(tmp_path), "help", "--command", "verfy-work"],
+            expect_exit=1,
+        )
+        assert payload["error"] == "unknown_command"
+        assert payload["public_runtime_command_prefix"] == "$gpd-"
+        assert payload["primary_action"]["command"] == "$gpd-help --all"
+        assert any(suggestion["command"] == "$gpd-verify-work" for suggestion in payload["suggestions"])
+
+    def test_command_context_unknown_command_preserves_inline_request(self, tmp_path: Path) -> None:
+        payload = _raw_json(
+            [
+                "--raw",
+                "--cwd",
+                str(tmp_path),
+                "validate",
+                "command-context",
+                "gpd:verfy-work --phase 2",
+            ],
+            expect_exit=1,
+        )
+        assert payload["error"] == "unknown_command"
+        assert payload["requested_command"] == "gpd:verfy-work --phase 2"
+        assert payload["normalized_command"] == "gpd:verfy-work"
+        assert payload["canonical_command"] == "gpd:verfy-work"
+        assert any(suggestion["canonical_command"] == "gpd:verify-work" for suggestion in payload["suggestions"])
 
     def test_command_context_project_aware_command_accepts_explicit_inputs(
         self,

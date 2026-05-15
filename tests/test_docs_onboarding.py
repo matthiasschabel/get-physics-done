@@ -9,12 +9,13 @@ import pytest
 from gpd.adapters.runtime_catalog import get_runtime_descriptor, get_shared_install_metadata, iter_runtime_descriptors
 from gpd.core.onboarding_surfaces import beginner_runtime_surface, beginner_runtime_surfaces
 from gpd.core.public_surface_contract import beginner_onboarding_hub_url
-from gpd.core.public_surface_renderer import runtime_doc_filename
+from gpd.core.public_surface_renderer import runtime_doc_filename, runtime_quickstart_block_id
 from tests.assertion_taxonomy_support import FragmentMode
 from tests.doc_surface_contracts import (
     assert_any_docs_semantic_anchor,
     assert_beginner_hub_preflight_contract,
     assert_beginner_startup_routing_contract,
+    assert_default_recovery_note_hides_raw_reference_vocabulary,
     assert_docs_public_exact,
     assert_docs_release_source_policy_contract,
     assert_docs_semantic_anchor,
@@ -25,7 +26,12 @@ from tests.markdown_test_support import (
     assert_markdown_link,
     assert_ordered_fragments,
     extract_markdown_section,
+    extract_marker_range,
     markdown_fence_bodies,
+)
+from tests.runtime_command_prefix_support import (
+    assert_no_incompatible_beginner_command_labels,
+    beginner_runtime_quickstart_labels,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -62,6 +68,27 @@ def test_runtime_quickstarts_surface_the_beginner_next_steps(surface) -> None:
         "runtime guide stable headings",
         ("## Choose this runtime if", "## What must already be true", "## 2) Install, start, and use GPD"),
         context=doc_path,
+    )
+
+
+@pytest.mark.parametrize("surface", beginner_runtime_surfaces(), ids=lambda surface: surface.runtime_name)
+def test_runtime_quickstart_blocks_do_not_leak_incompatible_command_prefixes(surface) -> None:
+    doc_path = f"docs/{runtime_doc_filename(surface)}"
+    content = _read(doc_path)
+    block_id = runtime_quickstart_block_id(surface)
+    quickstart = extract_marker_range(
+        content,
+        f"<!-- gpd-public-surface:{block_id}:start -->",
+        f"<!-- gpd-public-surface:{block_id}:end -->",
+        context=doc_path,
+    )
+
+    for command in beginner_runtime_quickstart_labels(surface):
+        assert command in quickstart
+    assert_no_incompatible_beginner_command_labels(
+        quickstart,
+        surface,
+        context=f"{doc_path} generated quickstart",
     )
 
 
@@ -210,6 +237,23 @@ def test_docs_onboarding_hub_surfaces_release_source_policy() -> None:
 
     assert_docs_release_source_policy_contract(content, context="docs/README.md")
     assert_forbidden_fragments(content, "Graduate to Balanced", context="docs/README.md")
+
+
+@pytest.mark.parametrize(
+    "relative_path",
+    (
+        "README.md",
+        "docs/README.md",
+        "docs/macos.md",
+        "docs/windows.md",
+        "docs/linux.md",
+        "src/gpd/specs/workflows/help.md",
+    ),
+)
+def test_default_recovery_notes_hide_raw_reference_vocabulary(relative_path: str) -> None:
+    content = _read(relative_path)
+
+    assert_default_recovery_note_hides_raw_reference_vocabulary(content, context=relative_path)
 
 
 def test_root_readme_settings_short_wording_matches_model_profile_contract() -> None:

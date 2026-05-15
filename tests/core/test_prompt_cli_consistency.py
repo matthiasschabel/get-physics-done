@@ -600,6 +600,9 @@ def test_tour_prompt_delegates_routing_to_workflow_only() -> None:
     )
     assert "gpd:set-tier-models" in tour_command
     assert "gpd:settings" in tour_command
+    assert "gpd:tour --all" in tour_command
+    assert "gpd:tour --reference" in tour_command
+    assert "gpd:help --all" in tour_command
     assert "gpd:start" in tour_command_expanded
     assert "gpd:resume-work" in tour_command_expanded
     assert_tour_command_surface_contract(tour_workflow)
@@ -608,10 +611,14 @@ def test_tour_prompt_delegates_routing_to_workflow_only() -> None:
         tour_workflow,
         "tour workflow does not route",
         (
-            "Do not narrow the command list, select a path, or route based on it.",
+            "Do not narrow the command list, select a path, or route based on non-flag context.",
+            "Unknown flags are context only unless they are exactly `--all` or `--reference`.",
             "the runtime, where you use the GPD command prefix provided for that runtime",
         ),
     )
+    assert "80 lines or fewer" in tour_workflow
+    assert "4500 characters or fewer" in tour_workflow
+    assert "gpd:help --all` remains the canonical complete command index" in tour_workflow
     assert "Normal terminal vs runtime" in tour_workflow
 
 

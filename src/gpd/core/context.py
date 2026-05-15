@@ -308,6 +308,7 @@ from gpd.core.staged_context_fields import (
 from gpd.core.staged_init_assembly import (
     assemble_staged_init_payload as _assemble_staged_init_payload,
 )
+from gpd.core.start_context_choices import start_visible_choices
 from gpd.core.state import _current_machine_identity, _finalize_project_contract_gate, backup_only_state_guidance
 from gpd.core.state import peek_state_json as _peek_state_json
 from gpd.core.task_overlays import build_task_overlay_load_manifest
@@ -3756,6 +3757,7 @@ def init_start_context(cwd: Path) -> dict[str, object]:
         "classification": folder_state,
         **classifier,
         "init_progress": init_progress,
+        "visible_choices": start_visible_choices(classifier),
         "raw_diagnostics_command": "gpd --raw init new-project",
     }
 

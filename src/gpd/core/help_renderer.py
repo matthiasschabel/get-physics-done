@@ -71,6 +71,13 @@ _ADDITIONAL_QUICK_START_RUNTIME_COMMANDS = (
     "gpd:branch-hypothesis",
 )
 
+_DEFAULT_HELP_RUNTIME_COMMANDS = (
+    "gpd:start",
+    "gpd:new-project",
+    "gpd:map-research",
+    "gpd:resume-work",
+)
+
 
 def _runtime_command_for_ladder_step(step: str) -> tuple[str, ...]:
     return tuple(f"gpd:{part.strip()}" for part in step.split("/") if part.strip())
@@ -623,7 +630,7 @@ def render_detailed_command_reference_markdown(*, public_prefix: str = "gpd:") -
 
 
 def render_quick_start_markdown(*, public_prefix: str = "gpd:") -> str:
-    """Render the default public quick-start help section."""
+    """Render the broad public quick-start reference used by help --all."""
 
     for command in _quick_start_runtime_commands():
         get_command(command)
@@ -680,6 +687,41 @@ def render_quick_start_markdown(*, public_prefix: str = "gpd:") -> str:
     ).strip()
 
 
+def render_default_help_markdown(*, public_prefix: str = "gpd:") -> str:
+    """Render the short default help chooser."""
+
+    for command in _DEFAULT_HELP_RUNTIME_COMMANDS:
+        get_command(command)
+    local_resume = local_cli_resume_command()
+    local_resume_recent = local_cli_resume_recent_command()
+    start_command = _apply_public_prefix("gpd:start", public_prefix=public_prefix)
+    new_project_command = _apply_public_prefix("gpd:new-project", public_prefix=public_prefix)
+    map_research_command = _apply_public_prefix("gpd:map-research", public_prefix=public_prefix)
+    resume_work_command = _apply_public_prefix("gpd:resume-work", public_prefix=public_prefix)
+    minimal_project_command = _apply_public_prefix("gpd:new-project --minimal", public_prefix=public_prefix)
+    return textwrap.dedent(
+        f"""\
+        ## Quick Start
+
+        Choose the path that matches this folder:
+
+        **New folder**
+        1. `{start_command}` - Let GPD inspect the folder and route the safest first step
+        2. `{new_project_command}` - Create a full GPD project here
+        3. `{minimal_project_command}` - Use the shortest setup path
+
+        **Existing research folder**
+        1. `{map_research_command}` - Map files and context before planning
+        2. `{new_project_command}` - Turn the mapped context into a full GPD project
+
+        **Returning project**
+        1. `{local_resume}` - Reopen this workspace from your normal terminal
+        2. `{local_resume_recent}` - Choose a different recent workspace from your normal terminal
+        3. `{resume_work_command}` - Continue inside the reopened project's canonical state
+        """
+    ).strip()
+
+
 def render_command_index_markdown(*, public_prefix: str = "gpd:") -> str:
     """Render the compact grouped command index from command-owned help metadata."""
 
@@ -698,9 +740,15 @@ def render_command_index_markdown(*, public_prefix: str = "gpd:") -> str:
 
 
 def render_quick_start(*, public_prefix: str = "gpd:") -> str:
-    """Render the default public quick-start help section."""
+    """Render the broad public quick-start reference used by help --all."""
 
     return render_quick_start_markdown(public_prefix=public_prefix)
+
+
+def render_default_help(*, public_prefix: str = "gpd:") -> str:
+    """Render the short default help chooser."""
+
+    return render_default_help_markdown(public_prefix=public_prefix)
 
 
 def render_command_index(*, public_prefix: str = "gpd:") -> str:
@@ -721,6 +769,8 @@ __all__ = [
     "format_detailed_help_follow_up",
     "format_help_all_command",
     "help_command_groups",
+    "render_default_help",
+    "render_default_help_markdown",
     "render_command_index",
     "render_command_index_markdown",
     "render_command_detail_markdown",

@@ -35,6 +35,10 @@ from scripts.render_public_surface import (
     update_generated_files,
 )
 from tests.markdown_test_support import parse_markdown_table
+from tests.runtime_command_prefix_support import (
+    assert_no_incompatible_beginner_command_labels,
+    beginner_runtime_quickstart_labels,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -199,6 +203,21 @@ def test_runtime_doc_links_and_quickstart_snippets_are_runtime_derived() -> None
         ):
             assert command in snippet
         assert context.contract.post_start_settings.default_sentence in snippet
+
+
+def test_runtime_quickstart_snippets_do_not_leak_incompatible_command_prefixes() -> None:
+    context = public_surface_context()
+
+    for surface in context.runtime_surfaces:
+        snippet = render_runtime_quickstart_snippet(surface.runtime_name, context)
+        for command in beginner_runtime_quickstart_labels(surface):
+            assert command in snippet
+        assert_no_incompatible_beginner_command_labels(
+            snippet,
+            surface,
+            context=f"{surface.runtime_name} rendered quickstart",
+            surfaces=context.runtime_surfaces,
+        )
 
 
 def test_runtime_doc_filename_slugifies_display_names() -> None:

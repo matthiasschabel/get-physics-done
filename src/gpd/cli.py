@@ -85,10 +85,13 @@ from gpd.core.command_arguments import (
 )
 from gpd.core.command_preflight import (
     CommandContextPreflightResult,
+    CommandLookupError,
     CommandRuntimeSurfaceMetadata,
     _publication_subject_preflight_policy,
     _review_preflight_publication_routing,
+    build_command_lookup_error_payload,
     command_label_lookup_and_arguments,
+    format_command_lookup_error,
 )
 from gpd.core.command_preflight import (
     build_command_context_preflight as _core_build_command_context_preflight,
@@ -1049,12 +1052,16 @@ def help_bridge(
         format_help_all_command,
         render_command_detail_markdown,
         render_command_index_markdown,
+        render_default_help_markdown,
         render_quick_start_markdown,
     )
 
     runtime_cwd = _get_cwd()
-    active_public_prefix = _active_runtime_command_prefix(cwd=runtime_cwd) or ""
+    runtime_surface = _command_runtime_surface_metadata(cwd=runtime_cwd)
+    active_public_prefix = runtime_surface.public_runtime_command_prefix
     public_prefix = active_public_prefix or "gpd:"
+    canonical_default_help_markdown = render_default_help_markdown()
+    default_help_markdown = render_default_help_markdown(public_prefix=public_prefix)
     canonical_quick_start_markdown = render_quick_start_markdown()
     quick_start_markdown = render_quick_start_markdown(public_prefix=public_prefix)
     canonical_command_index_markdown = render_command_index_markdown()
@@ -1062,7 +1069,7 @@ def help_bridge(
     payload: dict[str, object] = {
         "command": "gpd:help",
         "surface": "local_cli_raw_help_bridge",
-        "validated_surface": _validated_runtime_surface(cwd=runtime_cwd),
+        "validated_surface": runtime_surface.validated_surface,
         "public_runtime_command_prefix": active_public_prefix,
         "local_cli_equivalence_guaranteed": False,
         "dispatch_note": (
@@ -1072,8 +1079,8 @@ def help_bridge(
         "default_sections": ["quick_start_extract", "wrapper_owned_all_hint"],
         "quick_start": {
             "heading": "Quick Start",
-            "markdown": quick_start_markdown,
-            "canonical_markdown": canonical_quick_start_markdown,
+            "markdown": default_help_markdown,
+            "canonical_markdown": canonical_default_help_markdown,
         },
         "recommended_commands": [format_help_all_command(public_prefix=public_prefix)],
         "canonical_recommended_commands": ["gpd:help --all"],
@@ -1084,15 +1091,11 @@ def help_bridge(
         try:
             detail_payload = command_detail_payload(canonical, minimal=minimal, include_markdown=True)
         except KeyError:
-            payload.update(
-                {
-                    "ok": False,
-                    "error": "unknown_command",
-                    "requested_command": command_name,
-                    "canonical_command": canonical,
-                    "guidance": "Unknown command. Run `gpd --raw help --all` for the compact command index.",
-                }
+            lookup_payload = build_command_lookup_error_payload(
+                command_name,
+                runtime_surface_metadata=runtime_surface,
             )
+            payload.update(dataclasses.asdict(lookup_payload))
             _output(payload)
             raise typer.Exit(code=1) from None
         canonical_detail_markdown = detail_payload.get("detail_markdown")
@@ -1114,6 +1117,11 @@ def help_bridge(
             {
                 "ok": True,
                 "rendered_sections": ["quick_start", "command_index", "detailed_help_follow_up"],
+                "quick_start": {
+                    "heading": "Quick Start",
+                    "markdown": quick_start_markdown,
+                    "canonical_markdown": canonical_quick_start_markdown,
+                },
                 "command_index_markdown": command_index_markdown,
                 "canonical_command_index_markdown": canonical_command_index_markdown,
                 "command_groups": command_groups_payload(),
@@ -6803,6 +6811,16 @@ def _runtime_surface_dispatch_note(*, cwd: Path | None = None) -> str:
     )
 
 
+def _command_runtime_surface_metadata(*, cwd: Path | None = None) -> CommandRuntimeSurfaceMetadata:
+    resolved_cwd = cwd or _get_cwd()
+    return CommandRuntimeSurfaceMetadata(
+        validated_surface=_validated_runtime_surface(cwd=resolved_cwd),
+        public_runtime_command_prefix=_active_runtime_command_prefix(cwd=resolved_cwd) or "",
+        init_command=_active_runtime_new_project_command(cwd=resolved_cwd),
+        dispatch_note=_runtime_surface_dispatch_note(cwd=resolved_cwd),
+    )
+
+
 def _canonical_command_name(command_name: str) -> str:
     """Normalize a CLI command name to the registry's public gpd:name form."""
     return canonical_command_label(command_name)
@@ -6873,12 +6891,7 @@ def _build_command_context_preflight(
     arguments: str | None = None,
 ) -> CommandContextPreflightResult:
     cwd = _get_cwd()
-    runtime_surface = CommandRuntimeSurfaceMetadata(
-        validated_surface=_validated_runtime_surface(cwd=cwd),
-        public_runtime_command_prefix=_active_runtime_command_prefix(cwd=cwd) or "",
-        init_command=_active_runtime_new_project_command(cwd=cwd),
-        dispatch_note=_runtime_surface_dispatch_note(cwd=cwd),
-    )
+    runtime_surface = _command_runtime_surface_metadata(cwd=cwd)
     return _core_build_command_context_preflight(
         command_name,
         cwd=cwd,
@@ -8027,7 +8040,19 @@ def validate_command_context(
 ) -> None:
     """Run centralized command-context preflight based on command metadata."""
     arguments = " ".join(str(arg) for arg in ctx.args) or None
-    result = _build_command_context_preflight(command_name, arguments=arguments)
+    try:
+        result = _build_command_context_preflight(command_name, arguments=arguments)
+    except CommandLookupError as exc:
+        requested_command = " ".join(part for part in (command_name, arguments or "") if part)
+        lookup_payload = build_command_lookup_error_payload(
+            requested_command,
+            runtime_surface_metadata=_command_runtime_surface_metadata(cwd=_get_cwd()),
+        )
+        if _raw:
+            _output(dataclasses.asdict(lookup_payload))
+        else:
+            err_console.print(f"[bold red]Error:[/] {format_command_lookup_error(lookup_payload)}", highlight=False)
+        raise typer.Exit(code=1) from exc
     _output(result)
     if not result.passed:
         raise typer.Exit(code=1)

@@ -20,6 +20,7 @@ from gpd.core.model_visible_text import (
     agent_visibility_note,
     review_contract_visibility_note,
 )
+from gpd.core.onboarding_surfaces import beginner_runtime_surface
 from gpd.registry import _frontmatter_parts, _load_frontmatter_mapping, _parse_spawn_contracts
 from tests.adapters.projection_budget_support import (
     COMPACT_WORKFLOW_REFERENCE_COMMAND_PROJECTION_BUDGETS,
@@ -57,6 +58,7 @@ from tests.adapters.projection_test_utils import (
     staged_command_has_protocol_bundle_fields,
 )
 from tests.prompt_metrics_support import runtime_command_visibility_note
+from tests.runtime_command_prefix_support import assert_no_incompatible_beginner_command_labels
 from tests.workflow_authority_support import expanded_workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -918,6 +920,40 @@ def test_runtime_projected_help_uses_native_include_or_compact_help_bridge_shim(
 
     if not get_runtime_descriptor(runtime).native_include_support:
         assert has_help_bridge_shim_sentinel(projected)
+
+
+_BEGINNER_ENTRYPOINT_EXPECTED_LABELS = {
+    "help": ("help",),
+    "start": ("help", "start", "tour", "new-project", "new-project --minimal", "map-research", "resume-work"),
+    "tour": ("help", "start", "tour", "new-project", "new-project --minimal", "map-research", "resume-work"),
+}
+
+
+def _expected_beginner_entrypoint_label(runtime: str, command_name: str) -> str:
+    if command_name == "new-project --minimal":
+        return _expected_runtime_command_label(runtime, "new-project", " --minimal")
+    return _expected_runtime_command_label(runtime, command_name)
+
+
+@pytest.mark.parametrize("command_name", ("help", "start", "tour"))
+@pytest.mark.parametrize("runtime", RUNTIMES)
+def test_runtime_projected_beginner_entrypoints_keep_active_runtime_prefixes(
+    runtime: str,
+    command_name: str,
+) -> None:
+    projected = _project_markdown(COMMANDS_DIR / f"{command_name}.md", runtime, is_agent=False)
+    descriptor = get_runtime_descriptor(runtime)
+    surface = beginner_runtime_surface(runtime)
+
+    assert get_adapter(runtime).format_command(command_name) in projected
+    if not descriptor.native_include_support:
+        for expected in _BEGINNER_ENTRYPOINT_EXPECTED_LABELS[command_name]:
+            assert _expected_beginner_entrypoint_label(runtime, expected) in projected
+    assert_no_incompatible_beginner_command_labels(
+        projected,
+        surface,
+        context=f"{runtime} projected {command_name}",
+    )
 
 
 def _manifest_asset_paths(manifest: dict[str, object]) -> set[str]:

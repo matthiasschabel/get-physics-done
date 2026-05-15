@@ -3702,18 +3702,45 @@ def test_validate_verification_contract_rejects_live_row_mistakes_from_product_v
     )
 
 
-def test_validate_command_context_unknown_command_surfaces_user_facing_error(tmp_path: Path) -> None:
+def test_validate_command_context_unknown_command_surfaces_user_facing_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("gpd.cli.detect_runtime_for_gpd_use", lambda cwd=None: None)
     result = runner.invoke(
         app,
         ["--raw", "--cwd", str(tmp_path), "validate", "command-context", "not-a-real-command"],
     )
 
-    assert result.exit_code == 1
-    assert isinstance(result.exception, cli_module.GPDError)
-    assert "Unknown GPD command: gpd:not-a-real-command" in str(result.exception)
-    assert "Internal error" not in str(result.exception)
+    payload = json_output_from_result(result, expect_exit=1)
+    assert payload["ok"] is False
+    assert payload["passed"] is False
+    assert payload["error"] == "unknown_command"
+    assert payload["requested_command"] == "not-a-real-command"
+    assert payload["normalized_command"] == "not-a-real-command"
+    assert payload["canonical_command"] == "gpd:not-a-real-command"
+    assert payload["known_command"] is False
+    assert "gpd:help" in payload["allowed_preview"]
+    assert isinstance(payload["primary_action"], dict)
+    assert "primary_actions" not in payload
+    assert payload["primary_action"]["command"] == "gpd --raw help --all"
+    assert payload["safe_alternatives"]
+    assert payload["debug_actions"]
     assert "Internal error" not in result.output
     assert "Internal error" not in result.stderr
+
+
+def test_validate_command_context_unknown_command_suggests_close_match(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        ["--raw", "--cwd", str(tmp_path), "validate", "command-context", "verfy-work"],
+    )
+
+    payload = json_output_from_result(result, expect_exit=1)
+    assert payload["error"] == "unknown_command"
+    assert payload["canonical_command"] == "gpd:verfy-work"
+    assert any(suggestion["canonical_command"] == "gpd:verify-work" for suggestion in payload["suggestions"])
+    assert payload["debug_actions"][0]["command"] == "gpd --raw validate command-context gpd:verfy-work"
 
 
 def test_raw_command_field_access_json_is_deterministic_for_command_context() -> None:

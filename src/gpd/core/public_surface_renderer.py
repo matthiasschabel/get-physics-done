@@ -21,7 +21,9 @@ __all__ = [
     "render_os_install_matrix",
     "render_os_next_step_table",
     "render_post_start_settings_note",
+    "render_recovery_reference_note",
     "render_public_surface_block",
+    "render_default_recovery_note",
     "render_recovery_note",
     "render_runtime_doc_links",
     "render_runtime_quickstart_snippet",
@@ -160,7 +162,24 @@ def render_post_start_settings_note(context: PublicSurfaceRenderContext | None =
     return _context(context).contract.post_start_settings.render_note()
 
 
-def render_recovery_note(context: PublicSurfaceRenderContext | None = None) -> str:
+def render_default_recovery_note(context: PublicSurfaceRenderContext | None = None) -> str:
+    ctx = _context(context)
+    ladder = ctx.contract.recovery_ladder
+    recovery = (
+        f"{ladder.title}: use {_code(ladder.local_snapshot_command)} for {ladder.local_snapshot_phrase}. "
+        f"If that is the wrong workspace, use {_code(ladder.cross_workspace_command)} to "
+        f"{ladder.cross_workspace_phrase}, then {ladder.resume_phrase} with {_code('resume-work')}. "
+        f"After resuming, {_code('suggest-next')} is {ladder.next_phrase}. Before stepping away mid-phase, "
+        f"run {_code('pause-work')} so that ladder has an explicit handoff to restore later."
+    )
+    return (
+        f"{recovery} Fresh context resets are for context management, not as a recovery step; run "
+        f"{_code(ladder.local_snapshot_command)} in your normal terminal only when workspace "
+        f"rediscovery is needed."
+    )
+
+
+def render_recovery_reference_note(context: PublicSurfaceRenderContext | None = None) -> str:
     ctx = _context(context)
     recovery = ctx.contract.recovery_ladder.render_note(
         resume_work_phrase=_code("resume-work"),
@@ -174,6 +193,12 @@ def render_recovery_note(context: PublicSurfaceRenderContext | None = None) -> s
         f"{ctx.contract.recovery_ladder.local_snapshot_command} in your normal terminal only when workspace "
         f"rediscovery is needed.\n\nResume vocabulary fields: {resume.render_public_field_list()}."
     )
+
+
+def render_recovery_note(context: PublicSurfaceRenderContext | None = None) -> str:
+    """Render the explicit reference form with raw resume vocabulary."""
+
+    return render_recovery_reference_note(context)
 
 
 def render_supported_runtime_table(context: PublicSurfaceRenderContext | None = None) -> str:
@@ -347,7 +372,8 @@ def _static_public_surface_block_renderers() -> dict[str, Callable[[PublicSurfac
         "terminal-runtime-bridge": render_terminal_runtime_bridge_text,
         "local-cli-bridge-summary": render_local_cli_bridge_summary,
         "post-start-settings": render_post_start_settings_note,
-        "recovery-note": render_recovery_note,
+        "recovery-note": render_default_recovery_note,
+        "recovery-reference-note": render_recovery_reference_note,
         "supported-runtimes-table": render_supported_runtime_table,
         "os-install-matrix": render_os_install_matrix,
         "os-next-steps-table": render_os_next_step_table,

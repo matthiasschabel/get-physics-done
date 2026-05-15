@@ -40,6 +40,10 @@ def _tour_required_entries(workflow: str) -> set[str]:
     return {line.strip()[3:-1] for line in table_block.splitlines() if line.strip().startswith("- `")}
 
 
+def _default_tour_step(workflow: str) -> str:
+    return _extract_step(workflow, "default_contextual_tour")
+
+
 def _assert_tour_read_only_boundary(text: str) -> None:
     _assert_anchor(
         text,
@@ -68,16 +72,65 @@ def test_tour_command_references_workflow() -> None:
 
     assert "@{GPD_INSTALL_DIR}/workflows/tour.md" in raw_command_prompt
     assert "@{GPD_INSTALL_DIR}/references/onboarding/beginner-command-taxonomy.md" in raw_command_prompt
+    assert 'argument-hint: "[optional short goal | --all | --reference]"' in raw_command_prompt
+    assert "gpd:tour --all" in command_prompt
+    assert "gpd:tour --reference" in command_prompt
+    assert "gpd:help --all" in command_prompt
     assert "gpd:set-tier-models" in command_prompt
     assert "gpd:settings" in command_prompt
     assert "This is a read-only tour of the main GPD commands. It will not change your files." in command_prompt
     _assert_anchor(command_prompt, "tour uses runtime-native command labels", ("runtime-native command labels", "gpd:"))
 
 
-def test_tour_workflow_introduces_a_safe_beginner_walkthrough() -> None:
+def test_tour_workflow_default_is_short_contextual_orientation() -> None:
     workflow = (WORKFLOWS_DIR / "tour.md").read_text(encoding="utf-8")
     expanded_workflow = expand_at_includes(workflow, SOURCE_ROOT, PATH_PREFIX)
     assert_tour_command_surface_contract(workflow)
+    default_step = _default_tour_step(workflow)
+
+    assert len(default_step.splitlines()) <= 80
+    assert len(default_step) <= 4_500
+    _assert_anchor(
+        _extract_step(workflow, "parse_arguments"),
+        "tour parses default versus reference flags",
+        (
+            "--all",
+            "--reference",
+            "default_contextual_tour",
+            "all_reference_tour",
+            "Unknown flags are context only",
+        ),
+    )
+    _assert_anchor(
+        default_step,
+        "tour default stays contextual",
+        (
+            "80 lines or fewer",
+            "4500 characters or fewer",
+            "no full command reference",
+            "no 12-row core-path table",
+            "Which path fits?",
+            "gpd:start",
+            "gpd:tour",
+            "gpd:new-project --minimal",
+            "gpd:map-research",
+            "gpd:resume-work",
+            "gpd:tour --all",
+            "gpd:help --all",
+        ),
+    )
+    _assert_absent(default_step, "default tour omits broader reference-only rows", "gpd:explain <topic>")
+    _assert_absent(default_step, "default tour omits full new-project row", "| `gpd:new-project` |")
+    _assert_tour_read_only_boundary(workflow)
+    _assert_anchor(
+        expanded_workflow,
+        "tour startup ladder comes from public surface contract",
+        (beginner_startup_ladder_text(), "folder state", "actual path"),
+    )
+
+
+def test_tour_workflow_reference_mode_contains_broader_table() -> None:
+    workflow = (WORKFLOWS_DIR / "tour.md").read_text(encoding="utf-8")
     table_entries = _extract_between(workflow, "Include these entries:", "Keep this table runtime-facing only.")
     assert _tour_required_entries(workflow) == {
         "gpd:start",
@@ -93,17 +146,22 @@ def test_tour_workflow_introduces_a_safe_beginner_walkthrough() -> None:
         "gpd:settings",
         "gpd:help",
     }
+    _assert_anchor(
+        _extract_step(workflow, "all_reference_tour"),
+        "tour all and reference mode",
+        (
+            "--all",
+            "--reference",
+            "longer guided",
+            "gpd:help --all",
+            "canonical complete command index",
+        ),
+    )
     _assert_absent(table_entries, "normal terminal resume is absent from runtime table", "- `gpd resume`")
     _assert_anchor(
         workflow,
         "tour table stays runtime-facing",
         ("runtime-facing only", "gpd resume", "terminal/runtime distinction"),
-    )
-    _assert_tour_read_only_boundary(workflow)
-    _assert_anchor(
-        expanded_workflow,
-        "tour startup ladder comes from public surface contract",
-        (beginner_startup_ladder_text(), "folder state", "actual path"),
     )
 
     for public_label in (
@@ -160,8 +218,8 @@ def test_tour_workflow_introduces_a_safe_beginner_walkthrough() -> None:
         ("GPD project", "research map", "phase", "read-only", "without making changes"),
     )
 
-    fragment_count("tour set-tier-models exact mention count", "gpd:set-tier-models", expected_count=2).check(workflow)
-    fragment_count("tour settings exact mention count", "gpd:settings", expected_count=2).check(workflow)
-    forbidden_duplicate("tour set-tier-models bounded duplicates", "set-tier-models", max_count=3).check(workflow)
-    forbidden_duplicate("tour settings bounded duplicates", "settings", max_count=5).check(workflow)
+    fragment_count("tour set-tier-models exact mention count", "gpd:set-tier-models", expected_count=3).check(workflow)
+    fragment_count("tour settings exact mention count", "gpd:settings", expected_count=3).check(workflow)
+    forbidden_duplicate("tour set-tier-models bounded duplicates", "set-tier-models", max_count=4).check(workflow)
+    forbidden_duplicate("tour settings bounded duplicates", "settings", max_count=6).check(workflow)
     fragment_count("tour tier-1 model tier appears once", "tier-1", expected_count=1).check(workflow)

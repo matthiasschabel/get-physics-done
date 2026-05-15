@@ -6,8 +6,8 @@ Mark a completed research stage (v1.0, v1.1, v2.0) as done. Creates historical r
 
 <required_reading>
 
-1. `@{GPD_INSTALL_DIR}/templates/milestone.md`
-2. `@{GPD_INSTALL_DIR}/templates/milestone-archive.md`
+1. `{GPD_INSTALL_DIR}/templates/milestone.md`
+2. `{GPD_INSTALL_DIR}/templates/milestone-archive.md`
 3. `GPD/ROADMAP.md`
 4. `GPD/REQUIREMENTS.md`
 5. `GPD/PROJECT.md`
@@ -27,7 +27,7 @@ When a research milestone completes:
 
 **Context Efficiency:** Archives keep ROADMAP.md constant-size and REQUIREMENTS.md milestone-scoped.
 
-**ROADMAP archive** uses `@{GPD_INSTALL_DIR}/templates/milestone-archive.md` -- includes milestone header (status, phases, date), full phase details, milestone summary (decisions, key findings, open questions).
+**ROADMAP archive** uses `{GPD_INSTALL_DIR}/templates/milestone-archive.md` -- includes milestone header (status, phases, date), full phase details, milestone summary (decisions, key findings, open questions).
 
 **REQUIREMENTS archive** contains all requirements marked complete with outcomes, traceability table with final status, notes on changed requirements.
 
@@ -153,7 +153,7 @@ Key accomplishments for this milestone:
 
 <step name="create_milestone_entry">
 
-**Note:** MILESTONES.md entry is now created automatically by `gpd milestone complete` in the archive_milestone step. The entry includes version, date, phase/plan/task counts, and accomplishments extracted from summary artifacts (`SUMMARY.md` and `*-SUMMARY.md`).
+`gpd milestone complete` writes the MILESTONES.md entry during the archive_milestone step. The entry includes version, date, phase/plan/task counts, accomplishments extracted from summary artifacts (`SUMMARY.md` and `*-SUMMARY.md`), and an `**Archived evidence:**` block listing the roadmap, requirements, research digest, and audit file archive paths. **Do NOT manually append content to a MILESTONES.md entry** — the Python writer is the single source of truth and already encodes whether the audit file and research digest were present. Never add "audit file: NOT PRESENT" or similar free-form prose; a missing audit is encoded as "(audit file is opt-in; run `gpd:audit-milestone` ...)".
 
 If additional details are needed (e.g., researcher-provided "Key Findings" summary, git range, LOC stats), add them manually after the CLI creates the base entry.
 
@@ -507,6 +507,7 @@ Read `GPD/INSIGHTS.md` and identify entries that:
 - Were confirmed across 2+ phases (high confidence)
 - Describe repeatable error patterns, not one-off issues
 - Have clear detection and prevention strategies
+- Include rows in `GPD/BACKTRACKS.md` flagged `promote: true` — these were auto-copied into INSIGHTS.md's `## Execution Deviations` section by the `gpd:record-backtrack` workflow when captured, so they surface here alongside directly-recorded insights.
 
 For each candidate, check if a matching pattern already exists:
 
@@ -743,13 +744,19 @@ See GPD/MILESTONES.md for full details."
 
 Confirm: "Tagged: v[X.Y]"
 
-Ask: "Push tag to remote? (y/n)"
+Summary: "Tagged v[X.Y] locally. Remote: origin."
+
+Ask: "Push tag v[X.Y] to remote? [Y/n/e]  (Enter = Y; e opens freeform for a custom remote or additional options)"
+
+**Edit branch:** If the user chooses `e`, collect the custom remote or push options, render the exact push command that would run, and re-present the updated `[Y/n/e]` prompt once before pushing. Do not treat the edit text itself as approval.
 
 If yes:
 
 ```bash
 git push origin v[X.Y]
 ```
+
+If no, leave the local tag unpushed and continue to the completion summary with the remote-push status recorded as skipped.
 
 </step>
 
@@ -801,7 +808,7 @@ Tag: v[X.Y]
 
 `gpd:new-milestone`
 
-<sub>`/clear` first -> fresh context window</sub>
+<sub>Start a fresh context window</sub>
 
 ---
 ```

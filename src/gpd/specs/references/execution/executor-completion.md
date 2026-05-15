@@ -289,7 +289,7 @@ gpd_return:
   status: completed | checkpoint | blocked | failed
   files_written: ["GPD/phases/XX-name/{phase}-{plan}-SUMMARY.md"]
   issues: [list of issues encountered, if any]
-  next_actions: [list of recommended follow-up actions]
+  next_actions: [concrete commands or exact artifact review actions]
   state_updates:
     advance_plan: true
     update_progress: true
@@ -308,13 +308,13 @@ gpd_return:
     - text: "{blocker text}"
   continuation_update:
     handoff:
-      recorded_at: "{timestamp}"
-      recorded_by: "gpd-executor"
       stopped_at: "Completed ${PHASE}-${PLAN}-PLAN.md"
       resume_file: null
       last_result_id: null
     bounded_segment: null
 ```
+
+`gpd apply-return-updates` records handoff timestamp/provenance; omit `recorded_at` and `recorded_by` from child returns.
 
 Include ALL checkpoints (previous + new if continuation agent).
 

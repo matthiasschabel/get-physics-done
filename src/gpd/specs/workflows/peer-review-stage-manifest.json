@@ -1,32 +1,103 @@
 {
   "schema_version": 1,
   "workflow_id": "peer-review",
+  "required_init_field_groups": {
+    "review_target_context": [
+      "project_exists",
+      "state_exists",
+      "commit_docs",
+      "autonomy",
+      "research_mode",
+      "review_target_input",
+      "review_target_mode",
+      "review_target_mode_reason",
+      "resolved_review_target",
+      "resolved_review_root"
+    ],
+    "contract_reference_context": [
+      "project_contract",
+      "project_contract_gate",
+      "project_contract_load_info",
+      "project_contract_validation",
+      "contract_intake",
+      "effective_reference_intake",
+      "selected_protocol_bundle_ids",
+      "protocol_bundle_context",
+      "active_reference_context",
+      "derived_manuscript_reference_status",
+      "derived_manuscript_reference_status_count",
+      "derived_manuscript_proof_review_status"
+    ],
+    "reference_evidence_context": [
+      "reference_artifact_files",
+      "reference_artifacts_content",
+      "literature_review_files",
+      "literature_review_count",
+      "research_map_reference_files",
+      "research_map_reference_count",
+      "citation_source_files",
+      "citation_source_count",
+      "citation_source_warnings",
+      "derived_citation_sources",
+      "derived_citation_source_count"
+    ],
+    "publication_lane_context": [
+      "publication_subject_slug",
+      "publication_lane_kind",
+      "publication_lane_owner",
+      "managed_publication_root",
+      "selected_publication_root",
+      "selected_review_root"
+    ],
+    "manuscript_resolution_context": [
+      "manuscript_resolution_status",
+      "manuscript_resolution_detail"
+    ],
+    "manuscript_package_paths": [
+      "manuscript_root",
+      "manuscript_entrypoint",
+      "artifact_manifest_path",
+      "bibliography_audit_path",
+      "reproducibility_manifest_path"
+    ],
+    "publication_blockers_context": [
+      "publication_blockers",
+      "publication_blocker_count"
+    ],
+    "latest_review_response_context": [
+      "latest_review_round",
+      "latest_review_round_suffix",
+      "latest_review_ledger",
+      "latest_referee_decision",
+      "latest_referee_report_md",
+      "latest_referee_report_tex",
+      "latest_proof_redteam",
+      "latest_review_artifacts",
+      "latest_response_round",
+      "latest_response_round_suffix",
+      "latest_author_response",
+      "latest_referee_response",
+      "latest_response_artifacts"
+    ]
+  },
   "stages": [
     {
       "id": "bootstrap",
       "order": 1,
-      "purpose": "manuscript routing, contract-gate validation, and bootstrap review setup",
+      "purpose": "target-aware manuscript routing, intake-mode bootstrap, contract-gate validation, and review setup",
       "mode_paths": [
         "workflows/peer-review.md"
       ],
+      "required_init_field_groups": [
+        "review_target_context",
+        "contract_reference_context",
+        "publication_lane_context",
+        "manuscript_resolution_context",
+        "manuscript_package_paths",
+        "publication_blockers_context",
+        "latest_review_response_context"
+      ],
       "required_init_fields": [
-        "project_exists",
-        "state_exists",
-        "commit_docs",
-        "autonomy",
-        "research_mode",
-        "project_contract",
-        "project_contract_gate",
-        "project_contract_load_info",
-        "project_contract_validation",
-        "contract_intake",
-        "effective_reference_intake",
-        "selected_protocol_bundle_ids",
-        "protocol_bundle_context",
-        "active_reference_context",
-        "derived_manuscript_reference_status",
-        "derived_manuscript_reference_status_count",
-        "derived_manuscript_proof_review_status",
         "platform"
       ],
       "loaded_authorities": [
@@ -57,52 +128,35 @@
       "writes_allowed": [],
       "produced_state": [
         "bootstrap review state",
-        "manuscript routing state"
+        "target-aware manuscript routing state",
+        "prior round snapshot state"
       ],
       "next_stages": [
         "preflight"
       ],
       "checkpoints": [
-        "manuscript target resolved",
-        "contract gate remains visible"
+        "intake mode and manuscript target resolved",
+        "contract gate remains visible",
+        "target-local round state surfaced"
       ]
     },
     {
       "id": "preflight",
       "order": 2,
-      "purpose": "review prerequisite validation and manuscript-root readiness checks",
+      "purpose": "mode-aware prerequisite validation and manuscript-root readiness checks",
       "mode_paths": [
         "workflows/peer-review.md"
       ],
+      "required_init_field_groups": [
+        "review_target_context",
+        "contract_reference_context",
+        "reference_evidence_context",
+        "publication_lane_context",
+        "manuscript_resolution_context",
+        "manuscript_package_paths",
+        "publication_blockers_context"
+      ],
       "required_init_fields": [
-        "project_exists",
-        "state_exists",
-        "commit_docs",
-        "autonomy",
-        "research_mode",
-        "project_contract",
-        "project_contract_gate",
-        "project_contract_load_info",
-        "project_contract_validation",
-        "contract_intake",
-        "effective_reference_intake",
-        "selected_protocol_bundle_ids",
-        "protocol_bundle_context",
-        "active_reference_context",
-        "derived_manuscript_reference_status",
-        "derived_manuscript_reference_status_count",
-        "derived_manuscript_proof_review_status",
-        "reference_artifact_files",
-        "reference_artifacts_content",
-        "literature_review_files",
-        "literature_review_count",
-        "research_map_reference_files",
-        "research_map_reference_count",
-        "citation_source_files",
-        "citation_source_count",
-        "citation_source_warnings",
-        "derived_citation_sources",
-        "derived_citation_source_count",
         "platform"
       ],
       "loaded_authorities": [
@@ -132,52 +186,34 @@
       "writes_allowed": [],
       "produced_state": [
         "review preflight state",
-        "manuscript artifact freshness state"
+        "mode-aware manuscript artifact freshness state"
       ],
       "next_stages": [
         "artifact_discovery"
       ],
       "checkpoints": [
         "review preflight completed",
-        "required manuscript artifacts visible"
+        "project-backed gates or standalone waivers resolved"
       ]
     },
     {
       "id": "artifact_discovery",
       "order": 3,
-      "purpose": "manuscript artifact loading, round detection, and proof-bearing routing",
+      "purpose": "manuscript artifact loading, target-aware round detection, and proof-bearing routing",
       "mode_paths": [
         "workflows/peer-review.md"
       ],
+      "required_init_field_groups": [
+        "review_target_context",
+        "contract_reference_context",
+        "reference_evidence_context",
+        "publication_lane_context",
+        "manuscript_resolution_context",
+        "manuscript_package_paths",
+        "publication_blockers_context",
+        "latest_review_response_context"
+      ],
       "required_init_fields": [
-        "project_exists",
-        "state_exists",
-        "commit_docs",
-        "autonomy",
-        "research_mode",
-        "project_contract",
-        "project_contract_gate",
-        "project_contract_load_info",
-        "project_contract_validation",
-        "contract_intake",
-        "effective_reference_intake",
-        "selected_protocol_bundle_ids",
-        "protocol_bundle_context",
-        "active_reference_context",
-        "derived_manuscript_reference_status",
-        "derived_manuscript_reference_status_count",
-        "derived_manuscript_proof_review_status",
-        "reference_artifact_files",
-        "reference_artifacts_content",
-        "literature_review_files",
-        "literature_review_count",
-        "research_map_reference_files",
-        "research_map_reference_count",
-        "citation_source_files",
-        "citation_source_count",
-        "citation_source_warnings",
-        "derived_citation_sources",
-        "derived_citation_source_count",
         "platform"
       ],
       "loaded_authorities": [
@@ -209,15 +245,15 @@
       "writes_allowed": [],
       "produced_state": [
         "manuscript target routing state",
-        "round detection state",
+        "target-aware round detection state",
         "proof-bearing routing state"
       ],
       "next_stages": [
         "panel_stages"
       ],
       "checkpoints": [
-        "manuscript target resolved",
-        "review round established",
+        "target-aware manuscript route resolved",
+        "target-bound review round established",
         "proof-bearing routing resolved"
       ]
     },
@@ -228,35 +264,14 @@
       "mode_paths": [
         "workflows/peer-review.md"
       ],
+      "required_init_field_groups": [
+        "review_target_context",
+        "contract_reference_context",
+        "reference_evidence_context",
+        "publication_lane_context",
+        "manuscript_package_paths"
+      ],
       "required_init_fields": [
-        "project_exists",
-        "state_exists",
-        "commit_docs",
-        "autonomy",
-        "research_mode",
-        "project_contract",
-        "project_contract_gate",
-        "project_contract_load_info",
-        "project_contract_validation",
-        "contract_intake",
-        "effective_reference_intake",
-        "selected_protocol_bundle_ids",
-        "protocol_bundle_context",
-        "active_reference_context",
-        "derived_manuscript_reference_status",
-        "derived_manuscript_reference_status_count",
-        "derived_manuscript_proof_review_status",
-        "reference_artifact_files",
-        "reference_artifacts_content",
-        "literature_review_files",
-        "literature_review_count",
-        "research_map_reference_files",
-        "research_map_reference_count",
-        "citation_source_files",
-        "citation_source_count",
-        "citation_source_warnings",
-        "derived_citation_sources",
-        "derived_citation_source_count",
         "platform"
       ],
       "loaded_authorities": [
@@ -291,7 +306,14 @@
         "GPD/review/STAGE-math{round_suffix}.json",
         "GPD/review/PROOF-REDTEAM{round_suffix}.md",
         "GPD/review/STAGE-physics{round_suffix}.json",
-        "GPD/review/STAGE-interestingness{round_suffix}.json"
+        "GPD/review/STAGE-interestingness{round_suffix}.json",
+        "GPD/publication/{subject_slug}/review/CLAIMS{round_suffix}.json",
+        "GPD/publication/{subject_slug}/review/STAGE-reader{round_suffix}.json",
+        "GPD/publication/{subject_slug}/review/STAGE-literature{round_suffix}.json",
+        "GPD/publication/{subject_slug}/review/STAGE-math{round_suffix}.json",
+        "GPD/publication/{subject_slug}/review/PROOF-REDTEAM{round_suffix}.md",
+        "GPD/publication/{subject_slug}/review/STAGE-physics{round_suffix}.json",
+        "GPD/publication/{subject_slug}/review/STAGE-interestingness{round_suffix}.json"
       ],
       "produced_state": [
         "claim index",
@@ -314,35 +336,23 @@
       "mode_paths": [
         "workflows/peer-review.md"
       ],
+      "required_init_field_groups": [
+        "review_target_context",
+        "contract_reference_context",
+        "reference_evidence_context",
+        "publication_lane_context",
+        "manuscript_resolution_context",
+        "manuscript_package_paths"
+      ],
       "required_init_fields": [
-        "project_exists",
-        "state_exists",
-        "commit_docs",
-        "autonomy",
-        "research_mode",
-        "project_contract",
-        "project_contract_gate",
-        "project_contract_load_info",
-        "project_contract_validation",
-        "contract_intake",
-        "effective_reference_intake",
-        "selected_protocol_bundle_ids",
-        "protocol_bundle_context",
-        "active_reference_context",
-        "derived_manuscript_reference_status",
-        "derived_manuscript_reference_status_count",
-        "derived_manuscript_proof_review_status",
-        "reference_artifact_files",
-        "reference_artifacts_content",
-        "literature_review_files",
-        "literature_review_count",
-        "research_map_reference_files",
-        "research_map_reference_count",
-        "citation_source_files",
-        "citation_source_count",
-        "citation_source_warnings",
-        "derived_citation_sources",
-        "derived_citation_source_count",
+        "latest_review_round",
+        "latest_review_round_suffix",
+        "latest_referee_report_md",
+        "latest_review_artifacts",
+        "latest_response_round",
+        "latest_response_round_suffix",
+        "latest_author_response",
+        "latest_response_artifacts",
         "platform"
       ],
       "loaded_authorities": [
@@ -372,7 +382,12 @@
         "GPD/review/REFEREE-DECISION{round_suffix}.json",
         "GPD/REFEREE-REPORT{round_suffix}.md",
         "GPD/REFEREE-REPORT{round_suffix}.tex",
-        "GPD/CONSISTENCY-REPORT.md"
+        "GPD/publication/{subject_slug}/review/REVIEW-LEDGER{round_suffix}.json",
+        "GPD/publication/{subject_slug}/review/REFEREE-DECISION{round_suffix}.json",
+        "GPD/publication/{subject_slug}/REFEREE-REPORT{round_suffix}.md",
+        "GPD/publication/{subject_slug}/REFEREE-REPORT{round_suffix}.tex",
+        "GPD/CONSISTENCY-REPORT.md",
+        "GPD/publication/{subject_slug}/CONSISTENCY-REPORT.md"
       ],
       "produced_state": [
         "final recommendation state",
@@ -384,7 +399,7 @@
       "checkpoints": [
         "ledger and decision written",
         "referee report complete",
-        "recommendation validated"
+        "recommendation validated against target-bound round state"
       ]
     },
     {
@@ -394,24 +409,12 @@
       "mode_paths": [
         "workflows/peer-review.md"
       ],
+      "required_init_field_groups": [
+        "review_target_context",
+        "contract_reference_context",
+        "publication_lane_context"
+      ],
       "required_init_fields": [
-        "project_exists",
-        "state_exists",
-        "commit_docs",
-        "autonomy",
-        "research_mode",
-        "project_contract",
-        "project_contract_gate",
-        "project_contract_load_info",
-        "project_contract_validation",
-        "contract_intake",
-        "effective_reference_intake",
-        "selected_protocol_bundle_ids",
-        "protocol_bundle_context",
-        "active_reference_context",
-        "derived_manuscript_reference_status",
-        "derived_manuscript_reference_status_count",
-        "derived_manuscript_proof_review_status",
         "platform"
       ],
       "loaded_authorities": [

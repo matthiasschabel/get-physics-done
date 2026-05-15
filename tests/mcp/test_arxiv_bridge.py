@@ -7,13 +7,29 @@ from contextlib import asynccontextmanager
 import pytest
 
 
-def test_load_settings_uses_default_storage_root() -> None:
-    from gpd.core.arxiv_source_download import ARXIV_DEFAULT_STORAGE_PATH
-    from gpd.mcp.servers.arxiv_bridge import load_settings
+def test_load_settings_uses_current_home_for_default_storage_root(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    from gpd.core.arxiv_source_download import ARXIV_SOURCE_STORAGE_ENV_VAR
+    from gpd.mcp.servers.arxiv_bridge import ArxivBridgeConfig, load_settings
+
+    monkeypatch.delenv(ARXIV_SOURCE_STORAGE_ENV_VAR, raising=False)
+    home = tmp_path / "home"
+    monkeypatch.setattr("gpd.core.arxiv_source_download.Path.home", lambda: home)
+
+    # Run the resolver from a directory that has no GPD/ markers so we
+    # exercise the legacy home fallback rather than auto-detecting a project.
+    bare_dir = tmp_path / "bare"
+    bare_dir.mkdir()
+    monkeypatch.chdir(bare_dir)
 
     config = load_settings()
+    dataclass_default = ArxivBridgeConfig()
 
-    assert config.storage_path == ARXIV_DEFAULT_STORAGE_PATH.resolve()
+    expected = (home / ".arxiv-mcp-server" / "papers").resolve()
+    assert config.storage_path == expected
+    assert dataclass_default.storage_path == home / ".arxiv-mcp-server" / "papers"
 
 
 @pytest.mark.asyncio
@@ -57,7 +73,7 @@ async def test_bridge_open_spawns_upstream_server_with_storage_path(monkeypatch:
 
 
 @pytest.mark.asyncio
-async def test_bridge_filters_upstream_tools_and_adds_download_source() -> None:
+async def test_bridge_advertises_live_upstream_tools_and_adds_local_download_source() -> None:
     from mcp.types import ListToolsResult, Tool
 
     from gpd.mcp.servers.arxiv_bridge import ArxivBridge, ArxivBridgeConfig
@@ -70,8 +86,9 @@ async def test_bridge_filters_upstream_tools_and_adds_download_source() -> None:
                     Tool(name="download_paper", inputSchema={"type": "object"}),
                     Tool(name="read_paper", inputSchema={"type": "object"}),
                     Tool(name="semantic_search", inputSchema={"type": "object"}),
+                    Tool(name="download_source", inputSchema={"type": "object", "properties": {"upstream": {}}}),
                 ],
-                nextCursor=None,
+                nextCursor="next-page",
             )
 
     bridge = ArxivBridge(ArxivBridgeConfig())
@@ -85,17 +102,131 @@ async def test_bridge_filters_upstream_tools_and_adds_download_source() -> None:
         "search_papers",
         "download_paper",
         "read_paper",
+        "semantic_search",
         "download_source",
     ]
+    assert result.tools[-1].inputSchema["properties"]["paper_id"]["description"].startswith("arXiv paper identifier")
+    assert result.tools[-1].annotations is not None
+    assert result.tools[-1].annotations.readOnlyHint is False
+    assert result.tools[-1].annotations.destructiveHint is True
+    assert result.tools[-1].annotations.idempotentHint is False
+    assert result.tools[-1].annotations.openWorldHint is True
+    assert result.nextCursor == "next-page"
 
 
 @pytest.mark.asyncio
-async def test_bridge_proxies_upstream_tool_calls_without_rewriting() -> None:
-    from mcp.types import CallToolResult, TextContent
+async def test_download_source_schema_rejects_whitespace_only_paper_id() -> None:
+    from jsonschema import Draft202012Validator
+    from mcp.types import ListToolsResult, Tool
 
     from gpd.mcp.servers.arxiv_bridge import ArxivBridge, ArxivBridgeConfig
 
     class FakeSession:
+        async def list_tools(self, cursor=None):
+            return ListToolsResult(tools=[Tool(name="search_papers", inputSchema={"type": "object"})])
+
+    bridge = ArxivBridge(ArxivBridgeConfig())
+    bridge._session = FakeSession()  # type: ignore[assignment]
+    try:
+        result = await bridge.list_tools()
+    finally:
+        bridge._session = None
+
+    schema = next(tool.inputSchema for tool in result.tools if tool.name == "download_source")
+    paper_id = schema["properties"]["paper_id"]
+    validator = Draft202012Validator(schema)
+
+    assert paper_id["minLength"] == 1
+    assert paper_id["pattern"] == r"\S"
+    assert not list(validator.iter_errors({"paper_id": "2401.12345"}))
+    assert list(validator.iter_errors({"paper_id": "   "}))
+
+
+@pytest.mark.asyncio
+async def test_bridge_preserves_upstream_pagination_and_only_adds_download_source_on_first_page() -> None:
+    from mcp.types import ListToolsResult, Tool
+
+    from gpd.mcp.servers.arxiv_bridge import ArxivBridge, ArxivBridgeConfig
+
+    class FakeSession:
+        async def list_tools(self, cursor=None):
+            return ListToolsResult(
+                tools=[Tool(name="list_papers", inputSchema={"type": "object"})],
+                nextCursor="cursor-2" if cursor is None else None,
+            )
+
+    bridge = ArxivBridge(ArxivBridgeConfig())
+    bridge._session = FakeSession()  # type: ignore[assignment]
+    try:
+        first = await bridge.list_tools()
+        second = await bridge.list_tools("cursor-2")
+    finally:
+        bridge._session = None
+
+    assert [tool.name for tool in first.tools] == ["list_papers", "download_source"]
+    assert first.nextCursor == "cursor-2"
+    assert [tool.name for tool in second.tools] == ["list_papers"]
+    assert second.nextCursor is None
+
+
+@pytest.mark.asyncio
+async def test_first_page_refresh_resets_incomplete_upstream_tool_cache() -> None:
+    from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
+
+    from gpd.mcp.servers.arxiv_bridge import ArxivBridge, ArxivBridgeConfig
+
+    class FakeSession:
+        def __init__(self) -> None:
+            self.refreshed = False
+            self.calls: list[str | None] = []
+
+        async def list_tools(self, cursor=None):
+            self.calls.append(cursor)
+            if not self.refreshed:
+                return ListToolsResult(tools=[Tool(name="search_papers", inputSchema={"type": "object"})])
+            if cursor is None:
+                return ListToolsResult(
+                    tools=[Tool(name="search_papers", inputSchema={"type": "object"})],
+                    nextCursor="page-2",
+                )
+            return ListToolsResult(tools=[Tool(name="semantic_search", inputSchema={"type": "object"})])
+
+        async def call_tool(self, name, arguments):
+            return CallToolResult(
+                content=[TextContent(type="text", text=f"{name}:{arguments['query']}")],
+                structuredContent={"tool": name, "arguments": arguments},
+            )
+
+    fake_session = FakeSession()
+    bridge = ArxivBridge(ArxivBridgeConfig())
+    bridge._session = fake_session  # type: ignore[assignment]
+    try:
+        await bridge.list_tools()
+        assert bridge._upstream_tool_names_complete is True
+
+        fake_session.refreshed = True
+        await bridge.list_tools()
+        assert bridge._upstream_tool_names_complete is False
+
+        result = await bridge.call_tool("semantic_search", {"query": "qft"})
+    finally:
+        bridge._session = None
+
+    assert fake_session.calls == [None, None, None, "page-2"]
+    assert result.isError is not True
+    assert result.structuredContent == {"tool": "semantic_search", "arguments": {"query": "qft"}}
+
+
+@pytest.mark.asyncio
+async def test_bridge_proxies_upstream_tool_calls_without_rewriting() -> None:
+    from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
+
+    from gpd.mcp.servers.arxiv_bridge import ArxivBridge, ArxivBridgeConfig
+
+    class FakeSession:
+        async def list_tools(self, cursor=None):
+            return ListToolsResult(tools=[Tool(name="download_paper", inputSchema={"type": "object"})])
+
         async def call_tool(self, name, arguments):
             return CallToolResult(
                 content=[TextContent(type="text", text=f"{name}:{arguments['paper_id']}")],
@@ -110,6 +241,64 @@ async def test_bridge_proxies_upstream_tool_calls_without_rewriting() -> None:
         bridge._session = None
 
     assert result.structuredContent == {"tool": "download_paper", "arguments": {"paper_id": "2401.12345"}}
+
+
+@pytest.mark.asyncio
+async def test_bridge_forwards_live_upstream_tool_not_in_static_fallback() -> None:
+    from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
+
+    from gpd.mcp.servers.arxiv_bridge import ArxivBridge, ArxivBridgeConfig
+
+    class FakeSession:
+        async def list_tools(self, cursor=None):
+            return ListToolsResult(tools=[Tool(name="semantic_search", inputSchema={"type": "object"})])
+
+        async def call_tool(self, name, arguments):
+            return CallToolResult(
+                content=[TextContent(type="text", text=f"{name}:{arguments['query']}")],
+                structuredContent={"tool": name, "arguments": arguments},
+            )
+
+    bridge = ArxivBridge(ArxivBridgeConfig())
+    bridge._session = FakeSession()  # type: ignore[assignment]
+    try:
+        result = await bridge.call_tool("semantic_search", {"query": "qft"})
+    finally:
+        bridge._session = None
+
+    assert result.structuredContent == {"tool": "semantic_search", "arguments": {"query": "qft"}}
+
+
+@pytest.mark.asyncio
+async def test_bridge_rejects_removed_static_upstream_tool_calls() -> None:
+    from mcp.types import ListToolsResult, Tool
+
+    from gpd.mcp.servers.arxiv_bridge import ArxivBridge, ArxivBridgeConfig
+
+    class FakeSession:
+        called = False
+
+        async def list_tools(self, cursor=None):
+            return ListToolsResult(tools=[Tool(name="search_papers", inputSchema={"type": "object"})])
+
+        async def call_tool(self, name, arguments):
+            self.called = True
+            raise AssertionError("removed static tools must not be proxied")
+
+    fake_session = FakeSession()
+    bridge = ArxivBridge(ArxivBridgeConfig())
+    bridge._session = fake_session  # type: ignore[assignment]
+    try:
+        result = await bridge.call_tool("download_paper", {"paper_id": "2401.12345"})
+    finally:
+        bridge._session = None
+
+    assert result.isError is True
+    assert fake_session.called is False
+    assert result.structuredContent == {
+        "schema_version": 1,
+        "error": "Tool 'download_paper' is not advertised by the GPD arXiv bridge",
+    }
 
 
 @pytest.mark.asyncio
@@ -141,8 +330,43 @@ async def test_bridge_download_source_returns_structured_metadata(monkeypatch: p
 
     assert result.isError is False
     assert result.structuredContent is not None
-    assert result.structuredContent["arxiv_id"] == "2401.12345"
+    assert result.structuredContent["schema_version"] == 1
+    assert result.structuredContent["tool"] == "download_source"
+    assert result.structuredContent["result"]["arxiv_id"] == "2401.12345"
     assert "Downloaded source archive" in result.content[0].text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("arguments", "message"),
+    [
+        ({}, "paper_id must be a non-empty string"),
+        ({"paper_id": "   "}, "paper_id must be a non-empty string"),
+        ({"paper_id": "2401.12345", "overwrite": "false"}, "overwrite must be a boolean"),
+        ({"paper_id": "2401.12345", "extra": True}, "unsupported arguments: extra"),
+    ],
+)
+async def test_bridge_validates_download_source_arguments(
+    arguments: dict[str, object],
+    message: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from gpd.mcp.servers import arxiv_bridge as module
+    from gpd.mcp.servers.arxiv_bridge import ArxivBridge, ArxivBridgeConfig
+
+    def fail_download(*args, **kwargs):
+        raise AssertionError("invalid download_source arguments must not call downloader")
+
+    monkeypatch.setattr(module, "download_arxiv_source_archive", fail_download)
+
+    bridge = ArxivBridge(ArxivBridgeConfig())
+    result = await bridge.call_tool("download_source", arguments)
+
+    assert result.isError is True
+    assert result.structuredContent is not None
+    assert result.structuredContent["schema_version"] == 1
+    assert message in result.structuredContent["error"]
+    assert message in result.content[0].text
 
 
 @pytest.mark.asyncio
@@ -179,6 +403,63 @@ def test_build_server_registers_expected_server_name() -> None:
 
     assert server.name == "gpd-arxiv"
     assert bridge.config.storage_path.is_absolute()
+
+
+def _make_verified_gpd_project(root):
+    gpd_dir = root / "GPD"
+    gpd_dir.mkdir(parents=True, exist_ok=True)
+    (gpd_dir / "state.json").write_text("{}", encoding="utf-8")
+    (gpd_dir / "PROJECT.md").write_text("# project\n", encoding="utf-8")
+    return root
+
+
+def test_load_settings_honors_env_var_override(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    from gpd.core.arxiv_source_download import ARXIV_SOURCE_STORAGE_ENV_VAR
+    from gpd.mcp.servers.arxiv_bridge import load_settings
+
+    override = tmp_path / "env-cache"
+    override.mkdir()
+    monkeypatch.setenv(ARXIV_SOURCE_STORAGE_ENV_VAR, str(override))
+
+    config = load_settings()
+
+    assert config.storage_path == override.resolve()
+
+
+def test_load_settings_prefers_project_local_cache_when_workspace_in_project(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    from gpd.core.arxiv_source_download import (
+        ARXIV_PROJECT_LOCAL_CACHE_DIRNAME,
+        ARXIV_SOURCE_STORAGE_ENV_VAR,
+    )
+    from gpd.mcp.servers.arxiv_bridge import load_settings
+
+    monkeypatch.delenv(ARXIV_SOURCE_STORAGE_ENV_VAR, raising=False)
+    project = _make_verified_gpd_project(tmp_path / "paper-2401-12345")
+
+    config = load_settings(workspace=project)
+
+    expected = (project / ARXIV_PROJECT_LOCAL_CACHE_DIRNAME).resolve()
+    assert config.storage_path == expected
+
+
+def test_load_settings_explicit_storage_path_overrides_env_and_workspace(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    from gpd.core.arxiv_source_download import ARXIV_SOURCE_STORAGE_ENV_VAR
+    from gpd.mcp.servers.arxiv_bridge import load_settings
+
+    project = _make_verified_gpd_project(tmp_path / "proj")
+    explicit = tmp_path / "explicit-storage"
+    explicit.mkdir()
+    monkeypatch.setenv(ARXIV_SOURCE_STORAGE_ENV_VAR, str(tmp_path / "env-cache"))
+
+    config = load_settings(storage_path=explicit, workspace=project)
+
+    assert config.storage_path == explicit.resolve()
 
 
 def test_module_entrypoint_runs_main(monkeypatch: pytest.MonkeyPatch) -> None:

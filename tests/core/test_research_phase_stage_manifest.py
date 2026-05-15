@@ -1,4 +1,4 @@
-"""Stage-manifest regressions for the `research-phase` startup surface."""
+"""Stage-manifest assertions for the `research-phase` startup surface."""
 
 from __future__ import annotations
 
@@ -64,15 +64,13 @@ def test_research_phase_prompt_budget_keeps_the_vertical_reasonably_tight() -> N
     )
 
     assert agent_metrics.raw_include_count == 0
-    assert agent_metrics.expanded_line_count == 2028
-    assert agent_metrics.expanded_char_count == 101143
+    assert agent_metrics.expanded_line_count <= 600
+    assert agent_metrics.expanded_char_count <= 22000
     assert agent_metrics.expanded_char_count < 130000
-    assert command_metrics.raw_include_count == 2
-    assert command_metrics.expanded_line_count == 421
-    assert command_metrics.expanded_char_count == 17557
+    assert command_metrics.raw_include_count == 1
+    assert command_metrics.expanded_line_count <= 440
     assert command_metrics.expanded_char_count < 20000
-    assert workflow_metrics.expanded_line_count == 318
-    assert workflow_metrics.expanded_char_count == 13567
+    assert workflow_metrics.expanded_line_count <= 340
     assert workflow_metrics.expanded_char_count < 15000
 
 
@@ -89,10 +87,11 @@ def test_research_phase_command_prompt_budget_keeps_delegation_authorities_out_o
         path_prefix=PATH_PREFIX,
     )
 
-    assert metrics.raw_include_count == 2
+    assert metrics.raw_include_count == 1
     assert "@{GPD_INSTALL_DIR}/workflows/research-phase.md" in command_text
-    assert "@{GPD_INSTALL_DIR}/references/orchestration/model-profile-resolution.md" in command_text
+    assert "@{GPD_INSTALL_DIR}/references/orchestration/model-profile-resolution.md" not in command_text
     assert "@{GPD_INSTALL_DIR}/references/orchestration/runtime-delegation-note.md" not in command_text
+    assert workflow.raw_include_count == 2
     assert metrics.expanded_line_count > workflow.expanded_line_count
     assert metrics.expanded_char_count > workflow.expanded_char_count
     assert metrics.expanded_line_count < workflow.expanded_line_count + 300

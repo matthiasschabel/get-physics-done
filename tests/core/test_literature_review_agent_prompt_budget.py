@@ -1,9 +1,10 @@
-"""Prompt budget regressions for the `gpd-literature-reviewer` agent surface."""
+"""Prompt budget assertions for the `gpd-literature-reviewer` agent surface."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
+from gpd import registry
 from tests.prompt_metrics_support import expanded_prompt_text, measure_prompt_surface
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -22,11 +23,14 @@ def test_gpd_literature_reviewer_prompt_stays_within_expected_budget_and_keeps_t
     assert metrics.expanded_line_count < 2_100
     assert metrics.expanded_char_count < 100_000
 
-    assert "Commit authority: orchestrator-only." in source
+    assert "Authority: use the frontmatter-derived Agent Requirements block" not in source
+    assert registry.get_agent("gpd-literature-reviewer").system_prompt.count("## Agent Requirements") == 1
     assert "This is a one-shot checkpoint handoff." in source
     assert "gpd_return.status: checkpoint" in source
     assert "GPD/literature/{slug}-REVIEW.md" in source
     assert "GPD/literature/{slug}-CITATION-SOURCES.json" in source
+    assert "`{GPD_INSTALL_DIR}/references/shared/shared-protocols.md`" in source
+    assert "@{GPD_INSTALL_DIR}/references/shared/shared-protocols.md" not in source
     assert "anchor_id" in source
     assert "locator" in source
     assert "fresh continuation run" in source
@@ -43,4 +47,3 @@ def test_gpd_literature_reviewer_prompt_stays_within_expected_budget_and_keeps_t
         "Preprint Revision Retraction",
     ):
         assert f"## {heading}" not in expanded
-

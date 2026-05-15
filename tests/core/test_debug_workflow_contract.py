@@ -1,4 +1,4 @@
-"""Focused regressions for the debug workflow seam."""
+"""Focused assertions for the debug workflow seam."""
 
 from __future__ import annotations
 
@@ -18,6 +18,8 @@ def test_debug_workflow_uses_typed_child_return_and_skips_artifact_inventory() -
     assert "typed `gpd_return` envelope" in workflow
     assert "gpd_return.session_file" in workflow
     assert "session_status: diagnosed" in workflow
+    assert "The debug session file at `GPD/debug/{slug}.md` keeps the debug-session `status` lifecycle" in workflow
+    assert "does not use `session_status`" in workflow
     assert "artifacts:" not in workflow
     assert "src/integrator.py" not in workflow
     assert "src/simulation.py" not in workflow

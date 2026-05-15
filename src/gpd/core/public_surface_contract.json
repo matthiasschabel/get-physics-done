@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "beginner_onboarding": {
-    "hub_url": "./docs/README.md",
+    "hub_url": "https://github.com/psi-oss/get-physics-done/tree/main/docs",
     "preflight_requirements": [
       "One supported runtime is already installed and can open from your normal terminal.",
       "Node.js 20+ is available in that same terminal.",
@@ -26,9 +26,9 @@
     "commands": [
       "gpd --help",
       "gpd doctor",
-      "gpd validate unattended-readiness --runtime <runtime> --autonomy balanced",
-      "gpd permissions status --runtime <runtime> --autonomy balanced",
-      "gpd permissions sync --runtime <runtime> --autonomy balanced",
+      "gpd validate unattended-readiness --runtime <runtime> --autonomy <mode>",
+      "gpd permissions status --runtime <runtime> --autonomy <mode>",
+      "gpd permissions sync --runtime <runtime> --autonomy <mode>",
       "gpd resume",
       "gpd resume --recent",
       "gpd observe execution",
@@ -40,9 +40,9 @@
     "named_commands": {
       "help": "gpd --help",
       "doctor": "gpd doctor",
-      "unattended_readiness": "gpd validate unattended-readiness --runtime <runtime> --autonomy balanced",
-      "permissions_status": "gpd permissions status --runtime <runtime> --autonomy balanced",
-      "permissions_sync": "gpd permissions sync --runtime <runtime> --autonomy balanced",
+      "unattended_readiness": "gpd validate unattended-readiness --runtime <runtime> --autonomy <mode>",
+      "permissions_status": "gpd permissions status --runtime <runtime> --autonomy <mode>",
+      "permissions_sync": "gpd permissions sync --runtime <runtime> --autonomy <mode>",
       "resume": "gpd resume",
       "resume_recent": "gpd resume --recent",
       "observe_execution": "gpd observe execution",
@@ -52,11 +52,11 @@
       "integrations_status_wolfram": "gpd integrations status wolfram"
     },
     "terminal_phrase": "from your normal terminal",
-    "purpose_phrase": "the broader local install, readiness, validation, permissions, observability, diagnostics, recovery, cost, preset, and shared Wolfram integration surface",
+    "purpose_phrase": "install/readiness checks, typed command validation, permissions, observability, diagnostics, recovery, cost, presets, and shared Wolfram integration",
     "install_local_example": "gpd install <runtime> --local",
     "doctor_local_command": "gpd doctor --runtime <runtime> --local",
     "doctor_global_command": "gpd doctor --runtime <runtime> --global",
-    "validate_command_context_command": "gpd validate command-context gpd:<name>"
+    "validate_command_context_command": "gpd validate command-context <name>"
   },
   "post_start_settings": {
     "primary_sentence": "After your first successful start or later, use the runtime `settings` command to review autonomy, workflow defaults, model-cost posture, runtime permission sync, and preset/tier overrides.",

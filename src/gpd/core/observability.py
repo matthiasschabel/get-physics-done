@@ -6,7 +6,7 @@ Observability is written to the project-local telemetry and lineage surfaces:
 - ``current-session.json`` points at the latest observed session summary
 - ``GPD/lineage/execution-lineage.jsonl`` stores append-only execution lineage
 - ``GPD/lineage/execution-head.json`` stores the derived execution head cache
-- ``current-execution.json`` remains the compatibility mirror for legacy readers
+- ``current-execution.json`` mirrors the latest execution state for flat-file readers
 
 Automatic low-level function/span logging is intentionally disabled. Only
 explicit session/workflow events should be recorded here.
@@ -322,7 +322,7 @@ def resolve_project_root(
     *,
     project_dir: Path | str | None = None,
 ) -> Path | None:
-    """Compatibility wrapper around the canonical shared root resolver."""
+    """Thin wrapper that delegates to the canonical shared root resolver."""
     return _shared_resolve_project_root(cwd, project_dir=project_dir)
 
 
@@ -405,7 +405,9 @@ def _read_current_execution_raw(layout: ProjectLayout) -> dict[str, object] | No
 
 def _current_execution_snapshot(layout: ProjectLayout) -> CurrentExecutionState | None:
     head_snapshot = load_execution_lineage_head(layout.root)
-    if head_snapshot is not None and isinstance(head_snapshot.execution, dict):
+    if head_snapshot is not None:
+        if head_snapshot.execution is None:
+            return None
         try:
             return CurrentExecutionState.model_validate(head_snapshot.execution)
         except Exception:
@@ -448,17 +450,22 @@ def _execution_lane_field_value(payload: object, field: str) -> str | None:
     return None
 
 
+_STRONG_EXECUTION_IDENTITY_FIELDS = ("resume_file", "segment_id", "transition_id")
+_WEAK_EXECUTION_CONTEXT_FIELDS = ("phase", "plan")
+
+
 def _execution_lanes_compatible(left: object, right: object) -> bool:
-    comparisons = 0
-    for field in ("resume_file", "segment_id", "phase", "plan", "transition_id"):
+    strong_overlap = False
+    for field in (*_STRONG_EXECUTION_IDENTITY_FIELDS, *_WEAK_EXECUTION_CONTEXT_FIELDS):
         left_value = _execution_lane_field_value(left, field)
         right_value = _execution_lane_field_value(right, field)
         if left_value is None or right_value is None:
             continue
-        comparisons += 1
         if left_value != right_value:
             return False
-    return comparisons > 0
+        if field in _STRONG_EXECUTION_IDENTITY_FIELDS:
+            strong_overlap = True
+    return strong_overlap
 
 
 def _canonical_result_payload(state_obj: dict[str, object], result_id: str) -> dict[str, object] | None:
@@ -532,18 +539,18 @@ def _sync_execution_visibility_anchors_from_canonical_continuation(
     head_payload: ExecutionLineageHead | None = None
     head_raw: dict[str, object] | None = None
     if head_exists:
-        head_raw = _read_json(layout.execution_lineage_head)
-        if isinstance(head_raw, dict):
-            try:
-                head_payload = ExecutionLineageHead.model_validate(head_raw)
-            except Exception:
-                head_payload = None
-            else:
-                if isinstance(head_payload.execution, dict):
-                    try:
-                        head_snapshot = CurrentExecutionState.model_validate(head_payload.execution)
-                    except Exception:
-                        head_snapshot = None
+        head_payload = load_execution_lineage_head(layout.root)
+        if head_payload is not None:
+            head_raw = head_payload.model_dump(mode="json")
+            if head_payload.execution is None:
+                return False
+            if isinstance(head_payload.execution, dict):
+                try:
+                    head_snapshot = CurrentExecutionState.model_validate(head_payload.execution)
+                except Exception:
+                    head_snapshot = None
+        else:
+            head_raw = _read_json(layout.execution_lineage_head)
 
     live_snapshot = head_snapshot or current_snapshot
     if live_snapshot is None:
@@ -681,6 +688,16 @@ def _persist_durable_bounded_segment(layout: ProjectLayout, next_execution: Curr
         state_clear_continuation_bounded_segment(layout.root)
         return
     state_set_continuation_bounded_segment(layout.root, desired_bounded_segment)
+
+
+def _best_effort_persist_durable_bounded_segment(
+    layout: ProjectLayout,
+    next_execution: CurrentExecutionState | None,
+) -> None:
+    try:
+        _persist_durable_bounded_segment(layout, next_execution)
+    except Exception:
+        return
 
 
 def get_current_execution(cwd: Path | None = None) -> CurrentExecutionState | None:
@@ -877,7 +894,7 @@ def _execution_visibility_next_commands(
 
     if visibility_mode in {"snapshot-only", "trace-only"}:
         mode_reason = (
-            "inspect recent observability sessions because only the compatibility snapshot is available"
+            "inspect recent observability sessions because only the flat-file execution snapshot is available"
             if visibility_mode == "snapshot-only"
             else "inspect recent observability sessions because only the lineage trace head is available"
         )
@@ -999,7 +1016,13 @@ def _execution_visibility_source_state(
     head_exists = layout.execution_lineage_head.exists()
 
     current_raw = _read_current_execution_raw(layout) if current_exists else None
-    head_raw = _read_json(layout.execution_lineage_head) if head_exists else None
+    head_payload = load_execution_lineage_head(layout.root)
+    if head_payload is not None:
+        head_raw = head_payload.model_dump(mode="json")
+    elif head_exists:
+        head_raw = _read_json(layout.execution_lineage_head)
+    else:
+        head_raw = None
 
     current_snapshot: CurrentExecutionState | None = None
     head_snapshot: CurrentExecutionState | None = None
@@ -1019,23 +1042,28 @@ def _execution_visibility_source_state(
             degraded_reasons.append("current-execution.json is missing or unreadable")
 
     if head_exists:
-        if isinstance(head_raw, dict):
-            try:
-                head_payload = ExecutionLineageHead.model_validate(head_raw)
-            except Exception:
-                degraded_reasons.append("execution-head.json is malformed")
-            else:
-                if isinstance(head_payload.execution, dict):
-                    try:
-                        head_snapshot = CurrentExecutionState.model_validate(head_payload.execution)
-                    except Exception:
-                        degraded_reasons.append("execution-head.json payload is malformed")
-                    else:
-                        head_valid = True
+        if head_payload is not None:
+            if isinstance(head_payload.execution, dict):
+                try:
+                    head_snapshot = CurrentExecutionState.model_validate(head_payload.execution)
+                except Exception:
+                    degraded_reasons.append("execution-head.json payload is malformed")
                 else:
-                    degraded_reasons.append("execution-head.json is incomplete")
+                    head_valid = True
+            else:
+                degraded_reasons.append("execution-head.json is incomplete")
+        elif isinstance(head_raw, dict):
+            degraded_reasons.append("execution-head.json is malformed")
         else:
             degraded_reasons.append("execution-head.json is missing or unreadable")
+
+    if head_payload is not None and head_payload.execution is None:
+        note = (
+            "execution lineage head is clear; ignoring stale current-execution.json"
+            if current_exists
+            else None
+        )
+        return None, "idle", note
 
     snapshot = authoritative_snapshot or head_snapshot or current_snapshot
     if snapshot is None:
@@ -1051,7 +1079,7 @@ def _execution_visibility_source_state(
     if head_valid and not current_exists:
         return snapshot, "full", None
     if current_valid and head_exists and not head_valid:
-        note = "; ".join(dict.fromkeys(degraded_reasons)) or "compatibility snapshot only"
+        note = "; ".join(dict.fromkeys(degraded_reasons)) or "flat-file execution snapshot only"
         return snapshot, "snapshot-only", note
     if head_valid and current_exists and not current_valid:
         note = "; ".join(dict.fromkeys(degraded_reasons)) or "lineage trace only"
@@ -1183,6 +1211,15 @@ def _normalized_tangent_decision(value: object) -> str | None:
 
 
 _EXECUTION_REVIEW_REASONS = frozenset({"first_result", "pre_fanout", "skeptical_requestioning"})
+_RESULT_VERBS: frozenset[str] = frozenset({"produce", "log"})
+_DEFAULT_REVIEW_CADENCE: str = "dense"
+_FALLBACK_EXECUTION_POLICY: dict[str, object] = {
+    "max_unattended_minutes_per_plan": 15,
+    "max_unattended_minutes_per_wave": 30,
+    "checkpoint_after_n_tasks": 1,
+    "checkpoint_after_first_load_bearing_result": True,
+    "review_cadence": _DEFAULT_REVIEW_CADENCE,
+}
 
 
 def _review_clear_targets(execution: dict[str, object]) -> set[str]:
@@ -1254,6 +1291,7 @@ def _reset_execution_segment_state(current: dict[str, object]) -> None:
         "resume_file",
         "segment_started_at",
         "transition_id",
+        "review_cadence",
     ):
         current[key] = None
 
@@ -1280,13 +1318,17 @@ def _load_execution_policy(cwd: Path | None) -> dict[str, object]:
     """Load the bounded-execution policy for one project root."""
 
     if cwd is None:
-        return {}
+        return _default_execution_policy()
     try:
         from gpd.core.config import load_config
 
         cfg = load_config(cwd)
     except Exception:
-        return {}
+        return _default_execution_policy()
+    return _execution_policy_from_config(cfg)
+
+
+def _execution_policy_from_config(cfg: object) -> dict[str, object]:
     return {
         "max_unattended_minutes_per_plan": int(getattr(cfg, "max_unattended_minutes_per_plan", 0) or 0),
         "max_unattended_minutes_per_wave": int(getattr(cfg, "max_unattended_minutes_per_wave", 0) or 0),
@@ -1294,7 +1336,17 @@ def _load_execution_policy(cwd: Path | None) -> dict[str, object]:
         "checkpoint_after_first_load_bearing_result": bool(
             getattr(cfg, "checkpoint_after_first_load_bearing_result", True)
         ),
+        "review_cadence": str(getattr(cfg, "review_cadence", _DEFAULT_REVIEW_CADENCE) or _DEFAULT_REVIEW_CADENCE),
     }
+
+
+def _default_execution_policy() -> dict[str, object]:
+    try:
+        from gpd.core.config import GPDProjectConfig
+
+        return _execution_policy_from_config(GPDProjectConfig())
+    except Exception:
+        return dict(_FALLBACK_EXECUTION_POLICY)
 
 
 def _parse_iso_datetime(value: object) -> datetime | None:
@@ -1349,12 +1401,27 @@ def _apply_automatic_execution_guards(
         )
     )
 
+    # Per-segment snapshot override: if a workflow emitted
+    # `execution.review_cadence` on a prior event (today only execute-plan.md's
+    # gate/enter events, which echo the project config), that value takes
+    # precedence over the policy read from GPD/config.json. This permits a
+    # future high-stakes segment to request dense mid-execution even when the
+    # project default is weaker, without needing a config rewrite. Inversely,
+    # a segment emitting `review_cadence="adaptive"` on a dense project would
+    # disable the dense_forced branch for that segment. Workflow prompts
+    # currently echo the project-level value verbatim; this override is a
+    # latent escalation hook, not an active feature.
+    cadence = str(current.get("review_cadence") or policy.get("review_cadence") or "").strip().lower()
+    dense_forced = cadence == "dense"
     if (
         payload.name == "result"
-        and payload.action in {"produce", "log"}
-        and load_bearing
-        and policy.get("checkpoint_after_first_load_bearing_result")
+        and payload.action in _RESULT_VERBS
         and not current.get("first_result_gate_pending")
+        and not current.get("first_result_ready")
+        and (
+            (load_bearing and policy.get("checkpoint_after_first_load_bearing_result"))
+            or dense_forced
+        )
     ):
         current["first_result_ready"] = True
         current["first_result_gate_pending"] = True
@@ -1692,7 +1759,7 @@ def _updated_execution_state(
                 current["segment_status"] = "active"
             _clear_tangent_state(current)
 
-    if payload.name == "result" and payload.action in {"produce", "log"}:
+    if payload.name == "result" and payload.action in _RESULT_VERBS:
         if current.get("checkpoint_reason") == "first_result" or _bool_or_none(execution.get("load_bearing")):
             current["first_result_ready"] = True
 
@@ -2091,15 +2158,9 @@ def observe_event(
                 previous_execution=previous_execution,
                 next_execution=next_execution,
             )
-            _persist_durable_bounded_segment(layout, next_execution)
+            _best_effort_persist_durable_bounded_segment(layout, next_execution)
     else:
         _append_event(session_log, payload.model_dump(mode="json"))
-        next_execution = _updated_execution_state(get_current_execution(layout.root), payload, cwd=layout.root)
-        if next_execution is None:
-            _clear_current_execution(layout)
-        else:
-            _save_current_execution(layout, next_execution)
-        _persist_durable_bounded_segment(layout, next_execution)
 
     updated = _updated_session(
         session,
@@ -2353,6 +2414,7 @@ class ExportLogsResult(BaseModel):
     events_exported: int = 0
     traces_exported: int = 0
     files_written: list[str] = Field(default_factory=list)
+    empty_export: bool = False
     reason: str | None = None
 
 
@@ -2376,6 +2438,13 @@ def export_logs(
     Supported formats: ``jsonl`` (raw, one JSON object per line),
     ``json`` (pretty-printed array), ``markdown`` (human-readable report).
     """
+    if format not in {"jsonl", "json", "markdown"}:
+        return ExportLogsResult(
+            exported=False,
+            output_dir=str(Path(output_dir)) if output_dir else "",
+            reason=f"Unsupported format: {format}. Use jsonl, json, or markdown.",
+        )
+
     layout = _layout(cwd)
     if layout is None:
         return ExportLogsResult(
@@ -2385,21 +2454,26 @@ def export_logs(
         )
 
     dest = Path(output_dir) if output_dir else layout.root / "GPD" / "exports" / "logs"
-    dest.mkdir(parents=True, exist_ok=True)
 
-    if format not in {"jsonl", "json", "markdown"}:
+    all_sessions = _iter_session_meta(layout)
+    if not all_sessions:
         return ExportLogsResult(
             exported=False,
             output_dir=str(dest),
-            reason=f"Unsupported format: {format}. Use jsonl, json, or markdown.",
+            reason=(
+                "No observability sessions found in GPD/observability/sessions/. "
+                "Run any GPD command first, then retry export-logs."
+            ),
         )
+
+    dest.mkdir(parents=True, exist_ok=True)
 
     files_written: list[str] = []
     sessions_exported = 0
     events_exported = 0
     traces_exported = 0
 
-    sessions = _iter_session_meta(layout)
+    sessions = all_sessions
     if command:
         sessions = [s for s in sessions if s.command == command]
     if session:
@@ -2541,6 +2615,8 @@ def export_logs(
                 existing = safe_read_file(report_path_obj) or ""
                 atomic_write(report_path_obj, existing + "\n".join(trace_section))
 
+    empty_export = sessions_exported == 0 and events_exported == 0 and traces_exported == 0
+
     return ExportLogsResult(
         exported=True,
         output_dir=str(dest),
@@ -2548,4 +2624,6 @@ def export_logs(
         events_exported=events_exported,
         traces_exported=traces_exported,
         files_written=files_written,
+        empty_export=empty_export,
+        reason="No matching sessions, events, or traces found for the requested filters." if empty_export else None,
     )

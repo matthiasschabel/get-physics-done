@@ -11,9 +11,10 @@ import pytest
 from gpd.adapters import get_adapter, list_runtimes
 from gpd.adapters.runtime_catalog import get_runtime_descriptor
 from gpd.core import suggest as suggest_module
-from gpd.core.constants import ENV_GPD_ACTIVE_RUNTIME
+from gpd.core.constants import ENV_DATA_DIR, ENV_GPD_ACTIVE_RUNTIME
 from gpd.core.conventions import KNOWN_CONVENTIONS
 from gpd.core.proof_review import resolve_manuscript_proof_review_status
+from gpd.core.recent_projects import record_recent_project
 from gpd.core.reproducibility import compute_sha256
 from gpd.core.runtime_command_surfaces import format_active_runtime_command
 from gpd.core.suggest import (
@@ -67,6 +68,7 @@ def _isolate_runtime_detection(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
     """Keep suggest tests independent from the host machine's runtime installs."""
     for key in _RUNTIME_ENV_VARS_TO_CLEAR:
         monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv(ENV_DATA_DIR, str(tmp_path / "gpd-data"))
     monkeypatch.setattr("gpd.hooks.runtime_detect.Path.home", lambda: tmp_path / "home")
 
 
@@ -126,6 +128,7 @@ def _write_active_manuscript_entrypoint(
     manuscript_root.mkdir(parents=True, exist_ok=True)
     entrypoint = manuscript_root / f"{CANONICAL_MANUSCRIPT_STEM}{suffix}"
     entrypoint.write_text(body, encoding="utf-8")
+    entrypoint_sha256 = compute_sha256(entrypoint)
     (manuscript_root / "ARTIFACT-MANIFEST.json").write_text(
         json.dumps(
             {
@@ -133,12 +136,14 @@ def _write_active_manuscript_entrypoint(
                 "paper_title": "Curvature Flow Bounds",
                 "journal": "jhep",
                 "created_at": "2026-03-10T00:00:00+00:00",
+                "manuscript_sha256": entrypoint_sha256,
+                "manuscript_mtime_ns": entrypoint.stat().st_mtime_ns,
                 "artifacts": [
                     {
                         "artifact_id": "manuscript",
                         "category": "tex",
                         "path": entrypoint.name,
-                        "sha256": compute_sha256(entrypoint),
+                        "sha256": entrypoint_sha256,
                         "produced_by": "tests.core.test_suggest",
                         "sources": [],
                         "metadata": {"role": "manuscript"},
@@ -151,8 +156,46 @@ def _write_active_manuscript_entrypoint(
     return entrypoint
 
 
-def _write_reproducibility_manifest(project_root: Path, *, manuscript_pdf: Path) -> None:
-    (project_root / "paper" / "reproducibility-manifest.json").write_text(
+def _write_clean_bibliography_audit(manuscript_root: Path) -> None:
+    (manuscript_root / "BIBLIOGRAPHY-AUDIT.json").write_text(
+        json.dumps(
+            {
+                "generated_at": "2026-03-10T00:00:00+00:00",
+                "total_sources": 1,
+                "resolved_sources": 1,
+                "partial_sources": 0,
+                "unverified_sources": 0,
+                "failed_sources": 0,
+                "entries": [
+                    {
+                        "key": "Ref2026",
+                        "source_type": "paper",
+                        "reference_id": "ref-main",
+                        "title": "Curvature Flow Bounds",
+                        "resolution_status": "provided",
+                        "verification_status": "verified",
+                        "verification_sources": ["phase-summary"],
+                        "canonical_identifiers": ["doi:10.1000/test"],
+                        "missing_core_fields": [],
+                        "enriched_fields": [],
+                        "warnings": [],
+                        "errors": [],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _write_reproducibility_manifest(
+    project_root: Path,
+    *,
+    manuscript_pdf: Path,
+    manuscript_root: Path | None = None,
+) -> None:
+    target_root = manuscript_root or (project_root / "paper")
+    (target_root / "reproducibility-manifest.json").write_text(
         json.dumps(
             {
                 "paper_title": "Curvature Flow Bounds",
@@ -208,6 +251,133 @@ def _write_reproducibility_manifest(project_root: Path, *, manuscript_pdf: Path)
     )
 
 
+def _write_managed_publication_submission_lane(
+    workspace: Path,
+    *,
+    subject_slug: str = "curvature-flow",
+    project_backed: bool,
+) -> Path:
+    if project_backed:
+        _setup_project(workspace)
+        _create_roadmap(workspace)
+
+    entrypoint = _write_active_manuscript_entrypoint(
+        workspace,
+        root_name=f"GPD/publication/{subject_slug}/manuscript",
+    )
+    manuscript_root = entrypoint.parent
+    _write_clean_bibliography_audit(manuscript_root)
+    manuscript_pdf = manuscript_root / f"{CANONICAL_MANUSCRIPT_STEM}.pdf"
+    manuscript_pdf.write_text("%PDF-1.4\n", encoding="utf-8")
+    _write_reproducibility_manifest(workspace, manuscript_pdf=manuscript_pdf, manuscript_root=manuscript_root)
+    _create_state(
+        workspace,
+        {
+            "convention_lock": {
+                "metric_signature": "(-,+,+,+)",
+                "natural_units": "c=1",
+                "coordinate_system": "global chart",
+            }
+        },
+    )
+
+    publication_root = workspace / "GPD" / "publication" / subject_slug
+    review_dir = publication_root / "review"
+    review_dir.mkdir(parents=True, exist_ok=True)
+    manuscript_rel = entrypoint.relative_to(workspace).as_posix()
+    manuscript_sha256 = compute_sha256(entrypoint)
+    round_suffix = ""
+    (review_dir / f"CLAIMS{round_suffix}.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "manuscript_path": manuscript_rel,
+                "manuscript_sha256": manuscript_sha256,
+                "claims": [
+                    {
+                        "claim_id": "CLM-001",
+                        "claim_type": "main_result",
+                        "claim_kind": "other",
+                        "text": "The manuscript reports a managed publication result.",
+                        "artifact_path": manuscript_rel,
+                        "section": "Main Result",
+                        "equation_refs": [],
+                        "figure_refs": [],
+                        "supporting_artifacts": [],
+                        "theorem_assumptions": [],
+                        "theorem_parameters": [],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    stage_artifacts: list[str] = []
+    for stage_id in ("reader", "literature", "math", "physics", "interestingness"):
+        stage_path = review_dir / f"STAGE-{stage_id}{round_suffix}.json"
+        stage_path.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "round": 1,
+                    "stage_id": stage_id,
+                    "stage_kind": stage_id,
+                    "manuscript_path": manuscript_rel,
+                    "manuscript_sha256": manuscript_sha256,
+                    "claims_reviewed": [],
+                    "summary": f"{stage_id} review",
+                    "strengths": ["checked manuscript"],
+                    "findings": [],
+                    "proof_audits": [],
+                    "confidence": "high",
+                    "recommendation_ceiling": "minor_revision",
+                }
+            ),
+            encoding="utf-8",
+        )
+        stage_artifacts.append(stage_path.relative_to(workspace).as_posix())
+    (review_dir / f"REVIEW-LEDGER{round_suffix}.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "round": 1,
+                "manuscript_path": manuscript_rel,
+                "issues": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (review_dir / f"REFEREE-DECISION{round_suffix}.json").write_text(
+        json.dumps(
+            {
+                "manuscript_path": manuscript_rel,
+                "target_journal": "jhep",
+                "final_recommendation": "accept",
+                "final_confidence": "medium",
+                "stage_artifacts": stage_artifacts,
+                "central_claims_supported": True,
+                "claim_scope_proportionate_to_evidence": True,
+                "physical_assumptions_justified": True,
+                "proof_audit_coverage_complete": True,
+                "theorem_proof_alignment_adequate": True,
+                "unsupported_claims_are_central": False,
+                "reframing_possible_without_new_results": True,
+                "mathematical_correctness": "adequate",
+                "novelty": "adequate",
+                "significance": "adequate",
+                "venue_fit": "adequate",
+                "literature_positioning": "adequate",
+                "unresolved_major_issues": 0,
+                "unresolved_minor_issues": 0,
+                "blocking_issue_ids": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (publication_root / "REFEREE-REPORT.md").write_text("Accepted after revision.\n", encoding="utf-8")
+    return entrypoint
+
+
 def _create_roadmap_with_phases(tmp_path: Path, phases: list[tuple[str, str]]) -> None:
     lines = ["# Roadmap", ""]
     for number, name in phases:
@@ -258,6 +428,79 @@ def _write_submission_review_package(
     return root
 
 
+def _write_review_round(
+    project_root: Path,
+    *,
+    manuscript_path: str,
+    round_number: int = 1,
+    final_recommendation: str = "major_revision",
+    blocking_issue_ids: list[str] | None = None,
+    review_dir: Path | None = None,
+) -> None:
+    review_dir = review_dir or (project_root / "GPD" / "review")
+    review_dir.mkdir(parents=True, exist_ok=True)
+    round_suffix = "" if round_number <= 1 else f"-R{round_number}"
+    (review_dir / f"REVIEW-LEDGER{round_suffix}.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "round": round_number,
+                "manuscript_path": manuscript_path,
+                "issues": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (review_dir / f"REFEREE-DECISION{round_suffix}.json").write_text(
+        json.dumps(
+            {
+                "manuscript_path": manuscript_path,
+                "target_journal": "jhep",
+                "final_recommendation": final_recommendation,
+                "final_confidence": "medium",
+                "stage_artifacts": [],
+                "central_claims_supported": True,
+                "claim_scope_proportionate_to_evidence": True,
+                "physical_assumptions_justified": True,
+                "proof_audit_coverage_complete": True,
+                "theorem_proof_alignment_adequate": True,
+                "unsupported_claims_are_central": False,
+                "reframing_possible_without_new_results": True,
+                "mathematical_correctness": "adequate",
+                "novelty": "adequate",
+                "significance": "adequate",
+                "venue_fit": "adequate",
+                "literature_positioning": "adequate",
+                "unresolved_major_issues": 0,
+                "unresolved_minor_issues": 0,
+                "blocking_issue_ids": blocking_issue_ids or [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _write_bound_response_pair(project_root: Path, *, round_number: int = 1) -> None:
+    round_suffix = "" if round_number <= 1 else f"-R{round_number}"
+    response_frontmatter = (
+        "---\n"
+        f"response_to: REFEREE-REPORT{round_suffix}.md\n"
+        f"round: {round_number}\n"
+        f"manuscript_path: {manuscript_relpath()}\n"
+        f"review_ledger: GPD/review/REVIEW-LEDGER{round_suffix}.json\n"
+        f"referee_decision: GPD/review/REFEREE-DECISION{round_suffix}.json\n"
+        "---\n\n"
+    )
+    (project_root / "GPD" / f"AUTHOR-RESPONSE{round_suffix}.md").write_text(
+        response_frontmatter + "# Author Response\n",
+        encoding="utf-8",
+    )
+    (project_root / "GPD" / "review" / f"REFEREE_RESPONSE{round_suffix}.md").write_text(
+        response_frontmatter + "# Referee Response\n",
+        encoding="utf-8",
+    )
+
+
 # ─── No Project ────────────────────────────────────────────────────────────────
 
 
@@ -268,6 +511,41 @@ def test_no_project_suggests_new_project(tmp_path: Path) -> None:
     assert result.top_action is not None
     assert result.top_action.action == "new-project"
     assert result.top_action.priority == 1
+
+
+def test_no_project_with_recoverable_recent_projects_suggests_recent_resume(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A projectless parent with recent projects should not route to fresh setup."""
+    data_dir = tmp_path / "gpd-data"
+    monkeypatch.setenv(ENV_DATA_DIR, str(data_dir))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    recent_project = tmp_path / "recent-project"
+    recent_project.mkdir()
+    _setup_project(recent_project)
+    resume_file = recent_project / "GPD" / "phases" / "01" / ".continue-here.md"
+    resume_file.parent.mkdir(parents=True, exist_ok=True)
+    resume_file.write_text("resume here\n", encoding="utf-8")
+
+    record_recent_project(
+        recent_project,
+        session_data={
+            "last_date": "2026-03-29T12:00:00+00:00",
+            "stopped_at": "Phase 01",
+            "resume_file": "GPD/phases/01/.continue-here.md",
+            "resume_target_kind": "handoff",
+            "resume_target_recorded_at": "2026-03-29T12:00:00+00:00",
+        },
+    )
+
+    result = suggest_next(workspace)
+
+    assert result.suggestion_count == 1
+    assert result.top_action is not None
+    assert result.top_action.action == "resume-recent"
+    assert result.top_action.command == "gpd resume --recent"
+    assert "gpd:resume-work" in result.top_action.reason
 
 
 def test_no_project_uses_workspace_runtime_install_for_command_formatting(tmp_path: Path) -> None:
@@ -334,7 +612,9 @@ def test_format_command_matches_shared_runtime_surface_helper_for_suggest_next(t
     assert result == format_active_runtime_command("suggest-next", cwd=workspace, fallback=None)
 
 
-def test_format_command_falls_back_to_local_cli_for_unknown_runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_format_command_falls_back_to_local_cli_for_unknown_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Unknown runtime detection should preserve the local CLI fallback surface."""
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -342,6 +622,17 @@ def test_format_command_falls_back_to_local_cli_for_unknown_runtime(tmp_path: Pa
     monkeypatch.setattr("gpd.hooks.runtime_detect.detect_runtime_for_gpd_use", lambda cwd=None: RUNTIME_UNKNOWN)
 
     assert suggest_module._format_command("new-project", cwd=workspace) == "gpd init new-project"
+
+
+def test_suggest_next_does_not_create_state_lock_for_read_only_state_probe(tmp_path: Path) -> None:
+    root = _setup_project(tmp_path)
+    _create_roadmap(root)
+    _create_state(root, {"position": {"current_phase": "01", "status": "Initialized"}})
+
+    result = suggest_next(root)
+
+    assert result.suggestion_count >= 0
+    assert not (root / "GPD" / "state.json.lock").exists()
 
 
 @pytest.mark.parametrize("include_local_conflict", [False, True])
@@ -515,6 +806,24 @@ def test_complete_unverified_suggests_verify(tmp_path: Path) -> None:
     result = suggest_next(root)
     actions = [s.action for s in result.suggestions]
     assert "verify-work" in actions
+
+
+def test_stale_verification_blocks_audit_and_paper_suggestions(tmp_path: Path) -> None:
+    """Stale verification is verification debt, not milestone/paper readiness."""
+    root = _setup_project(tmp_path)
+    _create_roadmap(root)
+    phase_dir = _create_phase(root, "01-setup", plans=1, summaries=1, verification=True)
+    (phase_dir / "01-VERIFICATION.md").write_text("status: stale\n", encoding="utf-8")
+
+    result = suggest_next(root)
+
+    actions = [s.action for s in result.suggestions]
+    assert "verify-work" in actions
+    assert "audit-milestone" not in actions
+    assert "write-paper" not in actions
+    verify = next(s for s in result.suggestions if s.action == "verify-work")
+    assert verify.command == "gpd init verify-work 01"
+    assert "stale" in verify.reason
 
 
 def test_researched_phase_suggests_plan(tmp_path: Path) -> None:
@@ -789,6 +1098,32 @@ def test_referee_report_in_canonical_gpd_root_suggests_response(tmp_path: Path) 
     assert "peer-review" not in actions
 
 
+def test_managed_publication_lane_ignores_global_referee_report(tmp_path: Path) -> None:
+    root = _setup_project(tmp_path)
+    _create_roadmap(root)
+    _write_active_manuscript_entrypoint(root, root_name="GPD/publication/ising-bootstrap/manuscript")
+    (root / "GPD" / "REFEREE-REPORT.md").write_text("Major revision needed.\n", encoding="utf-8")
+
+    result = suggest_next(root)
+    actions = [s.action for s in result.suggestions]
+
+    assert "respond-to-referees" not in actions
+    assert "peer-review" in actions
+    assert "arxiv-submission" not in actions
+
+
+def test_standalone_managed_publication_lane_routes_to_peer_review(tmp_path: Path) -> None:
+    _write_active_manuscript_entrypoint(tmp_path, root_name="GPD/publication/external-lane/manuscript")
+
+    result = suggest_next(tmp_path)
+    actions = [s.action for s in result.suggestions]
+
+    assert "peer-review" in actions
+    assert "arxiv-submission" not in actions
+    peer_review = next(s for s in result.suggestions if s.action == "peer-review")
+    assert "standalone peer review" in peer_review.reason
+
+
 def test_markdown_referee_report_suggests_response_without_arxiv_submission(tmp_path: Path) -> None:
     root = _setup_project(tmp_path)
     _create_roadmap(root)
@@ -803,17 +1138,36 @@ def test_markdown_referee_report_suggests_response_without_arxiv_submission(tmp_
     assert "arxiv-submission" not in actions
 
 
-def test_author_response_and_accepted_decision_clear_referee_response_suggestion(tmp_path: Path) -> None:
+def test_legacy_review_dir_referee_report_still_suggests_response_during_migration(tmp_path: Path) -> None:
+    root = _write_submission_review_package(tmp_path, theorem_bearing=False, review_report=False)
+    _create_roadmap(root)
+    review_dir = root / "GPD" / "review"
+    _write_review_round(
+        root,
+        manuscript_path=manuscript_relpath(),
+        final_recommendation="major_revision",
+    )
+    (review_dir / "REFEREE-REPORT.md").write_text("Major revision needed.\n", encoding="utf-8")
+
+    result = suggest_next(root)
+    actions = [s.action for s in result.suggestions]
+
+    assert "respond-to-referees" in actions
+    assert "peer-review" not in actions
+    assert "arxiv-submission" not in actions
+
+
+def test_completed_response_pair_routes_back_to_peer_review_before_arxiv_submission(tmp_path: Path) -> None:
     root = _write_submission_review_package(tmp_path, theorem_bearing=False, review_report=True)
     _create_roadmap(root)
-    (root / "GPD" / "AUTHOR-RESPONSE.md").write_text("Responses incorporated.\n", encoding="utf-8")
+    _write_bound_response_pair(root)
 
     result = suggest_next(root)
     actions = [s.action for s in result.suggestions]
 
     assert "respond-to-referees" not in actions
-    assert "peer-review" not in actions
-    assert "arxiv-submission" in actions
+    assert "peer-review" in actions
+    assert "arxiv-submission" not in actions
 
 
 def test_blocking_accepted_decision_does_not_suggest_arxiv_submission(tmp_path: Path) -> None:
@@ -827,7 +1181,10 @@ def test_blocking_accepted_decision_does_not_suggest_arxiv_submission(tmp_path: 
                 "target_journal": "jhep",
                 "final_recommendation": "accept",
                 "final_confidence": "high",
-                "stage_artifacts": [f"GPD/review/STAGE-{stage}.json" for stage in ("reader", "literature", "math", "physics", "interestingness")],
+                "stage_artifacts": [
+                    f"GPD/review/STAGE-{stage}.json"
+                    for stage in ("reader", "literature", "math", "physics", "interestingness")
+                ],
                 "central_claims_supported": True,
                 "claim_scope_proportionate_to_evidence": True,
                 "physical_assumptions_justified": True,
@@ -866,6 +1223,28 @@ def test_accepted_review_decision_overrides_referee_response_with_submission(tmp
     assert "arxiv-submission" in actions
 
 
+def test_project_backed_managed_publication_lane_can_still_suggest_arxiv_submission(tmp_path: Path) -> None:
+    root = tmp_path
+    _write_managed_publication_submission_lane(root, project_backed=True)
+
+    result = suggest_next(root)
+    actions = [s.action for s in result.suggestions]
+
+    assert "peer-review" not in actions
+    assert "arxiv-submission" in actions
+
+
+def test_standalone_managed_publication_lane_does_not_suggest_arxiv_submission_after_accepted_review(
+    tmp_path: Path,
+) -> None:
+    _write_managed_publication_submission_lane(tmp_path, subject_slug="external-lane", project_backed=False)
+
+    result = suggest_next(tmp_path)
+    actions = [s.action for s in result.suggestions]
+
+    assert "arxiv-submission" not in actions
+
+
 def test_stale_non_theorem_review_snapshot_does_not_suggest_arxiv_submission(tmp_path: Path) -> None:
     root = _write_submission_review_package(tmp_path, theorem_bearing=False, review_report=True)
     _create_roadmap(root)
@@ -894,6 +1273,23 @@ def test_review_package_for_different_active_manuscript_does_not_suggest_arxiv_s
     actions = [s.action for s in result.suggestions]
 
     assert "arxiv-submission" not in actions
+
+
+def test_newer_review_round_for_different_manuscript_does_not_block_submission_suggestion(tmp_path: Path) -> None:
+    root = _write_submission_review_package(tmp_path, theorem_bearing=False, review_report=False)
+    _create_roadmap(root)
+    _write_review_round(
+        root,
+        manuscript_path="submission/other.tex",
+        round_number=2,
+        final_recommendation="major_revision",
+    )
+
+    result = suggest_next(root)
+    actions = [s.action for s in result.suggestions]
+
+    assert "arxiv-submission" in actions
+    assert "respond-to-referees" not in actions
 
 
 def test_missing_submission_support_artifacts_do_not_suggest_arxiv_submission(tmp_path: Path) -> None:
@@ -1227,7 +1623,7 @@ def test_suggest_context_defaults() -> None:
     assert ctx.current_phase is None
     assert ctx.progress_percent == 0.0
     assert ctx.phase_count == 0
-    assert ctx.autonomy == "balanced"
+    assert ctx.autonomy == "supervised"
     assert ctx.research_mode == "balanced"
 
 

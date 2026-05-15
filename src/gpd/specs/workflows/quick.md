@@ -1,5 +1,5 @@
 <purpose>
-Execute small, ad-hoc physics tasks with GPD guarantees (atomic commits and durable state updates) while skipping optional agents (literature search, plan-checker, verifier). Quick mode routes through the canonical planner handoff, supports staged planner loading when available, tracks artifacts in `GPD/quick/`, and records completion through the structured state commands plus the quick-task summary files. Typical quick tasks include: quick derivation, dimensional check, order-of-magnitude estimate, limiting case verification, and bibliography lookup. Quick mode is NOT authorized to close theorem-style or `proof_obligation` work.
+Execute small, ad-hoc physics tasks with GPD guarantees (atomic commits and durable state updates) while skipping optional agents (literature search, plan-checker, verifier). Quick mode routes through the canonical planner handoff, loads staged quick init at the task-bootstrap and task-authoring boundaries, tracks artifacts in `GPD/quick/`, and records completion through the structured state commands plus the quick-task summary files. Typical quick tasks include: quick derivation, dimensional check, order-of-magnitude estimate, limiting case verification, and bibliography lookup. Quick mode is NOT authorized to close theorem-style or `proof_obligation` work.
 </purpose>
 
 <required_reading>
@@ -9,21 +9,17 @@ Read all files referenced by the invoking prompt's execution_context before star
 <process>
 **Step 1: Get task description**
 
-Prompt user interactively for the task description:
+Ask for the task description as a single freeform prompt. Do not use the shared structured-choice fallback here; there are no fixed option labels to preserve.
 
-```
-> **Platform note:** If `ask_user` is not available, present these options in plain text and wait for the user's freeform response.
+Ask ONE question inline (freeform, NOT ask_user):
 
-ask_user(
-  header: "Quick Task",
-  question: "What do you want to do? Examples:
+```text
+What quick task do you want to do? Examples:
   - Quick derivation of the equation of motion from the Lagrangian
   - Dimensional check on the cross-section formula in eq. (3.14)
   - Order-of-magnitude estimate for the tunneling rate
   - Verify the non-relativistic limiting case of the dispersion relation
-  - Look up the original reference for the Mermin-Wagner theorem",
-  followUp: null
-)
+  - Look up the original reference for the Mermin-Wagner theorem
 ```
 
 Store response as `$DESCRIPTION`.
@@ -35,20 +31,21 @@ If empty, re-prompt: "Please provide a task description."
 **Step 2: Initialize**
 
 ```bash
-INIT=$(gpd --raw init quick "$DESCRIPTION")
+TASK_BOOTSTRAP_INIT=$(gpd --raw init quick "$DESCRIPTION" --stage task_bootstrap)
 if [ $? -ne 0 ]; then
-  echo "ERROR: gpd initialization failed: $INIT"
+  echo "ERROR: gpd initialization failed: $TASK_BOOTSTRAP_INIT"
   # STOP — display the error to the user and do not proceed.
 fi
+INIT="$TASK_BOOTSTRAP_INIT"
 ```
 
 Parse JSON for: `planner_model`, `executor_model`, `commit_docs`, `autonomy`, `next_num`, `slug`, `date`, `timestamp`, `quick_dir`, `task_dir`, `roadmap_exists`, `project_exists`, `planning_exists`, `project_contract`, `project_contract_gate`, `project_contract_validation`, `project_contract_load_info`, `contract_intake`, `effective_reference_intake`, `active_reference_context`, `reference_artifacts_content`.
 
-If staged planner-loading fields appear in the init payload, treat them as authoritative for the planner handoff shape rather than reconstructing a separate quick-specific prompt contract.
+Before the planner handoff, reload the `task_authoring` staged init payload and treat its `staged_loading` block as authoritative for the planner handoff shape rather than reconstructing a separate quick-specific prompt contract.
 
 **Mode-aware behavior:**
-- `autonomy=supervised`: Pause after the plan for user approval before execution.
-- `autonomy=balanced` (default): Execute without pausing unless the quick task reveals a real decision point.
+- `autonomy=supervised` (default): Pause after the plan for user approval before execution.
+- `autonomy=balanced`: Execute without pausing unless the quick task reveals a real decision point.
 - `autonomy=yolo`: Execute and commit without pausing.
 
 **If `project_exists` is false:** Error -- Quick mode requires an initialized project with `GPD/PROJECT.md`. Run `gpd:new-project` first.
@@ -58,7 +55,7 @@ If staged planner-loading fields appear in the init payload, treat them as autho
 Quick tasks can run mid-phase and do NOT require ROADMAP.md. They still require an initialized project workspace with `GPD/PROJECT.md` and the `GPD/` directory.
 Quick mode still inherits the approved `project_contract` only when `project_contract_gate.authoritative` is true, and it still inherits the active reference ledger. Do not bypass required anchors, baselines, or forbidden-proxy constraints just because the task is small.
 
-**Proof-obligation command block:** If the description or inherited contract indicates theorem-style work (`proof_obligation`, `theorem`, `lemma`, `corollary`, `proposition`, `claim`, `proof`, `prove`, `show that`, `existence`, `uniqueness`), STOP instead of using quick mode. Do not bypass this by asking for a "quick sketch", "light proof", or "just the main idea". Route explicitly to:
+**Proof-obligation command block:** If the description or inherited contract indicates theorem-style or contract-backed proof work (`proof_obligation`, `claim_kind: theorem`, `claim_kind: lemma`, `claim_kind: corollary`, `claim_kind: proposition`, ProjectContract `claim_kind: claim`, `proof`, `prove`, `we prove`, theorem metadata, proof fields, or a formal `show that` / existence / uniqueness target with named hypotheses, parameters, quantifiers, domains, or conclusion clauses), STOP instead of using quick mode. A generic manuscript or task "claim" is not enough by itself. Do not bypass this by asking for a "quick sketch", "light proof", or "just the main idea". Route explicitly to:
 
 - `gpd:plan-phase <phase>` when this belongs in planned phase work
 - `gpd:derive-equation "<goal>"` when you need a derivation/proof draft
@@ -86,11 +83,22 @@ Directory: ${QUICK_DIR}
 
 **Step 4: Spawn planner (quick mode)**
 
+Load the staged task-authoring payload before assembling the quick planner prompt:
+
+```bash
+TASK_AUTHORING_INIT=$(gpd --raw init quick "$DESCRIPTION" --stage task_authoring)
+if [ $? -ne 0 ]; then
+  echo "ERROR: gpd quick task-authoring init failed: $TASK_AUTHORING_INIT"
+  # STOP — display the error to the user and do not proceed.
+fi
+INIT="$TASK_AUTHORING_INIT"
+```
+
 Spawn gpd-planner with the quick-mode context:
 
 @{GPD_INSTALL_DIR}/references/orchestration/runtime-delegation-note.md
 
-> If subagent spawning is unavailable, execute these steps sequentially in the main context.
+> Apply the canonical runtime delegation convention already loaded above.
 
 ```
 task(
@@ -122,7 +130,7 @@ Read the file at GPD/STATE.md
 - Create a SINGLE plan with 1-3 focused tasks
 - Quick tasks should be atomic and self-contained
 - No literature review phase, no checker phase
-- If staged planner-loading fields are present in the init payload, use them as the source of truth for the handoff instead of inventing a separate quick-only contract
+- Use the `staged_loading` fields from `TASK_AUTHORING_INIT` as the source of truth for the handoff instead of inventing a separate quick-only contract
 - If `project_contract_load_info.status` starts with `blocked` or `project_contract_validation.valid` is false, return `gpd_return.status: checkpoint` instead of drafting a plan from guessed scope. The `## CHECKPOINT REACHED` heading is presentation only.
 - If the task is theorem-style or proof-bearing, return `gpd_return.status: checkpoint` and tell the user quick mode is blocked pending the full proof-redteam workflow.
 - Target ~30% context usage (simple, focused)
@@ -172,9 +180,7 @@ fi
 **Step 5: Spawn executor**
 
 Spawn gpd-executor with plan reference:
-@{GPD_INSTALL_DIR}/references/orchestration/runtime-delegation-note.md
-
-> If subagent spawning is unavailable, execute these steps sequentially in the main context.
+Apply the canonical runtime delegation convention already loaded above.
 
 ```
 task(

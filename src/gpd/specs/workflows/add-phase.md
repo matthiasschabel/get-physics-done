@@ -99,13 +99,13 @@ Roadmap updated: GPD/ROADMAP.md
 
 ---
 
-## Next Up
+## > Next Up
 
 **Phase {N}: {description}**
 
 `gpd:plan-phase {N}`
 
-<sub>`/clear` first -> fresh context window</sub>
+<sub>Start a fresh context window</sub>
 
 ---
 

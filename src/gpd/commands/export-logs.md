@@ -12,27 +12,11 @@ allowed-tools:
 
 
 <objective>
-Export GPD observability session logs and execution traces to files for external review, sharing, debugging, or archival.
+Export GPD observability session logs and execution traces for review, sharing, debugging, or archival.
 
-Reads session event streams from `GPD/observability/sessions/` and trace logs from `GPD/traces/`, applies optional filters, and writes the results to `GPD/exports/logs/` (or a custom directory).
+The local-only CLI passthrough filters `--command`, `--phase`, and `--category` narrow the underlying export only. Supported options are `--format jsonl|json|markdown`, `--session <id>`, `--last N`, `--command <label>`, `--phase <phase>`, `--category <name>`, `--no-traces`, and `--output-dir <path>`.
 
-The local-only CLI passthrough filters `--command`, `--phase`, and `--category` are forwarded to the underlying export command; they only narrow what gets exported.
-
-**Formats:**
-
-- `jsonl` (default): Raw JSONL — one JSON object per line, suitable for machine consumption or log-processing pipelines
-- `json`: Pretty-printed JSON arrays, suitable for inspection or import into analysis tools
-- `markdown`: Human-readable report with session table and event timeline
-
-**Filters:**
-
-- `--session <id>`: Export only a specific session
-- `--last N`: Export only the N most recent sessions
-- `--command <label>`: Export only sessions for a given command
-- `--phase <phase>`: Export only events from the matching phase
-- `--category <name>`: Export only events from the matching category
-- `--no-traces`: Exclude execution traces (only export observability events)
-- `--output-dir <path>`: Write files to a custom directory instead of `GPD/exports/logs/`
+The raw export validates the requested format before creating directories, refuses missing session logs, and labels filtered empty exports with `empty_export: true`.
 </objective>
 
 <execution_context>
@@ -41,39 +25,50 @@ The local-only CLI passthrough filters `--command`, `--phase`, and `--category` 
 
 <context>
 Format and filters: $ARGUMENTS (all optional)
-Local-only CLI passthrough filters: `--command`, `--phase`, and `--category`
 
 @GPD/STATE.md
 </context>
 
 <process>
-Execute the export-logs workflow from @{GPD_INSTALL_DIR}/workflows/export-logs.md end-to-end.
+Execute the included export-logs workflow end-to-end.
 
-## Step 1: Validate project
+## Step 1: Validate context
 
-Confirm a GPD project exists and observability data is present.
+Run the raw prefixless command-context preflight before export:
 
-## Step 2: Parse arguments
+```bash
+CONTEXT=$(gpd --raw validate command-context export-logs "$ARGUMENTS")
+if [ $? -ne 0 ]; then
+  echo "$CONTEXT"
+  exit 1
+fi
+```
 
-Extract format, filters, and output directory from $ARGUMENTS.
+## Step 2: Parse arguments as data
+
+Extract format, filters, and output directory from `$ARGUMENTS` as data only. Do not evaluate it, run it through a shell-interpreter wrapper, or concatenate it into a shell command.
+
+Use only the recognized flags listed above. Preserve spaces inside values such as output paths or command/category labels. If a value cannot be unambiguously assigned to a known flag, stop and ask for the exact format, filter, or output path instead of guessing.
 
 ## Step 3: Run export
 
-```bash
-gpd --raw observe export $ARGUMENTS
-```
+Invoke `gpd --raw observe export` once. Pass only requested recognized options, with each value as its own quoted argv value:
+
+`--format "$FORMAT"`, `--session "$SESSION"`, `--last "$LAST"`, `--command "$COMMAND"`, `--phase "$PHASE"`, `--category "$CATEGORY"`, `--output-dir "$OUTPUT_DIR"`, `--no-traces`.
+
+Never pass raw `$ARGUMENTS` to `observe export`, never build `EXPORT_ARGS`, and never run the export through a shell-interpreter wrapper. For example, a spaced path must be passed as one quoted `--output-dir` value.
 
 ## Step 4: Report results
 
-Display the export summary: files written, event counts, and output location.
+Display files written, event counts, and output location. If `empty_export: true`, state that the requested filters matched no sessions, events, or traces.
 </process>
 
 <success_criteria>
 
-- [ ] Project existence validated
-- [ ] Observability sessions discovered and read
+- [ ] Command-context preflight passed
 - [ ] Filters applied correctly (session, command, phase, last N)
 - [ ] Output files written in requested format
+- [ ] Empty filtered exports explicitly labeled when no content matched
 - [ ] Traces included unless --no-traces specified
 - [ ] File locations and counts reported to user
       </success_criteria>

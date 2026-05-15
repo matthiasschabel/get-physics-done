@@ -8,16 +8,24 @@ discovery surfaces without re-parsing the canonical content.
 
 from __future__ import annotations
 
+import dataclasses
 import re
 import textwrap
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 import yaml
 
 from gpd.adapters.install_utils import expand_at_includes
-from gpd.command_labels import canonical_command_label, canonical_skill_label, command_slug_from_label
+from gpd.command_labels import (
+    canonical_command_label,
+    canonical_skill_label,
+    command_slug_from_label,
+    parse_command_label,
+)
 from gpd.core.model_visible_sections import render_model_visible_yaml_section
 from gpd.core.model_visible_text import (
     AGENT_ARTIFACT_WRITE_AUTHORITIES,
@@ -25,6 +33,8 @@ from gpd.core.model_visible_text import (
     AGENT_ROLE_FAMILIES,
     AGENT_SHARED_STATE_AUTHORITIES,
     AGENT_SURFACES,
+    COMMAND_POLICY_FRONTMATTER_KEY,
+    COMMAND_POLICY_PROMPT_WRAPPER_KEY,
     REVIEW_CONTRACT_FRONTMATTER_KEY,
     REVIEW_CONTRACT_PROMPT_WRAPPER_KEY,
     VALID_CONTEXT_MODES,
@@ -52,6 +62,8 @@ _PKG_ROOT = Path(__file__).resolve().parent  # gpd/
 AGENTS_DIR = _PKG_ROOT / "agents"
 COMMANDS_DIR = _PKG_ROOT / "commands"
 _MODEL_VISIBLE_INCLUDE_PATH_PREFIX = "{GPD_INSTALL_DIR}/__gpd_registry_include__/"
+LOCAL_CLI_BRIDGE_WORKFLOW_EXEMPT_COMMANDS: frozenset[str] = frozenset({"health", "suggest-next"})
+CommandNameFormat = Literal["slug", "label"]
 
 # ─── Frontmatter parsing helpers ────────────────────────────────────────────
 
@@ -65,6 +77,14 @@ _SPAWN_CONTRACT_BLOCK_RE = re.compile(
     r"^[ \t]*<spawn_contract>[ \t]*$\n(?P<body>.*?)^[ \t]*</spawn_contract>[ \t]*$",
     re.DOTALL | re.MULTILINE,
 )
+_INTERACTIVE_SPAWN_CONTRACT_BLOCK_RE = re.compile(
+    r"^[ \t]*<spawn_contract_interactive>[ \t]*$\n(?P<body>.*?)^[ \t]*</spawn_contract_interactive>[ \t]*$",
+    re.DOTALL | re.MULTILINE,
+)
+_UNQUOTED_PLACEHOLDER_PATH_LIST_ITEM_RE = re.compile(r"^[ \t]*-[ \t]+\{[^}\n]+\}/[^#\n]*(?:#.*)?$")
+_SPAWN_CONTRACT_WRITE_SCOPE_MODES = ("scoped_write", "direct")
+_INTERACTIVE_SPAWN_CONTRACT_WRITE_SCOPE_MODES = ("no_write",)
+_INTERACTIVE_SPAWN_CONTRACT_SHARED_STATE_POLICIES = ("none",)
 _COMMAND_FRONTMATTER_KEYS = frozenset(
     {
         "name",
@@ -75,6 +95,7 @@ _COMMAND_FRONTMATTER_KEYS = frozenset(
         "requires",
         "allowed-tools",
         REVIEW_CONTRACT_FRONTMATTER_KEY,
+        COMMAND_POLICY_FRONTMATTER_KEY,
         "context_mode",
         "project_reentry_capable",
         # plan-phase carries this metadata in canonical frontmatter even though
@@ -95,6 +116,68 @@ _AGENT_FRONTMATTER_KEYS = frozenset(
         "shared_state_authority",
         "color",
     }
+)
+_COMMAND_POLICY_FIELD_ORDER = (
+    "schema_version",
+    "subject_policy",
+    "supporting_context_policy",
+    "output_policy",
+)
+_COMMAND_POLICY_SUBJECT_FIELD_ORDER = (
+    "subject_kind",
+    "resolution_mode",
+    "explicit_input_kinds",
+    "allow_external_subjects",
+    "allow_interactive_without_subject",
+    "supported_roots",
+    "allowed_suffixes",
+    "bootstrap_allowed",
+)
+_COMMAND_POLICY_SUPPORTING_CONTEXT_FIELD_ORDER = (
+    "project_context_mode",
+    "project_reentry_mode",
+    "required_file_patterns",
+    "optional_file_patterns",
+)
+_COMMAND_POLICY_OUTPUT_FIELD_ORDER = (
+    "output_mode",
+    "managed_root_kind",
+    "default_output_subtree",
+    "stage_artifact_policy",
+)
+_COMMAND_POLICY_KEYS = frozenset(_COMMAND_POLICY_FIELD_ORDER)
+_COMMAND_POLICY_SUBJECT_KEYS = frozenset(_COMMAND_POLICY_SUBJECT_FIELD_ORDER)
+_COMMAND_POLICY_SUPPORTING_CONTEXT_KEYS = frozenset(_COMMAND_POLICY_SUPPORTING_CONTEXT_FIELD_ORDER)
+_COMMAND_POLICY_OUTPUT_KEYS = frozenset(_COMMAND_POLICY_OUTPUT_FIELD_ORDER)
+_WRITE_PAPER_EXTERNAL_AUTHORING_INPUT_KIND = "authoring_intake_manifest"
+_WRITE_PAPER_EXTERNAL_AUTHORING_SCOPE = "explicit_intake_manifest"
+_WRITE_PAPER_EXTERNAL_AUTHORING_REQUIRED_OUTPUTS = (
+    "${PAPER_DIR}/{topic_specific_stem}.tex",
+    "${PAPER_DIR}/PAPER-CONFIG.json",
+    "${PAPER_DIR}/ARTIFACT-MANIFEST.json",
+    "${PAPER_DIR}/BIBLIOGRAPHY-AUDIT.json",
+    "${PAPER_DIR}/reproducibility-manifest.json",
+)
+_WRITE_PAPER_EXTERNAL_AUTHORING_REQUIRED_EVIDENCE = (
+    "validated external authoring intake manifest with explicit claim-to-evidence bindings",
+)
+_WRITE_PAPER_EXTERNAL_AUTHORING_BLOCKING_CONDITIONS = (
+    "invalid or incomplete external authoring intake manifest",
+)
+_WRITE_PAPER_EXTERNAL_AUTHORING_RELAXED_PREFLIGHT_CHECKS = (
+    "project_state",
+    "roadmap",
+    "conventions",
+    "research_artifacts",
+    "verification_reports",
+    "manuscript_proof_review",
+)
+_WRITE_PAPER_EXTERNAL_AUTHORING_OPTIONAL_PREFLIGHT_CHECKS = (
+    "artifact_manifest",
+    "bibliography_audit",
+    "bibliography_audit_clean",
+    "reproducibility_manifest",
+    "reproducibility_ready",
 )
 
 
@@ -217,10 +300,56 @@ class CommandDef:
     source: str  # "commands"
     context_mode: str = "project-required"
     project_reentry_capable: bool = False
+    command_policy: CommandPolicy | None = None
     review_contract: ReviewCommandContract | None = None
     agent: str | None = None
     staged_loading: WorkflowStageManifest | None = None
     spawn_contracts: tuple[dict[str, object], ...] = ()
+    interactive_spawn_contracts: tuple[dict[str, object], ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class CommandSubjectPolicy:
+    """Typed command subject-resolution policy."""
+
+    subject_kind: str | None = None
+    resolution_mode: str | None = None
+    explicit_input_kinds: list[str] = field(default_factory=list)
+    allow_external_subjects: bool | None = None
+    allow_interactive_without_subject: bool | None = None
+    supported_roots: list[str] = field(default_factory=list)
+    allowed_suffixes: list[str] = field(default_factory=list)
+    bootstrap_allowed: bool | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CommandSupportingContextPolicy:
+    """Typed command supporting-context policy."""
+
+    project_context_mode: str | None = None
+    project_reentry_mode: str | None = None
+    required_file_patterns: list[str] = field(default_factory=list)
+    optional_file_patterns: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class CommandOutputPolicy:
+    """Typed command output policy."""
+
+    output_mode: str | None = None
+    managed_root_kind: str | None = None
+    default_output_subtree: str | None = None
+    stage_artifact_policy: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CommandPolicy:
+    """Typed additive command policy compiled from frontmatter and companion fields."""
+
+    schema_version: int = 1
+    subject_policy: CommandSubjectPolicy | None = None
+    supporting_context_policy: CommandSupportingContextPolicy | None = None
+    output_policy: CommandOutputPolicy | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -231,8 +360,22 @@ class ReviewContractConditionalRequirement:
     required_outputs: list[str] = field(default_factory=list)
     required_evidence: list[str] = field(default_factory=list)
     blocking_conditions: list[str] = field(default_factory=list)
+    preflight_checks: list[str] = field(default_factory=list)
     blocking_preflight_checks: list[str] = field(default_factory=list)
     stage_artifacts: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewContractScopeVariant:
+    """Scope-specific review-contract overrides and relaxed preflight metadata."""
+
+    scope: str
+    activation: str
+    relaxed_preflight_checks: list[str] = field(default_factory=list)
+    optional_preflight_checks: list[str] = field(default_factory=list)
+    required_outputs_override: list[str] = field(default_factory=list)
+    required_evidence_override: list[str] = field(default_factory=list)
+    blocking_conditions_override: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -246,6 +389,7 @@ class ReviewCommandContract:
     preflight_checks: list[str]
     stage_artifacts: list[str] = field(default_factory=list)
     conditional_requirements: list[ReviewContractConditionalRequirement] = field(default_factory=list)
+    scope_variants: list[ReviewContractScopeVariant] = field(default_factory=list)
     required_state: str = ""
     schema_version: int = 1
 
@@ -262,6 +406,7 @@ class SkillDef:
     source_kind: str  # "command" or "agent"
     registry_name: str
     spawn_contracts: tuple[dict[str, object], ...] = ()
+    interactive_spawn_contracts: tuple[dict[str, object], ...] = ()
 
 
 # ─── Parsing helpers ─────────────────────────────────────────────────────────
@@ -270,7 +415,7 @@ class SkillDef:
 def _frontmatter_parts(text: str) -> tuple[str | None, str]:
     """Return raw frontmatter YAML and body from markdown text when present."""
 
-    text = text.lstrip('﻿')
+    text = text.lstrip("﻿")
     frontmatter_candidate = _LEADING_BLANK_LINES_BEFORE_FRONTMATTER_RE.sub("", text, count=1)
     frontmatter_parts = _split_frontmatter_block(frontmatter_candidate)
     if frontmatter_parts is None:
@@ -333,9 +478,7 @@ def _raw_scalar_frontmatter_value(frontmatter: str | None, *, field_name: str) -
     if not frontmatter:
         return None
 
-    pattern = re.compile(
-        rf"(?m)^[ \t]*{re.escape(field_name)}:[ \t]*(?P<value>[^#\r\n]*)[ \t]*(?:#.*)?$"
-    )
+    pattern = re.compile(rf"(?m)^[ \t]*{re.escape(field_name)}:[ \t]*(?P<value>[^#\r\n]*)[ \t]*(?:#.*)?$")
     match = pattern.search(frontmatter)
     if match is None:
         return None
@@ -465,8 +608,569 @@ def _parse_allowed_tools(raw: object, *, command_name: str) -> list[str]:
     return values
 
 
+def _normalize_command_policy_string(
+    value: object,
+    *,
+    field_name: str,
+    command_name: str,
+) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{field_name} for {command_name} must be a string")
+    normalized = value.strip()
+    if not normalized:
+        raise ValueError(f"{field_name} for {command_name} must be a non-empty string")
+    return normalized
+
+
+def _normalize_command_policy_bool(
+    value: object,
+    *,
+    field_name: str,
+    command_name: str,
+) -> bool:
+    if isinstance(value, bool):
+        return value
+    raise ValueError(f"{field_name} for {command_name} must be a boolean")
+
+
+def _normalize_command_policy_string_list(
+    value: object,
+    *,
+    field_name: str,
+    command_name: str,
+) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError(f"{field_name} for {command_name} must be a list of strings")
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        if not isinstance(item, str):
+            raise ValueError(f"{field_name} for {command_name} must contain only strings")
+        entry = item.strip()
+        if not entry:
+            raise ValueError(f"{field_name} for {command_name} must not contain blank entries")
+        if entry in seen:
+            raise ValueError(f"{field_name} for {command_name} must not contain duplicates")
+        seen.add(entry)
+        normalized.append(entry)
+    return normalized
+
+
+def _normalize_command_policy_context_mode(
+    value: object,
+    *,
+    field_name: str,
+    command_name: str,
+) -> str:
+    normalized = _normalize_command_policy_string(
+        value,
+        field_name=field_name,
+        command_name=command_name,
+    ).lower()
+    if normalized not in VALID_CONTEXT_MODES:
+        valid = ", ".join(VALID_CONTEXT_MODES)
+        raise ValueError(f"{field_name} for {command_name} must be one of: {valid}")
+    return normalized
+
+
+def _command_policy_frontmatter_value(
+    meta: dict[str, object],
+    *,
+    command_name: str,
+) -> tuple[object, bool]:
+    """Return the canonical command-policy frontmatter payload and whether it was explicit."""
+
+    if COMMAND_POLICY_PROMPT_WRAPPER_KEY in meta:
+        raise ValueError(
+            f"command-policy for {command_name} must use the canonical frontmatter key "
+            f"'{COMMAND_POLICY_FRONTMATTER_KEY}'"
+        )
+    if COMMAND_POLICY_FRONTMATTER_KEY not in meta:
+        return None, False
+    return meta.get(COMMAND_POLICY_FRONTMATTER_KEY), True
+
+
+def _command_policy_supporting_context_from_frontmatter(
+    *,
+    context_mode: str,
+    project_reentry_capable: bool,
+    requires: dict[str, object],
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "project_context_mode": context_mode,
+        "project_reentry_mode": "allowed" if project_reentry_capable else "disallowed",
+    }
+    required_files = requires.get("files")
+    if isinstance(required_files, list) and required_files:
+        payload["required_file_patterns"] = list(required_files)
+    return payload
+
+
+def _command_policy_requests_check(
+    review_contract: ReviewCommandContract | None,
+    check_name: str,
+) -> bool:
+    if review_contract is None:
+        return False
+    return check_name in list(getattr(review_contract, "preflight_checks", []) or [])
+
+
+def _command_policy_is_publication_contract(review_contract: ReviewCommandContract | None) -> bool:
+    return str(getattr(review_contract, "review_mode", "") or "").strip() == "publication"
+
+
+def _command_policy_supported_roots_from_patterns(patterns: list[str]) -> list[str]:
+    supported_roots: list[str] = []
+    seen: set[str] = set()
+    for pattern in patterns:
+        parts = Path(pattern).parts
+        if not parts:
+            continue
+        root = parts[0].strip()
+        if not root or root in seen:
+            continue
+        seen.add(root)
+        supported_roots.append(root)
+    return supported_roots
+
+
+def _publication_contract_mentions_external_artifact(review_contract: ReviewCommandContract | None) -> bool:
+    if review_contract is None:
+        return False
+    textual_cues = [
+        *(str(item) for item in list(getattr(review_contract, "required_evidence", []) or [])),
+        *(str(item) for item in list(getattr(review_contract, "blocking_conditions", []) or [])),
+    ]
+    return any("external-artifact review" in cue.casefold() for cue in textual_cues)
+
+
+def _publication_subject_policy_defaults(
+    *,
+    review_contract: ReviewCommandContract | None,
+    frontmatter_supporting_context: dict[str, object],
+) -> dict[str, object] | None:
+    if not _command_policy_is_publication_contract(review_contract):
+        return None
+    if not _command_policy_requests_check(review_contract, "manuscript"):
+        return None
+
+    required_patterns = [
+        str(pattern).strip()
+        for pattern in list(frontmatter_supporting_context.get("required_file_patterns", []) or [])
+        if str(pattern).strip()
+    ]
+    supported_roots = _command_policy_supported_roots_from_patterns(required_patterns)
+    allow_external_subjects = _publication_contract_mentions_external_artifact(review_contract)
+    bootstrap_allowed = (
+        not required_patterns
+        and not _command_policy_requests_check(review_contract, "compiled_manuscript")
+        and not _command_policy_requests_check(review_contract, "referee_report_source")
+    )
+
+    explicit_input_kinds: list[str] = []
+    if _command_policy_requests_check(review_contract, "referee_report_source"):
+        explicit_input_kinds.extend(["referee_report_path", "paste_referee_report"])
+    elif supported_roots:
+        explicit_input_kinds.extend(["manuscript_root", "manuscript_path"])
+    if allow_external_subjects:
+        explicit_input_kinds.append("publication_artifact_path")
+
+    allowed_suffixes = [".tex"]
+    if not _command_policy_requests_check(review_contract, "compiled_manuscript"):
+        allowed_suffixes.append(".md")
+    if allow_external_subjects:
+        for suffix in (".txt", ".pdf"):
+            if suffix not in allowed_suffixes:
+                allowed_suffixes.append(suffix)
+
+    resolution_mode = "project_manuscript"
+    if bootstrap_allowed:
+        resolution_mode = "project_manuscript_or_bootstrap"
+    elif _command_policy_requests_check(review_contract, "referee_report_source"):
+        resolution_mode = "project_manuscript_with_report_source"
+    elif explicit_input_kinds:
+        resolution_mode = "explicit_or_project_manuscript"
+
+    payload: dict[str, object] = {
+        "subject_kind": "publication",
+        "resolution_mode": resolution_mode,
+        "allowed_suffixes": allowed_suffixes,
+    }
+    if explicit_input_kinds:
+        payload["explicit_input_kinds"] = explicit_input_kinds
+    if supported_roots:
+        payload["supported_roots"] = supported_roots
+    if allow_external_subjects:
+        payload["allow_external_subjects"] = True
+    if (
+        allow_external_subjects
+        and str(frontmatter_supporting_context.get("project_context_mode", "")).strip() == "project-aware"
+    ):
+        payload["allow_interactive_without_subject"] = True
+    if bootstrap_allowed:
+        payload["bootstrap_allowed"] = True
+    return payload
+
+
+def _merge_command_policy_defaults(
+    explicit_mapping: dict[str, object] | None,
+    default_mapping: dict[str, object] | None,
+) -> dict[str, object] | None:
+    if default_mapping is None:
+        return dict(explicit_mapping) if explicit_mapping is not None else None
+    if explicit_mapping is None:
+        return dict(default_mapping)
+    merged = dict(default_mapping)
+    merged.update(explicit_mapping)
+    return merged
+
+
+def _merge_command_policy_submapping(
+    explicit_mapping: dict[str, object] | None,
+    companion_mapping: dict[str, object] | None,
+    *,
+    field_name: str,
+    command_name: str,
+    allow_explicit_override: bool = False,
+) -> dict[str, object] | None:
+    if explicit_mapping is None:
+        if companion_mapping:
+            return dict(companion_mapping)
+        return None
+    if not companion_mapping:
+        return dict(explicit_mapping)
+
+    merged = dict(companion_mapping)
+    for key, value in explicit_mapping.items():
+        companion_value = merged.get(key)
+        if companion_value is None or companion_value == []:
+            merged[key] = value
+            continue
+        if allow_explicit_override:
+            merged[key] = value
+            continue
+        if value != companion_value:
+            raise ValueError(f"{field_name}.{key} for {command_name} must stay aligned with companion command metadata")
+    return merged
+
+
+def _normalize_command_subject_policy(
+    raw: object,
+    *,
+    command_name: str,
+) -> dict[str, object] | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, Mapping):
+        raise ValueError(f"command_policy.subject_policy for {command_name} must be a mapping")
+    raw_mapping = dict(raw)
+    unknown_keys = sorted(str(key) for key in raw_mapping if str(key) not in _COMMAND_POLICY_SUBJECT_KEYS)
+    if unknown_keys:
+        formatted = ", ".join(unknown_keys)
+        raise ValueError(f"Unknown command-policy field(s): subject_policy.{formatted}")
+
+    normalized: dict[str, object] = {}
+    for field_name in ("subject_kind", "resolution_mode"):
+        if field_name in raw_mapping:
+            normalized[field_name] = _normalize_command_policy_string(
+                raw_mapping.get(field_name),
+                field_name=f"command_policy.subject_policy.{field_name}",
+                command_name=command_name,
+            )
+    for field_name in ("allow_external_subjects", "allow_interactive_without_subject", "bootstrap_allowed"):
+        if field_name in raw_mapping:
+            normalized[field_name] = _normalize_command_policy_bool(
+                raw_mapping.get(field_name),
+                field_name=f"command_policy.subject_policy.{field_name}",
+                command_name=command_name,
+            )
+    for field_name in ("explicit_input_kinds", "supported_roots", "allowed_suffixes"):
+        if field_name in raw_mapping:
+            normalized[field_name] = _normalize_command_policy_string_list(
+                raw_mapping.get(field_name),
+                field_name=f"command_policy.subject_policy.{field_name}",
+                command_name=command_name,
+            )
+    allowed_suffixes = normalized.get("allowed_suffixes")
+    if isinstance(allowed_suffixes, list):
+        invalid_suffixes = [suffix for suffix in allowed_suffixes if not suffix.startswith(".")]
+        if invalid_suffixes:
+            formatted = ", ".join(repr(item) for item in invalid_suffixes)
+            raise ValueError(
+                f"command_policy.subject_policy.allowed_suffixes for {command_name} "
+                f"must contain dotted suffixes like '.tex'; got {formatted}"
+            )
+    return normalized or None
+
+
+def _normalize_command_supporting_context_policy(
+    raw: object,
+    *,
+    command_name: str,
+) -> dict[str, object] | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, Mapping):
+        raise ValueError(f"command_policy.supporting_context_policy for {command_name} must be a mapping")
+    raw_mapping = dict(raw)
+    unknown_keys = sorted(str(key) for key in raw_mapping if str(key) not in _COMMAND_POLICY_SUPPORTING_CONTEXT_KEYS)
+    if unknown_keys:
+        formatted = ", ".join(unknown_keys)
+        raise ValueError(f"Unknown command-policy field(s): supporting_context_policy.{formatted}")
+
+    normalized: dict[str, object] = {}
+    if "project_context_mode" in raw_mapping:
+        normalized["project_context_mode"] = _normalize_command_policy_context_mode(
+            raw_mapping.get("project_context_mode"),
+            field_name="command_policy.supporting_context_policy.project_context_mode",
+            command_name=command_name,
+        )
+    if "project_reentry_mode" in raw_mapping:
+        normalized["project_reentry_mode"] = _normalize_command_policy_string(
+            raw_mapping.get("project_reentry_mode"),
+            field_name="command_policy.supporting_context_policy.project_reentry_mode",
+            command_name=command_name,
+        )
+    for field_name in ("required_file_patterns", "optional_file_patterns"):
+        if field_name in raw_mapping:
+            normalized[field_name] = _normalize_command_policy_string_list(
+                raw_mapping.get(field_name),
+                field_name=f"command_policy.supporting_context_policy.{field_name}",
+                command_name=command_name,
+            )
+    return normalized or None
+
+
+def _normalize_command_output_policy(
+    raw: object,
+    *,
+    command_name: str,
+) -> dict[str, object] | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, Mapping):
+        raise ValueError(f"command_policy.output_policy for {command_name} must be a mapping")
+    raw_mapping = dict(raw)
+    unknown_keys = sorted(str(key) for key in raw_mapping if str(key) not in _COMMAND_POLICY_OUTPUT_KEYS)
+    if unknown_keys:
+        formatted = ", ".join(unknown_keys)
+        raise ValueError(f"Unknown command-policy field(s): output_policy.{formatted}")
+
+    normalized: dict[str, object] = {}
+    for field_name in _COMMAND_POLICY_OUTPUT_FIELD_ORDER:
+        if field_name in raw_mapping:
+            normalized[field_name] = _normalize_command_policy_string(
+                raw_mapping.get(field_name),
+                field_name=f"command_policy.output_policy.{field_name}",
+                command_name=command_name,
+            )
+    return normalized or None
+
+
+def _command_policy_payload(command_policy: object) -> dict[str, object] | None:
+    def _strip_none_fields(value: object) -> object:
+        if isinstance(value, dict):
+            return {key: _strip_none_fields(item) for key, item in value.items() if item is not None}
+        if isinstance(value, list):
+            return [_strip_none_fields(item) for item in value]
+        return value
+
+    if command_policy is None:
+        return None
+    if isinstance(command_policy, Mapping):
+        return dict(_strip_none_fields(dict(command_policy)))
+    if dataclasses.is_dataclass(command_policy):
+        payload = _strip_none_fields(dataclasses.asdict(command_policy))
+        return payload if isinstance(payload, dict) else None
+    raise ValueError("command policy must be a mapping or dataclass instance")
+
+
+def _normalize_command_policy_payload(
+    command_policy: object,
+    *,
+    command_name: str,
+    context_mode: str,
+    project_reentry_capable: bool,
+    requires: dict[str, object],
+    review_contract: ReviewCommandContract | None = None,
+    explicit: bool = False,
+) -> dict[str, object]:
+    frontmatter_supporting_context = _command_policy_supporting_context_from_frontmatter(
+        context_mode=context_mode,
+        project_reentry_capable=project_reentry_capable,
+        requires=requires,
+    )
+    default_subject_policy = _publication_subject_policy_defaults(
+        review_contract=review_contract,
+        frontmatter_supporting_context=frontmatter_supporting_context,
+    )
+    inferred_payload: dict[str, object] = {
+        "schema_version": 1,
+        "subject_policy": default_subject_policy,
+        "supporting_context_policy": frontmatter_supporting_context,
+    }
+
+    payload = _command_policy_payload(command_policy)
+    if payload is None:
+        if explicit:
+            raise ValueError("command policy must set schema_version")
+        return inferred_payload
+    if not isinstance(payload, dict):
+        raise ValueError(f"command policy for {command_name} must be a mapping")
+
+    unknown_keys = sorted(str(key) for key in payload if str(key) not in _COMMAND_POLICY_KEYS)
+    if unknown_keys:
+        formatted = ", ".join(unknown_keys)
+        raise ValueError(f"Unknown command-policy field(s): {formatted}")
+
+    if "schema_version" not in payload:
+        raise ValueError("command policy must set schema_version")
+    schema_version = payload.get("schema_version")
+    if isinstance(schema_version, bool) or not isinstance(schema_version, int):
+        raise ValueError("command policy schema_version must be the integer 1")
+    if schema_version != 1:
+        raise ValueError("command policy schema_version must be 1")
+
+    subject_policy = _merge_command_policy_defaults(
+        _normalize_command_subject_policy(payload.get("subject_policy"), command_name=command_name),
+        default_subject_policy,
+    )
+    supporting_context_policy = _normalize_command_supporting_context_policy(
+        payload.get("supporting_context_policy"),
+        command_name=command_name,
+    )
+    effective_frontmatter_supporting_context = frontmatter_supporting_context
+    if (
+        supporting_context_policy is not None
+        and supporting_context_policy.get("project_reentry_mode") == "current-workspace"
+        and frontmatter_supporting_context.get("project_reentry_mode") == "allowed"
+    ):
+        effective_frontmatter_supporting_context = dict(frontmatter_supporting_context)
+        effective_frontmatter_supporting_context["project_reentry_mode"] = "current-workspace"
+    output_policy = _normalize_command_output_policy(payload.get("output_policy"), command_name=command_name)
+
+    return {
+        "schema_version": schema_version,
+        "subject_policy": subject_policy,
+        "supporting_context_policy": _merge_command_policy_submapping(
+            supporting_context_policy,
+            effective_frontmatter_supporting_context,
+            field_name="command_policy.supporting_context_policy",
+            command_name=command_name,
+            allow_explicit_override=_command_policy_is_publication_contract(review_contract),
+        ),
+        "output_policy": output_policy,
+    }
+
+
+def _render_command_policy_submapping(
+    payload: dict[str, object] | None,
+    *,
+    field_order: tuple[str, ...],
+) -> dict[str, object] | None:
+    if not payload:
+        return None
+    rendered: dict[str, object] = {}
+    for field_name in field_order:
+        if field_name not in payload:
+            continue
+        value = payload[field_name]
+        if isinstance(value, list):
+            if value:
+                rendered[field_name] = value
+            continue
+        if isinstance(value, bool):
+            rendered[field_name] = value
+            continue
+        if value is not None:
+            rendered[field_name] = value
+    return rendered or None
+
+
+def _render_command_policy_payload(
+    command_policy: CommandPolicy | dict[str, object] | None,
+) -> dict[str, object] | None:
+    payload = _command_policy_payload(command_policy)
+    if not payload:
+        return None
+
+    rendered: dict[str, object] = {"schema_version": int(payload["schema_version"])}
+    subject_policy = payload.get("subject_policy")
+    if isinstance(subject_policy, dict):
+        rendered_subject = _render_command_policy_submapping(
+            subject_policy,
+            field_order=_COMMAND_POLICY_SUBJECT_FIELD_ORDER,
+        )
+        if rendered_subject:
+            rendered["subject_policy"] = rendered_subject
+    supporting_context_policy = payload.get("supporting_context_policy")
+    if isinstance(supporting_context_policy, dict):
+        rendered_supporting_context = _render_command_policy_submapping(
+            supporting_context_policy,
+            field_order=_COMMAND_POLICY_SUPPORTING_CONTEXT_FIELD_ORDER,
+        )
+        if rendered_supporting_context:
+            rendered["supporting_context_policy"] = rendered_supporting_context
+    output_policy = payload.get("output_policy")
+    if isinstance(output_policy, dict):
+        rendered_output = _render_command_policy_submapping(
+            output_policy,
+            field_order=_COMMAND_POLICY_OUTPUT_FIELD_ORDER,
+        )
+        if rendered_output:
+            rendered["output_policy"] = rendered_output
+    return rendered
+
+
+def _parse_command_policy(
+    raw: object,
+    *,
+    command_name: str,
+    context_mode: str,
+    project_reentry_capable: bool,
+    requires: dict[str, object],
+    review_contract: ReviewCommandContract | None = None,
+    explicit: bool = False,
+) -> CommandPolicy:
+    if isinstance(raw, CommandPolicy):
+        return raw
+    try:
+        payload = _normalize_command_policy_payload(
+            raw,
+            command_name=command_name,
+            context_mode=context_mode,
+            project_reentry_capable=project_reentry_capable,
+            requires=requires,
+            review_contract=review_contract,
+            explicit=explicit,
+        )
+    except ValueError as exc:
+        raise ValueError(f"command-policy for {command_name}: {exc}") from exc
+
+    subject_policy_payload = payload.get("subject_policy")
+    supporting_context_payload = payload.get("supporting_context_policy")
+    output_policy_payload = payload.get("output_policy")
+    return CommandPolicy(
+        schema_version=int(payload["schema_version"]),
+        subject_policy=(
+            CommandSubjectPolicy(**subject_policy_payload) if isinstance(subject_policy_payload, dict) else None
+        ),
+        supporting_context_policy=(
+            CommandSupportingContextPolicy(**supporting_context_payload)
+            if isinstance(supporting_context_payload, dict)
+            else None
+        ),
+        output_policy=(
+            CommandOutputPolicy(**output_policy_payload) if isinstance(output_policy_payload, dict) else None
+        ),
+    )
+
+
 def _parse_bool_field(raw: object, *, field_name: str, command_name: str, default: bool = False) -> bool:
-    """Parse a strict YAML boolean and reject legacy compatibility aliases."""
+    """Parse a strict YAML boolean and reject non-boolean coercion aliases."""
     if raw is None:
         return default
     if isinstance(raw, bool):
@@ -480,7 +1184,7 @@ def _validate_raw_boolean_frontmatter_field(
     field_name: str,
     command_name: str,
 ) -> None:
-    """Reject legacy boolean spellings before YAML coercion can hide them."""
+    """Reject non-boolean scalar spellings before YAML coercion can hide them."""
 
     raw_value = _raw_scalar_frontmatter_value(frontmatter, field_name=field_name)
     if raw_value is None:
@@ -507,7 +1211,7 @@ def _validate_raw_nonempty_string_frontmatter_field(
 
 
 def _validate_raw_command_frontmatter(frontmatter: str | None, *, command_name: str) -> None:
-    """Reject legacy raw frontmatter spellings for strict command metadata."""
+    """Reject loose raw frontmatter spellings for strict command metadata."""
 
     _validate_raw_nonempty_string_frontmatter_field(
         frontmatter,
@@ -576,9 +1280,7 @@ def _parse_project_reentry_capable(raw: object, *, command_name: str, context_mo
         default=False,
     )
     if value and context_mode != "project-required":
-        raise ValueError(
-            f"project_reentry_capable for {command_name} requires context_mode 'project-required'"
-    )
+        raise ValueError(f"project_reentry_capable for {command_name} requires context_mode 'project-required'")
     return value
 
 
@@ -814,6 +1516,7 @@ def _command_visibility_payload(
     agent: str | None = None,
     allowed_tools: list[str],
     requires: dict[str, object],
+    command_policy: CommandPolicy | dict[str, object] | None = None,
 ) -> dict[str, object]:
     payload: dict[str, object] = {
         "context_mode": context_mode,
@@ -825,6 +1528,9 @@ def _command_visibility_payload(
         payload["allowed_tools"] = list(allowed_tools)
     if requires:
         payload["requires"] = requires
+    rendered_command_policy = _render_command_policy_payload(command_policy)
+    if rendered_command_policy:
+        payload[COMMAND_POLICY_PROMPT_WRAPPER_KEY] = rendered_command_policy
     return payload
 
 
@@ -835,21 +1541,31 @@ def _normalize_command_visibility_inputs(
     agent: str | None = None,
     allowed_tools: list[str],
     requires: dict[str, object],
+    command_policy: CommandPolicy | Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Validate and canonicalize public command-requirements render inputs."""
 
     command_name = "rendered command requirements"
     normalized_context_mode = _parse_context_mode(context_mode, command_name=command_name)
+    normalized_requires = _parse_requires(requires, command_name=command_name)
+    normalized_project_reentry_capable = _parse_project_reentry_capable(
+        project_reentry_capable,
+        command_name=command_name,
+        context_mode=normalized_context_mode,
+    )
     return _command_visibility_payload(
         context_mode=normalized_context_mode,
-        project_reentry_capable=_parse_project_reentry_capable(
-            project_reentry_capable,
-            command_name=command_name,
-            context_mode=normalized_context_mode,
-        ),
+        project_reentry_capable=normalized_project_reentry_capable,
         agent=_parse_command_agent(agent, command_name=command_name),
         allowed_tools=_parse_allowed_tools(allowed_tools, command_name=command_name),
-        requires=_parse_requires(requires, command_name=command_name),
+        requires=normalized_requires,
+        command_policy=_parse_command_policy(
+            command_policy,
+            command_name=command_name,
+            context_mode=normalized_context_mode,
+            project_reentry_capable=normalized_project_reentry_capable,
+            requires=normalized_requires,
+        ),
     )
 
 
@@ -860,6 +1576,7 @@ def render_command_requires_section(
     agent: str | None = None,
     allowed_tools: list[str],
     requires: dict[str, object],
+    command_policy: CommandPolicy | Mapping[str, object] | None = None,
 ) -> str:
     """Render model-visible execution constraints from command frontmatter."""
 
@@ -869,6 +1586,7 @@ def render_command_requires_section(
         agent=agent,
         allowed_tools=allowed_tools,
         requires=requires,
+        command_policy=command_policy,
     )
     return render_model_visible_yaml_section(
         heading="Command Requirements",
@@ -884,6 +1602,7 @@ def render_command_visibility_sections(
     agent: str | None = None,
     allowed_tools: list[str],
     requires: dict[str, object],
+    command_policy: CommandPolicy | Mapping[str, object] | None = None,
     review_contract: ReviewCommandContract | None,
 ) -> str:
     """Render model-visible command constraints in canonical prompt order."""
@@ -896,6 +1615,7 @@ def render_command_visibility_sections(
             agent=agent,
             allowed_tools=allowed_tools,
             requires=requires,
+            command_policy=command_policy,
         )
     )
 
@@ -912,6 +1632,7 @@ def render_command_visibility_sections_from_frontmatter(frontmatter: str, *, com
     _validate_raw_command_frontmatter(frontmatter, command_name=command_name)
     meta = _load_frontmatter_mapping(frontmatter, error_prefix=f"Malformed frontmatter for {command_name}")
     review_contract_value = _review_contract_frontmatter_value(meta, command_name=command_name)
+    command_policy_value, command_policy_explicit = _command_policy_frontmatter_value(meta, command_name=command_name)
     _validate_command_frontmatter_keys(meta, command_name=command_name)
 
     requires = _parse_requires(meta.get("requires"), command_name=command_name)
@@ -927,12 +1648,22 @@ def render_command_visibility_sections_from_frontmatter(frontmatter: str, *, com
         review_contract_value,
         command_name=command_name,
     )
+    command_policy = _parse_command_policy(
+        command_policy_value,
+        command_name=command_name,
+        context_mode=context_mode,
+        project_reentry_capable=project_reentry_capable,
+        requires=requires,
+        review_contract=review_contract,
+        explicit=command_policy_explicit,
+    )
     return render_command_visibility_sections(
         context_mode=context_mode,
         project_reentry_capable=project_reentry_capable,
         agent=agent,
         allowed_tools=allowed_tools,
         requires=requires,
+        command_policy=command_policy,
         review_contract=review_contract,
     )
 
@@ -975,6 +1706,7 @@ def _command_model_content(
     agent: str | None = None,
     allowed_tools: list[str],
     requires: dict[str, object],
+    command_policy: CommandPolicy | None = None,
 ) -> str:
     """Return the model-visible command body, including enforced command constraints."""
 
@@ -986,6 +1718,7 @@ def _command_model_content(
         agent=agent,
         allowed_tools=allowed_tools,
         requires=requires,
+        command_policy=command_policy,
         review_contract=review_contract,
     )
     if visibility_sections:
@@ -1006,6 +1739,32 @@ def _parse_review_contract(raw: object, command_name: str) -> ReviewCommandContr
     if not payload:
         return None
 
+    scope_variants_payload = list(payload["scope_variants"])
+    if str(payload["review_mode"]) == "publication" and not scope_variants_payload:
+        required_evidence = [str(item) for item in payload["required_evidence"]]
+        if any("external-artifact review" in item.casefold() for item in required_evidence):
+            scope_variants_payload = [
+                {
+                    "scope": "explicit_artifact",
+                    "activation": "explicit external artifact subject was supplied",
+                    "relaxed_preflight_checks": [
+                        "project_state",
+                        "roadmap",
+                        "conventions",
+                        "research_artifacts",
+                        "verification_reports",
+                        "manuscript_proof_review",
+                    ],
+                    "optional_preflight_checks": [
+                        "artifact_manifest",
+                        "bibliography_audit",
+                        "bibliography_audit_clean",
+                        "reproducibility_manifest",
+                        "reproducibility_ready",
+                    ],
+                }
+            ]
+
     return ReviewCommandContract(
         review_mode=str(payload["review_mode"]),
         required_outputs=list(payload["required_outputs"]),
@@ -1019,70 +1778,187 @@ def _parse_review_contract(raw: object, command_name: str) -> ReviewCommandContr
                 required_outputs=list(requirement.get("required_outputs", [])),
                 required_evidence=list(requirement.get("required_evidence", [])),
                 blocking_conditions=list(requirement.get("blocking_conditions", [])),
+                preflight_checks=list(requirement.get("preflight_checks", [])),
                 blocking_preflight_checks=list(requirement.get("blocking_preflight_checks", [])),
                 stage_artifacts=list(requirement.get("stage_artifacts", [])),
             )
             for requirement in payload["conditional_requirements"]
+        ],
+        scope_variants=[
+            ReviewContractScopeVariant(
+                scope=str(variant["scope"]),
+                activation=str(variant["activation"]),
+                relaxed_preflight_checks=list(variant.get("relaxed_preflight_checks", [])),
+                optional_preflight_checks=list(variant.get("optional_preflight_checks", [])),
+                required_outputs_override=list(variant.get("required_outputs_override", [])),
+                required_evidence_override=list(variant.get("required_evidence_override", [])),
+                blocking_conditions_override=list(variant.get("blocking_conditions_override", [])),
+            )
+            for variant in scope_variants_payload
         ],
         required_state=str(payload["required_state"]),
         schema_version=int(payload["schema_version"]),
     )
 
 
+def _validate_write_paper_external_authoring_frontmatter(
+    path: Path,
+    *,
+    command_name: str,
+    context_mode: str,
+    command_policy: CommandPolicy | None,
+    review_contract: ReviewCommandContract | None,
+) -> None:
+    """Validate the bounded write-paper external-authoring lane owned by frontmatter."""
+
+    canonical_path = (COMMANDS_DIR / "write-paper.md").resolve(strict=False)
+    if command_name != "gpd:write-paper" or path.resolve(strict=False) != canonical_path:
+        return
+
+    errors: list[str] = []
+    if context_mode != "project-aware":
+        errors.append("context_mode must be project-aware")
+    if command_policy is None or command_policy.subject_policy is None:
+        errors.append("command-policy.subject_policy is required")
+    else:
+        subject_policy = command_policy.subject_policy
+        if subject_policy.explicit_input_kinds != [_WRITE_PAPER_EXTERNAL_AUTHORING_INPUT_KIND]:
+            errors.append("command-policy.subject_policy.explicit_input_kinds must contain only authoring_intake_manifest")
+        if subject_policy.allow_external_subjects is not False:
+            errors.append("command-policy.subject_policy.allow_external_subjects must be false")
+        if subject_policy.allow_interactive_without_subject is not False:
+            errors.append("command-policy.subject_policy.allow_interactive_without_subject must be false")
+        if subject_policy.bootstrap_allowed is not True:
+            errors.append("command-policy.subject_policy.bootstrap_allowed must be true")
+    if command_policy is None or command_policy.supporting_context_policy is None:
+        errors.append("command-policy.supporting_context_policy is required")
+    else:
+        supporting_context_policy = command_policy.supporting_context_policy
+        if supporting_context_policy.project_context_mode != "project-aware":
+            errors.append("command-policy.supporting_context_policy.project_context_mode must be project-aware")
+        if supporting_context_policy.project_reentry_mode != "disallowed":
+            errors.append("command-policy.supporting_context_policy.project_reentry_mode must be disallowed")
+
+    scope_variant = None
+    if review_contract is None:
+        errors.append("review-contract is required")
+    else:
+        matching_scope_variants = [
+            variant
+            for variant in review_contract.scope_variants
+            if str(variant.scope).strip() == _WRITE_PAPER_EXTERNAL_AUTHORING_SCOPE
+        ]
+        if len(matching_scope_variants) != 1:
+            errors.append("review-contract.scope_variants must include exactly one explicit_intake_manifest variant")
+        else:
+            scope_variant = matching_scope_variants[0]
+
+    if scope_variant is not None:
+        expected_variant_fields = {
+            "relaxed_preflight_checks": list(_WRITE_PAPER_EXTERNAL_AUTHORING_RELAXED_PREFLIGHT_CHECKS),
+            "optional_preflight_checks": list(_WRITE_PAPER_EXTERNAL_AUTHORING_OPTIONAL_PREFLIGHT_CHECKS),
+            "required_outputs_override": list(_WRITE_PAPER_EXTERNAL_AUTHORING_REQUIRED_OUTPUTS),
+            "required_evidence_override": list(_WRITE_PAPER_EXTERNAL_AUTHORING_REQUIRED_EVIDENCE),
+            "blocking_conditions_override": list(_WRITE_PAPER_EXTERNAL_AUTHORING_BLOCKING_CONDITIONS),
+        }
+        for field_name, expected_value in expected_variant_fields.items():
+            actual_value = list(getattr(scope_variant, field_name))
+            if len(actual_value) != len(set(actual_value)):
+                errors.append(f"review-contract.scope_variants[].{field_name} must not contain duplicates")
+            elif set(actual_value) != set(expected_value):
+                errors.append(f"review-contract.scope_variants[].{field_name} is out of sync")
+
+    if errors:
+        raise ValueError("gpd:write-paper external-authoring frontmatter is invalid: " + "; ".join(errors))
+
+
 def _parse_spawn_contracts(content: str, *, owner_name: str) -> tuple[dict[str, object], ...]:
     """Parse canonical spawn-contract blocks from rendered markdown content."""
 
     contracts: list[dict[str, object]] = []
+    seen_contracts: set[tuple[object, ...]] = set()
     for match in _SPAWN_CONTRACT_BLOCK_RE.finditer(content):
         block = textwrap.dedent(match.group("body")).strip()
         if not block:
             raise ValueError(f"spawn-contract for {owner_name}: empty block")
         parsed = _parse_spawn_contract_block(block, owner_name=owner_name)
+        contract_key = _spawn_contract_key(parsed)
+        if contract_key in seen_contracts:
+            continue
+        seen_contracts.add(contract_key)
         contracts.append(parsed)
     return tuple(contracts)
 
 
-def _parse_spawn_contract_block(block: str, *, owner_name: str) -> dict[str, object]:
-    """Parse one spawn-contract block without requiring strict YAML quoting."""
+def _parse_interactive_spawn_contracts(content: str, *, owner_name: str) -> tuple[dict[str, object], ...]:
+    """Parse supervised no-write checkpoint contracts from rendered markdown content."""
 
-    lines = [line.rstrip() for line in block.splitlines() if line.strip()]
-    contract: dict[str, object] = {}
-    index = 0
-    while index < len(lines):
-        line = lines[index]
-        if line == "write_scope:":
-            index += 1
-            write_scope: dict[str, object] = {}
-            while index < len(lines) and lines[index].startswith("  "):
-                nested = lines[index].strip()
-                if nested.startswith("mode:"):
-                    write_scope["mode"] = nested.split(":", 1)[1].strip()
-                    index += 1
-                    continue
-                if nested == "allowed_paths:":
-                    index += 1
-                    allowed_paths: list[str] = []
-                    while index < len(lines) and lines[index].startswith("    - "):
-                        allowed_paths.append(lines[index].split("- ", 1)[1].strip())
-                        index += 1
-                    write_scope["allowed_paths"] = allowed_paths
-                    continue
-                raise ValueError(f"spawn-contract for {owner_name}: unexpected write_scope field {nested!r}")
-            contract["write_scope"] = write_scope
+    contracts: list[dict[str, object]] = []
+    seen_contracts: set[tuple[object, ...]] = set()
+    for match in _INTERACTIVE_SPAWN_CONTRACT_BLOCK_RE.finditer(content):
+        block = textwrap.dedent(match.group("body")).strip()
+        if not block:
+            raise ValueError(f"interactive spawn-contract for {owner_name}: empty block")
+        parsed = _parse_interactive_spawn_contract_block(block, owner_name=owner_name)
+        contract_key = _spawn_contract_key(parsed)
+        if contract_key in seen_contracts:
             continue
-        if line == "expected_artifacts:":
-            index += 1
-            expected_artifacts: list[str] = []
-            while index < len(lines) and lines[index].startswith("  - "):
-                expected_artifacts.append(lines[index].split("- ", 1)[1].strip())
-                index += 1
-            contract["expected_artifacts"] = expected_artifacts
-            continue
-        if line.startswith("shared_state_policy:"):
-            contract["shared_state_policy"] = line.split(":", 1)[1].strip()
-            index += 1
-            continue
-        raise ValueError(f"spawn-contract for {owner_name}: unexpected line {line!r}")
+        seen_contracts.add(contract_key)
+        contracts.append(parsed)
+    return tuple(contracts)
+
+
+def _spawn_contract_key(value: object) -> tuple[object, ...]:
+    """Return a hashable, order-preserving key for parsed spawn-contract metadata."""
+
+    if isinstance(value, dict):
+        return tuple((key, _spawn_contract_key(item)) for key, item in value.items())
+    if isinstance(value, list):
+        return tuple(_spawn_contract_key(item) for item in value)
+    return (value,)
+
+
+def _validate_spawn_contract_list(
+    values: object,
+    *,
+    field_name: str,
+    owner_name: str,
+    allow_empty: bool = False,
+    contract_label: str = "spawn-contract",
+) -> list[str]:
+    """Validate a spawn-contract string list and reject empty or duplicate entries."""
+
+    if not isinstance(values, list):
+        raise ValueError(f"{contract_label} for {owner_name}: {field_name} must be a list")
+    if not values and not allow_empty:
+        raise ValueError(f"{contract_label} for {owner_name}: {field_name} must not be empty")
+
+    normalized: list[str] = []
+    first_indices: dict[str, int] = {}
+    for index, value in enumerate(values):
+        if not isinstance(value, str):
+            raise ValueError(f"{contract_label} for {owner_name}: {field_name}[{index}] must be a string")
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError(f"{contract_label} for {owner_name}: {field_name}[{index}] must be a non-empty string")
+        if stripped in first_indices:
+            first_index = first_indices[stripped]
+            raise ValueError(
+                f"{contract_label} for {owner_name}: {field_name}[{index}] "
+                f"duplicates {field_name}[{first_index}]: {stripped}"
+            )
+        first_indices[stripped] = index
+        normalized.append(stripped)
+    return normalized
+
+
+def _validate_spawn_contract(contract: dict[str, object], *, owner_name: str) -> dict[str, object]:
+    """Validate and normalize one parsed spawn-contract block."""
+
+    allowed_keys = {"activation", "write_scope", "expected_artifacts", "shared_state_policy"}
+    unknown_keys = sorted(str(key) for key in contract if str(key) not in allowed_keys)
+    if unknown_keys:
+        raise ValueError(f"spawn-contract for {owner_name}: unexpected fields: {', '.join(unknown_keys)}")
 
     if "write_scope" not in contract:
         raise ValueError(f"spawn-contract for {owner_name}: missing write_scope")
@@ -1090,7 +1966,205 @@ def _parse_spawn_contract_block(block: str, *, owner_name: str) -> dict[str, obj
         raise ValueError(f"spawn-contract for {owner_name}: missing expected_artifacts")
     if "shared_state_policy" not in contract:
         raise ValueError(f"spawn-contract for {owner_name}: missing shared_state_policy")
-    return contract
+
+    raw_write_scope = contract["write_scope"]
+    if not isinstance(raw_write_scope, dict):
+        raise ValueError(f"spawn-contract for {owner_name}: write_scope must be a mapping")
+    write_scope = dict(raw_write_scope)
+    unknown_write_scope_keys = sorted(str(key) for key in write_scope if str(key) not in {"mode", "allowed_paths"})
+    if unknown_write_scope_keys:
+        raise ValueError(
+            f"spawn-contract for {owner_name}: unexpected write_scope fields: {', '.join(unknown_write_scope_keys)}"
+        )
+    mode = write_scope.get("mode")
+    if not isinstance(mode, str) or not mode.strip():
+        raise ValueError(f"spawn-contract for {owner_name}: write_scope.mode must be a non-empty string")
+    mode = mode.strip()
+    if mode not in _SPAWN_CONTRACT_WRITE_SCOPE_MODES:
+        valid = ", ".join(_SPAWN_CONTRACT_WRITE_SCOPE_MODES)
+        raise ValueError(f"spawn-contract for {owner_name}: invalid write_scope.mode {mode!r}; expected one of: {valid}")
+    write_scope["mode"] = mode
+    if "allowed_paths" not in write_scope:
+        raise ValueError(f"spawn-contract for {owner_name}: missing write_scope.allowed_paths")
+    write_scope["allowed_paths"] = _validate_spawn_contract_list(
+        write_scope["allowed_paths"],
+        field_name="write_scope.allowed_paths",
+        owner_name=owner_name,
+    )
+
+    expected_artifacts = _validate_spawn_contract_list(
+        contract["expected_artifacts"],
+        field_name="expected_artifacts",
+        owner_name=owner_name,
+    )
+
+    shared_state_policy = contract["shared_state_policy"]
+    if not isinstance(shared_state_policy, str) or not shared_state_policy.strip():
+        raise ValueError(f"spawn-contract for {owner_name}: shared_state_policy must be a non-empty string")
+    shared_state_policy = shared_state_policy.strip()
+    if shared_state_policy not in AGENT_SHARED_STATE_AUTHORITIES:
+        valid = ", ".join(AGENT_SHARED_STATE_AUTHORITIES)
+        raise ValueError(
+            f"spawn-contract for {owner_name}: invalid shared_state_policy {shared_state_policy!r}; "
+            f"expected one of: {valid}"
+        )
+
+    normalized: dict[str, object] = {
+        "write_scope": write_scope,
+        "expected_artifacts": expected_artifacts,
+        "shared_state_policy": shared_state_policy,
+    }
+    if "activation" in contract:
+        activation = contract["activation"]
+        if not isinstance(activation, str) or not activation.strip():
+            raise ValueError(f"spawn-contract for {owner_name}: activation must be a non-empty string")
+        normalized["activation"] = activation.strip()
+    return normalized
+
+
+def _validate_interactive_spawn_contract(contract: dict[str, object], *, owner_name: str) -> dict[str, object]:
+    """Validate the supervised interactive no-write checkpoint contract family."""
+
+    allowed_keys = {"activation", "write_scope", "expected_artifacts", "expected_return", "shared_state_policy"}
+    unknown_keys = sorted(str(key) for key in contract if str(key) not in allowed_keys)
+    if unknown_keys:
+        raise ValueError(f"interactive spawn-contract for {owner_name}: unexpected fields: {', '.join(unknown_keys)}")
+
+    missing_keys = sorted(key for key in allowed_keys if key not in contract)
+    if missing_keys:
+        raise ValueError(f"interactive spawn-contract for {owner_name}: missing fields: {', '.join(missing_keys)}")
+
+    activation = contract["activation"]
+    if not isinstance(activation, str) or not activation.strip():
+        raise ValueError(f"interactive spawn-contract for {owner_name}: activation must be a non-empty string")
+    activation = activation.strip()
+
+    raw_write_scope = contract["write_scope"]
+    if not isinstance(raw_write_scope, dict):
+        raise ValueError(f"interactive spawn-contract for {owner_name}: write_scope must be a mapping")
+    write_scope = dict(raw_write_scope)
+    unknown_write_scope_keys = sorted(str(key) for key in write_scope if str(key) not in {"mode", "allowed_paths"})
+    if unknown_write_scope_keys:
+        raise ValueError(
+            f"interactive spawn-contract for {owner_name}: unexpected write_scope fields: "
+            f"{', '.join(unknown_write_scope_keys)}"
+        )
+    mode = write_scope.get("mode")
+    if not isinstance(mode, str) or not mode.strip():
+        raise ValueError(f"interactive spawn-contract for {owner_name}: write_scope.mode must be a non-empty string")
+    mode = mode.strip()
+    if mode not in _INTERACTIVE_SPAWN_CONTRACT_WRITE_SCOPE_MODES:
+        valid = ", ".join(_INTERACTIVE_SPAWN_CONTRACT_WRITE_SCOPE_MODES)
+        raise ValueError(
+            f"interactive spawn-contract for {owner_name}: invalid write_scope.mode {mode!r}; expected one of: {valid}"
+        )
+    write_scope["mode"] = mode
+    if "allowed_paths" not in write_scope:
+        raise ValueError(f"interactive spawn-contract for {owner_name}: missing write_scope.allowed_paths")
+    write_scope["allowed_paths"] = _validate_spawn_contract_list(
+        write_scope["allowed_paths"],
+        field_name="write_scope.allowed_paths",
+        owner_name=owner_name,
+        allow_empty=True,
+        contract_label="interactive spawn-contract",
+    )
+    if write_scope["allowed_paths"]:
+        raise ValueError(
+            f"interactive spawn-contract for {owner_name}: write_scope.allowed_paths must be empty for no_write"
+        )
+
+    expected_artifacts = _validate_spawn_contract_list(
+        contract["expected_artifacts"],
+        field_name="expected_artifacts",
+        owner_name=owner_name,
+        allow_empty=True,
+        contract_label="interactive spawn-contract",
+    )
+    if expected_artifacts:
+        raise ValueError(f"interactive spawn-contract for {owner_name}: expected_artifacts must be empty for no_write")
+
+    expected_return = contract["expected_return"]
+    if not isinstance(expected_return, dict):
+        raise ValueError(f"interactive spawn-contract for {owner_name}: expected_return must be a mapping")
+    expected_return = dict(expected_return)
+    expected_return_keys = [str(key) for key in expected_return]
+    if sorted(expected_return_keys) != ["status"]:
+        raise ValueError(f"interactive spawn-contract for {owner_name}: expected_return must contain only status")
+    status = next(value for key, value in expected_return.items() if str(key) == "status")
+    if not isinstance(status, str) or status.strip() != "checkpoint":
+        raise ValueError(f"interactive spawn-contract for {owner_name}: expected_return.status must be checkpoint")
+    expected_return = {"status": status.strip()}
+
+    shared_state_policy = contract["shared_state_policy"]
+    if not isinstance(shared_state_policy, str) or not shared_state_policy.strip():
+        raise ValueError(f"interactive spawn-contract for {owner_name}: shared_state_policy must be a non-empty string")
+    shared_state_policy = shared_state_policy.strip()
+    if shared_state_policy not in _INTERACTIVE_SPAWN_CONTRACT_SHARED_STATE_POLICIES:
+        valid = ", ".join(_INTERACTIVE_SPAWN_CONTRACT_SHARED_STATE_POLICIES)
+        raise ValueError(
+            f"interactive spawn-contract for {owner_name}: invalid shared_state_policy {shared_state_policy!r}; "
+            f"expected one of: {valid}"
+        )
+
+    return {
+        "activation": activation,
+        "write_scope": write_scope,
+        "expected_artifacts": expected_artifacts,
+        "expected_return": expected_return,
+        "shared_state_policy": shared_state_policy,
+    }
+
+
+def _parse_interactive_spawn_contract_block(block: str, *, owner_name: str) -> dict[str, object]:
+    """Parse one supervised interactive spawn-contract YAML block."""
+
+    parsed = _load_spawn_contract_mapping(
+        block,
+        owner_name=owner_name,
+        contract_label="interactive spawn-contract",
+    )
+    return _validate_interactive_spawn_contract(parsed, owner_name=owner_name)
+
+
+def _parse_spawn_contract_block(block: str, *, owner_name: str) -> dict[str, object]:
+    """Parse one spawn-contract block as strict YAML."""
+
+    parsed = _load_spawn_contract_mapping(
+        block,
+        owner_name=owner_name,
+        contract_label="spawn-contract",
+    )
+    return _validate_spawn_contract(parsed, owner_name=owner_name)
+
+
+def _load_spawn_contract_mapping(
+    block: str,
+    *,
+    owner_name: str,
+    contract_label: str,
+) -> dict[str, object]:
+    """Parse one spawn-contract YAML mapping."""
+
+    _reject_unquoted_placeholder_path_list_items(block, owner_name=owner_name, contract_label=contract_label)
+    try:
+        parsed = load_strict_yaml(block)
+    except yaml.YAMLError as exc:
+        raise ValueError(f"{contract_label} for {owner_name}: malformed YAML: {exc}") from exc
+
+    if not isinstance(parsed, dict):
+        raise ValueError(f"{contract_label} for {owner_name}: block must parse to a mapping")
+    return dict(parsed)
+
+
+def _reject_unquoted_placeholder_path_list_items(block: str, *, owner_name: str, contract_label: str) -> None:
+    """Reject YAML list items such as ``- {phase_dir}/file.md`` before parsing."""
+
+    for line_number, line in enumerate(block.splitlines(), start=1):
+        if _UNQUOTED_PLACEHOLDER_PATH_LIST_ITEM_RE.match(line):
+            raise ValueError(
+                f"{contract_label} for {owner_name}: unquoted placeholder path list item at line {line_number}; "
+                "quote placeholder paths such as \"{phase_dir}/file.md\""
+            )
 
 
 def _load_command_staged_loading(path: Path, *, allowed_tools: list[str]) -> WorkflowStageManifest | None:
@@ -1101,7 +2175,10 @@ def _load_command_staged_loading(path: Path, *, allowed_tools: list[str]) -> Wor
         return None
     canonical_manifest_path = (SPECS_DIR / "workflows" / f"{path.stem}-stage-manifest.json").resolve(strict=False)
     canonical_command_path = (_PKG_ROOT / "commands" / path.name).resolve(strict=False)
-    if path.resolve(strict=False) != canonical_command_path and manifest_path.resolve(strict=False) == canonical_manifest_path:
+    if (
+        path.resolve(strict=False) != canonical_command_path
+        and manifest_path.resolve(strict=False) == canonical_manifest_path
+    ):
         return None
     return load_workflow_stage_manifest_from_path(
         manifest_path,
@@ -1212,6 +2289,13 @@ def _parse_command_file(path: Path, source: str) -> CommandDef:
         required=True,
     )
     _validate_raw_command_frontmatter(raw_frontmatter, command_name=command_name)
+    try:
+        command_policy_value, command_policy_explicit = _command_policy_frontmatter_value(
+            meta,
+            command_name=command_name,
+        )
+    except ValueError as exc:
+        raise ValueError(f"Invalid command-policy in {path}: {exc}") from exc
 
     try:
         review_contract = _parse_review_contract(
@@ -1232,6 +2316,25 @@ def _parse_command_file(path: Path, source: str) -> CommandDef:
         command_name=command_name,
         context_mode=context_mode,
     )
+    try:
+        command_policy = _parse_command_policy(
+            command_policy_value,
+            command_name=command_name,
+            context_mode=context_mode,
+            project_reentry_capable=project_reentry_capable,
+            requires=requires,
+            review_contract=review_contract,
+            explicit=command_policy_explicit,
+        )
+    except ValueError as exc:
+        raise ValueError(f"Invalid command-policy in {path}: {exc}") from exc
+    _validate_write_paper_external_authoring_frontmatter(
+        path,
+        command_name=command_name,
+        context_mode=context_mode,
+        command_policy=command_policy,
+        review_contract=review_contract,
+    )
     staged_loading = _load_command_staged_loading(path, allowed_tools=allowed_tools)
     content = _command_model_content(
         body,
@@ -1241,8 +2344,10 @@ def _parse_command_file(path: Path, source: str) -> CommandDef:
         agent=agent,
         allowed_tools=allowed_tools,
         requires=requires,
+        command_policy=command_policy,
     )
     spawn_contracts = _parse_spawn_contracts(content, owner_name=command_name)
+    interactive_spawn_contracts = _parse_interactive_spawn_contracts(content, owner_name=command_name)
 
     return CommandDef(
         name=command_name,
@@ -1259,11 +2364,13 @@ def _parse_command_file(path: Path, source: str) -> CommandDef:
         agent=agent,
         context_mode=context_mode,
         project_reentry_capable=project_reentry_capable,
+        command_policy=command_policy,
         requires=requires,
         allowed_tools=allowed_tools,
         review_contract=review_contract,
         staged_loading=staged_loading,
         spawn_contracts=spawn_contracts,
+        interactive_spawn_contracts=interactive_spawn_contracts,
         content=content,
         path=str(path),
         source=source,
@@ -1286,8 +2393,7 @@ def _validate_agent_name(path: Path, agent: AgentDef) -> None:
     expected_name = path.stem
     if agent.name != expected_name:
         raise ValueError(
-            f"Agent frontmatter name {agent.name!r} does not match file stem {path.stem!r}; "
-            f"expected {expected_name!r}"
+            f"Agent frontmatter name {agent.name!r} does not match file stem {path.stem!r}; expected {expected_name!r}"
         )
 
 
@@ -1362,6 +2468,8 @@ def _discover_commands() -> dict[str, CommandDef]:
 
 
 _SKILL_CATEGORY_MAP: dict[str, str] = {
+    "gpd-autonomous": "execution",
+    "gpd-digest-knowledge": "research",
     "gpd-execute": "execution",
     "gpd-plan-checker": "verification",
     "gpd-plan": "planning",
@@ -1370,6 +2478,7 @@ _SKILL_CATEGORY_MAP: dict[str, str] = {
     "gpd-new": "project",
     "gpd-write": "paper",
     "gpd-peer-review": "paper",
+    "gpd-review-knowledge": "research",
     "gpd-review": "paper",
     "gpd-paper": "paper",
     "gpd-literature": "research",
@@ -1412,6 +2521,7 @@ _SKILL_CATEGORY_MAP: dict[str, str] = {
     "gpd-undo": "management",
     "gpd-sync": "management",
     "gpd-branch": "management",
+    "gpd-tangent": "planning",
     "gpd-respond": "paper",
     "gpd-reapply": "management",
     "gpd-regression": "verification",
@@ -1433,6 +2543,7 @@ _SKILL_CATEGORY_MAP: dict[str, str] = {
     "gpd-referee": "paper",
     "gpd-revise-phase": "management",
     "gpd-roadmapper": "planning",
+    "gpd-route": "planning",
     "gpd-slides": "output",
     "gpd-research-mapper": "exploration",
     "gpd-verifier": "verification",
@@ -1482,6 +2593,7 @@ def _discover_skills(commands: dict[str, CommandDef], agents: dict[str, AgentDef
             source_kind="command",
             registry_name=registry_name,
             spawn_contracts=command.spawn_contracts,
+            interactive_spawn_contracts=command.interactive_spawn_contracts,
         )
 
     for registry_name, agent in sorted(agents.items()):
@@ -1522,9 +2634,27 @@ def get_agent(name: str) -> AgentDef:
     return agents[name]
 
 
-def list_commands() -> list[str]:
-    """Return sorted list of all command names."""
-    return sorted(_cache.commands())
+def _format_command_name(command: CommandDef | str, *, name_format: CommandNameFormat) -> str:
+    """Render a command registry entry in the requested public name shape."""
+    if name_format not in {"slug", "label"}:
+        raise ValueError("name_format must be 'slug' or 'label'")
+
+    if isinstance(command, CommandDef):
+        slug = command_slug_from_label(command.name)
+        label = command.name
+    else:
+        slug = command_slug_from_label(command) or command
+        label = canonical_command_label(command)
+    return slug if name_format == "slug" else label
+
+
+def list_commands(*, name_format: CommandNameFormat = "slug") -> list[str]:
+    """Return sorted command names.
+
+    Defaults to registry slugs. Pass ``name_format="label"`` to receive public
+    ``gpd:<slug>`` command labels.
+    """
+    return sorted(_format_command_name(command, name_format=name_format) for command in _cache.commands().values())
 
 
 def get_command(name: str) -> CommandDef:
@@ -1533,10 +2663,11 @@ def get_command(name: str) -> CommandDef:
     Raises KeyError if not found.
     """
     commands = _cache.commands()
-    slug = command_slug_from_label(name)
+    parsed = parse_command_label(name)
+    slug = parsed.slug
     candidates = []
     for candidate in (
-        canonical_command_label(name),
+        parsed.canonical_command,
         slug,
     ):
         if candidate and candidate not in candidates:
@@ -1550,9 +2681,17 @@ def get_command(name: str) -> CommandDef:
     raise KeyError(f"Command not found: {name}")
 
 
-def list_review_commands() -> list[str]:
-    """Return sorted list of command names that expose review contracts."""
-    return sorted(cmd.name for cmd in _cache.commands().values() if cmd.review_contract is not None)
+def list_review_commands(*, name_format: CommandNameFormat = "label") -> list[str]:
+    """Return sorted review-contract command names.
+
+    Defaults to public ``gpd:<slug>`` labels. Pass ``name_format="slug"`` to
+    align with ``list_commands()``'s default registry key shape.
+    """
+    return sorted(
+        _format_command_name(command, name_format=name_format)
+        for command in _cache.commands().values()
+        if command.review_contract is not None
+    )
 
 
 def list_skills() -> list[str]:
@@ -1595,8 +2734,14 @@ __all__ = [
     "AGENTS_DIR",
     "AgentDef",
     "COMMANDS_DIR",
+    "LOCAL_CLI_BRIDGE_WORKFLOW_EXEMPT_COMMANDS",
     "CommandDef",
+    "CommandOutputPolicy",
+    "CommandPolicy",
+    "CommandSubjectPolicy",
+    "CommandSupportingContextPolicy",
     "ReviewContractConditionalRequirement",
+    "ReviewContractScopeVariant",
     "ReviewCommandContract",
     "SkillDef",
     "SPECS_DIR",

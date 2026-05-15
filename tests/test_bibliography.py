@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from gpd.mcp.paper.bibliography import (
     BibliographyAudit,
+    CitationAuditRecord,
     CitationSource,
     audit_bibliography,
     audit_citation_source,
@@ -46,6 +47,12 @@ class TestBibtexCreation:
         bib = create_bibliography(sources)
         keys = list(bib.entries.keys())
         assert keys[0].startswith("einstein1905")
+
+    def test_generated_bib_key_sanitizes_year_component(self):
+        sources = [CitationSource(source_type="paper", title="Odd Year", authors=["J. Smith"], year="in press, 2026")]
+        bib = create_bibliography(sources)
+
+        assert list(bib.entries.keys()) == ["smithinpress2026"]
 
     def test_bib_key_dedup(self):
         sources = [
@@ -93,6 +100,21 @@ class TestBibtexCreation:
         bib = create_bibliography(sources)
 
         assert list(bib.entries.keys()) == ["shared-key", "shared-keya"]
+
+    @pytest.mark.parametrize("bibtex_key", ["bad key", "bad,key", "{bad}", "1bad", "bad/key"])
+    def test_preferred_bibtex_key_rejects_unsafe_values(self, bibtex_key: str):
+        sources = [
+            CitationSource(
+                source_type="paper",
+                title="Relativity",
+                authors=["A. Einstein"],
+                year="1905",
+                bibtex_key=bibtex_key,
+            )
+        ]
+
+        with pytest.raises(ValueError, match="preferred bibtex_key"):
+            create_bibliography(sources)
 
     def test_citation_keys_match_bibliography_emission(self):
         sources = [
@@ -147,6 +169,32 @@ class TestBibtexCreation:
         content = output.read_text()
         assert "@article" in content.lower() or "@misc" in content.lower()
         assert "Test Paper" in content
+
+    def test_non_author_bibtex_fields_sanitize_physics_unicode(self, tmp_path):
+        sources = [
+            CitationSource(
+                source_type="paper",
+                title="α_s bounds with Δm ≤ 10² GeV and ℏ corrections",
+                authors=["J. Smith"],
+                year="2026",
+                journal="Journal of β Physics",
+            )
+        ]
+
+        bib = create_bibliography(sources)
+        entry = list(bib.entries.values())[0]
+        output = tmp_path / "refs.bib"
+        write_bib_file(bib, output)
+        content = output.read_text(encoding="utf-8")
+
+        assert r"\alpha" in entry.fields["title"]
+        assert r"\Delta" in entry.fields["title"]
+        assert r"\leq" in entry.fields["title"]
+        assert r"\hbar" in entry.fields["title"]
+        assert r"\beta" in entry.fields["journal"]
+        assert "α" not in content
+        assert "β" not in content
+        assert "≤" not in content
 
 
 class TestCitationSourceParsing:
@@ -217,6 +265,23 @@ class TestCitationSourceParsing:
         )
 
         assert [source.reference_id for source in sources] == ["lit-ref-001"]
+
+    def test_parse_citation_source_sidecar_payload_rejects_duplicate_reference_id(self) -> None:
+        with pytest.raises(ValueError, match=r"reference_id duplicates 'lit-ref-001'"):
+            parse_citation_source_sidecar_payload(
+                [
+                    {
+                        "reference_id": "lit-ref-001",
+                        "source_type": "paper",
+                        "title": "Benchmark Paper",
+                    },
+                    {
+                        "reference_id": "lit-ref-001",
+                        "source_type": "paper",
+                        "title": "Other Paper",
+                    },
+                ]
+            )
 
 
 # ---- arXiv enrichment tests ----
@@ -350,6 +415,35 @@ class TestStrictBibliographyContracts:
                 }
             )
 
+    def test_bibliography_audit_rejects_summary_counts_that_disagree_with_entries(self) -> None:
+        with pytest.raises(ValidationError, match="summary counts do not match entries"):
+            BibliographyAudit.model_validate(
+                {
+                    "generated_at": "2026-03-10T00:00:00+00:00",
+                    "total_sources": 1,
+                    "resolved_sources": 1,
+                    "partial_sources": 0,
+                    "unverified_sources": 0,
+                    "failed_sources": 0,
+                    "entries": [
+                        {
+                            "key": "einstein1905",
+                            "source_type": "paper",
+                            "reference_id": "ref-einstein",
+                            "title": "Relativity",
+                            "resolution_status": "provided",
+                            "verification_status": "unverified",
+                            "verification_sources": [],
+                            "canonical_identifiers": [],
+                            "missing_core_fields": [],
+                            "enriched_fields": [],
+                            "warnings": [],
+                            "errors": [],
+                        }
+                    ],
+                }
+            )
+
 
 class TestBibliographyAudit:
     def test_audit_citation_source_marks_provided_identifiers_as_partial(self):
@@ -437,6 +531,27 @@ class TestBibliographyAudit:
         assert [entry.key for entry in audit.entries] == ["shared-key", "shared-keya"]
         assert [entry.reference_id for entry in audit.entries] == ["anchor-ref-1", "anchor-ref-2"]
 
+    def test_build_bibliography_with_audit_rejects_duplicate_reference_id(self):
+        sources = [
+            CitationSource(
+                source_type="paper",
+                reference_id="anchor-ref",
+                title="A Paper",
+                authors=["J. Smith"],
+                year="2024",
+            ),
+            CitationSource(
+                source_type="paper",
+                reference_id="anchor-ref",
+                title="B Paper",
+                authors=["A. Bohr"],
+                year="1913",
+            ),
+        ]
+
+        with pytest.raises(ValueError, match="duplicates entries 0 and 1"):
+            build_bibliography_with_audit(sources, enrich=False)
+
     def test_build_bibliography_with_audit_records_successful_enrichment(self):
         from datetime import datetime
 
@@ -520,7 +635,9 @@ class TestBibliographyAudit:
         )
         bib = create_bibliography([source])
 
-        plain_entry = Entry("misc", fields=[("title", "Project Note"), ("year", "2024"), ("url", "https://example.com")])
+        plain_entry = Entry(
+            "misc", fields=[("title", "Project Note"), ("year", "2024"), ("url", "https://example.com")]
+        )
         plain_entry.persons["author"] = [Person("Doe, J.")]
         bib.entries["doe2024"] = plain_entry
 
@@ -547,7 +664,9 @@ class TestBibliographyAudit:
             doi="10.1002/andp.19053221004",
         )
         source_bib, source_audit = build_bibliography_with_audit([source], enrich=False)
-        plain_entry = Entry("misc", fields=[("title", "Project Note"), ("year", "2024"), ("url", "https://example.com")])
+        plain_entry = Entry(
+            "misc", fields=[("title", "Project Note"), ("year", "2024"), ("url", "https://example.com")]
+        )
         plain_entry.persons["author"] = [Person("Doe, J.")]
         source_bib.entries["doe2024"] = plain_entry
 
@@ -570,7 +689,16 @@ class TestBibliographyAudit:
             partial_sources=1,
             unverified_sources=0,
             failed_sources=0,
-            entries=[],
+            entries=[
+                CitationAuditRecord(
+                    key="einstein1905",
+                    source_type="paper",
+                    reference_id="ref-einstein",
+                    title="Relativity",
+                    resolution_status="incomplete",
+                    verification_status="partial",
+                )
+            ],
         )
         output = tmp_path / "bibliography-audit.json"
 

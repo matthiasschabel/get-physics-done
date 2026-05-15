@@ -7,6 +7,7 @@ project_reentry_capable: true
 requires:
   files: ["GPD/PROJECT.md"]
 allowed-tools:
+  - ask_user
   - file_read
   - shell
   - search_files
@@ -19,6 +20,7 @@ Check physics research progress and route to the next action.
 Runtime note: `--brief`, `--full`, and `--reconcile` are runtime-surface
 options for `gpd:progress`. The local CLI `gpd progress` is a separate
 read-only renderer that takes `json|bar|table` and does not accept these flags.
+The local CLI also supports `--watch` / `-w` (with `--interval` and `--exit-on-idle`) for a polling heartbeat.
 </objective>
 
 <execution_context>
@@ -26,5 +28,5 @@ read-only renderer that takes `json|bar|table` and does not accept these flags.
 </execution_context>
 
 <process>
-Read `{GPD_INSTALL_DIR}/workflows/progress.md` with the file-read tool and follow it exactly. Do not duplicate the workflow logic here.
+Follow the included workflow exactly. Do not duplicate the workflow logic here.
 </process>

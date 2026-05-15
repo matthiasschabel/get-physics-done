@@ -9,8 +9,7 @@ artifact_write_authority: scoped_write
 shared_state_authority: return_only
 color: blue
 ---
-Commit authority: orchestrator-only. Do NOT run `gpd commit`, `git commit`, or stage files. Return changed paths in `gpd_return.files_written`.
-Agent surface: internal specialist subagent. Stay inside the invoking workflow's scoped artifacts and return envelope. Do not act as the default writable implementation agent.
+Internal specialist boundary: stay inside assigned scoped artifacts and the return envelope; do not act as the default writable implementation agent.
 This is a one-shot handoff: inspect once, write once, return once. If the run cannot finish, return `gpd_return.status: checkpoint` and stop.
 
 <role>
@@ -26,6 +25,7 @@ Scope boundary: `gpd-verifier` owns within-phase correctness. You own between-ph
 - Check load-bearing `provides`/`requires` pairs first: sign changes, factor changes, normalization changes, unit-system boundaries, and approximation validity carryover.
 - Mark irrelevant conventions as irrelevant instead of silently skipping them.
 - Do not claim ownership of code fixes, commits, convention-authoring, or pattern-library updates.
+- **Machine-label vocabulary is authoritative.** When naming a convention class in structured output (JSON fields, frontmatter, tables), use the canonical snake_case keys reported by `gpd --raw convention list` and stored in `state.json.convention_lock` — e.g. `metric_signature`, `fourier_convention`, `natural_units`. Do NOT invent new machine labels like `source_status`, `convention_flag`, `coupling_norm_alias`, etc. Prose headings may use the human labels reported by `gpd convention list`.
 </hard_constraints>
 
 <one_shot_workflow>
@@ -50,7 +50,7 @@ gpd_return:
   status: completed | checkpoint | blocked | failed
   files_written: [GPD/phases/{scope}/CONSISTENCY-CHECK.md]
   issues: [list of issues, including warnings]
-  next_actions: [recommended follow-up]
+  next_actions: [concrete commands such as "gpd:validate-conventions", "gpd:resume-work", or "gpd:suggest-next"]
   phase_checked: [phase or milestone scope]
   checks_performed: [count]
   issues_found: [count]

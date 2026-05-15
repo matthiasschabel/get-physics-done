@@ -6,7 +6,7 @@ import argparse
 import asyncio
 import sys
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import mcp.types as types
@@ -17,9 +17,11 @@ from mcp.server.models import InitializationOptions
 from mcp.server.stdio import stdio_server
 
 from gpd.core.arxiv_source_download import (
-    ARXIV_DEFAULT_STORAGE_PATH,
+    default_arxiv_source_storage_path,
     download_arxiv_source_archive,
+    resolve_default_arxiv_storage_path,
 )
+from gpd.mcp.servers import mutating_tool_annotations
 from gpd.version import __version__ as GPD_VERSION
 
 UPSTREAM_ARXIV_MODULE = "arxiv_mcp_server"
@@ -30,7 +32,14 @@ UPSTREAM_CORE_TOOL_NAMES = (
     "read_paper",
 )
 DOWNLOAD_SOURCE_TOOL_NAME = "download_source"
+# Static descriptor fallback. Runtime forwarding is gated by the live upstream
+# tool list whenever the upstream server can provide one.
 ADVERTISED_TOOL_NAMES = (*UPSTREAM_CORE_TOOL_NAMES, DOWNLOAD_SOURCE_TOOL_NAME)
+_DOWNLOAD_SOURCE_TOOL_ANNOTATIONS = mutating_tool_annotations(
+    destructive=True,
+    idempotent=False,
+    open_world=True,
+)
 
 _DOWNLOAD_SOURCE_SCHEMA: dict[str, object] = {
     "type": "object",
@@ -38,6 +47,7 @@ _DOWNLOAD_SOURCE_SCHEMA: dict[str, object] = {
         "paper_id": {
             "type": "string",
             "minLength": 1,
+            "pattern": r"\S",
             "description": "arXiv paper identifier, for example 2401.12345 or hep-th/9901001.",
         },
         "overwrite": {
@@ -57,6 +67,7 @@ _DOWNLOAD_SOURCE_TOOL = types.Tool(
         "Returns the saved path and metadata for the downloaded archive."
     ),
     inputSchema=_DOWNLOAD_SOURCE_SCHEMA,
+    annotations=_DOWNLOAD_SOURCE_TOOL_ANNOTATIONS,
 )
 
 
@@ -64,14 +75,27 @@ _DOWNLOAD_SOURCE_TOOL = types.Tool(
 class ArxivBridgeConfig:
     """Runtime configuration for the bridge."""
 
-    storage_path: Path = ARXIV_DEFAULT_STORAGE_PATH
+    storage_path: Path = field(default_factory=default_arxiv_source_storage_path)
 
 
-def load_settings(*, storage_path: str | Path | None = None) -> ArxivBridgeConfig:
-    """Load bridge settings for the upstream server and local source archive storage."""
+def load_settings(
+    *,
+    storage_path: str | Path | None = None,
+    workspace: str | Path | None = None,
+) -> ArxivBridgeConfig:
+    """Load bridge settings for the upstream server and local source archive storage.
+
+    When *storage_path* is not supplied, the storage root is resolved from
+    :func:`gpd.core.arxiv_source_download.resolve_default_arxiv_storage_path`,
+    which honors ``GPD_ARXIV_SOURCE_DIR`` first, then a project-local
+    ``<project_root>/.arxiv-cache`` directory when invoked inside a verified
+    GPD project, and finally falls back to the legacy
+    ``~/.arxiv-mcp-server/papers`` cache so callers running outside any
+    project remain backward-compatible.
+    """
 
     if storage_path is None:
-        resolved = ARXIV_DEFAULT_STORAGE_PATH
+        resolved = resolve_default_arxiv_storage_path(workspace)
     else:
         resolved = Path(storage_path)
     return ArxivBridgeConfig(storage_path=resolved.expanduser().resolve(strict=False))
@@ -83,6 +107,8 @@ class ArxivBridge:
     def __init__(self, config: ArxivBridgeConfig) -> None:
         self.config = config
         self._session: ClientSession | None = None
+        self._upstream_tool_names: set[str] | None = None
+        self._upstream_tool_names_complete = False
 
     @property
     def session(self) -> ClientSession:
@@ -107,14 +133,25 @@ class ArxivBridge:
 
     async def list_tools(self, cursor: str | None = None) -> types.ListToolsResult:
         upstream = await self.session.list_tools(cursor)
-        filtered = [tool for tool in upstream.tools if tool.name in UPSTREAM_CORE_TOOL_NAMES]
+        self._remember_upstream_tools(
+            upstream.tools,
+            reset=cursor in (None, ""),
+            complete=upstream.nextCursor is None,
+        )
+        filtered = [tool for tool in upstream.tools if tool.name != DOWNLOAD_SOURCE_TOOL_NAME]
         if cursor in (None, ""):
             filtered.append(_DOWNLOAD_SOURCE_TOOL)
-        return types.ListToolsResult(tools=filtered, nextCursor=None)
+        return types.ListToolsResult(tools=filtered, nextCursor=upstream.nextCursor)
 
     async def call_tool(self, name: str, arguments: dict[str, object] | None) -> types.CallToolResult:
         if name == DOWNLOAD_SOURCE_TOOL_NAME:
             return await self._call_download_source(arguments or {})
+        try:
+            upstream_tool_names = await self._live_upstream_tool_names()
+        except Exception as exc:
+            return _tool_error(f"Could not confirm live arXiv tool list before forwarding {name!r}: {exc}")
+        if name not in upstream_tool_names:
+            return _tool_error(f"Tool {name!r} is not advertised by the GPD arXiv bridge")
         return await self.session.call_tool(name, arguments or {})
 
     async def list_prompts(self, cursor: str | None = None) -> types.ListPromptsResult:
@@ -123,14 +160,56 @@ class ArxivBridge:
     async def get_prompt(self, name: str, arguments: dict[str, str] | None) -> types.GetPromptResult:
         return await self.session.get_prompt(name, arguments)
 
+    def _remember_upstream_tools(
+        self,
+        tools: list[types.Tool],
+        *,
+        reset: bool,
+        complete: bool,
+    ) -> None:
+        names = {tool.name for tool in tools if tool.name != DOWNLOAD_SOURCE_TOOL_NAME}
+        if reset or self._upstream_tool_names is None:
+            self._upstream_tool_names = names
+            self._upstream_tool_names_complete = complete
+        else:
+            self._upstream_tool_names.update(names)
+            if complete:
+                self._upstream_tool_names_complete = True
+
+    async def _live_upstream_tool_names(self) -> set[str]:
+        if self._upstream_tool_names is not None and self._upstream_tool_names_complete:
+            return set(self._upstream_tool_names)
+
+        names: set[str] = set()
+        cursor: str | None = None
+        seen_cursors: set[str] = set()
+        while True:
+            upstream = await self.session.list_tools(cursor)
+            names.update(tool.name for tool in upstream.tools if tool.name != DOWNLOAD_SOURCE_TOOL_NAME)
+            next_cursor = upstream.nextCursor
+            if next_cursor is None:
+                break
+            if next_cursor in seen_cursors:
+                raise RuntimeError("upstream arXiv list_tools returned a repeated pagination cursor")
+            seen_cursors.add(next_cursor)
+            cursor = next_cursor
+
+        self._upstream_tool_names = names
+        self._upstream_tool_names_complete = True
+        return set(names)
+
     async def _call_download_source(self, arguments: dict[str, object]) -> types.CallToolResult:
+        extra_args = sorted(set(arguments) - set(_DOWNLOAD_SOURCE_SCHEMA["properties"]))
+        if extra_args:
+            return _tool_error(f"download_source got unsupported arguments: {', '.join(extra_args)}")
+
         paper_id = arguments.get("paper_id")
-        overwrite = bool(arguments.get("overwrite", False))
         if not isinstance(paper_id, str) or not paper_id.strip():
-            return types.CallToolResult(
-                isError=True,
-                content=[types.TextContent(type="text", text="Error: paper_id must be a non-empty string")],
-            )
+            return _tool_error("paper_id must be a non-empty string")
+
+        overwrite = arguments.get("overwrite", False)
+        if not isinstance(overwrite, bool):
+            return _tool_error("overwrite must be a boolean")
 
         try:
             result = download_arxiv_source_archive(
@@ -139,10 +218,7 @@ class ArxivBridge:
                 overwrite=overwrite,
             )
         except Exception as exc:
-            return types.CallToolResult(
-                isError=True,
-                content=[types.TextContent(type="text", text=f"Error: {exc}")],
-            )
+            return _tool_error(str(exc))
 
         summary = (
             f"Downloaded source archive for {result.arxiv_id} to {result.path}"
@@ -151,8 +227,22 @@ class ArxivBridge:
         )
         return types.CallToolResult(
             content=[types.TextContent(type="text", text=summary)],
-            structuredContent=result.as_dict(),
+            structuredContent={
+                "schema_version": 1,
+                "tool": DOWNLOAD_SOURCE_TOOL_NAME,
+                "result": result.as_dict(),
+            },
         )
+
+
+def _tool_error(message: str) -> types.CallToolResult:
+    """Return a stable MCP tool-error result."""
+
+    return types.CallToolResult(
+        isError=True,
+        content=[types.TextContent(type="text", text=f"Error: {message}")],
+        structuredContent={"schema_version": 1, "error": message},
+    )
 
 
 def build_server(config: ArxivBridgeConfig) -> tuple[Server, ArxivBridge]:
@@ -192,12 +282,23 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="GPD arXiv MCP bridge")
     parser.add_argument("--transport", choices=["stdio"], default="stdio")
     parser.add_argument("--storage-path", default=None)
+    parser.add_argument(
+        "--workspace",
+        default=None,
+        help=(
+            "Workspace hint used when --storage-path is not supplied. "
+            "Defaults to the current working directory; the bridge prefers a "
+            "project-local <project_root>/.arxiv-cache when the workspace "
+            "resolves to a verified GPD project, and falls back to "
+            "~/.arxiv-mcp-server/papers otherwise."
+        ),
+    )
     return parser.parse_args()
 
 
 async def _run() -> None:
     args = _parse_args()
-    config = load_settings(storage_path=args.storage_path)
+    config = load_settings(storage_path=args.storage_path, workspace=args.workspace)
     server, _bridge = build_server(config)
     async with stdio_server() as (read_stream, write_stream):
         await server.run(

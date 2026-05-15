@@ -1,4 +1,4 @@
-"""Behavior-focused adapter regression coverage."""
+"""Behavior-focused adapter assertions."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 import pytest
 
+from gpd.adapters.install_utils import hook_python_interpreter
 from gpd.core.public_surface_contract import local_cli_bridge_commands
 from gpd.mcp.builtin_servers import GPD_MCP_SERVER_KEYS
 
@@ -32,6 +33,21 @@ def test_write_settings_mkdir_errors_reference_settings_directory(tmp_path: Path
     with patch("pathlib.Path.mkdir", side_effect=PermissionError("denied")):
         with pytest.raises(PermissionError, match="settings directory"):
             write_settings(settings_path, {"key": "value"})
+
+
+def test_copy_with_path_replacement_rejects_unknown_runtime_without_partial_dest(tmp_path: Path) -> None:
+    from gpd.adapters.install_utils import copy_with_path_replacement
+
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "probe.md").write_text("Path: {GPD_INSTALL_DIR}\n", encoding="utf-8")
+    dest = tmp_path / "dest"
+
+    with pytest.raises(KeyError, match=r"Unknown runtime 'not-a-runtime'"):
+        copy_with_path_replacement(src, dest, "/runtime/", "not-a-runtime")
+
+    assert not dest.exists()
+    assert not list(tmp_path.glob("dest.tmp.*"))
 
 
 def test_convert_tool_references_uses_literal_replacements() -> None:
@@ -141,13 +157,14 @@ def test_managed_wolfram_projection_helpers_hide_api_key_and_preserve_endpoint(
 
     monkeypatch.setenv("GPD_WOLFRAM_MCP_API_KEY", "super-secret-token")
     monkeypatch.setenv("GPD_WOLFRAM_MCP_ENDPOINT", "https://example.invalid/api/mcp")
+    monkeypatch.setenv("GPD_PYTHON", "/tmp/gpd-managed-python")
 
     servers = helper()
     wolfram = servers["gpd-wolfram"]
     payload = json.dumps(wolfram)
 
-    assert wolfram["command"] == "gpd-mcp-wolfram"
-    assert wolfram["args"] == []
+    assert wolfram["command"] == hook_python_interpreter()
+    assert wolfram["args"] == ["-m", "gpd.mcp.integrations.wolfram_bridge"]
     assert "super-secret-token" not in payload
     assert "GPD_WOLFRAM_MCP_API_KEY" not in payload
     assert "https://example.invalid/api/mcp" in payload
@@ -222,6 +239,58 @@ def test_runtime_shell_rewriters_handle_metacharacter_terminated_gpd_commands(
     assert expected_fragment in result
 
 
+def test_shared_runtime_shell_rewriter_handles_fenced_command_positions() -> None:
+    from gpd.adapters.install_utils import rewrite_gpd_cli_invocations_to_runtime_bridge
+
+    content = "Prose keeps `gpd status` unchanged.\n```bash\ngpd status\necho 'gpd status'\necho $(gpd status)\n```\n"
+
+    result = rewrite_gpd_cli_invocations_to_runtime_bridge(content, "/runtime/gpd")
+
+    assert "Prose keeps `gpd status` unchanged." in result
+    assert "/runtime/gpd status" in result
+    assert "echo 'gpd status'" in result
+    assert "echo $(/runtime/gpd status)" in result
+
+
+def test_shared_runtime_shell_rewriter_handles_double_quoted_command_substitutions() -> None:
+    from gpd.adapters.install_utils import rewrite_gpd_cli_invocations_to_runtime_bridge
+
+    content = (
+        "```bash\n"
+        'if [ "$(echo "$ROADMAP_INFO" | gpd json get .found --default false)" != "true" ]; then\n'
+        "  echo \"$(printf 'gpd status')\"\n"
+        "fi\n"
+        "```\n"
+    )
+
+    result = rewrite_gpd_cli_invocations_to_runtime_bridge(content, "/runtime/gpd")
+
+    assert 'if [ "$(echo "$ROADMAP_INFO" | /runtime/gpd json get .found --default false)" != "true" ]; then' in result
+    assert "echo \"$(printf 'gpd status')\"" in result
+
+
+def test_shared_runtime_shell_rewriter_handles_reserved_word_command_positions() -> None:
+    from gpd.adapters.install_utils import rewrite_gpd_cli_invocations_to_runtime_bridge
+
+    content = (
+        "```bash\n"
+        "if gpd status; then\n"
+        "  while gpd config ensure-section; do\n"
+        "    time gpd state add-decision\n"
+        "    { gpd graph; }\n"
+        "  done\n"
+        "fi\n"
+        "```\n"
+    )
+
+    result = rewrite_gpd_cli_invocations_to_runtime_bridge(content, "/runtime/gpd")
+
+    assert "if /runtime/gpd status; then" in result
+    assert "while /runtime/gpd config ensure-section; do" in result
+    assert "time /runtime/gpd state add-decision" in result
+    assert "{ /runtime/gpd graph; }" in result
+
+
 @pytest.mark.parametrize(
     ("module_name", "function_name"),
     [
@@ -239,9 +308,7 @@ def test_runtime_rewriters_preserve_public_local_cli_contract(module_name: str, 
     content = (
         "Use `gpd --help` before anything else.\n"
         "Keep `gpd config ensure-section` bridged because it is an executable shell step.\n"
-        "```bash\n"
-        + "\n".join([*public_commands, "gpd config ensure-section"])
-        + "\n```\n"
+        "```bash\n" + "\n".join([*public_commands, "gpd config ensure-section"]) + "\n```\n"
     )
 
     result = rewrite(content, "/runtime/gpd")

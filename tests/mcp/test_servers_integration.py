@@ -519,7 +519,9 @@ class TestSkillsServerIntegration:
         assert "gpd-help" in result["content"]
         assert "## Command Requirements" in result["content"]
         assert "Quick Start Extract" in result["content"]
-        assert "## Contextual Help" in result["content"]
+        assert "## Contextual Help" not in result["content"]
+        assert "subject-owned publication root at `GPD/publication/{subject_slug}`" in result["content"]
+        assert "resolved GPD-owned manuscript root" in result["content"]
         assert result["file_count"] == 1
         assert result["allowed_tools_surface"] == "command.allowed-tools"
 
@@ -527,6 +529,7 @@ class TestSkillsServerIntegration:
         from gpd.mcp.servers.skills_server import get_skill
 
         result = get_skill("gpd-peer-review")
+        contract_documents = {Path(entry["path"]).name: entry for entry in result["contract_documents"]}
 
         assert "error" not in result
         assert any(path.endswith("review-ledger-schema.md") for path in result["schema_references"])
@@ -534,23 +537,92 @@ class TestSkillsServerIntegration:
         assert result["review_contract"] is not None
         assert result["review_contract"]["review_mode"] == "publication"
         assert "required_state" not in result["review_contract"]
+        assert result["review_contract"]["required_evidence"] == [
+            "existing manuscript or explicit external artifact target",
+        ]
+        assert result["review_contract"]["blocking_conditions"] == [
+            "missing manuscript or explicit external artifact target",
+            "degraded review integrity",
+            "unsupported physical significance claims",
+            "collapsed novelty or venue fit",
+        ]
+        assert result["review_contract"]["conditional_requirements"][0]["when"] == "project-backed manuscript review"
+        assert any(
+            variant["scope"] == "explicit_artifact"
+            for variant in result["review_contract"].get("scope_variants", [])
+        )
         assert result["review_contract"]["conditional_requirements"] == [
             {
+                "when": "project-backed manuscript review",
+                "required_outputs": [],
+                "required_evidence": [
+                    "phase summaries or milestone digest",
+                    "verification reports",
+                    "manuscript-root bibliography audit",
+                    "manuscript-root artifact manifest",
+                    "manuscript-root reproducibility manifest",
+                    "manuscript-root publication artifacts",
+                ],
+                "blocking_conditions": [
+                    "missing project state",
+                    "missing roadmap",
+                    "missing conventions",
+                    "no research artifacts",
+                ],
+                "preflight_checks": [
+                    "project_state",
+                    "roadmap",
+                    "conventions",
+                    "research_artifacts",
+                    "verification_reports",
+                    "artifact_manifest",
+                    "bibliography_audit",
+                    "bibliography_audit_clean",
+                    "reproducibility_manifest",
+                    "reproducibility_ready",
+                ],
+                "blocking_preflight_checks": [
+                    "project_state",
+                    "roadmap",
+                    "conventions",
+                    "research_artifacts",
+                    "verification_reports",
+                    "artifact_manifest",
+                    "bibliography_audit",
+                    "bibliography_audit_clean",
+                    "reproducibility_manifest",
+                    "reproducibility_ready",
+                ],
+                "stage_artifacts": [],
+            },
+            {
                 "when": "theorem-bearing claims are present",
-                "required_outputs": ["GPD/review/PROOF-REDTEAM{round_suffix}.md"],
+                "required_outputs": ["${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md"],
                 "required_evidence": [],
                 "blocking_conditions": [],
+                "preflight_checks": [],
                 "blocking_preflight_checks": [],
-                "stage_artifacts": ["GPD/review/PROOF-REDTEAM{round_suffix}.md"],
+                "stage_artifacts": ["${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md"],
             }
         ]
-        assert result["context_mode"] == "project-required"
+        assert result["context_mode"] == "project-aware"
         assert result["project_reentry_capable"] is False
         assert "## Review Contract" in result["content"]
+        assert any(
+            fragment in result["content"]
+            for fragment in (
+                "project-managed manuscript lane at `GPD/publication/{subject_slug}/manuscript`",
+                "subject-owned publication root under `GPD/publication/{subject_slug}`",
+                "staged review artifacts on the workflow-owned `GPD/` paths",
+            )
+        )
         assert "review_contract:" in result["content"]
         assert "review-contract:" not in result["content"]
+        assert contract_documents == {}
+        assert any(path.endswith("peer-review-reliability.md") for path in result["contract_references"])
         assert "Treat `content` as the wrapper/context surface." in result["loading_hint"]
-        assert "Load `schema_documents` and `contract_documents` too when present" in result["loading_hint"]
+        assert "See `referenced_files` for external markdown dependencies." in result["loading_hint"]
+        assert "Load `schema_documents` and `contract_documents` too when present" not in result["loading_hint"]
         assert "It already embeds the model-visible `Command Requirements` section." in result["loading_hint"]
 
     def test_get_skill_check_proof_surfaces_dedicated_proof_redteam_schema_and_contract_docs(self):
@@ -567,13 +639,12 @@ class TestSkillsServerIntegration:
         assert any(path.endswith("proof-redteam-protocol.md") for path in direct_paths)
         assert any(path.endswith("proof-redteam-schema.md") for path in result["schema_references"])
         assert any(path.endswith("proof-redteam-protocol.md") for path in result["contract_references"])
-        assert "proof-redteam-schema.md" in schema_documents
-        assert "Proof Redteam" in schema_documents["proof-redteam-schema.md"]["body"]
-        assert "proof-redteam-protocol.md" in contract_documents
-        assert "Proof Redteam Protocol" in contract_documents["proof-redteam-protocol.md"]["body"]
+        assert schema_documents == {}
+        assert contract_documents == {}
         assert any(path.endswith("peer-review-panel.md") for path in result["contract_references"])
         assert "Treat `content` as the wrapper/context surface." in result["loading_hint"]
-        assert "Load `schema_documents` and `contract_documents` too when present" in result["loading_hint"]
+        assert "See `referenced_files` for external markdown dependencies." in result["loading_hint"]
+        assert "Load `schema_documents` and `contract_documents` too when present" not in result["loading_hint"]
 
     def test_get_skill_research_phase_surfaces_staged_loading_sidecar(self):
         from gpd.mcp.servers.skills_server import get_skill
@@ -658,15 +729,20 @@ class TestSkillsServerIntegration:
         assert "gpd_return:" in synthesizer["content"]
 
         expected_project_spawn_contracts = [dict(contract) for contract in registry.get_command("gpd:new-project").spawn_contracts]
+        expected_project_interactive_spawn_contracts = [
+            dict(contract) for contract in registry.get_command("gpd:new-project").interactive_spawn_contracts
+        ]
         expected_milestone_spawn_contracts = [
             dict(contract) for contract in registry.get_command("gpd:new-milestone").spawn_contracts
         ]
 
         assert new_project["spawn_contracts"] == expected_project_spawn_contracts
+        assert new_project["interactive_spawn_contracts"] == expected_project_interactive_spawn_contracts
         assert new_milestone["spawn_contracts"] == expected_milestone_spawn_contracts
         assert summary_contract in new_project["spawn_contracts"]
         assert summary_contract in new_milestone["spawn_contracts"]
         assert new_project["structured_metadata_authority"]["spawn_contracts"] == "mirrored"
+        assert new_project["structured_metadata_authority"]["interactive_spawn_contracts"] == "mirrored"
         assert new_milestone["structured_metadata_authority"]["spawn_contracts"] == "mirrored"
 
     def test_get_skill_surfaces_template_backed_schema_documents_for_writing_and_resume(self):
@@ -681,15 +757,11 @@ class TestSkillsServerIntegration:
         assert "error" not in write_paper
         assert any(path.endswith("figure-tracker.md") for path in write_paper["schema_references"])
         assert any(path.endswith("author-response.md") for path in write_paper["schema_references"])
-        assert "figure-tracker.md" in write_schema_documents
-        assert "author-response.md" in write_schema_documents
-        assert "figure_registry" in write_schema_documents["figure-tracker.md"]["body"]
-        assert "Issue ID" in write_schema_documents["author-response.md"]["body"]
+        assert write_schema_documents == {}
 
         assert "error" not in pause_work
         assert any(path.endswith("continue-here.md") for path in pause_work["schema_references"])
-        assert "continue-here.md" in pause_schema_documents
-        assert "<persistent_state>" in pause_schema_documents["continue-here.md"]["body"]
+        assert pause_schema_documents == {}
 
     def test_get_skill_surfaces_lightweight_paper_writer_reference_paths_and_transitive_metadata(self):
         from gpd.mcp.servers.skills_server import get_skill
@@ -723,7 +795,7 @@ class TestSkillsServerIntegration:
             "@{GPD_INSTALL_DIR}/templates/paper/referee-response.md",
         }
         assert paper_writer["schema_references"] == ["@{GPD_INSTALL_DIR}/templates/paper/author-response.md"]
-        assert paper_writer["schema_documents"]
+        assert paper_writer["schema_documents"] == []
         assert any(path.endswith("verification-core.md") for path in paper_writer_transitive_paths)
         assert any(path.endswith("publication-response-writer-handoff.md") for path in paper_writer_referenced_paths)
 

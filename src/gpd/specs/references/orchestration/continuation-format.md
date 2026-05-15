@@ -14,7 +14,7 @@ This format is a presentation layer only: the displayed next step is derived fro
 
 `{command to copy-paste}`
 
-<sub>`/clear` first, then run `{next command}`</sub>
+<sub>Start a fresh context window, then run `{next command}`</sub>
 
 ---
 
@@ -30,10 +30,25 @@ This format is a presentation layer only: the displayed next step is derived fro
 1. **Always show what it is** -- name + description, never just a command path
 2. **Pull context from source** -- ROADMAP.md for phases, PLAN.md `<objective>` for plans
 3. **Command in inline code** -- backticks, easy to copy-paste, renders as clickable link
-4. **`/clear` explanation** -- always include, and pair it with the next command instead of leaving it as a dead-end. If project rediscovery is still required, say so explicitly and point to `gpd resume` or `gpd resume --recent` before reopening the runtime instead of implying that `/clear` performs recovery.
+4. **Fresh context explanation** -- always include it, and pair it with the next command instead of leaving it as a dead-end. If project rediscovery is still required, say so explicitly and point to `gpd resume` or `gpd resume --recent` before reopening the runtime; do not treat the fresh context reset as project recovery.
 5. **"Also available" not "Other options"** -- sounds more app-like
 6. **Visual separators** -- `---` above and below to make it stand out
 7. **Derived, not authoritative** -- the message is a projection of the current recovery decision, not a competing source of truth
+
+## Stop And Checkpoint Rules
+
+Every user-visible completion, checkpoint, blocked return, failed return, retry gate, or stop that expects later action must end with this block. Do not end on labels such as "ready", "continue", "retry", "review", or "stop here" unless the same final section gives the exact command or artifact action.
+
+Use this routing unless a workflow has a more specific command:
+
+- Resumable handoff/checkpoint persisted: primary `gpd:resume-work`; include `gpd:suggest-next`
+- Same workflow should be retried after user edits input: show the exact original command, e.g. `gpd:new-project --minimal @file.md`
+- Phase lacks context: primary `gpd:discuss-phase N`; alternative `gpd:plan-phase N`
+- Phase has context but no plan: primary `gpd:plan-phase N`; include `gpd:research-phase N` when discovery is needed
+- Phase has plans to execute: primary `gpd:execute-phase N`
+- Verification gaps exist: primary `gpd:plan-phase N --gaps`; after gap plans exist, `gpd:execute-phase N --gaps-only`; confirm with `gpd:verify-work N`
+- Convention issue blocks progress: primary `gpd:validate-conventions`; include `gpd:resume-work` after repair
+- No clear primary route: primary `gpd:suggest-next`
 
 ## Variants
 
@@ -48,7 +63,7 @@ This format is a presentation layer only: the displayed next step is derived fro
 
 `gpd:execute-phase 2`
 
-<sub>`/clear` first, then run `gpd:execute-phase 2`</sub>
+<sub>Start a fresh context window, then run `gpd:execute-phase 2`</sub>
 
 ---
 
@@ -73,7 +88,7 @@ Add note that this is the last plan and what comes after:
 
 `gpd:execute-phase 2`
 
-<sub>`/clear` first, then run `gpd:execute-phase 2`</sub>
+<sub>Start a fresh context window, then run `gpd:execute-phase 2`</sub>
 
 ---
 
@@ -95,7 +110,7 @@ Add note that this is the last plan and what comes after:
 
 `gpd:plan-phase 2`
 
-<sub>`/clear` first, then run `gpd:plan-phase 2`</sub>
+<sub>Start a fresh context window, then run `gpd:plan-phase 2`</sub>
 
 ---
 
@@ -124,7 +139,7 @@ Show completion status before next action:
 
 `gpd:plan-phase 3`
 
-<sub>`/clear` first, then run `gpd:plan-phase 3`</sub>
+<sub>Start a fresh context window, then run `gpd:plan-phase 3`</sub>
 
 ---
 
@@ -153,7 +168,7 @@ When there's no clear primary action:
 
 **To research unknowns:** `gpd:research-phase 3`
 
-<sub>`/clear` first, then run the chosen command below</sub>
+<sub>Start a fresh context window, then run the chosen command below</sub>
 
 ---
 ```
@@ -173,7 +188,7 @@ All 4 phases completed
 
 `gpd:new-milestone`
 
-<sub>`/clear` first, then run `gpd:new-milestone`</sub>
+<sub>Start a fresh context window, then run `gpd:new-milestone`</sub>
 
 ---
 ```
@@ -214,21 +229,21 @@ Extract: `**02-03: Perturbative Corrections** -- Compute one-loop self-energy wi
 
 ### Don't: Command-only (no context)
 
-```
+```text
 ## To Continue
 
-Run `/clear`, then paste the concrete next command:
+Start a fresh context window, then run the concrete next command:
 gpd:execute-phase 2
 ```
 
 User has no idea what 02-03 is about.
 
-### Don't: Missing /clear explanation
+### Don't: Missing fresh-context explanation
 
-```
+```text
 `gpd:plan-phase 3`
 
-Run /clear first.
+Start a fresh context window, then run the command.
 ```
 
 Doesn't explain why. User might skip it.

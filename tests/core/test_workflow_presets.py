@@ -11,7 +11,18 @@ from gpd.core.workflow_presets import (
     preview_workflow_preset_application,
     resolve_workflow_preset_readiness,
 )
+from tests.latex_test_support import PAPER_TOOLCHAIN_CAPABILITY_KEYS
 from tests.latex_test_support import latex_capability_payload as _latex_capability
+
+
+def test_latex_capability_payload_tracks_toolchain_schema_shape() -> None:
+    payload = _latex_capability()
+
+    assert set(payload) == PAPER_TOOLCHAIN_CAPABILITY_KEYS
+    assert payload["available"] is True
+    assert payload["paper_build_ready"] is True
+    assert payload["arxiv_submission_ready"] is True
+    assert payload["pdf_review_ready"] is True
 
 
 def test_workflow_preset_inventory_is_stable_and_non_persisted() -> None:
@@ -36,7 +47,7 @@ def test_workflow_preset_config_bundle_contains_only_writable_config_keys() -> N
 
     assert "model_cost_posture" not in bundle
     assert bundle == {
-        "autonomy": "balanced",
+        "autonomy": "supervised",
         "research_mode": "exploit",
         "model_profile": "paper-writing",
         "execution.review_cadence": "dense",
@@ -76,22 +87,22 @@ def test_preview_workflow_preset_application_reports_change_contract() -> None:
     )
     assert result.ignored_guidance_only_keys == ("model_cost_posture",)
     assert result.changed_keys == (
+        "autonomy",
         "research_mode",
-        "execution.review_cadence",
         "parallelization",
         "workflow.plan_checker",
         "workflow.verifier",
     )
     assert result.changes == (
+        WorkflowPresetConfigChange(key="autonomy", before="balanced", after="supervised"),
         WorkflowPresetConfigChange(key="research_mode", before="explore", after="balanced"),
-        WorkflowPresetConfigChange(key="execution.review_cadence", before="dense", after="adaptive"),
         WorkflowPresetConfigChange(key="parallelization", before=False, after=True),
         WorkflowPresetConfigChange(key="workflow.plan_checker", before=False, after=True),
         WorkflowPresetConfigChange(key="workflow.verifier", before=False, after=True),
     )
     assert result.unchanged_keys == (
-        "autonomy",
         "model_profile",
+        "execution.review_cadence",
         "planning.commit_docs",
         "workflow.research",
     )
@@ -104,7 +115,7 @@ def test_preview_workflow_preset_application_reports_change_contract() -> None:
         "planning": {"commit_docs": True},
         "workflow": {"research": True, "plan_checker": False, "verifier": False},
     }
-    assert result.updated_config["autonomy"] == "balanced"
+    assert result.updated_config["autonomy"] == "supervised"
     assert result.updated_config["research_mode"] == "balanced"
     assert result.updated_config["model_profile"] == "review"
     assert result.updated_config["parallelization"] is True
@@ -118,11 +129,11 @@ def test_preview_workflow_preset_application_reports_change_contract() -> None:
 
 def test_preview_workflow_preset_application_uses_effective_alias_and_default_values() -> None:
     raw_config = {
-        "autonomy": "balanced",
+        "autonomy": "supervised",
         "research_mode": "balanced",
         "model_profile": "review",
         "parallelization": True,
-        "review_cadence": "adaptive",
+        "review_cadence": "dense",
         "workflow": {"research": True, "plan_checker": True, "verifier": True},
     }
 
@@ -140,7 +151,7 @@ def test_preview_workflow_preset_application_uses_effective_alias_and_default_va
         "workflow.plan_checker",
         "workflow.verifier",
     )
-    assert result.updated_config["execution"]["review_cadence"] == "adaptive"
+    assert result.updated_config["execution"]["review_cadence"] == "dense"
     assert result.updated_config["commit_docs"] is True
 
 
@@ -163,7 +174,7 @@ def test_apply_workflow_preset_config_is_atomic_and_does_not_mutate_input() -> N
         "parallelization": True,
         "workflow": {"research": False},
     }
-    assert updated["autonomy"] == "balanced"
+    assert updated["autonomy"] == "supervised"
     assert updated["research_mode"] == "balanced"
     assert updated["model_profile"] == "review"
     assert updated["parallelization"] is True
@@ -240,7 +251,56 @@ def test_workflow_preset_readiness_degrades_publication_family_when_bibtex_is_mi
     assert any("BibTeX support is missing" in warning for warning in publication["warnings"])
 
 
-def test_workflow_preset_readiness_does_not_backfill_legacy_paper_build_flag_to_ready() -> None:
+def test_workflow_preset_readiness_degrades_peer_review_pdf_intake_when_pypdf_is_missing() -> None:
+    # Pass pdf_review_ready=False directly; it takes precedence when present.
+    readiness = resolve_workflow_preset_readiness(
+        base_ready=True,
+        latex_capability=_latex_capability(pdf_review_ready=False),
+    )
+    statuses = {preset["id"]: preset["status"] for preset in readiness["presets"]}
+    publication = next(preset for preset in readiness["presets"] if preset["id"] == "publication-manuscript")
+
+    assert readiness["ready"] == 3
+    assert readiness["degraded"] == 2
+    assert readiness["blocked"] == 0
+    assert readiness["latex_capability"]["paper_build_ready"] is True
+    assert readiness["latex_capability"]["arxiv_submission_ready"] is True
+    assert readiness["latex_capability"]["pdf_review_ready"] is False
+    assert readiness["latex_capability"]["full_toolchain_available"] is False
+    assert statuses["publication-manuscript"] == "degraded"
+    assert statuses["full-research"] == "degraded"
+    assert publication["ready_workflows"] == ["write-paper", "paper-build", "arxiv-submission"]
+    assert publication["degraded_workflows"] == ["peer-review"]
+    assert publication["blocked_workflows"] == []
+    assert any("pypdf is missing" in warning for warning in publication["warnings"])
+    assert any("get-physics-done[paper]" in warning for warning in publication["warnings"])
+    assert not any("get-physics-done[arxiv]" in warning for warning in publication["warnings"])
+
+
+def test_workflow_preset_readiness_ignores_malformed_pdftotext_and_contradictory_state_overrides() -> None:
+    readiness = resolve_workflow_preset_readiness(
+        base_ready=True,
+        latex_capability={
+            "compiler_available": False,
+            "pdftotext_available": "yes",
+            "full_toolchain_available": True,
+            "readiness_state": "ready",
+        },
+    )
+    publication = next(preset for preset in readiness["presets"] if preset["id"] == "publication-manuscript")
+
+    assert readiness["latex_capability"]["available"] is False
+    assert readiness["latex_capability"]["compiler_available"] is False
+    assert readiness["latex_capability"]["pdftotext_available"] is None
+    assert readiness["latex_capability"]["pdf_review_ready"] is False
+    assert readiness["latex_capability"]["paper_build_ready"] is False
+    assert readiness["latex_capability"]["full_toolchain_available"] is False
+    assert readiness["latex_capability"]["readiness_state"] == "blocked"
+    assert publication["status"] == "degraded"
+    assert publication["ready_workflows"] == []
+
+
+def test_workflow_preset_readiness_does_not_backfill_stale_paper_build_flag_to_ready() -> None:
     readiness = resolve_workflow_preset_readiness(base_ready=True, latex_capability={"paper_build_ready": True})
     publication = next(preset for preset in readiness["presets"] if preset["id"] == "publication-manuscript")
 
@@ -280,8 +340,8 @@ def test_workflow_preset_readiness_rejects_string_booleans_in_latex_capability()
     assert any("No LaTeX compiler detected" in warning for warning in publication["warnings"])
 
 
-@pytest.mark.parametrize("latex_capability", [True, {"legacy_available": True}])
-def test_workflow_preset_readiness_ignores_legacy_compiler_availability_shapes(
+@pytest.mark.parametrize("latex_capability", [True, {"stale_available": True}])
+def test_workflow_preset_readiness_ignores_stale_compiler_availability_shapes(
     latex_capability: object,
 ) -> None:
     readiness = resolve_workflow_preset_readiness(base_ready=True, latex_capability=latex_capability)

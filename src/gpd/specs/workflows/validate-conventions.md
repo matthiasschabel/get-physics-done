@@ -33,7 +33,7 @@ Parse JSON for: `state_exists`, `roadmap_exists`, `phases`, `current_phase`, `de
 Read mode settings:
 
 ```bash
-AUTONOMY=$(gpd --raw config get autonomy 2>/dev/null | gpd json get .value --default balanced 2>/dev/null || echo "balanced")
+AUTONOMY=$(gpd --raw config get autonomy 2>/dev/null | gpd json get .value --default supervised 2>/dev/null || echo "supervised")
 ```
 
 Run centralized context preflight before continuing:
@@ -66,10 +66,14 @@ Capture the selected phase directory and roadmap view for the downstream scan:
 ROADMAP=$(gpd --raw roadmap analyze)
 ```
 
-Load the convention ledger:
+Load the convention ledger and the canonical vocabulary:
 
 ```bash
 CONVENTIONS=$(gpd convention list)
+# Canonical snake_case machine labels + human display names. Pass this to the
+# consistency-checker so its structured output stays on the authoritative
+# vocabulary and does not invent ad-hoc keys like "source_status".
+CONVENTION_VOCABULARY=$(gpd --raw convention vocabulary 2>/dev/null || echo "{}")
 ```
 
 Read `GPD/CONVENTIONS.md` when present so the checker can compare the human-readable convention record against the structured lock. If the file is missing, continue with the structured lock and report the missing artifact as a limitation rather than inventing a fallback policy.
@@ -162,8 +166,8 @@ If either check fails, treat the handoff as incomplete and do not accept success
 Route only on the canonical `gpd_return.status`:
 
 - `gpd_return.status: completed` means the checker finished for the selected scope. Surface any advisory items from `gpd_return.issues`, but do not reinterpret the status text.
-- `gpd_return.status: checkpoint` means the checker needs user input. Present the checkpoint, offer the user the next action, and stop. Present options, checkpoint, and return.
-- `gpd_return.status: blocked` or `gpd_return.status: failed` means the checker could not complete. Surface `gpd_return.issues`, keep the run fail-closed, and stop.
+- `gpd_return.status: checkpoint` means the checker needs user input. Present options, checkpoint, and return. End with `## > Next Up`: primary `gpd:resume-work`, plus `gpd:validate-conventions` and `gpd:suggest-next`.
+- `gpd_return.status: blocked` or `gpd_return.status: failed` means the checker could not complete. Surface `gpd_return.issues`, keep the run fail-closed, and end with `## > Next Up`: primary `gpd:validate-conventions`, plus `gpd:resume-work`, `gpd convention set <key> <value>` when a lock repair is known, and `gpd:suggest-next`.
 
 Do not route on checker-local text markers or headings. Those are presentation only; route only on the canonical `gpd_return.status`.
 
@@ -196,7 +200,7 @@ If the checker completed and the artifact gate passed, return the updated report
 - [ ] Checker prompt stays thin and delegates policy to `gpd-consistency-checker`
 - [ ] Expected `CONSISTENCY-CHECK.md` artifact is verified before success is accepted
 - [ ] Routing uses canonical `gpd_return.status`
-- [ ] Legacy checker-text routing is not used
+- [ ] Routing relies only on the canonical `gpd_return.status` (not checker prose)
 - [ ] Notation repair remains delegated to `gpd-notation-coordinator` when requested by the checker
 - [ ] Report presented with the selected scope and artifact gate result
 

@@ -88,6 +88,7 @@ goal: {find_root_cause_only | find_and_fix}
 task(
   prompt=filled_template,
   subagent_type="gpd-debugger",
+  readonly=false,
   description="Debug {slug}"
   # model parameter from profile tier — omit on single-model platforms
 )
@@ -96,11 +97,9 @@ task(
 **From debug (validation):**
 
 ```python
-task(prompt=template, subagent_type="gpd-debugger", description="Debug VAL-001")
+task(prompt=template, subagent_type="gpd-debugger", readonly=false, description="Debug VAL-001")
 # model parameter from profile tier — omit on single-model platforms
 ```
-
-## <!-- task() subagent_type and model parameters are runtime-specific; the installer adapts them to the target platform's delegation mechanism. -->
 
 ## Systematic Physics Debugging Strategy
 
@@ -170,7 +169,7 @@ If you cannot make progress after 3 investigation rounds, report structured fail
 1. **Document what you tried** — list each hypothesis tested and why it was eliminated
 2. **State what you know** — summarize confirmed facts and narrowed-down possibilities
 3. **Identify the blocker** — what specific information or capability is missing
-4. **Return CHECKPOINT REACHED** with the structured failure block above
+4. Return `gpd_return.status: checkpoint` with the structured failure block above
 
 Do NOT spin in circles retrying the same approaches. Escalate with structured context.
 

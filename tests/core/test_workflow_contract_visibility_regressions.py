@@ -6,7 +6,7 @@ import pytest
 
 from gpd.adapters.install_utils import expand_at_includes
 from gpd.core.public_surface_contract import resume_authority_fields
-from tests.doc_surface_contracts import resume_authority_public_vocabulary_intro, resume_compat_alias_fields
+from tests.doc_surface_contracts import resume_authority_public_vocabulary_intro, resume_backend_only_fields
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
@@ -33,9 +33,9 @@ def _workflow_text(name: str) -> str:
         ("progress.md", "Extract from init JSON:", "project_contract_gate"),
         ("audit-milestone.md", "Extract from init JSON:", "project_contract_gate"),
         ("resume-work.md", "- **Availability and contract authority:**", "project_contract_gate"),
-        ("write-paper.md", "Parse JSON for:", "project_contract_gate"),
+        ("write-paper.md", "Parse bootstrap JSON using", "project_contract_gate"),
         ("respond-to-referees.md", "Parse JSON for:", "project_contract_gate"),
-        ("peer-review.md", "Parse JSON for:", "project_contract_gate"),
+        ("peer-review.md", "Parse bootstrap JSON using", "project_contract_gate"),
     ],
 )
 def test_contract_gate_is_visible_before_authoritative_use(
@@ -56,17 +56,86 @@ def test_literature_review_workflow_surfaces_contract_gate_before_deferred_refer
 
     assert "project_contract_gate" in surface_line
     assert workflow.index(surface_line) < workflow.index("project_contract_gate.authoritative")
-    assert workflow.index(surface_line) < workflow.index("Do not use `reference_artifact_files` or `reference_artifacts_content` yet.")
+    assert workflow.index(surface_line) < workflow.index(
+        "Do not use `reference_artifact_files` or `reference_artifacts_content` yet."
+    )
+
+
+@pytest.mark.parametrize(
+    ("workflow_name", "gate_command", "first_forbidden_marker"),
+    [
+        ("plan-phase.md", "gpd --raw validate lifecycle-contract-gate plan-phase", "### Spawn gpd-phase-researcher"),
+        (
+            "execute-phase.md",
+            "gpd --raw validate lifecycle-contract-gate execute-phase",
+            '<step name="handle_branching">',
+        ),
+        ("verify-work.md", "gpd --raw validate lifecycle-contract-gate verify-work", "gpd-check-proof"),
+    ],
+)
+def test_lifecycle_workflows_stop_on_non_authoritative_project_contract_gate(
+    workflow_name: str,
+    gate_command: str,
+    first_forbidden_marker: str,
+) -> None:
+    workflow = _workflow_text(workflow_name)
+    stop_line = "**If `project_contract_gate.authoritative` is not true"
+
+    assert stop_line in workflow
+    assert "Do not plan, execute, verify, fingerprint, align, or pass `project_contract` to subagents" in workflow
+    assert gate_command in workflow
+    assert workflow.index(stop_line) < workflow.index(first_forbidden_marker)
+    assert workflow.index(gate_command) < workflow.index(first_forbidden_marker)
+
+
+def test_plan_phase_dirty_gate_stops_before_contract_and_authoring_surfaces() -> None:
+    workflow = _workflow_text("plan-phase.md")
+
+    assert "**Dirty worktree safety gate:**" in workflow
+    assert "ERROR: dirty project worktree detected before planning:" in workflow
+    assert "**If `project_contract_load_info.status` starts with `blocked`" in workflow
+    assert 'INIT=$(gpd --raw init plan-phase "$PHASE" --stage planner_authoring)' in workflow
+
+    dirty_gate = workflow.index("**Dirty worktree safety gate:**")
+    dirty_stop = workflow.index("ERROR: dirty project worktree detected before planning:")
+    contract_stop = workflow.index("**If `project_contract_load_info.status` starts with `blocked`")
+    first_authoring_reload = workflow.index('INIT=$(gpd --raw init plan-phase "$PHASE" --stage planner_authoring)')
+
+    assert "git status --porcelain --untracked-files=all" in workflow
+    assert "Choose: git status --short, gpd commit, or explicitly approve a project-local cleanup path." in workflow
+    assert "HALTING -- plan-phase never stashes, resets, cleans, overwrites, or hides user work." in workflow
+    assert dirty_gate < dirty_stop < contract_stop < first_authoring_reload
+
+
+def test_plan_phase_missing_contract_gate_blocks_scope_substitution_and_authoring() -> None:
+    workflow = _workflow_text("plan-phase.md")
+
+    assert "**If `project_contract` is empty or null:**" in workflow
+    assert "**If `project_contract_gate.authoritative` is not true:**" in workflow
+    assert "LIFECYCLE_CONTRACT_GATE=$(gpd --raw validate lifecycle-contract-gate plan-phase" in workflow
+    assert 'INIT=$(gpd --raw init plan-phase "$PHASE" --stage planner_authoring)' in workflow
+
+    missing_contract_stop = workflow.index("**If `project_contract` is empty or null:**")
+    authoritative_gate_stop = workflow.index("**If `project_contract_gate.authoritative` is not true:**")
+    lifecycle_gate = workflow.index("LIFECYCLE_CONTRACT_GATE=$(gpd --raw validate lifecycle-contract-gate plan-phase")
+    first_authoring_reload = workflow.index('INIT=$(gpd --raw init plan-phase "$PHASE" --stage planner_authoring)')
+
+    assert "Planning requires an approved scoping contract in `GPD/state.json`" in workflow
+    assert "do not infer phase scope from `ROADMAP.md` or `REQUIREMENTS.md` alone" in workflow
+    assert "a visible-but-blocked contract is not an approved planning contract" in workflow
+    assert "Do not plan, execute, verify, fingerprint, align, or pass `project_contract` to subagents" in workflow
+    assert missing_contract_stop < authoritative_gate_stop < lifecycle_gate < first_authoring_reload
 
 
 def test_write_paper_surfaces_manuscript_reference_status_before_using_it() -> None:
     workflow = _workflow_text("write-paper.md")
-    surface_line = next(line for line in workflow.splitlines() if line.startswith("Parse JSON for:"))
+    surface_line = next(line for line in workflow.splitlines() if line.startswith("Parse bootstrap JSON using"))
+    use_line = next(line for line in workflow.splitlines() if "When later steps need publication routing" in line)
 
-    assert "derived_manuscript_reference_status" in surface_line
-    assert "derived_manuscript_reference_status_count" in surface_line
+    assert "do not duplicate the manifest's required-field list in prose" in surface_line
+    assert "selected_publication_root" not in surface_line
+    assert "derived manuscript review statuses" in use_line
     assert workflow.index(surface_line) < workflow.index("derived_manuscript_reference_status")
-    assert workflow.index(surface_line) < workflow.index("derived_manuscript_reference_status_count")
     assert "If `derived_manuscript_reference_status` is present" in workflow
 
 
@@ -82,11 +151,11 @@ def test_execute_phase_latex_compile_guidance_uses_resolved_manuscript_root() ->
 
 def test_peer_review_reliability_reference_matches_peer_review_workflow_invocation() -> None:
     workflow = _workflow_text("peer-review.md")
-    reliability = (
-        REPO_ROOT / "src/gpd/specs/references/publication/peer-review-reliability.md"
-    ).read_text(encoding="utf-8")
+    reliability = (REPO_ROOT / "src/gpd/specs/references/publication/peer-review-reliability.md").read_text(
+        encoding="utf-8"
+    )
 
-    expected = 'gpd validate review-preflight peer-review "$ARGUMENTS" --strict'
+    expected = 'gpd validate review-preflight peer-review "$REVIEW_TARGET" --strict'
 
     assert expected in workflow
     assert expected in reliability
@@ -120,7 +189,9 @@ def test_new_milestone_roadmapper_prompt_surfaces_contract_gate_inputs() -> None
     assert "Active references: {active_reference_context}" in contract_context
     assert "Effective reference intake: {effective_reference_intake}" in contract_context
     assert "Reference artifacts: {reference_artifacts_content}" in contract_context
-    assert workflow.index("Project contract gate: {project_contract_gate}") < workflow.index("approved project contract")
+    assert workflow.index("Project contract gate: {project_contract_gate}") < workflow.index(
+        "approved project contract"
+    )
     assert "`project_contract_gate.authoritative` is true" in workflow
     assert "shared_state_policy: return_only" in workflow
     assert "expected_artifacts:" in workflow
@@ -129,13 +200,13 @@ def test_new_milestone_roadmapper_prompt_surfaces_contract_gate_inputs() -> None
 def test_help_resume_surface_stays_user_facing() -> None:
     workflow = expand_at_includes(_workflow_text("help.md"), REPO_ROOT / "src/gpd", "/runtime/").lower()
 
-    assert "compatibility-only intake fields stay internal" in workflow
-    assert "compat_resume_surface" not in workflow
+    assert "canonical continuation fields define the public resume vocabulary" in workflow
+    assert "`resume_surface`" not in workflow
     assert "session.resume_file" not in workflow
     assert "shared resume-surface resolver owns canonical candidate kind/origin semantics" not in workflow
 
 
-def test_resume_work_keeps_public_resume_vocabulary_and_nested_compatibility_intake_separate() -> None:
+def test_resume_work_keeps_public_resume_vocabulary_canonical() -> None:
     resume_work_command = expand_at_includes(
         (COMMANDS_DIR / "resume-work.md").read_text(encoding="utf-8"),
         REPO_ROOT / "src/gpd",
@@ -145,12 +216,10 @@ def test_resume_work_keeps_public_resume_vocabulary_and_nested_compatibility_int
 
     assert resume_authority_public_vocabulary_intro() in resume_work_command
     assert resume_authority_public_vocabulary_intro() in resume_work_workflow
-    assert "compatibility-only intake fields stay internal" in resume_work_command.lower()
-    assert "compatibility-only intake fields stay internal" in resume_work_workflow.lower()
-    assert "compat_resume_surface" not in resume_work_command
-    assert "compat_resume_surface" not in resume_work_workflow
-    assert "session_resume_file" not in resume_work_command
-    assert "session_resume_file" not in resume_work_workflow
+    assert "`resume_surface`" not in resume_work_command
+    assert "`resume_surface`" not in resume_work_workflow
+    assert "handoff_resume_file" not in resume_work_command
+    assert "handoff_resume_file" not in resume_work_workflow
     assert resume_authority_fields() == (
         "active_resume_kind",
         "active_resume_origin",
@@ -163,7 +232,7 @@ def test_resume_work_keeps_public_resume_vocabulary_and_nested_compatibility_int
         "missing_continuity_handoff_file",
         "resume_candidates",
     )
-    assert not any(alias in resume_authority_fields() for alias in resume_compat_alias_fields())
+    assert not any(alias in resume_authority_fields() for alias in resume_backend_only_fields())
 
 
 def test_sync_state_keeps_state_json_authority_before_markdown_repair() -> None:
@@ -178,33 +247,42 @@ def test_sync_state_keeps_state_json_authority_before_markdown_repair() -> None:
 
     assert "@{GPD_INSTALL_DIR}/workflows/sync-state.md" in raw_sync_state_command
     assert "@{GPD_INSTALL_DIR}/templates/state-json-schema.md" not in raw_sync_state_command
-    assert "@{GPD_INSTALL_DIR}/templates/state-json-schema.md" in raw_sync_state_workflow
+    assert "{GPD_INSTALL_DIR}/templates/state-json-schema.md" in raw_sync_state_workflow
+    assert "@{GPD_INSTALL_DIR}/templates/state-json-schema.md" not in raw_sync_state_workflow
     assert "`state.json` is the authoritative store for structured state" in raw_sync_state_workflow
     assert "`STATE.md` is the human-readable projection" in raw_sync_state_workflow
 
     for content in (sync_state_command, sync_state_workflow):
-        assert "# state.json Schema" in content
-        assert "Authoritative vs Derived" in content
+        assert "state-json-schema.md" in content
+        assert "# state.json Schema" not in content
         assert "Markdown is only used as a recovery source when `state.json` is missing or unreadable." in content
         assert "do not invent a field-by-field merge" in content
 
 
-def test_resume_workflow_routes_new_projects_before_state_reconstruction() -> None:
+def test_resume_workflow_routes_recent_project_ambiguity_before_new_projects_and_state_reconstruction() -> None:
     workflow = _workflow_text("resume-work.md")
 
-    new_project_line = "**If `planning_exists` is false:** This is a new project - route to gpd:new-project and do not attempt STATE.md reconstruction."
+    ambiguity_line = (
+        '**If `project_reentry_requires_selection` is true or `project_reentry_mode="ambiguous-recent-projects"`:**'
+    )
+    auto_recent_line = '**If `project_root_auto_selected` is true or `project_root_source="recent_project"`:**'
+    new_project_line = "**If `planning_exists` is false and no recent-project selection is required:** If recoverable state exists, repair first. Otherwise route to gpd:new-project and do not attempt STATE.md reconstruction."
     reconstruction_line = "If STATE.md is missing but other artifacts exist and `planning_exists` is true:"
 
+    assert ambiguity_line in workflow
+    assert auto_recent_line in workflow
     assert new_project_line in workflow
     assert reconstruction_line in workflow
+    assert workflow.index(ambiguity_line) < workflow.index(new_project_line)
+    assert workflow.index(auto_recent_line) < workflow.index(new_project_line)
     assert workflow.index(new_project_line) < workflow.index(reconstruction_line)
 
 
-def test_resume_workflow_prioritizes_blocked_contract_repair_before_resume_targets_and_incomplete_plan_completion() -> None:
+def test_resume_workflow_prioritizes_blocked_contract_repair_before_resume_targets_and_incomplete_plan() -> None:
     workflow = _workflow_text("resume-work.md")
 
     blocked_contract_line = "**If `project_contract_gate.authoritative` is false:**"
-    bounded_segment_line = "**If `active_resume_kind=\"bounded_segment\"` and `active_bounded_segment` exists:**"
+    bounded_segment_line = '**If `active_resume_kind="bounded_segment"` and `active_bounded_segment` exists:**'
     incomplete_plan_line = "**If incomplete plan (PLAN without SUMMARY) and no higher-priority blocker is active:**"
 
     assert blocked_contract_line in workflow
@@ -218,13 +296,14 @@ def test_arxiv_submission_does_not_instruct_unsupported_explicit_submission_root
     workflow = _workflow_text("arxiv-submission.md")
 
     assert "submission/topic_stem.tex" not in workflow
-    assert "documented manuscript roots `paper/`, `manuscript/`, and `draft/`" in workflow
+    assert (
+        "inspect only the documented GPD-owned manuscript roots: `paper/`, `manuscript/`, `draft/`, "
+        "and a unique `GPD/publication/<subject_slug>/manuscript/` lane" in workflow
+    )
 
 
 def test_paper_quality_scoring_reference_tracks_per_journal_gate_and_generic_fallback() -> None:
-    scoring = (
-        REPO_ROOT / "src/gpd/specs/references/publication/paper-quality-scoring.md"
-    ).read_text(encoding="utf-8")
+    scoring = (REPO_ROOT / "src/gpd/specs/references/publication/paper-quality-scoring.md").read_text(encoding="utf-8")
 
     assert "minimum_submission_score" in scoring
     assert "score ≥ 80" not in scoring
@@ -233,11 +312,12 @@ def test_paper_quality_scoring_reference_tracks_per_journal_gate_and_generic_fal
 
 def test_write_paper_and_scoring_docs_distinguish_builder_supported_vs_manual_only_journals() -> None:
     workflow = _workflow_text("write-paper.md")
-    scoring = (
-        REPO_ROOT / "src/gpd/specs/references/publication/paper-quality-scoring.md"
-    ).read_text(encoding="utf-8")
+    scoring = (REPO_ROOT / "src/gpd/specs/references/publication/paper-quality-scoring.md").read_text(encoding="utf-8")
 
-    assert "These are the only valid `journal` values in `PAPER-CONFIG.json` and `${PAPER_DIR}/ARTIFACT-MANIFEST.json`." in workflow
+    assert (
+        "These are the only valid `journal` values in `PAPER-CONFIG.json` and `${PAPER_DIR}/ARTIFACT-MANIFEST.json`."
+        in workflow
+    )
     assert "artifact-driven `--from-project` path" in scoring
     assert "Manual JSON is also the only supported path today for scoring-only profiles" in scoring
     assert "`prd`, `prb`, `prc`, and `nature_physics`" in scoring

@@ -10,10 +10,14 @@ from pathlib import Path
 
 import pytest
 
+from gpd.contracts import ResearchContract
 from gpd.core import state as state_module
 from gpd.core.constants import STATE_JSON_BACKUP_FILENAME, ProjectLayout
 from gpd.core.continuation import ContinuationBoundedSegment
+from gpd.core.contract_validation import contract_fingerprint
+from gpd.core.errors import StateError
 from gpd.core.state import (
+    ContractAlignmentGate,
     _find_list_parent_loc,
     _load_recent_projects_index,
     _load_state_snapshot_for_mutation,
@@ -31,6 +35,7 @@ from gpd.core.state import (
     save_state_markdown,
     state_get,
     state_load,
+    state_record_contract_alignment,
     state_record_session,
     state_set_continuation_bounded_segment,
     state_set_project_contract,
@@ -111,6 +116,15 @@ def _project_contract_with_question(question: str) -> dict[str, object]:
     contract["scope"]["question"] = question
     return contract
 
+
+def _project_contract_fixture() -> dict[str, object]:
+    return json.loads((FIXTURES_DIR / "project_contract.json").read_text(encoding="utf-8"))
+
+
+def _project_contract_hash(contract: dict[str, object]) -> str:
+    return contract_fingerprint(ResearchContract.model_validate(contract))
+
+
 # ─── default_state_dict ──────────────────────────────────────────────────────
 
 
@@ -119,7 +133,7 @@ def test_default_state_dict_has_required_keys():
     assert "position" in s
     assert "decisions" in s
     assert "blockers" in s
-    assert "session" in s
+    assert "session" not in s
     assert "continuation" in s
     assert "convention_lock" in s
     assert "approximations" in s
@@ -137,7 +151,7 @@ def test_default_state_dict_position_defaults():
     assert s["project_contract"] is None
 
 
-def test_parse_state_to_json_import_legacy_session_requires_resume_relevant_fields() -> None:
+def test_parse_state_to_json_requires_resume_relevant_fields() -> None:
     markdown = (
         "# STATE\n\n"
         "## Project\n\n"
@@ -154,8 +168,8 @@ def test_parse_state_to_json_import_legacy_session_requires_resume_relevant_fiel
         "**Progress:** 40%\n\n"
         "## Session Continuity\n\n"
         "**Last session:** 2026-04-01T12:00:00+00:00\n"
-        "**Hostname:** legacy-host\n"
-        "**Platform:** legacy-platform\n"
+        "**Hostname:** stale-host\n"
+        "**Platform:** stale-platform\n"
         "**Stopped at:** —\n"
         "**Resume file:** —\n"
         "**Last result ID:** —\n\n"
@@ -171,7 +185,7 @@ def test_parse_state_to_json_import_legacy_session_requires_resume_relevant_fiel
         "## Pending Todos\n\nNone.\n"
     )
 
-    parsed = parse_state_to_json(markdown, import_legacy_session=True)
+    parsed = parse_state_to_json(markdown)
 
     assert parsed["continuation"]["handoff"]["resume_file"] is None
     assert parsed["continuation"]["handoff"]["stopped_at"] is None
@@ -179,7 +193,7 @@ def test_parse_state_to_json_import_legacy_session_requires_resume_relevant_fiel
     assert parsed["continuation"]["machine"]["platform"] is None
 
 
-def test_parse_state_to_json_import_legacy_session_keeps_real_handoff_and_machine_context() -> None:
+def test_parse_state_to_json_keeps_real_handoff_and_machine_context() -> None:
     markdown = (
         "# STATE\n\n"
         "## Project\n\n"
@@ -196,8 +210,8 @@ def test_parse_state_to_json_import_legacy_session_keeps_real_handoff_and_machin
         "**Progress:** 40%\n\n"
         "## Session Continuity\n\n"
         "**Last session:** 2026-04-01T12:00:00+00:00\n"
-        "**Hostname:** legacy-host\n"
-        "**Platform:** legacy-platform\n"
+        "**Hostname:** stale-host\n"
+        "**Platform:** stale-platform\n"
         "**Stopped at:** Phase 03 Plan 02\n"
         "**Resume file:** GPD/phases/03-analysis/.continue-here.md\n"
         "**Last result ID:** result-7\n\n"
@@ -213,13 +227,13 @@ def test_parse_state_to_json_import_legacy_session_keeps_real_handoff_and_machin
         "## Pending Todos\n\nNone.\n"
     )
 
-    parsed = parse_state_to_json(markdown, import_legacy_session=True)
+    parsed = parse_state_to_json(markdown)
 
     assert parsed["continuation"]["handoff"]["resume_file"] == "GPD/phases/03-analysis/.continue-here.md"
     assert parsed["continuation"]["handoff"]["stopped_at"] == "Phase 03 Plan 02"
     assert parsed["continuation"]["handoff"]["last_result_id"] == "result-7"
-    assert parsed["continuation"]["machine"]["hostname"] == "legacy-host"
-    assert parsed["continuation"]["machine"]["platform"] == "legacy-platform"
+    assert parsed["continuation"]["machine"]["hostname"] == "stale-host"
+    assert parsed["continuation"]["machine"]["platform"] == "stale-platform"
 
 
 def test_parse_state_md_treats_plain_not_set_placeholders_as_unset() -> None:
@@ -272,6 +286,52 @@ def test_parse_state_md_treats_plain_not_set_placeholders_as_unset() -> None:
     assert parsed["session"]["stopped_at"] is None
     assert parsed["session"]["resume_file"] is None
     assert parsed["session"]["last_result_id"] is None
+
+
+def test_parse_state_md_filters_exact_placeholder_bullets_only() -> None:
+    markdown = (
+        "# Research State\n\n"
+        "## Active Calculations\n\n"
+        "- Nonequilibrium saddle expansion\n"
+        "- None of the counterterms cancel\n"
+        "- none\n"
+        "- None yet.\n"
+        "- -\n"
+        "- \u2014\n\n"
+        "## Intermediate Results\n\n"
+        "- Nonequilibrium dispersion relation\n"
+        "- none yet\n\n"
+        "## Open Questions\n\n"
+        "- Nonequilibrium Ward identity?\n"
+        "- none\n\n"
+        "## Accumulated Context\n\n"
+        "### Decisions\n\n"
+        "- [Phase 02]: Nonequilibrium branch is physical\n"
+        "- Nonequilibrium normalization stays explicit\n"
+        "- none\n\n"
+        "### Pending Todos\n\n"
+        "- Nonequilibrium limit check\n"
+        "- None yet.\n\n"
+        "### Blockers/Concerns\n\n"
+        "- Nonequilibrium convergence is slow\n"
+        "- -\n"
+        "- none\n\n"
+    )
+
+    parsed = parse_state_md(markdown)
+
+    assert parsed["active_calculations"] == [
+        "Nonequilibrium saddle expansion",
+        "None of the counterterms cancel",
+    ]
+    assert parsed["intermediate_results"] == ["Nonequilibrium dispersion relation"]
+    assert parsed["open_questions"] == ["Nonequilibrium Ward identity?"]
+    assert parsed["decisions"] == [
+        {"phase": "02", "summary": "Nonequilibrium branch is physical", "rationale": None},
+        {"phase": None, "summary": "Nonequilibrium normalization stays explicit", "rationale": None},
+    ]
+    assert parsed["pending_todos"] == ["Nonequilibrium limit check"]
+    assert parsed["blockers"] == ["Nonequilibrium convergence is slow"]
 
 
 # ─── ensure_state_schema ─────────────────────────────────────────────────────
@@ -359,10 +419,10 @@ def test_normalize_state_schema_reports_coercive_project_contract_scalars():
 
 def test_integrity_issue_from_contract_error_accepts_pydantic_extra_forbidden_suffix() -> None:
     issue = state_module._integrity_issue_from_contract_error(
-        "legacy_notes: Extra inputs are not permitted [type=extra_forbidden]"
+        "stale_notes: Extra inputs are not permitted [type=extra_forbidden]"
     )
 
-    assert issue == 'schema normalization: dropped unknown "project_contract.legacy_notes"'
+    assert issue == 'schema normalization: dropped unknown "project_contract.stale_notes"'
 
 
 def test_normalize_state_schema_drops_project_contract_that_fails_draft_scoping_validation():
@@ -370,11 +430,12 @@ def test_normalize_state_schema_drops_project_contract_that_fails_draft_scoping_
 
     assert normalized["project_contract"] is None
     assert any(
-        'schema normalization: dropped "project_contract" because contract failed draft scoping validation'
-        in issue
+        'schema normalization: dropped "project_contract" because contract failed draft scoping validation' in issue
         for issue in issues
     )
-    assert any("project_contract: claim claim-benchmark references unknown reference missing-ref" in issue for issue in issues)
+    assert any(
+        "project_contract: claim claim-benchmark references unknown reference missing-ref" in issue for issue in issues
+    )
 
 
 def test_peek_state_json_respects_project_root_for_project_contract_grounding(tmp_path: Path) -> None:
@@ -403,7 +464,7 @@ def test_peek_state_json_respects_project_root_for_project_contract_grounding(tm
 
     assert loaded is not None
     assert source == "state.json"
-    assert any("schema normalization: dropped \"project_contract\"" in issue for issue in issues)
+    assert any('schema normalization: dropped "project_contract"' in issue for issue in issues)
     assert loaded["project_contract"] is None
 
 
@@ -602,7 +663,9 @@ def test_load_state_json_readonly_reads_backup_without_persisting_recovery(
     assert layout.state_md.exists()
 
 
-def test_normalize_state_schema_irrecoverable_reset_drops_unknown_top_level_keys(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_normalize_state_schema_irrecoverable_reset_drops_unknown_top_level_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     validation_error = state_module.PydanticValidationError.from_exception_data(
         "ResearchState",
         [
@@ -631,10 +694,7 @@ def test_normalize_state_schema_empty_dict_emits_reset_sentinel() -> None:
     normalized, issues = _normalize_state_schema({})
 
     assert normalized["position"]["progress_percent"] == 0  # got defaults
-    assert any(
-        "schema normalization: irrecoverable validation failure; reset to defaults" in issue
-        for issue in issues
-    )
+    assert any("schema normalization: irrecoverable validation failure; reset to defaults" in issue for issue in issues)
 
 
 def test_normalize_state_schema_none_returns_defaults_without_issues() -> None:
@@ -662,18 +722,13 @@ def test_state_validate_recovers_backup_when_primary_is_empty_dict(tmp_path: Pat
 
     # Corrupt primary to {}, keep backup valid
     layout.state_json.write_text("{}\n", encoding="utf-8")
-    layout.state_json_backup.write_text(
-        json.dumps(baseline, indent=2) + "\n", encoding="utf-8"
-    )
+    layout.state_json_backup.write_text(json.dumps(baseline, indent=2) + "\n", encoding="utf-8")
 
     validation = state_validate(tmp_path)
 
     assert validation.valid is True
     assert validation.integrity_status == "warning"
-    assert any(
-        "state.json root was recovered from state.json.bak" in warning
-        for warning in validation.warnings
-    )
+    assert any("state.json root was recovered from state.json.bak" in warning for warning in validation.warnings)
 
 
 def test_mutation_snapshot_graceful_fallback_when_primary_and_backup_are_empty_dict(
@@ -755,7 +810,9 @@ def test_ensure_state_schema_malformed_verification_record_preserves_intermediat
 
     ids = [item["id"] for item in result["intermediate_results"] if isinstance(item, dict)]
     assert ids == ["good-1", "bad-1", "good-2"]
-    bad_result = next(item for item in result["intermediate_results"] if isinstance(item, dict) and item["id"] == "bad-1")
+    bad_result = next(
+        item for item in result["intermediate_results"] if isinstance(item, dict) and item["id"] == "bad-1"
+    )
     assert bad_result["verification_records"] == []
 
 
@@ -767,8 +824,7 @@ def test_state_set_project_contract_persists_contract_and_unresolved_questions(t
 
     assert result.updated is True
     assert any(
-        "context_intake.must_include_prior_outputs entry does not resolve to a project-local artifact"
-        in warning
+        "context_intake.must_include_prior_outputs entry does not resolve to a project-local artifact" in warning
         for warning in result.warnings
     )
     saved = load_state_json(tmp_path)
@@ -787,7 +843,7 @@ def test_state_set_project_contract_repairs_raw_blocked_payload_even_when_visibl
     layout = ProjectLayout(tmp_path)
     raw_state = json.loads(layout.state_json.read_text(encoding="utf-8"))
     blocked_contract = json.loads(json.dumps(contract))
-    blocked_contract["claims"][0]["notes"] = "legacy drift"
+    blocked_contract["claims"][0]["notes"] = "stale drift"
     raw_state["project_contract"] = blocked_contract
     layout.state_json.write_text(json.dumps(raw_state, indent=2) + "\n", encoding="utf-8")
 
@@ -918,7 +974,6 @@ def test_save_state_markdown_preserves_canonical_continuation_recorded_at_when_s
     state = json.loads((cwd / "GPD" / "state.json").read_text(encoding="utf-8"))
     state["continuation"]["handoff"]["recorded_at"] = "2026-03-30T09:15:00+00:00"
     state["continuation"]["machine"]["recorded_at"] = "2026-03-30T09:15:00+00:00"
-    state["session"]["last_date"] = "2026-03-30T09:15:00+00:00"
     save_state_json(cwd, state)
 
     markdown = (cwd / "GPD" / "STATE.md").read_text(encoding="utf-8")
@@ -1128,9 +1183,9 @@ def test_load_state_json_preserves_draft_invalid_project_contract_visibility(tmp
     assert loaded is not None
     assert loaded["project_contract"] is not None
     assert loaded["project_contract"]["claims"][0]["references"] == ["missing-ref"]
-    assert json.loads(layout.state_json.read_text(encoding="utf-8"))["project_contract"]["claims"][0][
-        "references"
-    ] == ["missing-ref"]
+    assert json.loads(layout.state_json.read_text(encoding="utf-8"))["project_contract"]["claims"][0]["references"] == [
+        "missing-ref"
+    ]
 
 
 def test_save_state_markdown_normalizes_visible_project_contract_when_primary_contract_has_singleton_list_drift(
@@ -1341,9 +1396,7 @@ def test_state_load_backup_recovery_does_not_promote_salvaged_backup_contract_to
     backup_state = default_state_dict()
     backup_state["position"]["current_phase"] = "9"
     backup_state["position"]["status"] = "Planning"
-    backup_state["project_contract"] = json.loads(
-        (FIXTURES_DIR / "project_contract.json").read_text(encoding="utf-8")
-    )
+    backup_state["project_contract"] = json.loads((FIXTURES_DIR / "project_contract.json").read_text(encoding="utf-8"))
     backup_state["project_contract"]["context_intake"]["must_read_refs"] = "ref-benchmark"
 
     layout.state_json.write_text("{not-json", encoding="utf-8")
@@ -1400,7 +1453,10 @@ def test_state_load_blocks_nested_collection_truncation_in_raw_project_contract(
     assert loaded.project_contract_load_info["status"] == "blocked_schema"
     assert loaded.project_contract_gate["visible"] is False
     assert loaded.project_contract_gate["repair_required"] is True
-    assert "claims.0.parameters.0.domain_or_type: Input should be a valid string" in loaded.project_contract_load_info["errors"]
+    assert (
+        "claims.0.parameters.0.domain_or_type: Input should be a valid string"
+        in loaded.project_contract_load_info["errors"]
+    )
 
 
 def test_state_load_backup_restore_surfaces_project_contract_salvage_diagnostics(
@@ -1442,9 +1498,6 @@ def test_load_state_json_recovers_backup_only_state_when_primary_json_is_missing
 
 def test_load_state_json_recovers_backup_continuation_when_primary_json_is_corrupted(tmp_path: Path) -> None:
     primary_state = default_state_dict()
-    primary_state["session"]["last_date"] = "2026-03-29T12:00:00+00:00"
-    primary_state["session"]["stopped_at"] = "Phase 03 Plan 2"
-    primary_state["session"]["resume_file"] = "resume.md"
     primary_state["continuation"]["handoff"]["recorded_at"] = "2026-03-29T12:00:00+00:00"
     primary_state["continuation"]["handoff"]["stopped_at"] = "Phase 03 Plan 2"
     backup_state = json.loads(json.dumps(primary_state))
@@ -1462,20 +1515,110 @@ def test_load_state_json_recovers_backup_continuation_when_primary_json_is_corru
     loaded = load_state_json(tmp_path)
 
     assert loaded is not None
-    assert loaded["session"]["resume_file"] is None
+    assert "session" not in loaded
     assert loaded["continuation"]["handoff"]["stopped_at"] == "Phase 03 Plan 2"
+    assert loaded["continuation"]["handoff"]["resume_file"] is None
     assert loaded["continuation"]["bounded_segment"]["segment_id"] == "segment-03-02"
     assert loaded["continuation"]["bounded_segment"]["resume_file"] == "GPD/phases/03-analysis/.continue-here.md"
     persisted = json.loads(layout.state_json.read_text(encoding="utf-8"))
     assert persisted["continuation"]["bounded_segment"]["segment_id"] == "segment-03-02"
-    assert persisted["session"]["resume_file"] is None
+    assert "session" not in persisted
 
 
-def test_load_state_json_recovers_backup_continuation_when_primary_continuation_section_is_invalid(tmp_path: Path) -> None:
+def test_load_state_json_accepts_newer_state_md_when_only_backup_bounded_segment_differs(
+    tmp_path: Path,
+) -> None:
     primary_state = default_state_dict()
-    primary_state["session"]["last_date"] = "2026-03-29T12:00:00+00:00"
-    primary_state["session"]["stopped_at"] = "Legacy stop"
-    primary_state["session"]["resume_file"] = "legacy.md"
+    primary_state["continuation"]["handoff"]["recorded_at"] = "2026-03-29T12:00:00+00:00"
+    primary_state["continuation"]["handoff"]["stopped_at"] = "Phase 03 Plan 2"
+    backup_state = json.loads(json.dumps(primary_state))
+    backup_state["continuation"]["bounded_segment"] = {
+        "resume_file": "GPD/phases/03-analysis/.continue-here.md",
+        "phase": "03",
+        "plan": "02",
+        "segment_id": "segment-json-only",
+        "segment_status": "paused",
+        "pre_fanout_review_pending": True,
+    }
+    layout = _write_backup_only_state(tmp_path, primary_state, backup_state=backup_state)
+    layout.state_json.write_text("{not-json", encoding="utf-8")
+    old_ns = 1_700_000_000_000_000_000
+    new_ns = old_ns + 1_000_000_000
+    os.utime(layout.state_json_backup, ns=(old_ns, old_ns))
+    os.utime(layout.state_md, ns=(new_ns, new_ns))
+
+    loaded = load_state_json(tmp_path)
+
+    assert loaded is not None
+    assert loaded["continuation"]["handoff"]["stopped_at"] == "Phase 03 Plan 2"
+    assert loaded["continuation"]["bounded_segment"]["segment_id"] == "segment-json-only"
+    assert loaded["continuation"]["bounded_segment"]["pre_fanout_review_pending"] is True
+    assert (
+        json.loads(layout.state_json.read_text(encoding="utf-8"))["continuation"]["bounded_segment"]["segment_id"]
+        == "segment-json-only"
+    )
+
+
+def test_state_md_rebuild_preserves_stale_backup_json_only_bounded_segment(tmp_path: Path) -> None:
+    layout = ProjectLayout(tmp_path)
+    layout.gpd.mkdir(parents=True, exist_ok=True)
+
+    backup_state = default_state_dict()
+    backup_state["position"]["current_phase"] = "03"
+    backup_state["position"]["status"] = "Executing"
+    backup_state["continuation"]["bounded_segment"] = {
+        "resume_file": "GPD/phases/03-analysis/.continue-here.md",
+        "phase": "03",
+        "plan": "02",
+        "segment_id": "segment-preserved-from-stale-backup",
+        "segment_status": "paused",
+        "downstream_locked": True,
+        "updated_at": "2026-03-29T12:00:00+00:00",
+    }
+    backup_state["continuation"]["handoff"].update(
+        {
+            "recorded_at": "2026-03-20T12:00:00+00:00",
+            "stopped_at": "Old backup handoff",
+            "resume_file": "GPD/phases/03-analysis/old.md",
+        }
+    )
+    md_state = default_state_dict()
+    md_state["position"]["current_phase"] = "06"
+    md_state["position"]["status"] = "Paused"
+    md_state["continuation"]["handoff"].update(
+        {
+            "recorded_at": "2026-03-30T12:00:00+00:00",
+            "stopped_at": "New markdown handoff",
+            "resume_file": "GPD/phases/06-analysis/new.md",
+        }
+    )
+    layout.state_json.write_text("{not-json", encoding="utf-8")
+    layout.state_json_backup.write_text(json.dumps(backup_state, indent=2) + "\n", encoding="utf-8")
+    layout.state_md.write_text(generate_state_markdown(md_state), encoding="utf-8")
+    old_ns = 1_700_000_000_000_000_000
+    new_ns = old_ns + 1_000_000_000
+    os.utime(layout.state_json_backup, ns=(old_ns, old_ns))
+    os.utime(layout.state_md, ns=(new_ns, new_ns))
+
+    loaded, issues, state_source = peek_state_json(tmp_path, recover_intent=False)
+
+    assert loaded is not None
+    assert state_source == "STATE.md"
+    assert (
+        "state.json root was recovered from STATE.md after primary state.json was unavailable or unreadable" in issues
+    )
+    assert loaded["position"]["current_phase"] == "06"
+    assert loaded["position"]["status"] == "Paused"
+    assert loaded["continuation"]["handoff"]["stopped_at"] == "New markdown handoff"
+    assert loaded["continuation"]["handoff"]["resume_file"] == "GPD/phases/06-analysis/new.md"
+    assert loaded["continuation"]["bounded_segment"]["segment_id"] == "segment-preserved-from-stale-backup"
+    assert loaded["continuation"]["bounded_segment"]["downstream_locked"] is True
+
+
+def test_load_state_json_recovers_backup_continuation_when_primary_continuation_section_is_invalid(
+    tmp_path: Path,
+) -> None:
+    primary_state = default_state_dict()
     primary_state["continuation"] = []
 
     backup_state = default_state_dict()
@@ -1507,18 +1650,15 @@ def test_load_state_json_recovers_backup_continuation_when_primary_continuation_
 
     assert loaded is not None
     assert loaded["continuation"]["handoff"]["stopped_at"] == "Phase 03 Plan 2"
+    assert loaded["continuation"]["handoff"]["resume_file"] == "GPD/phases/03-analysis/.continue-here.md"
+    assert loaded["continuation"]["machine"]["hostname"] == "builder-01"
+    assert loaded["continuation"]["machine"]["platform"] == "Linux 6.1 x86_64"
     assert loaded["continuation"]["bounded_segment"]["segment_id"] == "segment-03-02"
-    assert loaded["session"] == {
-        "last_date": "2026-03-29T12:00:00+00:00",
-        "stopped_at": "Phase 03 Plan 2",
-        "resume_file": "GPD/phases/03-analysis/.continue-here.md",
-        "hostname": "builder-01",
-        "platform": "Linux 6.1 x86_64",
-        "last_result_id": None,
-    }
+    assert "session" not in loaded
     persisted = json.loads(layout.state_json.read_text(encoding="utf-8"))
     assert persisted["continuation"]["bounded_segment"]["segment_id"] == "segment-03-02"
-    assert persisted["session"]["resume_file"] == "GPD/phases/03-analysis/.continue-here.md"
+    assert persisted["continuation"]["handoff"]["resume_file"] == "GPD/phases/03-analysis/.continue-here.md"
+    assert "session" not in persisted
 
 
 def test_load_state_json_repairs_primary_json_from_state_markdown_when_primary_is_unreadable(tmp_path: Path) -> None:
@@ -1707,6 +1847,23 @@ def test_state_get_rebuilds_missing_state_markdown_from_state_json(tmp_path: Pat
     assert layout.state_md.exists()
 
 
+def test_state_get_recovers_pending_intent_before_reading_state_markdown(tmp_path: Path) -> None:
+    stale_state = default_state_dict()
+    stale_state["position"]["current_phase"] = "01"
+
+    recovered_state = default_state_dict()
+    recovered_state["position"]["current_phase"] = "05"
+    recovered_state["position"]["status"] = "Executing"
+
+    layout = _write_intent_recovery_state(tmp_path, stale_state=stale_state, recovered_state=recovered_state)
+
+    result = state_get(tmp_path, "Current Phase")
+
+    assert result.value == "05"
+    assert not layout.state_intent.exists()
+    assert json.loads(layout.state_json.read_text(encoding="utf-8"))["position"]["current_phase"] == "05"
+
+
 def test_state_get_prefers_canonical_session_continuation_and_handoff_payloads(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1724,25 +1881,24 @@ def test_state_get_prefers_canonical_session_continuation_and_handoff_payloads(
         encoding="utf-8",
     )
 
-    session = state_get(tmp_path, "session")
     continuation = state_get(tmp_path, "continuation")
     handoff = state_get(tmp_path, "handoff")
-    session_payload = json.loads(session.value or "{}")
     continuation_payload = json.loads(continuation.value or "{}")
     handoff_payload = json.loads(handoff.value or "{}")
 
-    assert session.section_name == "session"
+    session_display = state_module._session_display_from_continuation(continuation_payload)
+
     assert continuation.section_name == "continuation"
     assert handoff.section_name == "handoff"
-    assert session_payload["hostname"] == "builder-01"
-    assert session_payload["platform"] == "Linux 6.1 x86_64"
-    assert session_payload["stopped_at"] == "Phase 03 Plan 2"
-    assert session_payload["resume_file"] == "NEXT.md"
-    assert session_payload["last_result_id"] is None
-    assert session_payload["last_date"] is not None
+    assert session_display["hostname"] == "builder-01"
+    assert session_display["platform"] == "Linux 6.1 x86_64"
+    assert session_display["stopped_at"] == "Phase 03 Plan 2"
+    assert session_display["resume_file"] == "NEXT.md"
+    assert session_display["last_result_id"] is None
+    assert session_display["last_date"] is not None
     assert continuation_payload["handoff"]["resume_file"] == "NEXT.md"
     assert handoff_payload["resume_file"] == "NEXT.md"
-    assert "stale-host" not in (session.value or "")
+    assert "stale-host" not in (continuation.value or "")
 
 
 def test_peek_state_json_keeps_normalized_primary_when_unrelated_section_is_schema_corrupt(tmp_path: Path) -> None:
@@ -1783,7 +1939,10 @@ def test_state_validate_keeps_normalized_primary_when_unrelated_section_is_schem
     assert result.valid is True
     assert result.integrity_status == "warning"
     assert result.state_source == "state.json"
-    assert any('schema normalization: dropped "blockers" because expected list, got str' in warning for warning in result.warnings)
+    assert any(
+        'schema normalization: dropped "blockers" because expected list, got str' in warning
+        for warning in result.warnings
+    )
     assert not any("state.json root was recovered from state.json.bak" in warning for warning in result.warnings)
 
 
@@ -1801,6 +1960,8 @@ def test_state_snapshot_does_not_recover_intent_marker_and_keeps_state_unchanged
     snapshot = state_snapshot(tmp_path)
 
     assert snapshot.current_phase == "01"
+    assert "session" not in type(snapshot).model_fields
+    assert "session" not in snapshot.model_dump(mode="json")
     assert layout.state_json.read_text(encoding="utf-8") == before_state
     assert json.loads(layout.state_json.read_text(encoding="utf-8"))["position"]["current_phase"] == "01"
     assert layout.state_intent.exists()
@@ -1838,6 +1999,33 @@ def test_load_state_json_discards_stale_intent_when_current_state_files_are_newe
     assert not md_tmp.exists()
 
 
+def test_load_state_json_completes_half_promoted_json_intent_with_markdown_temp(tmp_path: Path) -> None:
+    stale_state = default_state_dict()
+    stale_state["position"]["current_phase"] = "01"
+
+    recovered_state = default_state_dict()
+    recovered_state["position"]["current_phase"] = "05"
+    recovered_state["position"]["status"] = "Executing"
+
+    layout = _write_intent_recovery_state(tmp_path, stale_state=stale_state, recovered_state=recovered_state)
+    json_tmp = layout.gpd / ".state-json-tmp"
+    md_tmp = layout.gpd / ".state-md-tmp"
+    json_tmp.replace(layout.state_json)
+
+    assert not json_tmp.exists()
+    assert md_tmp.exists()
+    assert "**Current Phase:** 01" in layout.state_md.read_text(encoding="utf-8")
+
+    loaded = load_state_json(tmp_path)
+
+    assert loaded is not None
+    assert loaded["position"]["current_phase"] == "05"
+    assert json.loads(layout.state_json.read_text(encoding="utf-8"))["position"]["current_phase"] == "05"
+    assert "**Current Phase:** 05" in layout.state_md.read_text(encoding="utf-8")
+    assert not layout.state_intent.exists()
+    assert not md_tmp.exists()
+
+
 def test_peek_state_json_fallback_does_not_consume_intent_marker(tmp_path: Path) -> None:
     stale_state = default_state_dict()
     stale_state["position"]["current_phase"] = "01"
@@ -1855,18 +2043,20 @@ def test_peek_state_json_fallback_does_not_consume_intent_marker(tmp_path: Path)
 
     assert loaded is not None
     assert loaded["position"]["current_phase"] == "01"
-    assert issues == ["state.json root was recovered from STATE.md after primary state.json was unavailable or unreadable"]
+    assert issues == [
+        "state.json root was recovered from STATE.md after primary state.json was unavailable or unreadable"
+    ]
     assert state_source == "STATE.md"
     assert layout.state_intent.exists()
     assert layout.state_intent.read_text(encoding="utf-8") == before_intent
 
 
-def test_peek_state_json_state_md_fallback_does_not_import_legacy_session_continuation(tmp_path: Path) -> None:
+def test_peek_state_json_state_md_fallback_projects_session_continuity_into_continuation(tmp_path: Path) -> None:
     state = default_state_dict()
-    state["session"]["resume_file"] = "GPD/phases/03-analysis/.continue-here.md"
-    state["session"]["stopped_at"] = "2026-03-10T12:00:00+00:00"
-    state["session"]["hostname"] = "legacy-host"
-    state["session"]["platform"] = "legacy-platform"
+    state["continuation"]["handoff"]["resume_file"] = "GPD/phases/03-analysis/.continue-here.md"
+    state["continuation"]["handoff"]["stopped_at"] = "2026-03-10T12:00:00+00:00"
+    state["continuation"]["machine"]["hostname"] = "stale-host"
+    state["continuation"]["machine"]["platform"] = "stale-platform"
     layout = ProjectLayout(tmp_path)
     layout.gpd.mkdir(parents=True, exist_ok=True)
     layout.state_md.write_text(generate_state_markdown(state), encoding="utf-8")
@@ -1879,9 +2069,11 @@ def test_peek_state_json_state_md_fallback_does_not_import_legacy_session_contin
 
     assert loaded is not None
     assert state_source == "STATE.md"
-    assert "state.json root was recovered from STATE.md after primary state.json was unavailable or unreadable" in issues
-    assert loaded["continuation"]["handoff"]["resume_file"] is None
-    assert loaded["continuation"]["machine"]["hostname"] is None
+    assert (
+        "state.json root was recovered from STATE.md after primary state.json was unavailable or unreadable" in issues
+    )
+    assert loaded["continuation"]["handoff"]["resume_file"] == "GPD/phases/03-analysis/.continue-here.md"
+    assert loaded["continuation"]["machine"]["hostname"] == "stale-host"
 
 
 def test_mutation_snapshot_recovers_from_state_markdown_when_json_and_backup_are_unreadable(tmp_path: Path) -> None:
@@ -1910,7 +2102,6 @@ def test_save_state_markdown_preserves_backup_project_contract_without_resurrect
 
     backup_state = default_state_dict()
     backup_state["project_contract"] = _project_contract_with_question("backup-only contract")
-    backup_state["session"]["resume_file"] = "backup-resume.md"
     layout.state_json_backup.write_text(json.dumps(backup_state, indent=2) + "\n", encoding="utf-8")
     layout.state_json.write_text("{bad json\n", encoding="utf-8")
 
@@ -1923,13 +2114,15 @@ def test_save_state_markdown_preserves_backup_project_contract_without_resurrect
 
     assert result["project_contract"] is not None
     assert result["project_contract"]["scope"]["question"] == "backup-only contract"
-    assert result["session"]["resume_file"] is None
+    assert "session" not in result
+    assert result["continuation"]["handoff"]["resume_file"] is None
     assert stored["project_contract"] is not None
     assert stored["project_contract"]["scope"]["question"] == "backup-only contract"
-    assert stored["session"]["resume_file"] is None
+    assert "session" not in stored
+    assert stored["continuation"]["handoff"]["resume_file"] is None
 
 
-def test_save_state_markdown_preserves_backup_continuation_without_reviving_backup_only_session_resume_file(
+def test_save_state_markdown_preserves_backup_continuation_without_reviving_backup_only_handoff_resume_file(
     tmp_path: Path,
 ) -> None:
     baseline = default_state_dict()
@@ -1937,7 +2130,6 @@ def test_save_state_markdown_preserves_backup_continuation_without_reviving_back
     layout = ProjectLayout(tmp_path)
 
     backup_state = default_state_dict()
-    backup_state["session"]["resume_file"] = "stale-session-only.md"
     backup_state["continuation"]["handoff"].update(
         {
             "resume_file": "GPD/phases/06-analysis/.continue-here.md",
@@ -1956,10 +2148,10 @@ def test_save_state_markdown_preserves_backup_continuation_without_reviving_back
     stored = json.loads(layout.state_json.read_text(encoding="utf-8"))
 
     assert result["continuation"]["handoff"]["resume_file"] == "GPD/phases/06-analysis/.continue-here.md"
-    assert result["session"]["resume_file"] == "GPD/phases/06-analysis/.continue-here.md"
-    assert result["session"]["stopped_at"] == "Phase 06 Plan 2"
+    assert result["continuation"]["handoff"]["stopped_at"] == "Phase 06 Plan 2"
+    assert "session" not in result
     assert stored["continuation"]["handoff"]["resume_file"] == "GPD/phases/06-analysis/.continue-here.md"
-    assert stored["session"]["resume_file"] == "GPD/phases/06-analysis/.continue-here.md"
+    assert "session" not in stored
 
 
 def test_save_state_markdown_preserves_backup_project_contract_when_primary_root_is_not_an_object(
@@ -2013,6 +2205,23 @@ def test_save_state_markdown_recovers_pending_intent_before_merging_existing_sta
     assert not layout.state_intent.exists()
 
 
+def test_state_load_project_contract_diagnostics_use_recovered_intent_state(tmp_path: Path) -> None:
+    stale_state = default_state_dict()
+    stale_state["project_contract"] = _draft_invalid_project_contract()
+
+    recovered_state = default_state_dict()
+    recovered_state["project_contract"] = _project_contract_with_question("recovered contract")
+
+    _write_intent_recovery_state(tmp_path, stale_state=stale_state, recovered_state=recovered_state)
+
+    loaded = state_load(tmp_path)
+
+    assert loaded.state["project_contract"]["scope"]["question"] == "recovered contract"
+    assert loaded.project_contract_load_info["status"] == "loaded"
+    assert loaded.project_contract_gate["visible"] is True
+    assert loaded.project_contract_gate["authoritative"] is True
+
+
 def test_state_load_persists_state_md_recovery_to_backup_and_recent_projects(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -2061,7 +2270,6 @@ def test_sync_state_json_preserves_backup_project_contract_without_resurrecting_
 
     backup_state = default_state_dict()
     backup_state["project_contract"] = _project_contract_with_question("backup-only contract")
-    backup_state["session"]["resume_file"] = "backup-resume.md"
     layout.state_json_backup.write_text(json.dumps(backup_state, indent=2) + "\n", encoding="utf-8")
     layout.state_json.write_text("{bad json\n", encoding="utf-8")
 
@@ -2074,10 +2282,12 @@ def test_sync_state_json_preserves_backup_project_contract_without_resurrecting_
 
     assert result["project_contract"] is not None
     assert result["project_contract"]["scope"]["question"] == "backup-only contract"
-    assert result["session"]["resume_file"] is None
+    assert "session" not in result
+    assert result["continuation"]["handoff"]["resume_file"] is None
     assert stored["project_contract"] is not None
     assert stored["project_contract"]["scope"]["question"] == "backup-only contract"
-    assert stored["session"]["resume_file"] is None
+    assert "session" not in stored
+    assert stored["continuation"]["handoff"]["resume_file"] is None
 
 
 def test_state_set_project_contract_does_not_fall_back_to_persisting_loader(
@@ -2088,7 +2298,7 @@ def test_state_set_project_contract_does_not_fall_back_to_persisting_loader(
     contract = _project_contract_with_question("safe contract write")
 
     def _unexpected_loader(_cwd: Path) -> dict[str, object]:
-        raise AssertionError("legacy persisting loader should not be used")
+        raise AssertionError("stale persisting loader should not be used")
 
     monkeypatch.setattr("gpd.core.state.load_state_json", _unexpected_loader)
 
@@ -2176,7 +2386,9 @@ def test_state_validate_review_surfaces_structural_errors_instead_of_not_found(t
 
     result = state_validate(tmp_path, integrity_mode="review")
 
-    assert any("state.json structural error: state root must be an object, got list" in issue for issue in result.issues)
+    assert any(
+        "state.json structural error: state root must be an object, got list" in issue for issue in result.issues
+    )
     assert not any("state.json not found" in issue for issue in result.issues)
 
     standard = load_state_json(tmp_path, integrity_mode="standard")
@@ -2405,6 +2617,38 @@ def test_state_validate_warns_when_primary_project_contract_is_blocked(tmp_path:
     assert not any("state.json root was recovered from state.json.bak" in warning for warning in validation.warnings)
 
 
+def test_state_validate_surfaces_blocked_project_contract_diagnostics(tmp_path: Path) -> None:
+    baseline = default_state_dict()
+    save_state_json(tmp_path, baseline)
+    save_state_markdown(tmp_path, generate_state_markdown(baseline))
+    layout = ProjectLayout(tmp_path)
+
+    broken_state = default_state_dict()
+    broken_state["project_contract"] = "not-an-object"
+    layout.state_json.write_text(json.dumps(broken_state, indent=2) + "\n", encoding="utf-8")
+
+    validation = state_validate(tmp_path, surface_blocked_project_contract=True)
+
+    assert validation.valid is True
+    assert validation.project_contract_load_info is not None
+    assert validation.project_contract_load_info["status"] == "blocked_type"
+    assert validation.project_contract_gate is not None
+    assert validation.project_contract_gate["authoritative"] is False
+    assert any("project contract must be a JSON object" in warning for warning in validation.warnings)
+
+
+def test_state_validate_reports_unknown_top_level_state_json_keys(tmp_path: Path) -> None:
+    state = default_state_dict()
+    state["custom_notes"] = "operator-only note"
+    save_state_json(tmp_path, state)
+    save_state_markdown(tmp_path, generate_state_markdown(state))
+
+    validation = state_validate(tmp_path)
+
+    assert validation.valid is True
+    assert any('unknown top-level state.json key "custom_notes"' in warning for warning in validation.warnings)
+
+
 def test_state_load_recovers_backup_project_contract_when_primary_contract_is_blocked(tmp_path: Path) -> None:
     baseline = default_state_dict()
     baseline["position"]["status"] = "Executing"
@@ -2429,9 +2673,7 @@ def test_state_load_recovers_backup_project_contract_when_primary_contract_is_bl
     assert loaded.state["project_contract"] is None
     assert loaded.state_source == "state.json"
     assert any(
-        "project_contract.references.0.must_surface must be a boolean"
-        in issue
-        for issue in loaded.integrity_issues
+        "project_contract.references.0.must_surface must be a boolean" in issue for issue in loaded.integrity_issues
     )
     assert any(
         'dropped "project_contract" because authoritative scalar fields required normalization' in issue
@@ -2570,7 +2812,7 @@ def test_state_load_ignores_backup_only_session_without_replacing_newer_primary_
     backup_state = default_state_dict()
     backup_state["position"]["current_phase"] = "02"
     backup_state["position"]["status"] = "Planning"
-    backup_state["session"]["resume_file"] = "backup-resume.md"
+    backup_state["continuation"]["handoff"]["resume_file"] = "backup-resume.md"
     backup_state["project_contract"] = _project_contract_with_question("backup contract")
     backup_state["project_contract"]["references"][0]["must_surface"] = "yes"
     layout.state_json_backup.write_text(json.dumps(backup_state, indent=2) + "\n", encoding="utf-8")
@@ -2580,7 +2822,6 @@ def test_state_load_ignores_backup_only_session_without_replacing_newer_primary_
     assert loaded.state["position"]["current_phase"] == "05"
     assert loaded.state["position"]["status"] == "Executing"
     assert loaded.state["project_contract"]["scope"]["question"] == "newer primary contract"
-    assert loaded.state["session"]["resume_file"] is None
     assert loaded.state["continuation"]["handoff"]["resume_file"] is None
     assert loaded.state_source == "state.json"
 
@@ -2620,6 +2861,32 @@ def test_state_load_keeps_primary_position_authoritative_when_only_position_requ
     assert persisted["position"]["current_phase"] == "02"
     assert persisted["position"]["status"] == "Planning"
     assert persisted["project_contract"]["scope"]["question"] == "newer primary contract"
+
+
+def test_state_load_does_not_repair_position_from_backup_that_reset_to_defaults(tmp_path: Path) -> None:
+    primary_state = default_state_dict()
+    primary_state["position"]["current_phase"] = "05"
+    primary_state["position"]["status"] = "Executing"
+    save_state_json(tmp_path, primary_state)
+    save_state_markdown(tmp_path, generate_state_markdown(primary_state))
+    layout = ProjectLayout(tmp_path)
+
+    broken_state = json.loads(layout.state_json.read_text(encoding="utf-8"))
+    broken_state["position"] = []
+    layout.state_json.write_text(json.dumps(broken_state, indent=2) + "\n", encoding="utf-8")
+    layout.state_json_backup.write_text("{}\n", encoding="utf-8")
+
+    loaded = state_load(tmp_path)
+
+    assert any(
+        'schema normalization: dropped "position" because expected object, got list' in issue
+        for issue in loaded.integrity_issues
+    )
+    assert not any(
+        "state.json position was recovered from state.json.bak" in issue for issue in loaded.integrity_issues
+    )
+    persisted = json.loads(layout.state_json.read_text(encoding="utf-8"))
+    assert persisted["position"] == []
 
 
 def test_state_validate_keeps_warning_after_markdown_exists_for_a_non_object_state_root(tmp_path: Path) -> None:
@@ -2667,8 +2934,7 @@ def test_state_validate_review_blocks_when_primary_project_contract_requires_blo
     assert validation.integrity_status == "blocked"
     assert validation.state_source == "state.json"
     assert any(
-        'dropped "project_contract" because contract schema required normalization'
-        in issue
+        'dropped "project_contract" because contract schema required normalization' in issue
         for issue in validation.issues
     )
     assert not any("state.json root was recovered from state.json.bak" in issue for issue in validation.issues)
@@ -2721,14 +2987,16 @@ def test_state_validate_review_blocks_missing_evidence_file(tmp_path):
     assert any('evidence_path "artifacts/reports/R-04.json" does not exist' in issue for issue in result.issues)
 
 
-def test_state_validate_does_not_revive_legacy_session_resume_file_as_continuation_mismatch(tmp_path: Path) -> None:
+def test_state_validate_does_not_surface_continuation_mismatch_when_session_continuity_roundtrips(
+    tmp_path: Path,
+) -> None:
     save_state_json(tmp_path, default_state_dict())
 
     state_md = default_state_dict()
-    state_md["session"]["resume_file"] = "GPD/phases/03-analysis/.continue-here.md"
-    state_md["session"]["stopped_at"] = "2026-03-10T12:00:00+00:00"
-    state_md["session"]["hostname"] = "legacy-host"
-    state_md["session"]["platform"] = "legacy-platform"
+    state_md["continuation"]["handoff"]["resume_file"] = "GPD/phases/03-analysis/.continue-here.md"
+    state_md["continuation"]["handoff"]["stopped_at"] = "2026-03-10T12:00:00+00:00"
+    state_md["continuation"]["machine"]["hostname"] = "stale-host"
+    state_md["continuation"]["machine"]["platform"] = "stale-platform"
     layout = ProjectLayout(tmp_path)
     layout.state_md.write_text(generate_state_markdown(state_md), encoding="utf-8")
 
@@ -2805,9 +3073,9 @@ def test_state_record_session_does_not_emit_local_observability_events(tmp_path,
     state = default_state_dict()
     state["position"]["current_phase"] = "4"
     state["position"]["status"] = "Executing"
-    state["session"]["last_date"] = "2026-03-01T10:00:00+00:00"
-    state["session"]["stopped_at"] = "Phase 4 P1"
-    state["session"]["resume_file"] = "resume.md"
+    state["continuation"]["handoff"]["recorded_at"] = "2026-03-01T10:00:00+00:00"
+    state["continuation"]["handoff"]["stopped_at"] = "Phase 4 P1"
+    state["continuation"]["handoff"]["resume_file"] = "resume.md"
     save_state_json(tmp_path, state)
 
     result = state_record_session(tmp_path, stopped_at="Phase 4 P2", resume_file="NEXT.md")
@@ -2838,13 +3106,11 @@ def test_state_record_session_recovers_when_state_markdown_is_missing(tmp_path: 
     assert result.recorded is True
     assert layout.state_md.exists()
     repaired = json.loads(layout.state_json.read_text(encoding="utf-8"))
-    assert repaired["session"]["stopped_at"] == "Phase 4 P2"
+    assert repaired["continuation"]["handoff"]["stopped_at"] == "Phase 4 P2"
     assert repaired["continuation"]["handoff"]["resume_file"] == "NEXT.md"
 
 
-def test_state_record_session_updates_recent_project_index(
-    tmp_path: Path, state_project_factory, monkeypatch
-) -> None:
+def test_state_record_session_updates_recent_project_index(tmp_path: Path, state_project_factory, monkeypatch) -> None:
     monkeypatch.setenv("GPD_DATA_DIR", str(tmp_path / "gpd-data"))
     monkeypatch.setattr(
         state_module,
@@ -2905,6 +3171,46 @@ def test_state_record_session_without_resume_file_updates_recent_project_freshne
     assert row.stopped_at == "Phase 4 P2"
 
 
+def test_state_record_session_same_values_records_last_session_heartbeat(
+    tmp_path: Path,
+    state_project_factory,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        state_module,
+        "_current_machine_identity",
+        lambda: {"hostname": "builder-01", "platform": "Linux 6.1 x86_64"},
+    )
+    state = default_state_dict()
+    state["position"]["current_phase"] = "4"
+    state["position"]["status"] = "Executing"
+    state["continuation"]["handoff"].update(
+        {
+            "recorded_at": "2025-01-01T00:00:00+00:00",
+            "stopped_at": "Phase 4 P2",
+            "resume_file": "NEXT.md",
+            "recorded_by": "state_record_session",
+        }
+    )
+    state["continuation"]["machine"].update(
+        {
+            "recorded_at": "2025-01-01T00:00:00+00:00",
+            "hostname": "builder-01",
+            "platform": "Linux 6.1 x86_64",
+        }
+    )
+    cwd = state_project_factory(tmp_path, state_dict=state)
+
+    result = state_record_session(cwd, stopped_at="Phase 4 P2", resume_file="NEXT.md")
+    stored = json.loads((cwd / "GPD" / "state.json").read_text(encoding="utf-8"))
+
+    assert result.recorded is True
+    assert result.reason is None
+    assert result.updated == ["Last session"]
+    assert stored["continuation"]["handoff"]["recorded_at"] != "2025-01-01T00:00:00+00:00"
+    assert stored["continuation"]["machine"]["recorded_at"] != "2025-01-01T00:00:00+00:00"
+
+
 def test_save_state_markdown_does_not_backfill_missing_canonical_machine_from_session_surface(tmp_path: Path) -> None:
     baseline = default_state_dict()
     baseline["position"]["status"] = "Executing"
@@ -2924,10 +3230,7 @@ def test_save_state_markdown_does_not_backfill_missing_canonical_machine_from_se
 
     result = save_state_markdown(tmp_path, md_content)
 
-    assert result["session"]["stopped_at"] == "Phase 03 Plan 2"
-    assert result["session"]["resume_file"] == "resume.md"
-    assert result["session"]["hostname"] is None
-    assert result["session"]["platform"] is None
+    assert "session" not in result
     assert result["continuation"]["handoff"]["stopped_at"] == "Phase 03 Plan 2"
     assert result["continuation"]["handoff"]["resume_file"] == "resume.md"
     assert result["continuation"]["machine"]["hostname"] is None
@@ -2945,13 +3248,6 @@ def test_save_state_json_projects_recent_project_resume_file_from_canonical_cont
     resume_path.write_text("resume\n", encoding="utf-8")
 
     state = json.loads((cwd / "GPD" / "state.json").read_text(encoding="utf-8"))
-    state["session"].update(
-        {
-            "last_date": "2026-03-29T12:00:00+00:00",
-            "stopped_at": "Phase 4 P2",
-            "resume_file": "session.md",
-        }
-    )
     state["continuation"]["handoff"].update(
         {
             "recorded_at": "2026-03-29T12:00:00+00:00",
@@ -2997,13 +3293,11 @@ def test_save_state_json_preserves_canonical_continuation_when_session_conflicts
 ) -> None:
     cwd = state_project_factory(tmp_path)
     state = json.loads((cwd / "GPD" / "state.json").read_text(encoding="utf-8"))
-    state["session"].update(
-        {
-            "last_date": "2026-03-29T12:00:00+00:00",
-            "stopped_at": "Legacy session stop",
-            "resume_file": "legacy-session.md",
-        }
-    )
+    state["session"] = {
+        "last_date": "2026-03-29T12:00:00+00:00",
+        "stopped_at": "Stale session stop",
+        "resume_file": "stale-session.md",
+    }
     state["continuation"]["handoff"].update(
         {
             "recorded_at": "2026-03-30T09:15:00+00:00",
@@ -3017,10 +3311,9 @@ def test_save_state_json_preserves_canonical_continuation_when_session_conflicts
 
     stored = load_state_json(cwd)
     assert stored is not None
+    assert "session" not in stored
     assert stored["continuation"]["handoff"]["resume_file"] == "canonical-handoff.md"
     assert stored["continuation"]["handoff"]["stopped_at"] == "Canonical handoff stop"
-    assert stored["session"]["resume_file"] == "canonical-handoff.md"
-    assert stored["session"]["stopped_at"] == "Canonical handoff stop"
 
 
 def test_save_state_json_normalizes_canonical_continuation_resume_paths_for_persistence(
@@ -3059,9 +3352,9 @@ def test_save_state_json_normalizes_canonical_continuation_resume_paths_for_pers
 
     stored = load_state_json(cwd)
     assert stored is not None
+    assert "session" not in stored
     assert stored["continuation"]["handoff"]["resume_file"] == "GPD/phases/03-analysis/.continue-here.md"
     assert stored["continuation"]["bounded_segment"]["resume_file"] is None
-    assert stored["session"]["resume_file"] == "GPD/phases/03-analysis/.continue-here.md"
 
 
 @pytest.mark.parametrize(
@@ -3069,7 +3362,7 @@ def test_save_state_json_normalizes_canonical_continuation_resume_paths_for_pers
     [
         ("outside_resume_file", "portable repo-local reference"),
         ("invalid_boolean", "waiting_for_review"),
-        ("unknown_key", 'dropped unknown "continuation.bounded_segment.legacy_note"'),
+        ("unknown_key", 'dropped unknown "continuation.bounded_segment.stale_note"'),
         ("empty", "bounded_segment must include at least one non-empty field"),
     ],
 )
@@ -3103,7 +3396,7 @@ def test_state_set_continuation_bounded_segment_rejects_salvageable_drift(
             "phase": "03",
             "plan": "02",
             "segment_status": "paused",
-            "legacy_note": "stale",
+            "stale_note": "stale",
         },
         "empty": {},
     }
@@ -3119,6 +3412,35 @@ def test_state_set_continuation_bounded_segment_rejects_salvageable_drift(
 
     after = load_state_json(cwd)
     assert after == before
+
+
+def test_state_set_continuation_bounded_segment_rejects_unknown_last_result_id(
+    tmp_path: Path,
+    state_project_factory,
+) -> None:
+    cwd = state_project_factory(tmp_path)
+    resume_path = cwd / "GPD" / "phases" / "03-analysis" / "resume.md"
+    resume_path.parent.mkdir(parents=True, exist_ok=True)
+    resume_path.write_text("resume\n", encoding="utf-8")
+
+    before = load_state_json(cwd)
+    assert before is not None
+
+    result = state_set_continuation_bounded_segment(
+        cwd,
+        {
+            "resume_file": str(resume_path),
+            "phase": "03",
+            "plan": "02",
+            "segment_id": "segment-03-02",
+            "segment_status": "paused",
+            "last_result_id": "missing-result",
+        },
+    )
+
+    assert result.updated is False
+    assert 'last_result_id "missing-result" does not match any canonical result' in (result.reason or "")
+    assert load_state_json(cwd) == before
 
 
 def test_state_set_continuation_bounded_segment_persists_strict_valid_payload(
@@ -3168,22 +3490,19 @@ def test_save_state_markdown_does_not_override_canonical_continuation_session_mi
     save_state_json(cwd, state)
 
     markdown = (cwd / "GPD" / "STATE.md").read_text(encoding="utf-8")
-    edited_markdown = (
-        markdown.replace("**Stopped at:** Canonical handoff stop", "**Stopped at:** Edited in markdown", 1)
-        .replace("**Resume file:** canonical-handoff.md", "**Resume file:** edited-in-markdown.md", 1)
-    )
+    edited_markdown = markdown.replace(
+        "**Stopped at:** Canonical handoff stop", "**Stopped at:** Edited in markdown", 1
+    ).replace("**Resume file:** canonical-handoff.md", "**Resume file:** edited-in-markdown.md", 1)
 
     save_state_markdown(cwd, edited_markdown)
 
     stored = load_state_json(cwd)
     assert stored is not None
+    assert "session" not in stored
     assert stored["continuation"]["handoff"]["resume_file"] == "canonical-handoff.md"
     assert stored["continuation"]["handoff"]["stopped_at"] == "Canonical handoff stop"
-    assert stored["session"]["resume_file"] == "canonical-handoff.md"
-    assert stored["session"]["stopped_at"] == "Canonical handoff stop"
 
     cleared_state = json.loads((cwd / "GPD" / "state.json").read_text(encoding="utf-8"))
-    cleared_state["session"]["resume_file"] = None
     cleared_state["continuation"]["handoff"]["resume_file"] = None
     cleared_state["continuation"]["bounded_segment"] = None
     save_state_json(cwd, cleared_state)
@@ -3196,6 +3515,34 @@ def test_save_state_markdown_does_not_override_canonical_continuation_session_mi
     assert cleared_index.rows[0].resume_target_recorded_at is None
     assert cleared_index.rows[0].resume_file_available is None
     assert cleared_index.rows[0].resumable is False
+
+
+def test_save_state_markdown_does_not_mint_canonical_continuation_from_session_mirror(
+    tmp_path: Path, state_project_factory, monkeypatch
+) -> None:
+    monkeypatch.setenv("GPD_DATA_DIR", str(tmp_path / "gpd-data"))
+    cwd = state_project_factory(tmp_path)
+    markdown = (cwd / "GPD" / "STATE.md").read_text(encoding="utf-8")
+    edited_markdown = (
+        markdown.replace("**Last session:** —", "**Last session:** 2026-04-01T12:00:00+00:00", 1)
+        .replace("**Stopped at:** —", "**Stopped at:** Edited in markdown", 1)
+        .replace("**Resume file:** —", "**Resume file:** edited-in-markdown.md", 1)
+        .replace("**Hostname:** —", "**Hostname:** edited-host", 1)
+    )
+
+    result = save_state_markdown(cwd, edited_markdown)
+    stored = load_state_json(cwd)
+    persisted_markdown = (cwd / "GPD" / "STATE.md").read_text(encoding="utf-8")
+
+    assert stored is not None
+    assert result["continuation"]["handoff"]["recorded_at"] is None
+    assert result["continuation"]["handoff"]["stopped_at"] is None
+    assert result["continuation"]["handoff"]["resume_file"] is None
+    assert result["continuation"]["machine"]["hostname"] is None
+    assert stored["continuation"]["handoff"]["resume_file"] is None
+    assert "Edited in markdown" not in persisted_markdown
+    assert "edited-in-markdown.md" not in persisted_markdown
+    assert "edited-host" not in persisted_markdown
 
 
 def test_state_record_session_preserves_existing_recent_project_rows(
@@ -3354,9 +3701,7 @@ def _bootstrap_project_with_state(
     if extra_lines > 0:
         md += "\n" + "\n".join(f"<!-- padding line {i} -->" for i in range(extra_lines))
     (planning / "STATE.md").write_text(md, encoding="utf-8")
-    (planning / "state.json").write_text(
-        json.dumps(state, indent=2) + "\n", encoding="utf-8"
-    )
+    (planning / "state.json").write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
     return tmp_path
 
 
@@ -3384,10 +3729,7 @@ def test_state_compact_recovers_intent_before_reading(tmp_path):
     pos["progress_percent"] = 50
 
     # Add many old decisions so there is content to compact
-    state["decisions"] = [
-        {"phase": str((i % 3) + 1), "summary": f"Old decision {i}"}
-        for i in range(40)
-    ]
+    state["decisions"] = [{"phase": str((i % 3) + 1), "summary": f"Old decision {i}"} for i in range(40)]
 
     md = generate_state_markdown(state)
     md += "\n" + "\n".join(f"<!-- padding {i} -->" for i in range(100))
@@ -3402,9 +3744,7 @@ def test_state_compact_recovers_intent_before_reading(tmp_path):
     stale_state = default_state_dict()
     stale_state["position"]["current_phase"] = "01"
     stale_state["position"]["status"] = "Executing"
-    (planning / "state.json").write_text(
-        json.dumps(stale_state, indent=2) + "\n", encoding="utf-8"
-    )
+    (planning / "state.json").write_text(json.dumps(stale_state, indent=2) + "\n", encoding="utf-8")
     (planning / "STATE.md").write_text(md, encoding="utf-8")
 
     # Create temp files that _recover_intent_locked will promote —
@@ -3484,6 +3824,7 @@ def test_advance_plan_advances_normally(tmp_path):
     )
     result = state_advance_plan(cwd)
     assert result.advanced is True
+    assert result.state_mutated is True
     assert result.previous_plan == 1
     assert result.current_plan == 2
 
@@ -3509,6 +3850,7 @@ def test_advance_plan_returns_error_when_fields_missing(tmp_path):
 
     result = state_advance_plan(tmp_path)
     assert result.advanced is False
+    assert result.state_mutated is False
     assert result.error is not None
     assert "Cannot parse" in result.error
 
@@ -3537,12 +3879,11 @@ def test_advance_plan_marks_phase_complete_on_last_plan(tmp_path):
 
     md = generate_state_markdown(state)
     (planning / "STATE.md").write_text(md, encoding="utf-8")
-    (planning / "state.json").write_text(
-        json.dumps(state, indent=2) + "\n", encoding="utf-8"
-    )
+    (planning / "state.json").write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
 
     result = state_advance_plan(tmp_path)
     assert result.advanced is False
+    assert result.state_mutated is True
     assert result.reason == "last_plan"
     assert result.status == "ready_for_verification"
 
@@ -3554,13 +3895,20 @@ def test_advance_plan_marks_phase_complete_on_last_plan(tmp_path):
 
 def test_normalize_preserves_valid_list_entries_when_one_is_malformed():
     """Bug B (FULL-002): one malformed approximation must not destroy valid siblings."""
-    valid_entry = {"name": "Large-N", "validity_range": "N >> 1", "status": "valid",
-                   "controlling_param": "N", "current_value": ""}
+    valid_entry = {
+        "name": "Large-N",
+        "validity_range": "N >> 1",
+        "status": "valid",
+        "controlling_param": "N",
+        "current_value": "",
+    }
     malformed_entry = {"label": "bad", "description": "wrong schema"}  # missing required 'name'
 
-    normalized, issues = _normalize_state_schema({
-        "approximations": [valid_entry, malformed_entry],
-    })
+    normalized, issues = _normalize_state_schema(
+        {
+            "approximations": [valid_entry, malformed_entry],
+        }
+    )
 
     # The valid entry must survive
     assert len(normalized["approximations"]) == 1
@@ -3570,19 +3918,21 @@ def test_normalize_preserves_valid_list_entries_when_one_is_malformed():
 
 
 def test_normalize_preserves_empty_list_when_all_entries_malformed():
-    """Bug B (FULL-002): all-malformed entries should leave an empty list, not delete the section.
+    """Assert all-malformed entries leave an empty list rather than deleting the section.
 
-    Regression test for stale-index collision: after removing bad_0 at index 0,
-    bad_1 shifts to index 0.  Without clearing removed_validation_paths per pass,
-    the shifted element's loc collides with the already-recorded loc, causing it
-    to be skipped and the entire section to be removed instead.
+    Guards the stale-index collision path: after removing bad_0 at index 0,
+    bad_1 shifts to index 0.  Unless ``removed_validation_paths`` is cleared
+    per pass, the shifted element's loc collides with the already-recorded
+    loc, the element is skipped, and the entire section is removed.
     """
     bad_1 = {"label": "X", "description": "no name field"}
     bad_2 = {"scope": "global"}  # also missing required 'name'
 
-    normalized, issues = _normalize_state_schema({
-        "approximations": [bad_1, bad_2],
-    })
+    normalized, issues = _normalize_state_schema(
+        {
+            "approximations": [bad_1, bad_2],
+        }
+    )
 
     # Section must still exist as an empty list
     assert "approximations" in normalized
@@ -3592,16 +3942,28 @@ def test_normalize_preserves_empty_list_when_all_entries_malformed():
 
 def test_normalize_removes_multiple_malformed_list_entries():
     """Bug B (FULL-002): multiple malformed entries removed; valid ones survive."""
-    valid_1 = {"name": "Weak coupling", "validity_range": "g << 1", "status": "valid",
-               "controlling_param": "g", "current_value": "0.1"}
-    valid_2 = {"name": "Planar limit", "validity_range": "N -> inf", "status": "valid",
-               "controlling_param": "N", "current_value": ""}
+    valid_1 = {
+        "name": "Weak coupling",
+        "validity_range": "g << 1",
+        "status": "valid",
+        "controlling_param": "g",
+        "current_value": "0.1",
+    }
+    valid_2 = {
+        "name": "Planar limit",
+        "validity_range": "N -> inf",
+        "status": "valid",
+        "controlling_param": "N",
+        "current_value": "",
+    }
     bad_1 = {"label": "oops"}
     bad_2 = {"scope": "UV"}
 
-    normalized, issues = _normalize_state_schema({
-        "approximations": [valid_1, bad_1, valid_2, bad_2],
-    })
+    normalized, issues = _normalize_state_schema(
+        {
+            "approximations": [valid_1, bad_1, valid_2, bad_2],
+        }
+    )
 
     assert len(normalized["approximations"]) == 2
     names = {a["name"] for a in normalized["approximations"]}
@@ -3610,13 +3972,14 @@ def test_normalize_removes_multiple_malformed_list_entries():
 
 def test_normalize_preserves_valid_uncertainties_when_one_is_malformed():
     """Bug B (FULL-002): same fix applies to propagated_uncertainties list."""
-    valid = {"quantity": "mass", "value": "1.0 GeV", "uncertainty": "0.01 GeV",
-             "phase": "1", "method": "propagation"}
+    valid = {"quantity": "mass", "value": "1.0 GeV", "uncertainty": "0.01 GeV", "phase": "1", "method": "propagation"}
     malformed = {"label": "bad"}  # missing required 'quantity'
 
-    normalized, issues = _normalize_state_schema({
-        "propagated_uncertainties": [valid, malformed],
-    })
+    normalized, issues = _normalize_state_schema(
+        {
+            "propagated_uncertainties": [valid, malformed],
+        }
+    )
 
     assert len(normalized["propagated_uncertainties"]) == 1
     assert normalized["propagated_uncertainties"][0]["quantity"] == "mass"
@@ -3624,13 +3987,15 @@ def test_normalize_preserves_valid_uncertainties_when_one_is_malformed():
 
 
 def test_normalize_still_removes_top_level_section_for_non_list_errors():
-    """Regression guard: non-list validation errors still go through top-level removal."""
+    """Assert non-list validation errors go through top-level removal."""
     # 'position' is a dict (Position model), not a list. If it has a deeply invalid
     # field that can't be nested-removed, it should still be handled by the existing
     # top-level removal path.
-    normalized, issues = _normalize_state_schema({
-        "position": {"current_phase": [1, 2, 3]},  # current_phase expects str, not list
-    })
+    normalized, issues = _normalize_state_schema(
+        {
+            "position": {"current_phase": [1, 2, 3]},  # current_phase expects str, not list
+        }
+    )
 
     # Position should be reset to defaults (either dropped and re-defaulted, or
     # the string coercion path handles it). The key point: no crash, and the
@@ -3765,10 +4130,13 @@ def test_state_patch_mixed_success_and_failure(tmp_path: Path) -> None:
 
     cwd = _bootstrap_project_with_state(tmp_path)
 
-    result = state_patch(cwd, {
-        "current_plan": "2",
-        "nonexistent": "value",
-    })
+    result = state_patch(
+        cwd,
+        {
+            "current_plan": "2",
+            "nonexistent": "value",
+        },
+    )
 
     assert "current_plan" in result.updated
     assert "nonexistent" in result.failed
@@ -3821,8 +4189,12 @@ def test_state_patch_rejects_all_session_mirror_fields(tmp_path: Path) -> None:
     cwd = _bootstrap_project_with_state(tmp_path)
 
     mirror_fields = [
-        "last_session", "stopped_at", "resume_file",
-        "last_result_id", "hostname", "platform",
+        "last_session",
+        "stopped_at",
+        "resume_file",
+        "last_result_id",
+        "hostname",
+        "platform",
     ]
     result = state_patch(cwd, dict.fromkeys(mirror_fields, "test_value"))
 
@@ -3835,11 +4207,11 @@ def test_state_patch_rejects_all_session_mirror_fields(tmp_path: Path) -> None:
 
 
 def test_state_patch_underscore_field_with_dots_not_clobbered(tmp_path: Path) -> None:
-    """A literal **custom_field.status:** field must be found by its exact name.
+    """Assert a literal **custom_field.status:** field is found by its exact name.
 
-    Regression test for P3: underscore replacement must NOT run before the raw
-    field name is tried, otherwise custom_field.status -> custom field.status
-    (miss) -> dot-strip -> status (wrong field updated).
+    Underscore replacement must NOT run before the raw field name is tried,
+    otherwise custom_field.status -> custom field.status (miss) -> dot-strip
+    -> status (wrong field updated).
     """
     from gpd.core.state import state_patch
 
@@ -3884,3 +4256,181 @@ def test_state_patch_unknown_underscore_field_reports_also_tried(tmp_path: Path)
     assert "not found in STATE.md" in reason
     assert "also tried" in reason
     assert '"nonexistent field"' in reason
+
+
+# ─── contract_alignment persistence ───────────────────────────────────────────
+
+
+def test_state_contract_alignment_default_is_empty() -> None:
+    """Fresh state dict carries a default ContractAlignmentGate with all-None fields."""
+    s = default_state_dict()
+    assert "contract_alignment" in s
+    assert s["contract_alignment"] == {
+        "confirmed_at": None,
+        "confirmed_contract_hash": None,
+        "confirmed_context_hash": None,
+    }
+    gate = ContractAlignmentGate.model_validate(s["contract_alignment"])
+    assert gate.confirmed_at is None
+    assert gate.confirmed_contract_hash is None
+    assert gate.confirmed_context_hash is None
+
+
+def test_state_records_contract_alignment_round_trip(tmp_path: Path) -> None:
+    """state_record_contract_alignment persists timestamp + hashes through a reload."""
+    contract = _project_contract_fixture()
+    state = default_state_dict()
+    state["project_contract"] = contract
+    save_state_json(tmp_path, state)
+    contract_hash = _project_contract_hash(contract)
+
+    state_record_contract_alignment(
+        tmp_path,
+        contract_hash=contract_hash,
+        context_hash="sha256:def",
+        now="2026-04-23T12:00:00+00:00",
+    )
+
+    reloaded = load_state_json(tmp_path)
+    assert reloaded is not None
+    alignment = reloaded["contract_alignment"]
+    assert alignment["confirmed_at"] == "2026-04-23T12:00:00+00:00"
+    assert alignment["confirmed_contract_hash"] == contract_hash
+    assert alignment["confirmed_context_hash"] == "sha256:def"
+
+
+def test_state_record_contract_alignment_rejects_stale_contract_hash(tmp_path: Path) -> None:
+    """Alignment recording must bind to the current authoritative contract fingerprint."""
+    contract = _project_contract_fixture()
+    state = default_state_dict()
+    state["project_contract"] = contract
+    save_state_json(tmp_path, state)
+
+    with pytest.raises(StateError, match="contract_hash does not match"):
+        state_record_contract_alignment(
+            tmp_path,
+            contract_hash="sha256:stale",
+            context_hash="sha256:def",
+            now="2026-04-23T12:00:00+00:00",
+        )
+
+    reloaded = load_state_json(tmp_path)
+    assert reloaded is not None
+    assert reloaded["contract_alignment"]["confirmed_contract_hash"] is None
+
+
+def test_state_record_contract_alignment_rejects_visible_non_authoritative_contract(
+    tmp_path: Path,
+) -> None:
+    """Recording alignment must not accept or erase a visible contract with approval blockers."""
+    state = default_state_dict()
+    state["project_contract"] = _draft_invalid_project_contract()
+    _write_raw_state_json(tmp_path, state)
+
+    with pytest.raises(StateError, match="project_contract_gate.authoritative is not true"):
+        state_record_contract_alignment(
+            tmp_path,
+            contract_hash="sha256:abc",
+            context_hash="sha256:def",
+            now="2026-04-23T12:00:00+00:00",
+        )
+
+    persisted = json.loads((tmp_path / "GPD" / "state.json").read_text(encoding="utf-8"))
+    assert persisted["project_contract"]["claims"][0]["references"] == ["missing-ref"]
+    assert persisted["contract_alignment"]["confirmed_contract_hash"] is None
+
+
+def test_state_record_contract_alignment_rejects_recoverably_normalized_contract(
+    tmp_path: Path,
+) -> None:
+    """Validation-valid schema drift remains non-authoritative for alignment recording."""
+    contract = _project_contract_fixture()
+    contract["claims"][0]["notes"] = "recoverable drift"
+    state = default_state_dict()
+    state["project_contract"] = contract
+    _write_raw_state_json(tmp_path, state)
+
+    status = state_module.project_contract_authority_status(tmp_path)
+    assert status["passed"] is False
+    assert status["project_contract_load_info"]["status"] == "loaded_with_schema_normalization"
+    assert status["project_contract_validation"]["valid"] is True
+    assert status["project_contract_gate"]["authoritative"] is False
+    assert status["project_contract_gate"]["repair_required"] is True
+
+    with pytest.raises(StateError, match="project_contract_gate.authoritative is not true"):
+        state_record_contract_alignment(
+            tmp_path,
+            contract_hash="sha256:abc",
+            context_hash="sha256:def",
+            now="2026-04-23T12:00:00+00:00",
+        )
+
+
+def test_state_contract_alignment_unconfirmed_omits_gate_keys(tmp_path: Path) -> None:
+    """Unconfirmed alignment stays absent from the visible gate projection."""
+    state = default_state_dict()
+    state["project_contract"] = json.loads((FIXTURES_DIR / "project_contract.json").read_text(encoding="utf-8"))
+    _write_raw_state_json(tmp_path, state)
+
+    loaded = state_load(tmp_path)
+    gate = loaded.project_contract_gate or {}
+
+    assert "confirmed_at" not in gate
+    assert "confirmed_contract_hash" not in gate
+    assert "confirmed_context_hash" not in gate
+
+
+def test_state_contract_alignment_surfaces_on_gate_dict(tmp_path: Path) -> None:
+    """After recording, state_load surfaces alignment hashes on project_contract_gate."""
+    contract = _project_contract_fixture()
+    contract_hash = _project_contract_hash(contract)
+    state = default_state_dict()
+    state["project_contract"] = contract
+    save_state_json(tmp_path, state)
+
+    state_record_contract_alignment(
+        tmp_path,
+        contract_hash=contract_hash,
+        context_hash="sha256:context",
+        now="2026-04-23T13:00:00+00:00",
+    )
+
+    loaded = state_load(tmp_path)
+    gate = loaded.project_contract_gate or {}
+    assert gate.get("confirmed_at") == "2026-04-23T13:00:00+00:00"
+    assert gate.get("confirmed_contract_hash") == contract_hash
+    assert gate.get("confirmed_context_hash") == "sha256:context"
+
+
+def test_state_contract_alignment_absent_from_json_loads_default(tmp_path: Path) -> None:
+    """Stale state.json without contract_alignment reloads with the default gate payload."""
+    state = default_state_dict()
+    del state["contract_alignment"]
+    _write_raw_state_json(tmp_path, state)
+
+    loaded = load_state_json(tmp_path)
+    assert loaded["contract_alignment"] == {
+        "confirmed_at": None,
+        "confirmed_contract_hash": None,
+        "confirmed_context_hash": None,
+    }
+
+
+def test_state_contract_alignment_survives_markdown_rebuild(tmp_path: Path) -> None:
+    """contract_alignment hashes survive the generate_state_markdown / sync_state_json round-trip."""
+    state = default_state_dict()
+    state["contract_alignment"] = ContractAlignmentGate(
+        confirmed_at="2026-04-23T12:00:00+00:00",
+        confirmed_contract_hash="sha256:abc",
+        confirmed_context_hash="sha256:def",
+    ).model_dump(mode="python")
+    save_state_json(tmp_path, state)
+
+    reloaded = load_state_json(tmp_path)
+    md = generate_state_markdown(reloaded)
+    sync_state_json(tmp_path, md)
+
+    final = load_state_json(tmp_path)
+    assert final["contract_alignment"]["confirmed_at"] == "2026-04-23T12:00:00+00:00"
+    assert final["contract_alignment"]["confirmed_contract_hash"] == "sha256:abc"
+    assert final["contract_alignment"]["confirmed_context_hash"] == "sha256:def"

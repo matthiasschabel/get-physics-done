@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import re
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
+from gpd.core.knowledge_review_hash import (
+    compute_knowledge_reviewed_content_sha256,
+    knowledge_reviewed_content_projection,
+)
 from gpd.core.utils import normalize_ascii_slug
 
 __all__ = [
@@ -82,7 +84,14 @@ def _normalize_knowledge_id(value: object) -> str:
 def _normalize_project_relative_path(value: object, field_name: str) -> str:
     normalized = _normalize_required_text(value)
     path = Path(normalized)
-    if path.is_absolute() or any(part == ".." for part in path.parts):
+    normalized_path = normalized.replace("\\", "/")
+    normalized_parts = PurePosixPath(normalized_path).parts
+    if (
+        path.is_absolute()
+        or normalized.startswith("\\\\")
+        or re.match(r"^[A-Za-z]:/", normalized_path)
+        or any(part == ".." for part in normalized_parts)
+    ):
         raise ValueError(f"{field_name} must be a project-relative path")
     return normalized
 
@@ -282,37 +291,6 @@ class KnowledgeDocData(BaseModel):
                 raise ValueError("superseded_by must reference a different knowledge_id")
 
         return self
-
-
-def knowledge_reviewed_content_projection(
-    knowledge_doc: KnowledgeDocData,
-    *,
-    body_text: str = "",
-) -> dict[str, object]:
-    """Return the canonical trusted-content projection used for review freshness."""
-
-    normalized_body = body_text.replace("\r\n", "\n").replace("\r", "\n")
-    return {
-        "knowledge_schema_version": knowledge_doc.knowledge_schema_version,
-        "knowledge_id": knowledge_doc.knowledge_id,
-        "title": knowledge_doc.title,
-        "topic": knowledge_doc.topic,
-        "sources": [source.model_dump(mode="python") for source in knowledge_doc.sources],
-        "coverage_summary": knowledge_doc.coverage_summary.model_dump(mode="python"),
-        "body_text": normalized_body,
-    }
-
-
-def compute_knowledge_reviewed_content_sha256(
-    knowledge_doc: KnowledgeDocData,
-    *,
-    body_text: str = "",
-) -> str:
-    """Compute the canonical hash for the reviewed knowledge-document content."""
-
-    projection = knowledge_reviewed_content_projection(knowledge_doc, body_text=body_text)
-    payload = json.dumps(projection, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def parse_knowledge_doc_data_strict(

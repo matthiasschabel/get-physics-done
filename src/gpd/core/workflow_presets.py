@@ -42,11 +42,13 @@ _LATEX_CAPABILITY_DEFAULTS: dict[str, object] = {
     "bibliography_support_available": False,
     "latexmk_available": None,
     "kpsewhich_available": None,
+    "pdftotext_available": None,
     "readiness_state": "blocked",
     "message": "",
     "warnings": [],
     "paper_build_ready": False,
     "arxiv_submission_ready": False,
+    "pdf_review_ready": False,
 }
 
 
@@ -140,11 +142,12 @@ def _normalize_latex_capability(
 
     latexmk_value = _capability_value(latex_capability, "latexmk_available", "latexmk")
     kpsewhich_value = _capability_value(latex_capability, "kpsewhich_available", "kpsewhich")
-    full_toolchain_value = _capability_value(latex_capability, "full_toolchain_available", "full_toolchain_ready")
-    full_toolchain_available = _strict_bool_value(full_toolchain_value)
+    pdftotext_value = _capability_value(latex_capability, "pdftotext_available", "pdftotext")
+    # pdf_review_ready may be set explicitly (pypdf-based); otherwise use the
+    # text-extraction capability as the PDF review readiness signal.
+    pdf_review_value = _capability_value(latex_capability, "pdf_review_ready")
     compiler_path = _capability_value(latex_capability, "compiler_path")
     distribution = _capability_value(latex_capability, "distribution")
-    readiness_value = _capability_value(latex_capability, "readiness_state")
     message_value = _capability_value(latex_capability, "message")
     warnings_value = _capability_value(latex_capability, "warnings")
     if isinstance(warnings_value, str):
@@ -155,12 +158,16 @@ def _normalize_latex_capability(
         warnings = []
 
     bibtex_ready = bibtex_available is True
+    latexmk_ready = _strict_bool_value(latexmk_value) is True
+    kpsewhich_ready = _strict_bool_value(kpsewhich_value) is True
+    # Prefer the explicit pdf_review_ready field; fall back to pdftotext_available.
+    pdf_review_strict = _strict_bool_value(pdf_review_value)
+    pdftotext_ready = _strict_bool_value(pdftotext_value) is True
+    pdf_review_ready = (pdf_review_strict is True) if pdf_review_strict is not None else pdftotext_ready
     bibliography_support_available = compiler_available and bibtex_ready
     paper_build_ready = compiler_available
-    arxiv_submission_ready = bibliography_support_available and kpsewhich_value is True
-    if isinstance(readiness_value, str) and readiness_value in {"blocked", "degraded", "ready"}:
-        readiness_state = readiness_value
-    elif not compiler_available:
+    arxiv_submission_ready = bibliography_support_available and kpsewhich_ready
+    if not compiler_available:
         readiness_state = "blocked"
     elif bibtex_ready:
         readiness_state = "ready"
@@ -180,22 +187,20 @@ def _normalize_latex_capability(
         "compiler": compiler_name,
         "available": compiler_available,
         "compiler_available": compiler_available,
-        "full_toolchain_available": (
-            full_toolchain_available
-            if full_toolchain_available is not None
-            else compiler_available and bibtex_ready and latexmk_value is True and kpsewhich_value is True
-        ),
+        "full_toolchain_available": compiler_available and bibtex_ready and latexmk_ready and kpsewhich_ready and pdf_review_ready,
         "compiler_path": compiler_path,
         "distribution": distribution,
         "bibtex_available": bibtex_available,
         "bibliography_support_available": bibliography_support_available,
         "latexmk_available": _strict_bool_value(latexmk_value),
         "kpsewhich_available": _strict_bool_value(kpsewhich_value),
+        "pdftotext_available": _strict_bool_value(pdftotext_value),
         "readiness_state": readiness_state,
         "message": message,
         "warnings": warnings,
         "paper_build_ready": paper_build_ready,
         "arxiv_submission_ready": arxiv_submission_ready,
+        "pdf_review_ready": pdf_review_ready,
     }
     return normalized
 
@@ -204,14 +209,14 @@ WORKFLOW_PRESETS: tuple[WorkflowPreset, ...] = (
     WorkflowPreset(
         id="core-research",
         label="Core research",
-        description="Best default for most physics projects. Uses only the base runtime-readiness contract.",
-        summary="Balanced default workflow for planning, execution, and verification.",
+        description="Recommended default for most physics projects. Uses the base runtime-readiness contract.",
+        summary="Supervised default workflow for planning, execution, and verification.",
         recommended_config={
-            "autonomy": "balanced",
+            "autonomy": "supervised",
             "research_mode": "balanced",
             "model_profile": "review",
             "model_cost_posture": "balanced",
-            "execution.review_cadence": "adaptive",
+            "execution.review_cadence": "dense",
             "parallelization": True,
             "planning.commit_docs": True,
             "workflow.research": True,
@@ -222,10 +227,10 @@ WORKFLOW_PRESETS: tuple[WorkflowPreset, ...] = (
     WorkflowPreset(
         id="theory",
         label="Theory",
-        description="Bias toward rigorous derivations and exact reasoning without claiming extra machine-tooling requirements.",
-        summary="Derivation-heavy workflow using the base runtime-readiness contract only.",
+        description="Prioritizes rigorous derivations and exact reasoning within the base runtime-readiness contract.",
+        summary="Derivation-heavy workflow using the base runtime-readiness contract.",
         recommended_config={
-            "autonomy": "balanced",
+            "autonomy": "supervised",
             "research_mode": "adaptive",
             "model_profile": "deep-theory",
             "model_cost_posture": "max-quality",
@@ -240,14 +245,14 @@ WORKFLOW_PRESETS: tuple[WorkflowPreset, ...] = (
     WorkflowPreset(
         id="numerics",
         label="Numerics",
-        description="Bias toward computational implementation and convergence work without claiming extra machine-tooling requirements beyond the base runtime.",
-        summary="Computation-heavy workflow using the base runtime-readiness contract only.",
+        description="Prioritizes computational implementation, convergence testing, and numerical validation within the base runtime-readiness contract.",
+        summary="Computation-heavy workflow using the base runtime-readiness contract.",
         recommended_config={
-            "autonomy": "balanced",
+            "autonomy": "supervised",
             "research_mode": "balanced",
             "model_profile": "numerical",
             "model_cost_posture": "balanced",
-            "execution.review_cadence": "adaptive",
+            "execution.review_cadence": "dense",
             "parallelization": True,
             "planning.commit_docs": True,
             "workflow.research": True,
@@ -258,10 +263,10 @@ WORKFLOW_PRESETS: tuple[WorkflowPreset, ...] = (
     WorkflowPreset(
         id="publication-manuscript",
         label="Publication / manuscript",
-        description="Drafting, review, build, and submission workflow for paper production.",
+        description="Coordinates drafting, staged review, build checks, and submission preparation for paper production.",
         summary="Paper-writing workflow; build and submission depend on LaTeX readiness.",
         recommended_config={
-            "autonomy": "balanced",
+            "autonomy": "supervised",
             "research_mode": "exploit",
             "model_profile": "paper-writing",
             "model_cost_posture": "balanced",
@@ -281,14 +286,14 @@ WORKFLOW_PRESETS: tuple[WorkflowPreset, ...] = (
     WorkflowPreset(
         id="full-research",
         label="Full research",
-        description="Core research defaults plus publication/manuscript readiness awareness for projects expected to end in a paper.",
+        description="Core research defaults with publication readiness tracked for projects expected to become papers.",
         summary="Core research workflow with publication readiness tracked alongside it.",
         recommended_config={
-            "autonomy": "balanced",
+            "autonomy": "supervised",
             "research_mode": "adaptive",
             "model_profile": "review",
             "model_cost_posture": "balanced",
-            "execution.review_cadence": "adaptive",
+            "execution.review_cadence": "dense",
             "parallelization": True,
             "planning.commit_docs": True,
             "workflow.research": True,
@@ -323,8 +328,7 @@ def _preset_actionable_config_bundle(preset: WorkflowPreset) -> dict[str, object
         if canonical_config_key(key) is None or key not in supported_keys:
             supported = ", ".join(sorted(supported_keys))
             raise ValueError(
-                f"Workflow preset {preset.id!r} contains unsupported config key {key!r}; "
-                f"expected one of: {supported}"
+                f"Workflow preset {preset.id!r} contains unsupported config key {key!r}; expected one of: {supported}"
             )
         bundle[key] = copy.deepcopy(value)
     return bundle
@@ -384,8 +388,7 @@ def preview_workflow_preset_application(
         if canonical_config_key(key) is None or key not in supported_keys:
             supported = ", ".join(sorted(supported_keys))
             raise ValueError(
-                f"Workflow preset {preset.id!r} contains unsupported config key {key!r}; "
-                f"expected one of: {supported}"
+                f"Workflow preset {preset.id!r} contains unsupported config key {key!r}; expected one of: {supported}"
             )
 
         before = _preset_effective_value(raw_config, key)
@@ -448,6 +451,7 @@ def resolve_workflow_preset_readiness(
     bibliography_support_ready = capability.get("bibliography_support_available") is True
     latexmk_available = capability.get("latexmk_available")
     kpsewhich_available = capability.get("kpsewhich_available")
+    pdf_review_ready = capability.get("pdf_review_ready") is True
     paper_build_ready = capability["paper_build_ready"] is True
     arxiv_submission_ready = capability["arxiv_submission_ready"] is True
 
@@ -473,23 +477,40 @@ def resolve_workflow_preset_readiness(
             ready_workflows = []
             degraded_workflows = list(preset.degraded_workflows)
             blocked_workflows = list(preset.blocked_workflows)
-        elif preset.requires_extra_tooling and not bibliography_support_ready:
-            status = "degraded"
+        elif preset.requires_extra_tooling:
+            status = "ready"
             usable = True
-            summary = (
-                "degraded without bibliography tooling: draft/review remain usable, while paper-build and "
-                "arxiv-submission may fail for manuscripts that require bibliography processing"
-            )
-            ready_workflows = list(preset.degraded_workflows)
-            degraded_workflows = ["paper-build", "arxiv-submission"]
-            blocked_workflows = []
-        elif preset.requires_extra_tooling and not arxiv_submission_ready:
-            status = "degraded"
-            usable = True
-            summary = "degraded without arxiv-submission support: paper-build remains usable, but arxiv-submission stays blocked"
-            ready_workflows = [workflow for workflow in preset.ready_workflows if workflow != "arxiv-submission"]
+            summary = "ready"
+            ready_workflows = list(preset.ready_workflows)
             degraded_workflows = []
-            blocked_workflows = ["arxiv-submission"]
+            blocked_workflows = []
+
+            if not bibliography_support_ready:
+                summary = (
+                    "degraded without bibliography tooling: draft/review remain usable, while paper-build and "
+                    "arxiv-submission may fail for manuscripts that require bibliography processing"
+                )
+                status = "degraded"
+                ready_workflows = [
+                    workflow for workflow in ready_workflows if workflow not in {"paper-build", "arxiv-submission"}
+                ]
+                degraded_workflows.extend(["paper-build", "arxiv-submission"])
+            elif not arxiv_submission_ready:
+                summary = "degraded without arxiv-submission support: paper-build remains usable, but arxiv-submission stays blocked"
+                status = "degraded"
+                ready_workflows = [workflow for workflow in ready_workflows if workflow != "arxiv-submission"]
+                blocked_workflows.append("arxiv-submission")
+
+            if not pdf_review_ready:
+                if status == "ready":
+                    summary = (
+                        "degraded without pypdf: TeX/Markdown/TXT/CSV/TSV and built-in DOCX/XLSX review remain usable, "
+                        "but PDF intake for peer-review requires pypdf or a companion text file"
+                    )
+                status = "degraded"
+                ready_workflows = [workflow for workflow in ready_workflows if workflow != "peer-review"]
+                if "peer-review" not in degraded_workflows:
+                    degraded_workflows.append("peer-review")
         else:
             status = "ready"
             usable = True
@@ -516,8 +537,12 @@ def resolve_workflow_preset_readiness(
                     "BibTeX support is missing: bibliography-free manuscripts may still build, but citation-bearing builds and submission prep can fail outright."
                 )
             elif not arxiv_submission_ready:
+                warnings.append("kpsewhich is missing: paper-build remains usable, but arxiv-submission stays blocked.")
+            elif not pdf_review_ready:
                 warnings.append(
-                    "kpsewhich is missing: paper-build remains usable, but arxiv-submission stays blocked."
+                    "pypdf is missing: TeX/Markdown/TXT/CSV/TSV and built-in DOCX/XLSX review remain usable, "
+                    "but PDF-backed peer-review intake requires pypdf or a nearby `.txt` companion file. "
+                    "Install with: pip install 'get-physics-done[paper]'"
                 )
             if latexmk_available is False:
                 warnings.append("latexmk is missing: paper builds will fall back to manual multipass compilation.")

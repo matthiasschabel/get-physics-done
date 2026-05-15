@@ -15,11 +15,12 @@ from types import SimpleNamespace
 import gpd.hooks.install_context as hook_layout
 from gpd.adapters.runtime_catalog import get_hook_payload_policy
 from gpd.core.constants import ENV_GPD_DEBUG, ProjectLayout
-from gpd.core.root_resolution import normalize_workspace_hint
+from gpd.core.root_resolution import normalize_workspace_hint, resolve_project_roots, resolve_state_json_root
 from gpd.core.state import peek_state_json
 from gpd.hooks.payload_policy import resolve_hook_payload_policy, resolve_hook_surface_runtime
-from gpd.hooks.payload_roots import payload_uses_alias_only_workspace_mapping
+from gpd.hooks.payload_roots import payload_uses_alias_only_workspace_mapping, project_dir_hint_from_payload
 from gpd.hooks.payload_roots import resolve_payload_roots as _resolve_payload_roots
+from gpd.hooks.payload_roots import trusted_payload_project_root as _trusted_payload_project_root_text
 from gpd.hooks.runtime_detect import SCOPE_LOCAL, detect_runtime_install_target
 from gpd.hooks.runtime_lookup import resolve_runtime_lookup_context_from_payload_roots
 from gpd.hooks.update_resolution import latest_update_cache as _shared_latest_update_cache
@@ -30,10 +31,9 @@ _CONTEXT_REAL_LIMIT_PCT = 80
 _CONTEXT_WARN_THRESHOLD = 63
 _CONTEXT_HIGH_THRESHOLD = 81
 _CONTEXT_CRITICAL_THRESHOLD = 95
+_CONTEXT_FILLED = "#"
+_CONTEXT_EMPTY = "-"
 _STATUS_LABEL = "GPD"
-_CANONICAL_MODEL_KEYS = ("display_name", "name", "id")
-_CANONICAL_CONTEXT_WINDOW_SIZE_KEYS = ("context_window_size",)
-_CANONICAL_CONTEXT_REMAINING_KEYS = ("remaining_percentage", "remainingPercent", "remaining")
 
 
 def _context_bar(remaining_pct: float) -> str:
@@ -43,7 +43,7 @@ def _context_bar(remaining_pct: float) -> str:
     used = min(100, round((raw_used / _CONTEXT_REAL_LIMIT_PCT) * 100))
 
     filled = used // 10
-    bar = "\u2588" * filled + "\u2591" * (10 - filled)
+    bar = _CONTEXT_FILLED * filled + _CONTEXT_EMPTY * (10 - filled)
 
     if used < _CONTEXT_WARN_THRESHOLD:
         return f" \x1b[32m{bar} {used}%\x1b[0m"
@@ -51,7 +51,7 @@ def _context_bar(remaining_pct: float) -> str:
         return f" \x1b[33m{bar} {used}%\x1b[0m"
     if used < _CONTEXT_CRITICAL_THRESHOLD:
         return f" \x1b[38;5;208m{bar} {used}%\x1b[0m"
-    return f" \x1b[5;31m\U0001f480 {bar} {used}%\x1b[0m"
+    return f" \x1b[31m[CRITICAL] {bar} {used}%\x1b[0m"
 
 
 def _debug(msg: str) -> None:
@@ -83,14 +83,21 @@ def _first_value(value: object, *keys: str) -> object | None:
     return None
 
 
-def _merged_policy_keys(value: object, attribute: str, *, fallback: tuple[str, ...]) -> tuple[str, ...]:
-    """Return policy-owned keys plus canonical fallbacks, deduplicated in order."""
-    raw_keys = getattr(value, attribute, ())
-    merged: list[str] = []
-    for key in (*raw_keys, *fallback):
-        if isinstance(key, str) and key and key not in merged:
-            merged.append(key)
-    return tuple(merged)
+def _trusted_payload_project_root(
+    data: dict[str, object],
+    workspace_dir: str,
+    *,
+    hook_payload: object,
+) -> Path | None:
+    """Return a policy-owned payload project root when it is a real ancestor project."""
+    project_root = _trusted_payload_project_root_text(data, workspace_dir, hook_payload=hook_payload)
+    return Path(project_root) if project_root else None
+
+
+def _policy_keys(value: object, attribute: str) -> tuple[str, ...]:
+    """Return non-empty string keys owned by the resolved hook payload policy."""
+    raw_keys = getattr(value, attribute, ()) or ()
+    return tuple(key for key in raw_keys if isinstance(key, str) and key)
 
 
 def _object_value(value: object, key: str) -> object | None:
@@ -168,23 +175,37 @@ def _format_context_window_size(value: object) -> str:
     return f"{compact}{suffix} context"
 
 
+def _context_payload_containers(data: dict[str, object], hook_payload: object) -> tuple[object, ...]:
+    """Return context-bearing containers, including catalog-owned usage containers."""
+    containers: list[object] = [data.get("context_window"), data, data.get("model")]
+    for key in _policy_keys(hook_payload, "usage_keys"):
+        containers.append(data.get(key))
+    return tuple(containers)
+
+
+def _first_context_value(data: dict[str, object], hook_payload: object, key_attribute: str) -> object | None:
+    keys = _policy_keys(hook_payload, key_attribute)
+    if not keys:
+        return None
+    for container in _context_payload_containers(data, hook_payload):
+        value = _first_value(container, *keys)
+        if value is not None:
+            return value
+    return None
+
+
 def _read_model_label(data: dict[str, object], hook_payload=None) -> str:
     """Return the current model label with context-window size when available."""
     policy = hook_payload or _hook_payload_policy()
+    model_keys = _policy_keys(policy, "model_keys")
     model_value = data.get("model")
-    if isinstance(model_value, str) and model_value:
+    if isinstance(model_value, str) and model_value and model_keys:
         model_label = model_value
     else:
-        model_label = _first_string(
-            model_value,
-            *_merged_policy_keys(policy, "model_keys", fallback=_CANONICAL_MODEL_KEYS),
-        )
+        model_label = _first_string(model_value, *model_keys)
 
     context_label = _format_context_window_size(
-        _first_value(
-            data.get("context_window"),
-            *_merged_policy_keys(policy, "context_window_size_keys", fallback=_CANONICAL_CONTEXT_WINDOW_SIZE_KEYS),
-        )
+        _first_context_value(data, policy, "context_window_size_keys")
     )
     if model_label and context_label:
         return f"{model_label} ({context_label})"
@@ -204,11 +225,7 @@ def _read_workspace_label(
 
     policy = hook_payload or _hook_payload_policy(workspace_dir)
     workspace_path = Path(workspace_dir).expanduser()
-    workspace_value = data.get("workspace")
-    project_dir = project_root or _first_string(workspace_value, *policy.project_dir_keys) or _first_string(
-        data,
-        *policy.project_dir_keys,
-    )
+    project_dir = project_root or project_dir_hint_from_payload(data, hook_payload=policy)
 
     try:
         resolved_workspace = workspace_path.resolve()
@@ -236,23 +253,18 @@ def _statusline_project_root(workspace_dir: str) -> Path | None:
     normalized = normalize_workspace_hint(workspace_dir)
     if normalized is None:
         return None
-
-    bare_gpd_root: Path | None = None
-    for steps, candidate in enumerate((normalized, *normalized.parents)):
-        layout = ProjectLayout(candidate)
-        if not layout.gpd.is_dir():
-            continue
-        if (
-            layout.state_json.exists()
-            or layout.state_md.exists()
-            or layout.project_md.exists()
-            or layout.roadmap.exists()
-            or layout.phases_dir.is_dir()
-        ):
-            return candidate
-        if steps == 0 and bare_gpd_root is None:
-            bare_gpd_root = candidate
-    return bare_gpd_root
+    resolution = resolve_project_roots(normalized)
+    if resolution is None:
+        return None
+    if resolution.has_project_layout:
+        return resolution.project_root
+    state_root = resolve_state_json_root(normalized)
+    if state_root is not None:
+        return state_root
+    layout = ProjectLayout(resolution.project_root)
+    if resolution.project_root == normalized and layout.gpd.is_dir():
+        return resolution.project_root
+    return None
 
 
 def _read_position(workspace_dir: str) -> str:
@@ -345,10 +357,7 @@ def _read_current_task(session_id: str, workspace_dir: str | None = None) -> str
 
 def _read_context_remaining(data: dict[str, object], hook_payload) -> float | int | None:
     """Read remaining context percentage from runtime payload aliases."""
-    remaining = _first_value(
-        data.get("context_window"),
-        *_merged_policy_keys(hook_payload, "context_remaining_keys", fallback=_CANONICAL_CONTEXT_REMAINING_KEYS),
-    )
+    remaining = _first_context_value(data, hook_payload, "context_remaining_keys")
     if isinstance(remaining, (int, float)) and math.isfinite(remaining):
         return remaining
     return None
@@ -356,14 +365,8 @@ def _read_context_remaining(data: dict[str, object], hook_payload) -> float | in
 
 def _read_session_id(data: dict[str, object], hook_payload) -> str:
     """Read the runtime session id using the adapter-owned contract."""
-    for container in (
-        data,
-        data.get("workspace"),
-        data.get("model"),
-        data.get("usage"),
-        data.get("token_usage"),
-    ):
-        session_id = _first_string(container, *hook_payload.runtime_session_id_keys)
+    for container in (data, data.get("workspace"), data.get("model"), *_context_payload_containers(data, hook_payload)):
+        session_id = _first_string(container, *_policy_keys(hook_payload, "runtime_session_id_keys"))
         if session_id:
             return session_id
     return ""
@@ -585,7 +588,7 @@ def _check_update(workspace_dir: str | None = None) -> str:
         )
         if command is None:
             return ""
-        return f"\x1b[33m\u2b06 {command}\x1b[0m \u2502 "
+        return f"\x1b[33mUP {command}\x1b[0m | "
     return ""
 
 
@@ -612,7 +615,11 @@ def main() -> None:
             hook_payload=payload_policy,
         ):
             project_dir_trusted = False
-        statusline_project_root = _statusline_project_root(workspace_dir)
+        statusline_project_root = _trusted_payload_project_root(
+            data,
+            workspace_dir,
+            hook_payload=payload_policy,
+        ) or _statusline_project_root(workspace_dir)
         if statusline_project_root is not None:
             project_root = str(statusline_project_root)
         elif not project_dir_trusted:
@@ -622,6 +629,8 @@ def main() -> None:
             project_root=project_root,
             project_dir_present=project_dir_present,
             project_dir_trusted=project_dir_trusted,
+            target_path=getattr(roots, "target_path", None),
+            target_root=getattr(roots, "target_root", None),
         )
         runtime_lookup = resolve_runtime_lookup_context_from_payload_roots(
             runtime_roots,
@@ -678,7 +687,7 @@ def main() -> None:
         if position:
             segments.append(f"\x1b[36m{position}\x1b[0m")
 
-        statusline = " \u2502 ".join(segments)
+        statusline = " | ".join(segments)
         if gpd_update:
             statusline = f"{gpd_update}{statusline}"
 

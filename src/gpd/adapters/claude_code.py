@@ -8,6 +8,7 @@ from pathlib import Path
 
 from gpd.adapters.base import RuntimeAdapter
 from gpd.adapters.install_utils import (
+    DEFAULT_RUNTIME_BRIDGE_SHELL_FENCE_LANGUAGES,
     HOOK_SCRIPTS,
     MANIFEST_NAME,
     _is_hook_command_for_script,
@@ -22,7 +23,7 @@ from gpd.adapters.install_utils import (
     read_settings,
     remove_empty_json_object_file,
     remove_stale_agents,
-    should_preserve_public_local_cli_command,
+    rewrite_gpd_cli_invocations_to_runtime_bridge,
     translate_frontmatter_tool_names,
     verify_installed,
     write_settings,
@@ -33,8 +34,6 @@ from gpd.adapters.install_utils import (
 from gpd.mcp import managed_integrations as _managed_integrations
 
 logger = logging.getLogger(__name__)
-
-_SHELL_FENCE_LANGUAGES = frozenset({"bash", "sh", "shell", "zsh"})
 
 
 def _claude_settings_shape_is_valid(settings: dict[str, object]) -> bool:
@@ -75,6 +74,30 @@ def _read_claude_settings_state(settings_path: Path) -> tuple[dict[str, object] 
         return None, "malformed"
     return parsed, None
 
+
+def _validated_deferred_install_payload(
+    install_result: Mapping[str, object],
+) -> tuple[str | Path, dict[str, object], str, bool]:
+    """Return deferred settings payload or fail closed before finalization."""
+    settings_path = install_result.get("settingsPath")
+    settings = install_result.get("settings")
+    statusline_command = install_result.get("statuslineCommand")
+    should_install_statusline = install_result.get("shouldInstallStatusline", True)
+
+    if not isinstance(settings_path, (str, Path)):
+        raise RuntimeError("Claude Code deferred install result is malformed; refusing to finalize install.")
+    if not isinstance(settings, dict):
+        raise RuntimeError("Claude Code deferred install result is malformed; refusing to finalize install.")
+    if not _claude_settings_shape_is_valid(settings):
+        raise RuntimeError("Claude Code deferred install result is malformed; refusing to finalize install.")
+    if not isinstance(statusline_command, str):
+        raise RuntimeError("Claude Code deferred install result is malformed; refusing to finalize install.")
+    if type(should_install_statusline) is not bool:
+        raise RuntimeError("Claude Code deferred install result is malformed; refusing to finalize install.")
+
+    return settings_path, settings, statusline_command, should_install_statusline
+
+
 _TOOL_NAME_MAP: dict[str, str] = {
     "file_read": "Read",
     "file_write": "Write",
@@ -103,6 +126,28 @@ class ClaudeCodeAdapter(RuntimeAdapter):
     def runtime_name(self) -> str:
         return "claude-code"
 
+    def project_markdown_surface(
+        self,
+        content: str,
+        *,
+        surface_kind: str,
+        path_prefix: str,
+        command_name: str | None = None,
+        bridge_command: str | None = None,
+    ) -> str:
+        if surface_kind != "command":
+            return super().project_markdown_surface(
+                content,
+                surface_kind=surface_kind,
+                path_prefix=path_prefix,
+                command_name=command_name,
+                bridge_command=bridge_command,
+            )
+        if bridge_command is None:
+            raise ValueError("bridge_command is required for projected Claude Code command surfaces")
+        content = self.translate_shared_command_references(content)
+        return _render_claude_command_markdown(content, bridge_command=bridge_command)
+
     # --- Template method hooks ---
 
     def _install_commands(self, gpd_root: Path, target_dir: Path, path_prefix: str, failures: list[str]) -> int:
@@ -117,7 +162,7 @@ class ClaudeCodeAdapter(RuntimeAdapter):
                 prefix,
                 install_scope=install_scope,
             )
-            return _rewrite_gpd_cli_invocations(translated, bridge_command)
+            return _render_claude_command_markdown(translated, bridge_command=bridge_command)
 
         copy_with_path_replacement(
             commands_src,
@@ -182,10 +227,6 @@ class ClaudeCodeAdapter(RuntimeAdapter):
             )
         )
 
-    def _install_version(self, target_dir: Path, version: str, failures: list[str]) -> None:
-        """Write VERSION into the shared GPD content tree."""
-        super()._install_version(target_dir, version, failures)
-
     def _verify(self, target_dir: Path) -> None:
         """Verify the Claude Code install satisfies the shared contract."""
         super()._verify(target_dir)
@@ -198,12 +239,58 @@ class ClaudeCodeAdapter(RuntimeAdapter):
         """Defer settings.json validation until finalize_install()."""
         return self.install_detection_relpaths()
 
+    def missing_install_artifacts(self, target_dir: Path) -> tuple[str, ...]:
+        """Return missing or malformed Claude-owned install artifacts."""
+        missing = list(super().missing_install_artifacts(target_dir))
+        settings_path = target_dir / "settings.json"
+        if settings_path.exists():
+            _, settings_parse_error = _read_claude_settings_state(settings_path)
+            if settings_parse_error is not None and "settings.json" not in missing:
+                missing.append("settings.json")
+        return tuple(missing)
+
+    def _preflight_runtime_config(self, target_dir: Path, is_global: bool) -> None:
+        """Fail before copying files when Claude-owned config is malformed."""
+        settings_path = target_dir / "settings.json"
+        _, settings_parse_error = _read_claude_settings_state(settings_path)
+        if settings_parse_error is not None:
+            raise RuntimeError("Claude Code settings.json is malformed; refusing to overwrite it during install.")
+        self._preflight_project_integrations_config(target_dir, is_global)
+
+        project_cwd = None if is_global or getattr(self, "_install_explicit_target", False) else target_dir.parent
+        mcp_servers = _build_managed_mcp_servers(cwd=project_cwd)
+        if not mcp_servers:
+            return
+
+        mcp_config_path = _mcp_config_path(target_dir, is_global=is_global)
+        if not mcp_config_path.exists():
+            return
+
+        try:
+            mcp_config = parse_jsonc(mcp_config_path.read_text(encoding="utf-8"))
+        except (ValueError, OSError) as exc:
+            raise RuntimeError(
+                f"{mcp_config_path.name} is malformed; refusing to overwrite Claude MCP config during install."
+            ) from exc
+        if not isinstance(mcp_config, dict) or not _claude_mcp_config_shape_is_valid(mcp_config):
+            raise RuntimeError(
+                f"{mcp_config_path.name} is malformed; refusing to overwrite Claude MCP config during install."
+            )
+
+    def _install_rollback_paths(self, gpd_root: Path, target_dir: Path, is_global: bool) -> tuple[Path, ...]:
+        return (
+            *super()._install_rollback_paths(gpd_root, target_dir, is_global),
+            _mcp_config_path(target_dir, is_global=is_global),
+        )
+
     def _configure_runtime(self, target_dir: Path, is_global: bool) -> dict[str, object]:
         settings_path = target_dir / "settings.json"
         settings_state, settings_parse_error = _read_claude_settings_state(settings_path)
         if settings_parse_error is not None:
             raise RuntimeError("Claude Code settings.json is malformed; refusing to overwrite it during install.")
         settings = settings_state or {}
+        should_install_statusline = self._installed_hook_script_available(HOOK_SCRIPTS["statusline"])
+        should_install_update_hook = self._installed_hook_script_available(HOOK_SCRIPTS["check_update"])
         statusline_command = build_hook_command(
             target_dir,
             HOOK_SCRIPTS["statusline"],
@@ -218,12 +305,15 @@ class ClaudeCodeAdapter(RuntimeAdapter):
             config_dir_name=self.config_dir_name,
             explicit_target=getattr(self, "_install_explicit_target", False),
         )
-        ensure_update_hook(
-            settings,
-            update_check_command,
-            target_dir=target_dir,
-            config_dir_name=self.config_dir_name,
-        )
+        if should_install_update_hook:
+            ensure_update_hook(
+                settings,
+                update_check_command,
+                target_dir=target_dir,
+                config_dir_name=self.config_dir_name,
+            )
+        else:
+            logger.warning("Skipping update check hook because hooks/check_update.py is not GPD-managed")
 
         # Wire MCP servers into the correct config file.
         # Claude Code reads mcpServers from:
@@ -266,6 +356,7 @@ class ClaudeCodeAdapter(RuntimeAdapter):
             "settingsPath": str(settings_path),
             "settings": settings,
             "statuslineCommand": statusline_command,
+            "shouldInstallStatusline": should_install_statusline,
             "mcpServers": mcp_count,
         }
 
@@ -277,12 +368,20 @@ class ClaudeCodeAdapter(RuntimeAdapter):
         settings = settings or {}
         permissions = settings.get("permissions")
         permissions_dict = permissions if isinstance(permissions, dict) else {}
-        default_mode = permissions_dict.get("defaultMode") if isinstance(permissions_dict.get("defaultMode"), str) else None
+        default_mode = (
+            permissions_dict.get("defaultMode") if isinstance(permissions_dict.get("defaultMode"), str) else None
+        )
         bypass_disabled = permissions_dict.get("disableBypassPermissionsMode") == "disable"
         desired_mode = "yolo" if autonomy == "yolo" else "default"
         managed_state = self._runtime_permissions_manifest_state(target_dir) or {}
         managed_by_gpd = managed_state.get("mode") == "yolo"
-        config_aligned = False if not config_valid else default_mode == "bypassPermissions" if desired_mode == "yolo" else not managed_by_gpd
+        config_aligned = (
+            False
+            if not config_valid
+            else default_mode == "bypassPermissions"
+            if desired_mode == "yolo"
+            else not managed_by_gpd
+        )
         requires_relaunch = desired_mode == "yolo" and config_aligned
         next_step: str | None = None
         message = "Claude Code is using its normal permission mode."
@@ -305,7 +404,9 @@ class ClaudeCodeAdapter(RuntimeAdapter):
             else:
                 message = "Claude Code is not yet configured to open in bypassPermissions mode."
         elif managed_by_gpd:
-            message = "Claude Code is still pinned to a GPD-managed bypassPermissions default from an earlier yolo sync."
+            message = (
+                "Claude Code is still pinned to a GPD-managed bypassPermissions default from an earlier yolo sync."
+            )
         return {
             "runtime": self.runtime_name,
             "desired_mode": desired_mode,
@@ -354,7 +455,9 @@ class ClaudeCodeAdapter(RuntimeAdapter):
                         "remove the managed restriction to get uninterrupted yolo execution."
                     ),
                 }
-            current_mode = permissions_dict.get("defaultMode") if isinstance(permissions_dict.get("defaultMode"), str) else None
+            current_mode = (
+                permissions_dict.get("defaultMode") if isinstance(permissions_dict.get("defaultMode"), str) else None
+            )
             if current_mode != "bypassPermissions":
                 restore_state = {
                     "had_permissions": settings_had_permissions,
@@ -443,20 +546,19 @@ class ClaudeCodeAdapter(RuntimeAdapter):
         force_statusline: bool = False,
     ) -> None:
         """Persist settings.json-backed configuration after install."""
-        settings_path = install_result.get("settingsPath")
-        settings = install_result.get("settings")
-        statusline_command = install_result.get("statuslineCommand")
-        if isinstance(settings_path, (str, Path)) and isinstance(settings, dict) and isinstance(statusline_command, str):
-            _, settings_parse_error = _read_claude_settings_state(Path(settings_path))
-            if settings_parse_error is not None:
-                raise RuntimeError("Claude Code settings.json is malformed; refusing to overwrite it during finalize.")
-            self.finish_install(
-                settings_path,
-                settings,
-                statusline_command,
-                True,
-                force_statusline=force_statusline,
-            )
+        settings_path, settings, statusline_command, should_install_statusline = _validated_deferred_install_payload(
+            install_result
+        )
+        _, settings_parse_error = _read_claude_settings_state(Path(settings_path))
+        if settings_parse_error is not None:
+            raise RuntimeError("Claude Code settings.json is malformed; refusing to overwrite it during finalize.")
+        self.finish_install(
+            settings_path,
+            settings,
+            statusline_command,
+            should_install_statusline,
+            force_statusline=force_statusline,
+        )
 
     def uninstall(self, target_dir: Path) -> dict[str, object]:
         """Remove GPD from Claude Code config and clean the matching MCP config."""
@@ -543,9 +645,7 @@ class ClaudeCodeAdapter(RuntimeAdapter):
                 except (ValueError, OSError):
                     mcp_config = None
                 if isinstance(mcp_config, dict) and isinstance(mcp_config.get("mcpServers"), dict):
-                    removed_keys = [
-                        key for key in list(mcp_config["mcpServers"]) if key in _managed_mcp_server_keys()
-                    ]
+                    removed_keys = [key for key in list(mcp_config["mcpServers"]) if key in _managed_mcp_server_keys()]
                     if removed_keys:
                         for key in removed_keys:
                             del mcp_config["mcpServers"][key]
@@ -674,96 +774,16 @@ def _rewrite_gpd_cli_invocations(content: str, command: str) -> str:
     in a command position. This keeps model-visible prose and inline code spans
     canonical while still pinning runnable shell steps to the runtime bridge.
     """
-    rewritten: list[str] = []
-    in_shell_fence = False
-
-    for line in content.splitlines(keepends=True):
-        stripped = line.lstrip()
-        if stripped.startswith("```"):
-            if in_shell_fence:
-                in_shell_fence = False
-            else:
-                fence_language = stripped[3:].strip().lower()
-                in_shell_fence = fence_language in _SHELL_FENCE_LANGUAGES
-            rewritten.append(line)
-            continue
-
-        if in_shell_fence:
-            rewritten.append(_rewrite_gpd_shell_line(line, command))
-            continue
-
-        rewritten.append(line)
-
-    return "".join(rewritten)
+    return rewrite_gpd_cli_invocations_to_runtime_bridge(
+        content,
+        command,
+        shell_fence_languages=DEFAULT_RUNTIME_BRIDGE_SHELL_FENCE_LANGUAGES,
+    )
 
 
-def _rewrite_gpd_shell_line(line: str, command: str) -> str:
-    """Rewrite only command-position ``gpd`` tokens on a shell line."""
-    pieces: list[str] = []
-    index = 0
-    in_single = False
-    in_double = False
-
-    while index < len(line):
-        char = line[index]
-        previous = line[index - 1] if index > 0 else ""
-
-        if char == "'" and not in_double:
-            in_single = not in_single
-            pieces.append(char)
-            index += 1
-            continue
-
-        if char == '"' and not in_single and previous != "\\":
-            in_double = not in_double
-            pieces.append(char)
-            index += 1
-            continue
-
-        if (
-            not in_single
-            and not in_double
-            and line.startswith("gpd", index)
-            and _is_gpd_command_start(line, index)
-            and _is_gpd_token_end(line, index + 3)
-        ):
-            if should_preserve_public_local_cli_command(line[index:]):
-                pieces.append("gpd")
-                index += 3
-                continue
-            pieces.append(command)
-            index += 3
-            continue
-
-        pieces.append(char)
-        index += 1
-
-    return "".join(pieces)
-
-
-def _is_gpd_command_start(line: str, index: int) -> bool:
-    """Return whether ``gpd`` starts a shell command token at *index*."""
-    probe = index - 1
-    while probe >= 0 and line[probe] in " \t":
-        probe -= 1
-
-    if probe < 0:
-        return True
-
-    if line[probe] in "|;(!":
-        return True
-
-    if probe >= 1 and line[probe - 1 : probe + 1] in {"&&", "||", "$("}:
-        return True
-
-    return False
-
-
-def _is_gpd_token_end(line: str, end_index: int) -> bool:
-    """Return whether the token ending at *end_index* is a standalone ``gpd``."""
-    if end_index >= len(line):
-        return True
-    return line[end_index].isspace() or line[end_index] in {'"', "'", "`", ";", "|", "&", ")", "<", ">"}
+def _render_claude_command_markdown(content: str, *, bridge_command: str) -> str:
+    """Render one canonical command markdown source into Claude Code command content."""
+    return _rewrite_gpd_cli_invocations(content, bridge_command)
 
 
 def _mcp_config_path(target_dir: Path, *, is_global: bool) -> Path:
@@ -816,8 +836,9 @@ def _build_managed_mcp_servers(
     """Return shared MCP servers plus configured optional integrations."""
     from gpd.mcp.builtin_servers import build_mcp_servers_dict
 
-    servers = build_mcp_servers_dict(python_path=hook_python_interpreter())
-    servers.update(_build_managed_optional_mcp_servers(cwd=cwd, env=env))
+    python_path = hook_python_interpreter()
+    servers = build_mcp_servers_dict(python_path=python_path)
+    servers.update(_build_managed_optional_mcp_servers(cwd=cwd, env=env, python_path=python_path))
     return servers
 
 
@@ -825,9 +846,11 @@ def _build_managed_optional_mcp_servers(
     *,
     cwd: Path | None = None,
     env: Mapping[str, str] | None = None,
+    python_path: str | None = None,
 ) -> dict[str, dict[str, object]]:
     """Return optional managed MCP servers that are currently configured."""
-    return _managed_integrations.projected_managed_optional_mcp_servers(env, cwd=cwd)
+    python_path = python_path or hook_python_interpreter()
+    return _managed_integrations.projected_managed_optional_mcp_servers(env, cwd=cwd, python_path=python_path)
 
 
 def _managed_mcp_server_keys() -> frozenset[str]:

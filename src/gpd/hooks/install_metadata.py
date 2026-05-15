@@ -3,20 +3,28 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from importlib import import_module
 from pathlib import Path
 
-import gpd.adapters.install_utils as install_utils
 from gpd.adapters.runtime_catalog import (
+    ManifestMetadataListPolicy,
     get_managed_install_surface_policy,
+    get_manifest_metadata_list_policies,
+    get_runtime_descriptor,
     get_shared_install_metadata,
     list_runtime_names,
+    managed_install_globs_have_files,
+    normalize_manifest_file_entries,
+    normalize_manifest_relpath,
+    normalize_runtime_name,
 )
 
 _SHARED_INSTALL_METADATA = get_shared_install_metadata()
 GPD_INSTALL_DIR_NAME = _SHARED_INSTALL_METADATA.install_root_dir_name
 MANIFEST_NAME = _SHARED_INSTALL_METADATA.manifest_name
+_MANIFEST_RUNTIME_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
 
 def get_adapter(runtime: str):
@@ -51,6 +59,17 @@ def _canonical_manifest_runtime_name(value: str) -> str | None:
     return normalized if normalized in list_runtime_names() else None
 
 
+def _unsupported_manifest_runtime_name(value: str) -> str | None:
+    """Return a well-formed unsupported runtime id, or ``None`` for malformed drift."""
+
+    normalized = value.strip()
+    if not normalized or _MANIFEST_RUNTIME_ID_RE.fullmatch(normalized) is None:
+        return None
+    if normalize_runtime_name(normalized) is not None:
+        return None
+    return normalized
+
+
 @dataclass(frozen=True, slots=True)
 class InstallTargetAssessment:
     """Shared classification of a runtime config dir's GPD install state."""
@@ -79,6 +98,9 @@ class InstallTargetAssessment:
             return f"{self.config_dir} belongs to {owner}, not {runtime_label}."
         if self.state == "untrusted_manifest":
             return f"{self.config_dir} has an untrusted GPD manifest and cannot be treated as a ready install target."
+        if self.state == "unsupported_runtime":
+            owner = f"`{self.manifest_runtime}`" if self.manifest_runtime else "an unsupported runtime"
+            return f"{self.config_dir} belongs to {owner}, which is not supported by this GPD version."
         if self.state == "owned_complete":
             owner = f"`{self.manifest_runtime}`" if self.manifest_runtime else "the selected runtime"
             return f"{self.config_dir} already contains a complete GPD install for {owner}."
@@ -108,33 +130,21 @@ class ManagedInstallSurface:
         )
 
 
-def _glob_contains_files(config_dir: Path, patterns: tuple[str, ...]) -> bool:
-    """Return whether any configured managed-surface glob materializes files."""
-
-    for pattern in patterns:
-        for match in config_dir.glob(pattern):
-            if match.is_file():
-                return True
-            if match.is_dir() and install_utils._dir_contains_files(match):
-                return True
-    return False
-
-
-def inspect_managed_install_surface(config_dir: Path) -> ManagedInstallSurface:
+def inspect_managed_install_surface(config_dir: Path, *, runtime: str | None = None) -> ManagedInstallSurface:
     """Return the managed install surfaces currently materialized in *config_dir*."""
-    policy = get_managed_install_surface_policy()
+    policy = get_managed_install_surface_policy(runtime)
 
     return ManagedInstallSurface(
-        has_gpd_content=_glob_contains_files(config_dir, policy.gpd_content_globs),
-        has_nested_commands=_glob_contains_files(config_dir, policy.nested_command_globs),
-        has_flat_commands=_glob_contains_files(config_dir, policy.flat_command_globs),
-        has_managed_agents=_glob_contains_files(config_dir, policy.managed_agent_globs),
+        has_gpd_content=managed_install_globs_have_files(config_dir, policy.gpd_content_globs, on_error=True),
+        has_nested_commands=managed_install_globs_have_files(config_dir, policy.nested_command_globs, on_error=True),
+        has_flat_commands=managed_install_globs_have_files(config_dir, policy.flat_command_globs, on_error=True),
+        has_managed_agents=managed_install_globs_have_files(config_dir, policy.managed_agent_globs, on_error=True),
     )
 
 
-def config_dir_has_managed_install_markers(config_dir: Path) -> bool:
+def config_dir_has_managed_install_markers(config_dir: Path, *, runtime: str | None = None) -> bool:
     """Return whether *config_dir* carries any managed GPD install markers."""
-    return inspect_managed_install_surface(config_dir).has_managed_markers
+    return inspect_managed_install_surface(config_dir, runtime=runtime).has_managed_markers
 
 
 def load_install_manifest_state(config_dir: Path) -> tuple[str, dict[str, object]]:
@@ -164,7 +174,7 @@ def load_install_manifest_state(config_dir: Path) -> tuple[str, dict[str, object
 
 
 def load_install_manifest_runtime_status(config_dir: Path) -> tuple[str, dict[str, object], str | None]:
-    """Return the manifest parse state, payload, and canonical runtime when available."""
+    """Return the manifest parse state, payload, and runtime id when available."""
 
     state, payload = load_install_manifest_state(config_dir)
     if state != "ok":
@@ -182,9 +192,13 @@ def load_install_manifest_runtime_status(config_dir: Path) -> tuple[str, dict[st
         return "malformed_runtime", payload, None
 
     canonical_runtime = _canonical_manifest_runtime_name(normalized_runtime)
-    if canonical_runtime is None:
-        return "malformed_runtime", payload, None
-    return "ok", payload, canonical_runtime
+    if canonical_runtime is not None:
+        return "ok", payload, canonical_runtime
+
+    unsupported_runtime = _unsupported_manifest_runtime_name(normalized_runtime)
+    if unsupported_runtime is not None:
+        return "unsupported_runtime", payload, unsupported_runtime
+    return "malformed_runtime", payload, None
 
 
 def load_install_manifest_scope_status(config_dir: Path) -> tuple[str, dict[str, object], str | None]:
@@ -207,6 +221,122 @@ def load_install_manifest_scope_status(config_dir: Path) -> tuple[str, dict[str,
     return "ok", payload, normalized_scope
 
 
+def load_install_manifest_explicit_target_status(config_dir: Path) -> tuple[str, dict[str, object], bool | None]:
+    """Return the manifest parse state, payload, and explicit-target flag when available."""
+
+    state, payload = load_install_manifest_state(config_dir)
+    if state != "ok":
+        return state, payload, None
+
+    if "explicit_target" not in payload:
+        return "missing_explicit_target", payload, None
+
+    explicit_target = payload.get("explicit_target")
+    if not isinstance(explicit_target, bool):
+        return "malformed_explicit_target", payload, None
+    return "ok", payload, explicit_target
+
+
+def _safe_manifest_path_segment(value: object) -> str | None:
+    relpath = normalize_manifest_relpath(value)
+    if relpath is None or "/" in relpath:
+        return None
+    return relpath
+
+
+def _manifest_metadata_list_policy_is_satisfied(
+    payload: dict[str, object],
+    policy: ManifestMetadataListPolicy,
+) -> bool:
+    raw_values = payload.get(policy.key)
+    if raw_values is None:
+        return True
+    if not isinstance(raw_values, list):
+        return False
+    for raw_value in raw_values:
+        if policy.value_kind == "path_segment":
+            value = _safe_manifest_path_segment(raw_value)
+        elif policy.value_kind == "relpath":
+            value = normalize_manifest_relpath(raw_value)
+        else:
+            return False
+        if value is None:
+            return False
+        prefix = policy.item_prefix
+        suffix = policy.item_suffix
+        if prefix is not None and not value.startswith(prefix):
+            return False
+        if suffix is not None and not value.endswith(suffix):
+            return False
+    return True
+
+
+def _manifest_scalar_path_metadata_key_suffixes(runtime: str) -> tuple[str, ...]:
+    try:
+        descriptor = get_runtime_descriptor(runtime)
+    except KeyError:
+        return ()
+
+    roots: list[str] = []
+    seen_roots: set[str] = set()
+    for prefix in descriptor.manifest_file_prefixes:
+        root = prefix.replace("\\", "/").strip("/").split("/", 1)[0]
+        if not root or root in seen_roots:
+            continue
+        seen_roots.add(root)
+        roots.append(root)
+    return tuple(f"_{root}_dir" for root in roots)
+
+
+def _manifest_scalar_path_is_within_install_owner(value: object, *, config_dir: Path) -> bool:
+    if not isinstance(value, str) or not value.strip():
+        return False
+
+    owner_dir = config_dir.parent
+    raw_path = Path(value).expanduser()
+    candidate = raw_path if raw_path.is_absolute() else owner_dir / raw_path
+    try:
+        resolved_owner = owner_dir.resolve(strict=False)
+        resolved_candidate = candidate.resolve(strict=False)
+    except (OSError, RuntimeError, ValueError):
+        return False
+    return resolved_candidate != resolved_owner and resolved_candidate.is_relative_to(resolved_owner)
+
+
+def _manifest_scalar_path_metadata_state(payload: dict[str, object], *, config_dir: Path, runtime: str) -> str:
+    scalar_path_key_suffixes = _manifest_scalar_path_metadata_key_suffixes(runtime)
+    if not scalar_path_key_suffixes:
+        return "ok"
+
+    for key, value in payload.items():
+        if any(key.endswith(suffix) for suffix in scalar_path_key_suffixes):
+            if not _manifest_scalar_path_is_within_install_owner(value, config_dir=config_dir):
+                return "malformed_scalar_path_metadata"
+    return "ok"
+
+
+def _manifest_path_metadata_state(payload: dict[str, object], *, config_dir: Path, runtime: str) -> str:
+    raw_files = payload.get("files")
+    if raw_files is not None and normalize_manifest_file_entries(raw_files) is None:
+        return "malformed_files"
+
+    runtime_policies = get_manifest_metadata_list_policies(runtime)
+    runtime_policy_keys = {policy.key for policy in runtime_policies}
+    known_policy_keys = {policy.key for policy in get_manifest_metadata_list_policies()}
+    if any(key in payload and key not in runtime_policy_keys for key in known_policy_keys):
+        return "malformed_path_metadata"
+
+    for policy in runtime_policies:
+        if not _manifest_metadata_list_policy_is_satisfied(payload, policy):
+            return "malformed_path_metadata"
+
+    scalar_path_metadata_state = _manifest_scalar_path_metadata_state(payload, config_dir=config_dir, runtime=runtime)
+    if scalar_path_metadata_state != "ok":
+        return scalar_path_metadata_state
+
+    return "ok"
+
+
 def assess_install_target(
     config_dir: Path,
     *,
@@ -219,12 +349,14 @@ def assess_install_target(
     - ``clean``: target path exists but contains no managed GPD surface
     - ``owned_complete``: valid manifest for the owning runtime and complete install
     - ``owned_incomplete``: valid manifest for the owning runtime but missing install artifacts
+    - ``unsupported_runtime``: valid manifest for a runtime that this GPD version does not support
     - ``foreign_runtime``: valid manifest, but ownership belongs to another runtime
     - ``untrusted_manifest``: manifest missing/corrupt/malformed on a managed surface
     """
 
     resolved = config_dir.expanduser().resolve(strict=False)
     manifest_state, _payload, manifest_runtime = load_install_manifest_runtime_status(resolved)
+    manifest_scope_state, _scope_payload, _manifest_scope = load_install_manifest_scope_status(resolved)
     has_managed_markers = config_dir_has_managed_install_markers(resolved)
     missing_install_artifacts: tuple[str, ...] = ()
 
@@ -235,6 +367,37 @@ def assess_install_target(
                 expected_runtime=expected_runtime,
                 state="foreign_runtime",
                 manifest_state=manifest_state,
+                manifest_runtime=manifest_runtime,
+                has_managed_markers=True,
+            )
+        if manifest_scope_state != "ok":
+            return InstallTargetAssessment(
+                config_dir=resolved,
+                expected_runtime=expected_runtime,
+                state="untrusted_manifest",
+                manifest_state=manifest_scope_state,
+                manifest_runtime=manifest_runtime,
+                has_managed_markers=True,
+            )
+        explicit_target_state, _explicit_target_payload, _explicit_target = (
+            load_install_manifest_explicit_target_status(resolved)
+        )
+        if explicit_target_state in {"missing_explicit_target", "malformed_explicit_target"}:
+            return InstallTargetAssessment(
+                config_dir=resolved,
+                expected_runtime=expected_runtime,
+                state="untrusted_manifest",
+                manifest_state=explicit_target_state,
+                manifest_runtime=manifest_runtime,
+                has_managed_markers=True,
+            )
+        path_metadata_state = _manifest_path_metadata_state(_payload, config_dir=resolved, runtime=manifest_runtime)
+        if path_metadata_state != "ok":
+            return InstallTargetAssessment(
+                config_dir=resolved,
+                expected_runtime=expected_runtime,
+                state="untrusted_manifest",
+                manifest_state=path_metadata_state,
                 manifest_runtime=manifest_runtime,
                 has_managed_markers=True,
             )
@@ -253,6 +416,17 @@ def assess_install_target(
             manifest_runtime=manifest_runtime,
             has_managed_markers=True,
             missing_install_artifacts=missing_install_artifacts,
+        )
+
+    if manifest_state == "unsupported_runtime" and manifest_runtime is not None:
+        state = "foreign_runtime" if expected_runtime is not None else "unsupported_runtime"
+        return InstallTargetAssessment(
+            config_dir=resolved,
+            expected_runtime=expected_runtime,
+            state=state,
+            manifest_state=manifest_state,
+            manifest_runtime=manifest_runtime,
+            has_managed_markers=True,
         )
 
     if manifest_state == "missing" and not has_managed_markers:
@@ -304,16 +478,18 @@ def installed_update_command(config_dir: Path) -> str | None:
     if scope not in {"local", "global"}:
         return None
 
+    explicit_target_state, _explicit_target_manifest, explicit_target = load_install_manifest_explicit_target_status(
+        config_dir
+    )
+    if explicit_target_state != "ok" or explicit_target is None:
+        # Fail closed for manifests that do not prove whether the
+        # install was explicitly targeted. Update-command synthesis is only
+        # trusted when the manifest carries the authoritative flag.
+        return None
+
     try:
         get_adapter(runtime)
     except KeyError:
-        return None
-
-    explicit_target = manifest.get("explicit_target")
-    if not isinstance(explicit_target, bool):
-        # Fail closed for legacy manifests that do not prove whether the
-        # install was explicitly targeted. Update-command synthesis is only
-        # trusted when the manifest carries the authoritative flag.
         return None
 
     return build_runtime_install_repair_command(

@@ -18,9 +18,13 @@ NEW_MILESTONE_STAGE_MANIFEST_PATH = WORKFLOW_STAGE_MANIFEST_DIR / f"new-mileston
 EXECUTE_PHASE_STAGE_MANIFEST_PATH = WORKFLOW_STAGE_MANIFEST_DIR / f"execute-phase{WORKFLOW_STAGE_MANIFEST_SUFFIX}"
 PLAN_PHASE_STAGE_MANIFEST_PATH = WORKFLOW_STAGE_MANIFEST_DIR / f"plan-phase{WORKFLOW_STAGE_MANIFEST_SUFFIX}"
 QUICK_STAGE_MANIFEST_PATH = WORKFLOW_STAGE_MANIFEST_DIR / f"quick{WORKFLOW_STAGE_MANIFEST_SUFFIX}"
-LITERATURE_REVIEW_STAGE_MANIFEST_PATH = WORKFLOW_STAGE_MANIFEST_DIR / f"literature-review{WORKFLOW_STAGE_MANIFEST_SUFFIX}"
+LITERATURE_REVIEW_STAGE_MANIFEST_PATH = (
+    WORKFLOW_STAGE_MANIFEST_DIR / f"literature-review{WORKFLOW_STAGE_MANIFEST_SUFFIX}"
+)
 RESEARCH_PHASE_STAGE_MANIFEST_PATH = WORKFLOW_STAGE_MANIFEST_DIR / f"research-phase{WORKFLOW_STAGE_MANIFEST_SUFFIX}"
 MAP_RESEARCH_STAGE_MANIFEST_PATH = WORKFLOW_STAGE_MANIFEST_DIR / f"map-research{WORKFLOW_STAGE_MANIFEST_SUFFIX}"
+WRITE_PAPER_MANAGED_MANUSCRIPT_ROOT = "GPD/publication/{subject_slug}/manuscript"
+WRITE_PAPER_MANAGED_INTAKE_ROOT = "GPD/publication/{subject_slug}/intake"
 RESUME_WORK_INIT_FIELDS = frozenset(
     {
         "workspace_root",
@@ -36,6 +40,7 @@ RESUME_WORK_INIT_FIELDS = frozenset(
         "workspace_project_exists",
         "workspace_planning_exists",
         "state_exists",
+        "state_json_backup_exists",
         "roadmap_exists",
         "project_exists",
         "planning_exists",
@@ -74,9 +79,9 @@ RESUME_WORK_INIT_FIELDS = frozenset(
         "execution_resumable",
         "execution_paused_at",
         "current_execution_resume_file",
-        "session_resume_file",
-        "recorded_session_resume_file",
-        "missing_session_resume_file",
+        "handoff_resume_file",
+        "recorded_handoff_resume_file",
+        "missing_handoff_resume_file",
         "execution_resume_file",
         "execution_resume_file_source",
         "project_contract",
@@ -114,10 +119,17 @@ RESUME_WORK_INIT_FIELDS = frozenset(
 )
 SYNC_STATE_INIT_FIELDS = frozenset(
     {
-        "prefer_mode",
+        "workspace_root",
+        "project_root",
+        "project_root_source",
+        "project_root_auto_selected",
+        "init_root_policy",
+        "project_reentry_mode",
+        "project_reentry_guidance",
         "state_md_exists",
         "state_json_exists",
         "state_json_backup_exists",
+        "state_recovery_guidance",
         "state_md_content",
         "state_json_content",
         "state_json_backup_content",
@@ -139,9 +151,22 @@ NEW_PROJECT_INIT_FIELDS = frozenset(
         "autonomy",
         "research_mode",
         "project_exists",
+        "state_exists",
+        "roadmap_exists",
+        "recoverable_project_exists",
+        "partial_project_exists",
+        "project_recovery_status",
+        "init_progress_exists",
+        "init_progress_status",
+        "init_progress_valid",
+        "init_progress_corrupt",
+        "init_progress_step",
+        "init_progress_description",
+        "init_progress_path",
         "has_research_map",
         "planning_exists",
         "has_research_files",
+        "research_file_samples",
         "has_project_manifest",
         "needs_research_map",
         "has_git",
@@ -261,9 +286,9 @@ EXECUTE_PHASE_INIT_FIELDS = frozenset(
         "execution_resumable",
         "execution_paused_at",
         "current_execution_resume_file",
-        "session_resume_file",
-        "recorded_session_resume_file",
-        "missing_session_resume_file",
+        "handoff_resume_file",
+        "recorded_handoff_resume_file",
+        "missing_handoff_resume_file",
         "execution_resume_file",
         "execution_resume_file_source",
         "resume_projection",
@@ -447,6 +472,7 @@ QUICK_INIT_FIELDS = frozenset(
 LITERATURE_REVIEW_INIT_FIELDS = frozenset(
     {
         "commit_docs",
+        "project_root",
         "state_exists",
         "project_exists",
         "roadmap_exists",
@@ -574,9 +600,9 @@ RESEARCH_PHASE_INIT_FIELDS = frozenset(
         "execution_resumable",
         "execution_paused_at",
         "current_execution_resume_file",
-        "session_resume_file",
-        "recorded_session_resume_file",
-        "missing_session_resume_file",
+        "handoff_resume_file",
+        "recorded_handoff_resume_file",
+        "missing_handoff_resume_file",
         "execution_resume_file",
         "execution_resume_file_source",
         "resume_projection",
@@ -613,11 +639,18 @@ RESEARCH_PHASE_INIT_FIELDS = frozenset(
 MAP_RESEARCH_INIT_FIELDS = frozenset(
     {
         "mapper_model",
+        "workspace_root",
+        "project_root",
+        "project_root_source",
+        "project_root_auto_selected",
         "commit_docs",
         "autonomy",
         "research_mode",
+        "map_focus",
+        "map_focus_provided",
         "parallelization",
         "research_map_dir",
+        "research_map_dir_absolute",
         "existing_maps",
         "has_maps",
         "planning_exists",
@@ -662,7 +695,27 @@ MAP_RESEARCH_INIT_FIELDS = frozenset(
         "active_reference_count",
     }
 )
-VERIFY_WORK_INIT_FIELDS = frozenset(
+VERIFY_WORK_MCP_VERIFICATION_TOOLS = frozenset(
+    {
+        "mcp__gpd_verification__get_bundle_checklist",
+        "mcp__gpd_verification__suggest_contract_checks",
+        "mcp__gpd_verification__run_contract_check",
+    }
+)
+VERIFY_WORK_STAGE_ALLOWED_TOOLS = frozenset(
+    {
+        "ask_user",
+        "file_read",
+        "file_edit",
+        "file_write",
+        "find_files",
+        "search_files",
+        "shell",
+        "task",
+        *VERIFY_WORK_MCP_VERIFICATION_TOOLS,
+    }
+)
+VERIFY_WORK_BASE_INIT_FIELDS = frozenset(
     {
         "planner_model",
         "checker_model",
@@ -670,22 +723,35 @@ VERIFY_WORK_INIT_FIELDS = frozenset(
         "commit_docs",
         "autonomy",
         "research_mode",
+        "project_root",
         "phase_found",
         "phase_dir",
+        "phase_dir_abs",
         "phase_number",
         "phase_name",
         "has_verification",
         "has_validation",
-        "platform",
         "phase_proof_review_status",
+        "platform",
+    }
+)
+VERIFY_WORK_CONTRACT_GATE_FIELDS = frozenset(
+    {
         "project_contract",
         "project_contract_validation",
         "project_contract_load_info",
         "project_contract_gate",
+    }
+)
+VERIFY_WORK_REFERENCE_RUNTIME_FIELDS = frozenset(
+    {
         "contract_intake",
         "effective_reference_intake",
         "derived_active_references",
         "derived_active_reference_count",
+        "derived_knowledge_docs",
+        "derived_knowledge_doc_count",
+        "knowledge_doc_warnings",
         "citation_source_files",
         "citation_source_count",
         "citation_source_warnings",
@@ -701,12 +767,21 @@ VERIFY_WORK_INIT_FIELDS = frozenset(
         "protocol_bundle_verifier_extensions",
         "protocol_bundle_context",
         "active_reference_context",
+        "knowledge_doc_files",
+        "knowledge_doc_count",
+        "stable_knowledge_doc_files",
+        "stable_knowledge_doc_count",
+        "knowledge_doc_status_counts",
         "literature_review_files",
         "literature_review_count",
         "research_map_reference_files",
         "research_map_reference_count",
         "reference_artifact_files",
         "reference_artifacts_content",
+    }
+)
+VERIFY_WORK_STRUCTURED_STATE_FIELDS = frozenset(
+    {
         "state_load_source",
         "state_integrity_issues",
         "convention_lock",
@@ -717,6 +792,10 @@ VERIFY_WORK_INIT_FIELDS = frozenset(
         "approximation_count",
         "propagated_uncertainties",
         "propagated_uncertainty_count",
+    }
+)
+VERIFY_WORK_STATE_MEMORY_FIELDS = frozenset(
+    {
         "derived_convention_lock",
         "derived_convention_lock_count",
         "derived_intermediate_results",
@@ -725,17 +804,63 @@ VERIFY_WORK_INIT_FIELDS = frozenset(
         "derived_approximation_count",
     }
 )
+VERIFY_WORK_SCHEMA_BRIDGE_FIELDS = frozenset(
+    {
+        "verification_report_skeleton_bridge",
+    }
+)
+VERIFY_WORK_INIT_FIELDS = frozenset(
+    {
+        *VERIFY_WORK_BASE_INIT_FIELDS,
+        *VERIFY_WORK_CONTRACT_GATE_FIELDS,
+        *VERIFY_WORK_REFERENCE_RUNTIME_FIELDS,
+        *VERIFY_WORK_STRUCTURED_STATE_FIELDS,
+        *VERIFY_WORK_STATE_MEMORY_FIELDS,
+        *VERIFY_WORK_SCHEMA_BRIDGE_FIELDS,
+    }
+)
+_DEFAULT_ALLOWED_TOOLS_BY_WORKFLOW = {
+    "verify-work": VERIFY_WORK_STAGE_ALLOWED_TOOLS,
+}
 WRITE_PAPER_INIT_FIELDS = frozenset(
     {
         "commit_docs",
+        "project_root",
         "state_exists",
         "project_exists",
         "autonomy",
         "research_mode",
+        "write_paper_argument_input",
         "project_contract",
         "project_contract_gate",
         "project_contract_load_info",
         "project_contract_validation",
+        "contract_intake",
+        "effective_reference_intake",
+        "publication_subject",
+        "publication_subject_status",
+        "publication_subject_source",
+        "publication_subject_detail",
+        "publication_subject_slug",
+        "publication_lane_kind",
+        "publication_lane_owner",
+        "publication_artifact_base",
+        "selected_publication_root",
+        "selected_review_root",
+        "publication_intake_root",
+        "manuscript_resolution_status",
+        "manuscript_resolution_detail",
+        "manuscript_root",
+        "manuscript_entrypoint",
+        "artifact_manifest_path",
+        "bibliography_audit_path",
+        "reproducibility_manifest_path",
+        "managed_publication_root",
+        "managed_manuscript_root",
+        "publication_bootstrap",
+        "publication_bootstrap_mode",
+        "publication_bootstrap_root",
+        "publication_bootstrap_detail",
         "selected_protocol_bundle_ids",
         "protocol_bundle_context",
         "active_reference_context",
@@ -768,10 +893,17 @@ WRITE_PAPER_INIT_FIELDS = frozenset(
 PEER_REVIEW_INIT_FIELDS = frozenset(
     {
         "project_exists",
+        "project_root",
         "state_exists",
         "commit_docs",
         "autonomy",
         "research_mode",
+        "response_intake_input",
+        "review_target_input",
+        "review_target_mode",
+        "review_target_mode_reason",
+        "resolved_review_target",
+        "resolved_review_root",
         "project_contract",
         "project_contract_gate",
         "project_contract_load_info",
@@ -795,6 +927,12 @@ PEER_REVIEW_INIT_FIELDS = frozenset(
         "citation_source_warnings",
         "derived_citation_sources",
         "derived_citation_source_count",
+        "publication_subject_slug",
+        "publication_lane_kind",
+        "publication_lane_owner",
+        "managed_publication_root",
+        "selected_publication_root",
+        "selected_review_root",
         "manuscript_resolution_status",
         "manuscript_resolution_detail",
         "manuscript_root",
@@ -817,12 +955,20 @@ PEER_REVIEW_INIT_FIELDS = frozenset(
         "latest_author_response",
         "latest_referee_response",
         "latest_response_artifacts",
+        "latest_response_freshness_policy",
+        "latest_response_requires_fresh_review",
+        "latest_response_required_review_round",
+        "latest_response_required_review_round_suffix",
+        "latest_response_freshness_detail",
+        "latest_response_freshness",
         "platform",
     }
 )
 ARXIV_SUBMISSION_BOOTSTRAP_FIELDS = frozenset(
     {
         "commit_docs",
+        "arxiv_submission_argument_input",
+        "project_root",
         "state_exists",
         "project_exists",
         "autonomy",
@@ -842,6 +988,12 @@ ARXIV_SUBMISSION_BOOTSTRAP_FIELDS = frozenset(
 )
 ARXIV_SUBMISSION_SNAPSHOT_FIELDS = frozenset(
     {
+        "publication_subject_slug",
+        "publication_lane_kind",
+        "publication_lane_owner",
+        "managed_publication_root",
+        "selected_publication_root",
+        "selected_review_root",
         "manuscript_resolution_status",
         "manuscript_resolution_detail",
         "manuscript_root",
@@ -865,6 +1017,12 @@ ARXIV_SUBMISSION_SNAPSHOT_FIELDS = frozenset(
         "latest_author_response",
         "latest_referee_response",
         "latest_response_artifacts",
+        "latest_response_freshness_policy",
+        "latest_response_requires_fresh_review",
+        "latest_response_required_review_round",
+        "latest_response_required_review_round_suffix",
+        "latest_response_freshness_detail",
+        "latest_response_freshness",
     }
 )
 ARXIV_SUBMISSION_INIT_FIELDS = frozenset(
@@ -882,6 +1040,7 @@ _DEFAULT_KNOWN_INIT_FIELDS_BY_WORKFLOW = {
     "research-phase": RESEARCH_PHASE_INIT_FIELDS,
     "map-research": MAP_RESEARCH_INIT_FIELDS,
     "peer-review": PEER_REVIEW_INIT_FIELDS,
+    "respond-to-referees": PEER_REVIEW_INIT_FIELDS,
     "arxiv-submission": ARXIV_SUBMISSION_INIT_FIELDS,
     "plan-phase": PLAN_PHASE_INIT_FIELDS,
     "quick": QUICK_INIT_FIELDS,
@@ -890,13 +1049,24 @@ _DEFAULT_KNOWN_INIT_FIELDS_BY_WORKFLOW = {
     "execute-phase": EXECUTE_PHASE_INIT_FIELDS,
 }
 
-_ALLOWED_TOP_LEVEL_KEYS = frozenset({"schema_version", "workflow_id", "stages"})
+_ALLOWED_TOP_LEVEL_KEYS = frozenset(
+    {
+        "schema_version",
+        "workflow_id",
+        "prompt_usage",
+        "required_init_field_groups",
+        "stages",
+    }
+)
+_REQUIRED_TOP_LEVEL_KEYS = frozenset({"schema_version", "workflow_id", "stages"})
+_ALLOWED_PROMPT_USAGE_VALUES = frozenset({"staged_init", "metadata_only"})
 _ALLOWED_STAGE_KEYS = frozenset(
     {
         "id",
         "order",
         "purpose",
         "mode_paths",
+        "required_init_field_groups",
         "required_init_fields",
         "loaded_authorities",
         "conditional_authorities",
@@ -908,8 +1078,34 @@ _ALLOWED_STAGE_KEYS = frozenset(
         "checkpoints",
     }
 )
+_OPTIONAL_STAGE_KEYS = frozenset({"required_init_field_groups", "required_init_fields"})
+_REQUIRED_STAGE_KEYS = _ALLOWED_STAGE_KEYS - _OPTIONAL_STAGE_KEYS
 _ALLOWED_CONDITIONAL_KEYS = frozenset({"when", "authorities"})
 _AUTHORITY_ROOTS = ("workflows/", "references/", "templates/")
+_STAGE_MANIFEST_PAYLOAD_FIELDS = (
+    "mode_paths",
+    "required_init_fields",
+    "loaded_authorities",
+    "conditional_authorities",
+    "must_not_eager_load",
+    "allowed_tools",
+    "writes_allowed",
+    "produced_state",
+    "next_stages",
+    "checkpoints",
+)
+_STAGED_LOADING_PAYLOAD_FIELDS = (
+    "required_init_fields",
+    "mode_paths",
+    "loaded_authorities",
+    "conditional_authorities",
+    "must_not_eager_load",
+    "allowed_tools",
+    "writes_allowed",
+    "produced_state",
+    "next_stages",
+    "checkpoints",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -961,36 +1157,33 @@ class WorkflowStage:
                 combined.append(authority)
         return tuple(combined)
 
+    def _sequence_payload_fields(self, field_names: tuple[str, ...]) -> dict[str, object]:
+        payload: dict[str, object] = {}
+        for field_name in field_names:
+            if field_name == "conditional_authorities":
+                payload[field_name] = [entry.to_payload() for entry in self.conditional_authorities]
+            else:
+                payload[field_name] = list(getattr(self, field_name))
+        return payload
+
     def to_payload(self) -> dict[str, object]:
         return {
             "id": self.id,
             "order": self.order,
             "purpose": self.purpose,
-            "mode_paths": list(self.mode_paths),
-            "required_init_fields": list(self.required_init_fields),
-            "loaded_authorities": list(self.loaded_authorities),
-            "conditional_authorities": [entry.to_payload() for entry in self.conditional_authorities],
-            "must_not_eager_load": list(self.must_not_eager_load),
-            "allowed_tools": list(self.allowed_tools),
-            "writes_allowed": list(self.writes_allowed),
-            "produced_state": list(self.produced_state),
-            "next_stages": list(self.next_stages),
-            "checkpoints": list(self.checkpoints),
+            **self._sequence_payload_fields(_STAGE_MANIFEST_PAYLOAD_FIELDS),
         }
 
     def to_staged_loading_payload(self, workflow_id: str) -> dict[str, object]:
-        return {
+        payload = {
             "workflow_id": workflow_id,
             "stage_id": self.id,
             "order": self.order,
-            "loaded_authorities": list(self.loaded_authorities),
-            "conditional_authorities": [entry.to_payload() for entry in self.conditional_authorities],
-            "must_not_eager_load": list(self.must_not_eager_load),
-            "allowed_tools": list(self.allowed_tools),
-            "writes_allowed": list(self.writes_allowed),
-            "next_stages": list(self.next_stages),
-            "checkpoints": list(self.checkpoints),
+            **self._sequence_payload_fields(_STAGED_LOADING_PAYLOAD_FIELDS[:3]),
+            "eager_authorities": list(self.eager_authorities()),
         }
+        payload.update(self._sequence_payload_fields(_STAGED_LOADING_PAYLOAD_FIELDS[3:]))
+        return payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -998,6 +1191,7 @@ class WorkflowStageManifest:
     schema_version: int
     workflow_id: str
     stages: tuple[WorkflowStage, ...]
+    prompt_usage: str = "staged_init"
 
     def stage_ids(self) -> tuple[str, ...]:
         return tuple(stage.id for stage in self.stages)
@@ -1018,11 +1212,14 @@ class WorkflowStageManifest:
         return self.stage(stage_id).to_staged_loading_payload(self.workflow_id)
 
     def to_payload(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "schema_version": self.schema_version,
             "workflow_id": self.workflow_id,
             "stages": [stage.to_payload() for stage in self.stages],
         }
+        if self.prompt_usage != "staged_init":
+            payload["prompt_usage"] = self.prompt_usage
+        return payload
 
 
 def _require_string(raw: object, *, label: str) -> str:
@@ -1074,6 +1271,25 @@ def resolve_workflow_stage_manifest_path(workflow_id: str) -> Path:
 
 
 def _normalize_manifest_doc_path(raw: object, *, label: str) -> str:
+    normalized = _normalize_relative_posix_path(raw, label=label)
+    path = PurePosixPath(normalized)
+    if path.suffix != ".md":
+        raise ValueError(f"{label} must reference an existing markdown file: {normalized}")
+    if not normalized.startswith(_AUTHORITY_ROOTS):
+        raise ValueError(f"{label} must reference an authority path under workflows/, references/, or templates/")
+    if not (SPECS_DIR / normalized).is_file():
+        raise ValueError(f"{label} must reference an existing markdown file: {normalized}")
+    return normalized
+
+
+def _normalize_write_path(raw: object, *, label: str) -> str:
+    normalized = _normalize_relative_posix_path(raw, label=label)
+    if not normalized.startswith("GPD/"):
+        raise ValueError(f"{label} must be a normalized relative POSIX path")
+    return normalized
+
+
+def _normalize_relative_posix_path(raw: object, *, label: str) -> str:
     value = _require_string(raw, label=label)
     if "\\" in value:
         raise ValueError(f"{label} must be a normalized relative POSIX path")
@@ -1083,31 +1299,12 @@ def _normalize_manifest_doc_path(raw: object, *, label: str) -> str:
     normalized = path.as_posix()
     if normalized != value:
         raise ValueError(f"{label} must be a normalized relative POSIX path")
-    if path.suffix != ".md":
-        raise ValueError(f"{label} must reference an existing markdown file: {value}")
-    if not normalized.startswith(_AUTHORITY_ROOTS):
-        raise ValueError(f"{label} must reference an authority path under workflows/, references/, or templates/")
-    if not (SPECS_DIR / normalized).is_file():
-        raise ValueError(f"{label} must reference an existing markdown file: {normalized}")
     return normalized
 
 
-def _normalize_write_path(raw: object, *, label: str) -> str:
-    value = _require_string(raw, label=label)
-    if "\\" in value:
-        raise ValueError(f"{label} must be a normalized relative POSIX path")
-    path = PurePosixPath(value)
-    if path.is_absolute() or any(part in {".", ".."} for part in path.parts):
-        raise ValueError(f"{label} must be a normalized relative POSIX path")
-    normalized = path.as_posix()
-    if normalized != value or not normalized.startswith("GPD/"):
-        raise ValueError(f"{label} must be a normalized relative POSIX path")
-    return normalized
-
-
-def _normalize_tool_set(values: Iterable[str] | None) -> frozenset[str]:
+def _normalize_tool_set(values: Iterable[str] | None, *, workflow_id: str) -> frozenset[str]:
     if values is None:
-        return frozenset(CANONICAL_TOOL_NAMES)
+        return _DEFAULT_ALLOWED_TOOLS_BY_WORKFLOW.get(workflow_id, frozenset(CANONICAL_TOOL_NAMES))
     normalized: set[str] = set()
     for value in values:
         if not isinstance(value, str):
@@ -1171,6 +1368,61 @@ def _validate_conditional_authorities(
     return tuple(items)
 
 
+def _validate_required_init_field_groups(raw: object) -> dict[str, tuple[str, ...]]:
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError("required_init_field_groups must be an object")
+
+    groups: dict[str, tuple[str, ...]] = {}
+    for raw_name, raw_fields in raw.items():
+        name = _require_string(raw_name, label="required_init_field_groups key")
+        if name in groups:
+            raise ValueError("required_init_field_groups must not contain duplicate names")
+        groups[name] = _require_string_tuple(
+            raw_fields,
+            label=f"required_init_field_groups.{name}",
+        )
+    return groups
+
+
+def _expand_required_init_fields(
+    raw: dict[str, object],
+    *,
+    index: int,
+    groups: dict[str, tuple[str, ...]],
+) -> tuple[str, ...]:
+    group_names = _require_string_tuple(
+        raw.get("required_init_field_groups", []),
+        label=f"stages[{index}].required_init_field_groups",
+        allow_empty=True,
+    )
+    explicit_fields = _require_string_tuple(
+        raw.get("required_init_fields", []),
+        label=f"stages[{index}].required_init_fields",
+        allow_empty=True,
+    )
+
+    fields: list[str] = []
+    seen: set[str] = set()
+    for group_name in group_names:
+        group_fields = groups.get(group_name)
+        if group_fields is None:
+            raise ValueError(f"stages[{index}].required_init_field_groups references unknown group: {group_name}")
+        for field_name in group_fields:
+            if field_name in seen:
+                raise ValueError(f"stages[{index}].required_init_fields contains duplicate field: {field_name}")
+            seen.add(field_name)
+            fields.append(field_name)
+
+    for field_name in explicit_fields:
+        if field_name in seen:
+            raise ValueError(f"stages[{index}].required_init_fields contains duplicate field: {field_name}")
+        seen.add(field_name)
+        fields.append(field_name)
+    return tuple(fields)
+
+
 def _validate_stage(
     raw: object,
     *,
@@ -1178,6 +1430,7 @@ def _validate_stage(
     workflow_id: str,
     allowed_tools: frozenset[str],
     known_init_fields: frozenset[str] | None,
+    required_init_field_groups: dict[str, tuple[str, ...]],
 ) -> WorkflowStage:
     if not isinstance(raw, dict):
         raise ValueError(f"stages[{index}] must be a JSON object")
@@ -1186,7 +1439,9 @@ def _validate_stage(
     if unknown_keys:
         raise ValueError(f"stages[{index}] contains unexpected key(s): {', '.join(unknown_keys)}")
 
-    missing_keys = sorted(key for key in _ALLOWED_STAGE_KEYS if key not in raw)
+    missing_keys = sorted(key for key in _REQUIRED_STAGE_KEYS if key not in raw)
+    if "required_init_fields" not in raw and "required_init_field_groups" not in raw:
+        missing_keys.append("required_init_fields")
     if missing_keys:
         raise ValueError(f"stages[{index}] is missing required key(s): {', '.join(missing_keys)}")
 
@@ -1199,10 +1454,10 @@ def _validate_stage(
             _require_string_tuple(raw["mode_paths"], label=f"stages[{index}].mode_paths")
         )
     )
-    required_init_fields = _require_string_tuple(
-        raw["required_init_fields"],
-        label=f"stages[{index}].required_init_fields",
-        allow_empty=True,
+    required_init_fields = _expand_required_init_fields(
+        raw,
+        index=index,
+        groups=required_init_field_groups,
     )
     loaded_authorities = tuple(
         _normalize_manifest_doc_path(authority, label=f"stages[{index}].loaded_authorities[{authority_index}]")
@@ -1300,7 +1555,7 @@ def validate_workflow_stage_manifest_payload(
     if unknown_keys:
         raise ValueError(f"workflow stage manifest contains unexpected key(s): {', '.join(unknown_keys)}")
 
-    missing_keys = sorted(key for key in _ALLOWED_TOP_LEVEL_KEYS if key not in raw)
+    missing_keys = sorted(key for key in _REQUIRED_TOP_LEVEL_KEYS if key not in raw)
     if missing_keys:
         raise ValueError(f"workflow stage manifest is missing required key(s): {', '.join(missing_keys)}")
 
@@ -1312,12 +1567,19 @@ def validate_workflow_stage_manifest_payload(
     if expected_workflow_id is not None and workflow_id != expected_workflow_id:
         raise ValueError(f"workflow stage manifest workflow_id must be {expected_workflow_id!r}, got {workflow_id!r}")
 
+    prompt_usage = _require_string(raw.get("prompt_usage", "staged_init"), label="prompt_usage")
+    if prompt_usage not in _ALLOWED_PROMPT_USAGE_VALUES:
+        raise ValueError(
+            f"workflow stage manifest prompt_usage must be one of: {', '.join(sorted(_ALLOWED_PROMPT_USAGE_VALUES))}"
+        )
+
     stages_raw = raw["stages"]
     if not isinstance(stages_raw, list) or not stages_raw:
         raise ValueError("stages must be a non-empty list")
 
-    normalized_allowed_tools = _normalize_tool_set(allowed_tools)
+    normalized_allowed_tools = _normalize_tool_set(allowed_tools, workflow_id=workflow_id)
     normalized_known_init_fields = _normalize_init_field_set(known_init_fields, workflow_id=workflow_id)
+    required_init_field_groups = _validate_required_init_field_groups(raw.get("required_init_field_groups"))
     stages = tuple(
         _validate_stage(
             stage,
@@ -1325,6 +1587,7 @@ def validate_workflow_stage_manifest_payload(
             workflow_id=workflow_id,
             allowed_tools=normalized_allowed_tools,
             known_init_fields=normalized_known_init_fields,
+            required_init_field_groups=required_init_field_groups,
         )
         for index, stage in enumerate(stages_raw)
     )
@@ -1333,13 +1596,19 @@ def validate_workflow_stage_manifest_payload(
     if len(set(stage_ids)) != len(stage_ids):
         raise ValueError("stage ids must be unique")
 
+    stage_id_set = set(stage_ids)
+    unknown_next_stages = {
+        next_stage for stage in stages for next_stage in stage.next_stages if next_stage not in stage_id_set
+    }
+    if unknown_next_stages:
+        raise ValueError(f"next_stages contains unknown stage id(s): {', '.join(sorted(unknown_next_stages))}")
+
     stage_orders = [stage.order for stage in stages]
     if len(set(stage_orders)) != len(stage_orders):
         raise ValueError("stage order values must be unique")
     if stage_orders != list(range(1, len(stages) + 1)):
         raise ValueError("stage order values must start at 1 and increase by 1")
 
-    stage_id_set = set(stage_ids)
     order_by_id = {stage.id: stage.order for stage in stages}
     for stage in stages:
         backward_next = sorted(
@@ -1350,11 +1619,18 @@ def validate_workflow_stage_manifest_payload(
         if backward_next:
             raise ValueError(f"stage {stage.id!r} must only point to later stages; got {', '.join(backward_next)}")
 
-    return WorkflowStageManifest(schema_version=schema_version, workflow_id=workflow_id, stages=stages)
+    return WorkflowStageManifest(
+        schema_version=schema_version,
+        workflow_id=workflow_id,
+        stages=stages,
+        prompt_usage=prompt_usage,
+    )
 
 
-def _cache_key_tools(values: Iterable[str] | None) -> tuple[str, ...]:
-    return tuple(sorted(_normalize_tool_set(values)))
+def _cache_key_tools(values: Iterable[str] | None, *, workflow_id: str) -> tuple[str, ...] | None:
+    if values is None:
+        return None
+    return tuple(sorted(_normalize_tool_set(values, workflow_id=workflow_id)))
 
 
 def _cache_key_init_fields(values: Iterable[str] | None, *, workflow_id: str) -> tuple[str, ...] | None:
@@ -1362,11 +1638,20 @@ def _cache_key_init_fields(values: Iterable[str] | None, *, workflow_id: str) ->
     return tuple(sorted(normalized)) if normalized is not None else None
 
 
+def _infer_known_init_fields_cache_key_from_payload(raw: object) -> tuple[str, ...] | None:
+    if not isinstance(raw, dict):
+        return None
+    raw_workflow_id = raw.get("workflow_id")
+    if not isinstance(raw_workflow_id, str):
+        return None
+    return _cache_key_init_fields(None, workflow_id=_normalize_workflow_id(raw_workflow_id))
+
+
 @cache
 def _load_workflow_stage_manifest_cached(
     manifest_path: str,
     expected_workflow_id: str | None,
-    allowed_tools_key: tuple[str, ...],
+    allowed_tools_key: tuple[str, ...] | None,
     known_init_fields_key: tuple[str, ...] | None,
 ) -> WorkflowStageManifest:
     path = Path(manifest_path)
@@ -1374,11 +1659,14 @@ def _load_workflow_stage_manifest_cached(
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError(f"Failed to read workflow stage manifest {path}: {exc}") from exc
+    known_init_fields_for_validation = known_init_fields_key
+    if expected_workflow_id is None and known_init_fields_for_validation is None:
+        known_init_fields_for_validation = _infer_known_init_fields_cache_key_from_payload(payload)
     return validate_workflow_stage_manifest_payload(
         payload,
         expected_workflow_id=expected_workflow_id,
         allowed_tools=allowed_tools_key,
-        known_init_fields=known_init_fields_key,
+        known_init_fields=known_init_fields_for_validation,
     )
 
 
@@ -1393,7 +1681,7 @@ def load_workflow_stage_manifest(
     return _load_workflow_stage_manifest_cached(
         manifest_path.as_posix(),
         workflow_id,
-        _cache_key_tools(allowed_tools),
+        _cache_key_tools(allowed_tools, workflow_id=workflow_id),
         _cache_key_init_fields(known_init_fields, workflow_id=workflow_id),
     )
 
@@ -1406,14 +1694,17 @@ def load_workflow_stage_manifest_from_path(
     known_init_fields: Iterable[str] | None = None,
 ) -> WorkflowStageManifest:
     workflow_id = _normalize_workflow_id(expected_workflow_id) if expected_workflow_id is not None else None
-    normalized_init_fields = _cache_key_init_fields(
-        known_init_fields if known_init_fields is not None else known_init_fields_for_workflow(workflow_id),
-        workflow_id=workflow_id or "new-project",
-    )
+    if known_init_fields is not None:
+        normalized = _normalize_init_field_set(known_init_fields, workflow_id=workflow_id or "")
+        normalized_init_fields = tuple(sorted(normalized)) if normalized is not None else None
+    elif workflow_id is not None:
+        normalized_init_fields = _cache_key_init_fields(None, workflow_id=workflow_id)
+    else:
+        normalized_init_fields = None
     return _load_workflow_stage_manifest_cached(
         manifest_path.as_posix(),
         workflow_id,
-        _cache_key_tools(allowed_tools),
+        _cache_key_tools(allowed_tools, workflow_id=workflow_id or ""),
         normalized_init_fields,
     )
 
@@ -1536,13 +1827,23 @@ __all__ = [
     "QUICK_STAGE_MANIFEST_PATH",
     "RESEARCH_PHASE_INIT_FIELDS",
     "RESEARCH_PHASE_STAGE_MANIFEST_PATH",
+    "VERIFY_WORK_BASE_INIT_FIELDS",
+    "VERIFY_WORK_CONTRACT_GATE_FIELDS",
     "NewProjectConditionalAuthority",
     "NewProjectStage",
     "NewProjectStageContract",
     "WRITE_PAPER_INIT_FIELDS",
+    "WRITE_PAPER_MANAGED_INTAKE_ROOT",
+    "WRITE_PAPER_MANAGED_MANUSCRIPT_ROOT",
     "WORKFLOW_STAGE_MANIFEST_DIR",
     "WORKFLOW_STAGE_MANIFEST_SUFFIX",
     "VERIFY_WORK_INIT_FIELDS",
+    "VERIFY_WORK_MCP_VERIFICATION_TOOLS",
+    "VERIFY_WORK_REFERENCE_RUNTIME_FIELDS",
+    "VERIFY_WORK_SCHEMA_BRIDGE_FIELDS",
+    "VERIFY_WORK_STAGE_ALLOWED_TOOLS",
+    "VERIFY_WORK_STATE_MEMORY_FIELDS",
+    "VERIFY_WORK_STRUCTURED_STATE_FIELDS",
     "PEER_REVIEW_INIT_FIELDS",
     "WorkflowStage",
     "WorkflowStageConditionalAuthority",

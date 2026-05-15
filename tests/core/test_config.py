@@ -19,6 +19,7 @@ from gpd.core.config import (
     ResearchMode,
     ReviewCadence,
     _valid_runtime_names,
+    apply_config_update,
     load_config,
     resolve_agent_tier,
     resolve_model,
@@ -74,9 +75,10 @@ class TestModelProfiles:
         assert len(MODEL_PROFILES) == 24
 
     def test_all_agents_have_5_profiles(self):
-        profiles = {"deep-theory", "numerical", "exploratory", "review", "paper-writing"}
+        profiles = {profile.value for profile in ModelProfile}
         for agent, mapping in MODEL_PROFILES.items():
             assert set(mapping.keys()) == profiles, f"{agent} missing profiles"
+            assert all(isinstance(tier, ModelTier) for tier in mapping.values())
 
     def test_planner_always_tier_1(self):
         for profile, tier in MODEL_PROFILES["gpd-planner"].items():
@@ -89,6 +91,10 @@ class TestModelProfiles:
 
     def test_agent_default_tiers_match_agents(self):
         assert set(AGENT_DEFAULT_TIERS.keys()) == set(MODEL_PROFILES.keys())
+        assert AGENT_DEFAULT_TIERS == {
+            agent: mapping[ModelProfile.REVIEW.value]
+            for agent, mapping in MODEL_PROFILES.items()
+        }
 
 
 # ─── GPDProjectConfig defaults ────────────────────────────────────────────────────────
@@ -98,20 +104,102 @@ class TestGPDProjectConfigDefaults:
     def test_defaults(self):
         cfg = GPDProjectConfig()
         assert cfg.model_profile == ModelProfile.REVIEW
-        assert cfg.autonomy == AutonomyMode.BALANCED
-        assert cfg.review_cadence == ReviewCadence.ADAPTIVE
+        assert cfg.autonomy == AutonomyMode.SUPERVISED
+        assert cfg.review_cadence == ReviewCadence.DENSE
         assert cfg.research_mode == ResearchMode.BALANCED
         assert cfg.commit_docs is True
         assert cfg.parallelization is True
-        assert cfg.max_unattended_minutes_per_plan == 45
-        assert cfg.max_unattended_minutes_per_wave == 90
-        assert cfg.checkpoint_after_n_tasks == 3
+        assert cfg.max_unattended_minutes_per_plan == 15
+        assert cfg.max_unattended_minutes_per_wave == 30
+        assert cfg.checkpoint_after_n_tasks == 1
         assert cfg.checkpoint_after_first_load_bearing_result is True
         assert cfg.checkpoint_before_downstream_dependent_tasks is True
         assert cfg.project_usd_budget is None
         assert cfg.session_usd_budget is None
         assert cfg.branching_strategy == BranchingStrategy.NONE
         assert cfg.model_overrides is None
+
+
+# ─── Dense cadence forces first-result gate ────────────────────────────────────
+
+
+class TestDenseCadenceForcesFirstResultGate:
+    def test_dense_cadence_with_disabled_gate_rejects_config(self, tmp_path: Path) -> None:
+        (tmp_path / "GPD").mkdir()
+        (tmp_path / "GPD" / "config.json").write_text(
+            json.dumps(
+                {
+                    "review_cadence": "dense",
+                    "checkpoint_after_first_load_bearing_result": False,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with pytest.raises(
+            ConfigError,
+            match=r"review_cadence=dense requires checkpoint_after_first_load_bearing_result=true",
+        ):
+            load_config(tmp_path)
+
+    def test_apply_config_update_rejects_dense_with_disabled_first_result_gate(
+        self,
+    ) -> None:
+        """Write-path: setting checkpoint_after_first_load_bearing_result=False
+        on a dense config must fail through apply_config_update, not only
+        through load_config."""
+        raw: dict[str, object] = {"review_cadence": "dense"}
+        with pytest.raises(
+            ConfigError,
+            match=r"review_cadence=dense requires checkpoint_after_first_load_bearing_result=true",
+        ):
+            apply_config_update(raw, "checkpoint_after_first_load_bearing_result", False)
+
+    def test_apply_config_update_rejects_dense_cadence_on_disabled_gate_config(
+        self,
+    ) -> None:
+        """Inverse of the above: setting review_cadence=dense on a config
+        that already has first-result gate disabled must also fail."""
+        raw: dict[str, object] = {"checkpoint_after_first_load_bearing_result": False}
+        with pytest.raises(
+            ConfigError,
+            match=r"review_cadence=dense requires checkpoint_after_first_load_bearing_result=true",
+        ):
+            apply_config_update(raw, "review_cadence", "dense")
+
+    def test_dense_cadence_with_enabled_gate_loads_cleanly(self, tmp_path: Path) -> None:
+        (tmp_path / "GPD").mkdir()
+        (tmp_path / "GPD" / "config.json").write_text(
+            json.dumps(
+                {
+                    "review_cadence": "dense",
+                    "checkpoint_after_first_load_bearing_result": True,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        cfg = load_config(tmp_path)
+
+        assert cfg.review_cadence == ReviewCadence.DENSE
+        assert cfg.checkpoint_after_first_load_bearing_result is True
+
+    def test_non_dense_cadence_permits_disabled_gate(self, tmp_path: Path) -> None:
+        (tmp_path / "GPD").mkdir()
+        (tmp_path / "GPD" / "config.json").write_text(
+            json.dumps(
+                {
+                    "review_cadence": "adaptive",
+                    "checkpoint_after_first_load_bearing_result": False,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        cfg = load_config(tmp_path)
+
+        assert cfg.review_cadence == ReviewCadence.ADAPTIVE
+        assert cfg.checkpoint_after_first_load_bearing_result is False
 
 
 # ─── load_config ────────────────────────────────────────────────────────────────
@@ -208,6 +296,94 @@ class TestLoadConfig:
         assert cfg.research is False
         assert cfg.verifier is False
 
+    @pytest.mark.parametrize(
+        "section",
+        ["git", "execution", "execution_preferences", "planning", "workflow"],
+    )
+    @pytest.mark.parametrize("invalid_value", ["not-an-object", ["not-an-object"]])
+    def test_known_nested_sections_must_be_objects(
+        self,
+        tmp_path: Path,
+        section: str,
+        invalid_value: object,
+    ) -> None:
+        (tmp_path / "GPD").mkdir()
+        (tmp_path / "GPD" / "config.json").write_text(
+            json.dumps({section: invalid_value}),
+            encoding="utf-8",
+        )
+
+        with pytest.raises(
+            ConfigError,
+            match=rf"Invalid config\.json section types: `{section}` must be a JSON object",
+        ):
+            load_config(tmp_path)
+
+    def test_execution_preferences_string_booleans_use_model_validation(self, tmp_path: Path) -> None:
+        (tmp_path / "GPD").mkdir()
+        (tmp_path / "GPD" / "config.json").write_text(
+            json.dumps(
+                {
+                    "strict_wait": "false",
+                    "execution_preferences": {
+                        "never_interrupt_running_workers": "true",
+                        "never_auto_close_child_agents": False,
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        cfg = load_config(tmp_path)
+
+        assert cfg.execution_preferences.strict_wait is False
+        assert cfg.execution_preferences.never_interrupt_running_workers is True
+        assert cfg.execution_preferences.never_auto_close_child_agents is False
+
+    def test_execution_preferences_invalid_boolean_string_raises_config_error(self, tmp_path: Path) -> None:
+        (tmp_path / "GPD").mkdir()
+        (tmp_path / "GPD" / "config.json").write_text(
+            json.dumps({"execution_preferences": {"strict_wait": "definitely"}}),
+            encoding="utf-8",
+        )
+
+        with pytest.raises(ConfigError, match="Invalid config.json values"):
+            load_config(tmp_path)
+
+    def test_identical_root_and_nested_aliases_are_accepted(self, tmp_path: Path) -> None:
+        (tmp_path / "GPD").mkdir()
+        (tmp_path / "GPD" / "config.json").write_text(
+            json.dumps(
+                {
+                    "review_cadence": "sparse",
+                    "execution": {"review_cadence": "sparse"},
+                    "commit_docs": False,
+                    "planning": {"commit_docs": False},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        cfg = load_config(tmp_path)
+
+        assert cfg.review_cadence == ReviewCadence.SPARSE
+        assert cfg.commit_docs is False
+
+    def test_conflicting_root_and_nested_aliases_raise_config_error(self, tmp_path: Path) -> None:
+        (tmp_path / "GPD").mkdir()
+        (tmp_path / "GPD" / "config.json").write_text(
+            json.dumps(
+                {
+                    "review_cadence": "dense",
+                    "execution": {"review_cadence": "sparse"},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with pytest.raises(ConfigError, match="Conflicting duplicate config aliases"):
+            load_config(tmp_path)
+
     def test_gitignored_planning_dir_forces_commit_docs_false(
         self,
         tmp_path: Path,
@@ -248,6 +424,19 @@ class TestLoadConfig:
         )
         cfg = load_config(tmp_path)
         assert cfg.model_overrides == overrides
+
+    def test_model_overrides_preserve_runtime_native_model_strings(self, tmp_path: Path) -> None:
+        runtime_name = _RUNTIME_DESCRIPTORS[0].runtime_name
+        exact_model = "Provider/OpenAI:GPT-5[Reasoning=High]"
+        (tmp_path / "GPD").mkdir()
+        (tmp_path / "GPD" / "config.json").write_text(
+            json.dumps({"model_overrides": {runtime_name: {"tier-1": exact_model}}}),
+            encoding="utf-8",
+        )
+
+        cfg = load_config(tmp_path)
+
+        assert cfg.model_overrides == {runtime_name: {"tier-1": exact_model}}
 
     def test_invalid_model_overrides_runtime_raises(self, tmp_path: Path):
         (tmp_path / "GPD").mkdir()
@@ -346,18 +535,23 @@ class TestResolveAgentTier:
         with pytest.raises(ConfigError, match="Unknown agent 'gpd-unknown'"):
             resolve_agent_tier("gpd-unknown", "review")
 
-    def test_unknown_profile_falls_back_to_review(self):
-        tier = resolve_agent_tier("gpd-planner", "nonexistent")
-        assert tier == ModelTier.TIER_1  # planner review is tier-1
+    def test_unknown_profile_fails_closed(self):
+        with pytest.raises(ConfigError, match="Unknown model profile 'nonexistent'"):
+            resolve_agent_tier("gpd-planner", "nonexistent")
 
-    def test_registry_only_agent_falls_back_to_default_tier(self, monkeypatch: pytest.MonkeyPatch):
+    def test_registry_only_agent_without_model_profile_mapping_fails_closed(self, monkeypatch: pytest.MonkeyPatch):
         import gpd.registry as content_registry
 
         monkeypatch.setattr(content_registry, "list_agents", lambda: ["gpd-registry-only"])
 
-        tier = resolve_agent_tier("gpd-registry-only", "review")
+        with pytest.raises(ConfigError, match="No model tier mapping configured for agent 'gpd-registry-only'"):
+            resolve_agent_tier("gpd-registry-only", "review")
 
-        assert tier == ModelTier.TIER_2
+    def test_missing_agent_profile_mapping_fails_closed(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setitem(MODEL_PROFILES["gpd-planner"], ModelProfile.REVIEW.value, None)
+
+        with pytest.raises(ConfigError, match=r"MODEL_PROFILES\['gpd-planner'\]\['review'\] must be a ModelTier"):
+            resolve_agent_tier("gpd-planner", ModelProfile.REVIEW)
 
     def test_registry_import_failure_falls_back_to_default_agent_names(
         self,
@@ -431,6 +625,10 @@ class TestResolveModel:
         )
         model = resolve_model(tmp_path, "gpd-planner", runtime=descriptor.runtime_name)
         assert model is None
+
+    def test_unknown_runtime_argument_raises_config_error(self, tmp_path: Path) -> None:
+        with pytest.raises(ConfigError, match="Unknown runtime 'not-a-runtime'"):
+            resolve_model(tmp_path, "gpd-planner", runtime="not-a-runtime")
 
     @pytest.mark.parametrize("descriptor", _RUNTIME_DESCRIPTORS, ids=lambda descriptor: descriptor.runtime_name)
     def test_normalizes_runtime_display_names_before_override_lookup(self, tmp_path: Path, descriptor) -> None:

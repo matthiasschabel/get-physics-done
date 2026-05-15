@@ -18,17 +18,33 @@ def test_publication_contract_files_use_canonical_names_without_compatibility_sh
     manuscript_preflight = (TEMPLATES_DIR / "publication-manuscript-root-preflight.md").read_text(encoding="utf-8")
 
     assert "Canonical round-suffix and sibling-artifact contract for publication review rounds." in round_contract
-    assert "GPD/REFEREE-REPORT{round_suffix}.md" in round_contract
-    assert "GPD/AUTHOR-RESPONSE{round_suffix}.md" in round_contract
+    assert "${selected_publication_root}/REFEREE-REPORT{round_suffix}.md" in round_contract
+    assert "${selected_publication_root}/REFEREE-REPORT{round_suffix}.tex" in round_contract
+    assert "${selected_publication_root}/AUTHOR-RESPONSE{round_suffix}.md" in round_contract
+    assert "${selected_review_root}/REFEREE_RESPONSE{round_suffix}.md" in round_contract
+    assert "${selected_review_root}/PROOF-REDTEAM{round_suffix}.md" in round_contract
     assert "review-round-artifact-contract.md" not in round_contract
 
-    assert "Canonical paired response-artifact and one-shot child-return contract for referee-response work." in response_contract
+    assert (
+        "Canonical paired response-artifact and one-shot child-return contract for referee-response work."
+        in response_contract
+    )
     assert "gpd_return.files_written" in response_contract
+    assert "${selected_publication_root}/AUTHOR-RESPONSE{round_suffix}.md" in response_contract
+    assert "${selected_review_root}/REFEREE_RESPONSE{round_suffix}.md" in response_contract
+    assert "explicit active manuscript gates" in response_contract
+    assert "Default current-project response files without frontmatter" in response_contract
+    assert "existing project-root response rounds" in response_contract
+    assert "new files should carry the binding metadata" in response_contract
+    assert "backwards compatibility" not in response_contract.lower()
     assert "response-artifact-contract.md" not in response_contract
 
     assert "Canonical workflow-facing bootstrap and preflight reference for publication tasks." in bootstrap_preflight
     assert "publication-artifact-gates.md" not in bootstrap_preflight
-    assert "Canonical workflow-facing handoff and completion reference for spawned response-writing work." in response_handoff
+    assert (
+        "Canonical workflow-facing handoff and completion reference for spawned response-writing work."
+        in response_handoff
+    )
     assert "publication-artifact-gates.md" not in response_handoff
     assert "publication-bootstrap-preflight.md" in wrapper_guidance
     assert "publication-response-writer-handoff.md" in wrapper_guidance
@@ -37,6 +53,9 @@ def test_publication_contract_files_use_canonical_names_without_compatibility_sh
     assert "gpd paper-build" in manuscript_preflight
     assert "bibliography_audit_clean" in manuscript_preflight
     assert "reproducibility_ready" in manuscript_preflight
+    assert "GPD/publication/{subject_slug}/intake/" in manuscript_preflight
+    assert "GPD/publication/{subject_slug}/manuscript/" in manuscript_preflight
+    assert "do not let `intake/` participate in manuscript-root discovery" in manuscript_preflight
     assert "publication-artifact-gates.md" not in manuscript_preflight
 
 
@@ -64,13 +83,15 @@ def test_publication_workflows_and_agents_reference_only_the_canonical_publicati
     assert "publication-response-artifacts.md" in referee
 
 
-def test_publication_workflow_prompt_surfaces_surface_the_shared_manuscript_root_contract_before_round_or_response_policy() -> None:
+def test_publication_workflow_prompt_surfaces_surface_the_shared_manuscript_root_contract_before_round_or_response_policy() -> (
+    None
+):
     write_paper = (WORKFLOWS_DIR / "write-paper.md").read_text(encoding="utf-8")
     respond = (WORKFLOWS_DIR / "respond-to-referees.md").read_text(encoding="utf-8")
     peer_review = (WORKFLOWS_DIR / "peer-review.md").read_text(encoding="utf-8")
     arxiv = (WORKFLOWS_DIR / "arxiv-submission.md").read_text(encoding="utf-8")
     bootstrap_include = "@{GPD_INSTALL_DIR}/references/publication/publication-bootstrap-preflight.md"
-    handoff_include = "@{GPD_INSTALL_DIR}/references/publication/publication-response-writer-handoff.md"
+    handoff_include = "{GPD_INSTALL_DIR}/references/publication/publication-response-writer-handoff.md"
 
     assert bootstrap_include in write_paper
     assert bootstrap_include in respond

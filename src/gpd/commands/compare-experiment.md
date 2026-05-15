@@ -1,10 +1,21 @@
 ---
 name: gpd:compare-experiment
 description: Systematically compare theoretical predictions with experimental or observational data
-argument-hint: "[prediction or dataset to compare]"
+argument-hint: "[prediction, dataset, phase, or comparison target]"
 context_mode: project-aware
-requires:
-  files: ["GPD/ROADMAP.md"]
+command-policy:
+  schema_version: 1
+  subject_policy:
+    subject_kind: comparison
+    resolution_mode: explicit_or_interactive_theory_data_comparison
+    explicit_input_kinds:
+      - prediction, dataset path, phase identifier, or comparison target
+    allow_external_subjects: true
+    allow_interactive_without_subject: true
+  output_policy:
+    output_mode: managed
+    managed_root_kind: gpd_managed_durable
+    default_output_subtree: GPD/comparisons
 allowed-tools:
   - file_read
   - file_write
@@ -36,7 +47,7 @@ Interpretation:
 - If a prediction name: compare that specific theoretical prediction with data
 - If a dataset path: compare theoretical model against that dataset
 - If a phase number: compare all predictions from that phase with available data
-- If empty: prompt for comparison target
+- If empty: ask one focused clarification question to identify the theory side, the data side, and the decisive comparison target
 
 Load theoretical predictions:
 
@@ -47,7 +58,7 @@ find artifacts/ results/ data/ figures/ simulations/ paper/ -maxdepth 4 \
   grep -i "result\|predict\|spectrum\|observable" | head -20
 ```
 
-Treat `GPD/**` as internal provenance only. Discover predictions and reusable comparison inputs from stable workspace directories such as `artifacts/`, `results/`, `data/`, `figures/`, `simulations/`, or `paper/`.
+Treat `GPD/**` as internal provenance only for source discovery. Discover predictions and reusable comparison inputs from stable workspace directories such as `artifacts/`, `results/`, `data/`, `figures/`, `simulations/`, or `paper/`, but keep the generated GPD-authored comparison package under the current workspace `GPD/comparisons/` subtree.
 
 </context>
 
@@ -66,21 +77,12 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Follow the compare-experiment workflow: @{GPD_INSTALL_DIR}/workflows/compare-experiment.md
+Follow the included compare-experiment workflow.
 </process>
 
 <success_criteria>
 
-- [ ] Theoretical predictions identified with uncertainties
-- [ ] Experimental data loaded with uncertainties (stat + syst)
-- [ ] Unit conversions documented and applied
-- [ ] Convention matching verified
-- [ ] Point-by-point comparison performed with pulls
-- [ ] Global chi-squared computed with p-value
-- [ ] Residual analysis performed for systematic patterns
-- [ ] Discrepancies classified and quantified (in sigma)
-- [ ] Root cause analysis for any significant discrepancy
-- [ ] Comparison report generated
-- [ ] Comparison figures generated (or scripts provided)
-- [ ] Results routed appropriately (paper writing or debugging)
-      </success_criteria>
+- [ ] Command context validated
+- [ ] Compare-experiment workflow executed as the authority for comparison mechanics
+- [ ] Current-workspace input discovery and `GPD/comparisons/` output boundaries preserved
+</success_criteria>

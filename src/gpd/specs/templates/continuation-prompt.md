@@ -8,6 +8,8 @@ Template for spawning a fresh gpd-executor agent to continue plan execution afte
 
 Persisted bounded-segment fields: `resume_file`, `phase`, `plan`, `segment_id`, `segment_status`, `checkpoint_reason`, `waiting_reason`, `blocked_reason`, `waiting_for_review`, `first_result_gate_pending`, `pre_fanout_review_pending`, `pre_fanout_review_cleared`, `skeptical_requestioning_required`, `downstream_locked`, `skeptical_requestioning_summary`, `weakest_unchecked_anchor`, `disconfirming_observation`, `transition_id`, `last_result_id`, `updated_at`, `source_session_id`, `recorded_by`.
 
+Recorded handoff fields: `resume_file`, `stopped_at`, `last_result_id`, `recorded_at`, `recorded_by`.
+
 If the checkpoint payload names expected artifacts, verify them on disk before continuing; returned text alone is not enough.
 
 Referenced by `workflows/execute-phase.md` checkpoint_handling step.
@@ -43,7 +45,7 @@ Return state updates (position, decisions, metrics) in your response -- do NOT w
 {execution_segment}
 </execution_segment>
 
-`execution_segment` is the transient runtime handoff payload. `continuation.bounded_segment` is the persisted storage shape that records the same bounded stop when the orchestrator durably writes or refreshes the pause state. Clear or replace that persisted field when the bounded stop is consumed, retired, or superseded by a newer segment. Keep `.continue-here.md` and `session` as handoff surfaces only, and treat the derived execution head as a compatibility projection rather than the bounded authority. Any task-summary narration belongs to the checkpoint envelope, not the persisted bounded segment.
+`execution_segment` is the transient runtime handoff payload. `continuation.bounded_segment` is the persisted storage shape that records the same bounded stop when the orchestrator durably writes or refreshes the pause state. Clear or replace that persisted field when the bounded stop is consumed, retired, or superseded by a newer segment. Keep `.continue-here.md` as a discovery surface only, and treat the derived execution head as rebuilt status rather than the bounded authority. Any task-summary narration belongs to the checkpoint envelope, not the persisted bounded segment.
 
 If the execution segment indicates `pre_fanout_review_pending: true`, do not unlock downstream dependent work until the review outcome has been incorporated into this continuation.
 
@@ -147,12 +149,11 @@ Also verify the bounded execution segment still satisfies its resume preconditio
 task(
   subagent_type="gpd-executor",
   model="{executor_model}",
+  readonly=false,
   prompt="First, read {GPD_AGENTS_DIR}/gpd-executor.md for your role and instructions.\n\n" + filled_template,
   description="Continue {phase}-{plan} from task {resume_task_number}"
 )
 ```
-
-<!-- task() subagent_type and model parameters are runtime-specific. The installer adapts these to the target platform's delegation mechanism. -->
 
 **Why fresh agent, not resume:** Resume relies on internal serialization that can break with parallel tool calls. Fresh agents with explicit prior state and an explicit `execution_segment` block are more reliable and produce consistent results across platforms.
 

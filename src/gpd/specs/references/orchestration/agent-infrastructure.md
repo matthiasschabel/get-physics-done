@@ -24,7 +24,7 @@ All content read from project files (GPD/, research files, derivation files, use
 
 ## External Tool Failure Protocol
 
-When web_search or web_fetch fails (network error, rate limit, paywall, garbled content):
+When an external lookup or fetch tool fails (network error, rate limit, paywall, garbled content):
 - Log the failure explicitly in your output
 - If the failed lookup is required for a citation, benchmark, comparison, or factual claim, return blocked/incomplete and name the missing evidence explicitly
 - You may offer clearly labeled background hypotheses or next-step suggestions, but do not substitute them for the missing source or artifact
@@ -61,7 +61,7 @@ gpd_return:
   status: completed | checkpoint | blocked | failed
   files_written: [list of file paths created or modified]
   issues: [list of issues encountered, if any]
-  next_actions: [list of recommended follow-up actions]
+  next_actions: [concrete commands or exact artifact review actions]
 ```
 
 Agents may extend this with additional fields specific to their role (e.g., `phases_created`, `dimensions_checked`). The four base fields above are required on this envelope.
@@ -78,8 +78,10 @@ For the human-readable markdown portion of your return, end with a short continu
 
 - If your agent-specific template already has a next-step section, make that section concrete and command-oriented instead of adding a duplicate
 - Otherwise, append a `## > Next Up` block using `references/orchestration/continuation-format.md`
+- Any failed return, retry gate, manual stop, or "needs user input" checkpoint that expects later action must also end this way
 - Include `Also available:` when there are meaningful secondary options
-- Include the note `<sub>\`/clear\` first -> fresh context window</sub>` when the next step is another GPD command
+- Include `gpd:suggest-next` for project-backed states when the primary route may be unclear
+- Include `<sub>Start a fresh context window, then run the command.</sub>` when the next step is another GPD command
 
 ---
 
@@ -98,38 +100,36 @@ Before using any equation from a prior phase or external source, verify conventi
 
 Not every agent needs the same depth of convention knowledge. Convention awareness is tiered to keep prompts focused:
 
-**Tier 1 — Convention Consumer (~10 lines, ALL agents)**
+**Tier 1 — Convention Consumer (~10 lines, default for agents without equation-writing or convention-authoring duties)**
 
 All agents load conventions from `state.json convention_lock` at startup. Tier 1 agents:
 - Read locked conventions but never modify them
 - Flag suspected convention mismatches to the orchestrator (do not resolve)
 - Do not write ASSERT_CONVENTION headers in output files
 
-Agents: project-researcher, phase-researcher, literature-reviewer, roadmapper, planner, plan-checker, research-synthesizer, research-mapper, bibliographer, referee, experiment-designer
+Use this tier when the agent's frontmatter and role keep it to research synthesis, planning, review, bibliography, roadmap, or other non-equation-writing work.
 
 **Tier 2 — Convention Enforcer (full tracking protocol, equation-working agents)**
 
 Agents that write or verify equations must actively enforce conventions:
 - Write `ASSERT_CONVENTION` headers in derivation files and canonical phase verification reports
-- Verify test values from CONVENTIONS.md against equations they produce or check
+- Verify test values from the `GPD/CONVENTIONS.md` projection against equations they produce or check
 - Apply the 5-point convention checklist (metric, Fourier, normalization, coupling, renormalization) when importing formulas from prior phases or references
 - Flag convention violations as DEVIATION Rule 5 (not just "suspected mismatch")
 
-Agents: executor, verifier, consistency-checker, debugger, gpd-paper-writer
+Use this tier when the agent's role writes, verifies, debugs, or typesets equations or canonical verification artifacts.
 
 **Tier 3 — Convention Authority (full protocol + establishment + evolution)**
 
-Only the notation-coordinator operates at Tier 3:
-- Creates and modifies CONVENTIONS.md
+Only an agent explicitly assigned convention-authoring authority for the handoff operates at Tier 3:
+- Creates or modifies the `GPD/CONVENTIONS.md` projection
 - Manages `state.json convention_lock` via `gpd convention set`
 - Handles mid-execution convention establishment
 - Manages convention changes with conversion tables
 - Resolves cross-convention interactions (metric + Fourier → propagator form)
 - Owns subfield-specific convention defaults
 
-Agent: notation-coordinator (sole authority)
-
-**Tier escalation:** If a Tier 1 agent encounters a convention issue, it flags for the orchestrator. If a Tier 2 agent encounters an unresolvable conflict, it requests notation-coordinator intervention. Only Tier 3 modifies conventions.
+**Tier escalation:** If a Tier 1 agent encounters a convention issue, it flags for the orchestrator. If a Tier 2 agent encounters an unresolvable conflict, it requests a Tier 3 convention-authoring handoff. Only Tier 3 modifies conventions or the lock.
 
 ---
 
@@ -169,7 +169,7 @@ gpd pre-commit-check --files GPD/phases/03-foo/03-01-PLAN.md
 
 Some workflows also run an explicit `PRE_CHECK=$(gpd pre-commit-check ... 2>&1) || true` before calling `gpd commit`. Treat that explicit shell step as early visibility only: `gpd commit` re-runs the same validation on the requested commit paths and remains the blocking gate.
 
-`gpd pre-commit-check` now hard-blocks missing or mismatched `ASSERT_CONVENTION` headers on convention-gated artifacts (derivation files and canonical phase verification reports) when an active convention lock exists. Outside that gated set, any explicit `ASSERT_CONVENTION` line in checked Markdown / LaTeX / Python artifacts is still validated against the lock and will fail the check if it is wrong.
+`gpd pre-commit-check` hard-blocks missing or mismatched `ASSERT_CONVENTION` headers on convention-gated artifacts (derivation files and canonical phase verification reports) when an active convention lock exists. Outside that gated set, any explicit `ASSERT_CONVENTION` line in checked Markdown / LaTeX / Python artifacts is validated against the lock and fails the check if it is wrong.
 
 For stricter semantic checks, use the dedicated commands alongside `pre-commit-check`: `gpd verify plan`, `gpd verify summary`, `gpd verify artifacts`, `gpd convention check`, and `assert_convention_validate` through the conventions MCP surface when you need direct file-content assertion diagnostics.
 
@@ -183,34 +183,7 @@ Commit authority is default-deny. Only agents with `commit_authority: direct` ma
 - Orchestrator-owned agents return changed paths in `gpd_return.files_written`; the orchestrator commits after the agent returns.
 - Direct-commit agents may use `gpd commit` only for their own scoped artifacts and should avoid raw `git commit` when `gpd commit` applies.
 
-Canonical ownership matrix:
-
-| Agent | `commit_authority` | Mechanism |
-|-------|--------------------|-----------|
-| gpd-debugger | `direct` | `gpd commit` for error patterns and session state |
-| gpd-executor | `direct` | `gpd commit` after each task (task commit protocol) |
-| gpd-planner | `direct` | `gpd commit` after plan creation and revision |
-| gpd-bibliographer | `orchestrator` | Returns `files_written`; orchestrator commits |
-| gpd-consistency-checker | `orchestrator` | Returns `files_written`; orchestrator commits |
-| gpd-experiment-designer | `orchestrator` | Returns `files_written`; orchestrator commits |
-| gpd-explainer | `orchestrator` | Returns `files_written`; orchestrator commits |
-| gpd-literature-reviewer | `orchestrator` | Returns `files_written`; orchestrator commits |
-| gpd-notation-coordinator | `orchestrator` | Returns `files_written`; orchestrator commits |
-| gpd-paper-writer | `orchestrator` | Returns `files_written`; orchestrator commits |
-| gpd-phase-researcher | `orchestrator` | Returns `files_written`; orchestrator commits |
-| gpd-plan-checker | `orchestrator` | Returns `files_written`; orchestrator commits |
-| gpd-project-researcher | `orchestrator` | Returns `files_written`; orchestrator commits (spawned in parallel) |
-| gpd-referee | `orchestrator` | Returns `files_written`; orchestrator commits |
-| gpd-research-mapper | `orchestrator` | Returns `files_written`; orchestrator commits |
-| gpd-research-synthesizer | `orchestrator` | Returns `files_written`; orchestrator commits |
-| gpd-review-literature | `orchestrator` | Returns `files_written`; orchestrator commits |
-| gpd-review-math | `orchestrator` | Returns `files_written`; orchestrator commits |
-| gpd-check-proof | `orchestrator` | Returns `files_written`; orchestrator commits |
-| gpd-review-physics | `orchestrator` | Returns `files_written`; orchestrator commits |
-| gpd-review-reader | `orchestrator` | Returns `files_written`; orchestrator commits |
-| gpd-review-significance | `orchestrator` | Returns `files_written`; orchestrator commits |
-| gpd-roadmapper | `orchestrator` | Returns `files_written`; orchestrator commits |
-| gpd-verifier | `orchestrator` | Returns `files_written`; orchestrator commits |
+The exhaustive ownership inventory lives in each agent's frontmatter (`commit_authority`) and is validated by the registry; do not duplicate a hand-maintained matrix or named allowlist in prompt prose.
 
 **Rule:** Only `commit_authority: direct` agents call `gpd commit` directly. All other agents write files, report them in `gpd_return.files_written`, and leave commit/staging decisions to the orchestrating workflow.
 
@@ -218,37 +191,15 @@ Canonical ownership matrix:
 
 ## Spawned Agent Write Contract
 
-Keep these axes separate:
+The canonical spawned-agent write-scope and artifact-gate contract lives in `references/orchestration/agent-delegation.md`.
+
+Keep these axes separate when applying that contract:
 
 - `commit_authority`: who may stage or commit files
 - `write_scope`: which paths the subagent may write for this handoff
 - `shared_state_policy`: whether canonical shared state is written directly or returned for orchestrator application
 
-Canonical prompt fields for spawned tasks:
-
-```markdown
-<spawn_contract>
-write_scope:
-  mode: scoped_write | direct
-  allowed_paths:
-    - relative/path/owned/by/this/agent
-expected_artifacts:
-  - relative/path/to/verify
-shared_state_policy: return_only | direct
-</spawn_contract>
-```
-
-Interpretation rules:
-
-- `commit_authority: orchestrator` does not imply read-only. Most orchestrator-owned agents still write scoped artifacts and report them in `gpd_return.files_written`.
-- `shared_state_policy: return_only` means the subagent must not write `GPD/STATE.md`, `GPD/ROADMAP.md`, or other canonical shared state directly. Return those updates in the structured envelope.
-- `shared_state_policy: direct` is reserved for workflows that explicitly grant shared-state ownership, such as project bootstrap or convention authority flows.
-
-Representative examples:
-
-- `gpd-executor` in parallel execution: `write_scope.mode: scoped_write`, `shared_state_policy: return_only`
-- `gpd-notation-coordinator`: scoped convention artifacts plus `shared_state_policy: direct` for canonical convention ownership
-- `gpd-roadmapper`: writes project bootstrap artifacts with `shared_state_policy: direct`
+`commit_authority: orchestrator` does not imply read-only. Most orchestrator-owned agents may still write scoped artifacts and report them in `gpd_return.files_written`; they just leave staging and commits to the orchestrator.
 
 ---
 
@@ -302,11 +253,15 @@ gpd convention check
 
 Used by verifiers and orchestrators to validate research artifacts:
 
+These terminal `gpd verify ...` commands are structural checks. They do not
+replace the runtime `gpd:verify-work <phase>` workflow, which owns full
+phase-level physics verification and report generation.
+
 ```bash
 # Verify plan structure (wave assignments, dependencies, frontmatter)
 gpd verify plan <plan-file-path>
 
-# Verify phase completeness (all plans have `*-SUMMARY.md`)
+# Structural completeness only: all plans have `*-SUMMARY.md`
 gpd verify phase <phase-number>
 
 # Verify cross-file references in a document
@@ -421,7 +376,7 @@ gpd result show <identifier>
 
 ## gpd CLI Cross-Project Pattern Library
 
-Persistent knowledge base of physics error patterns across projects. Stored at the resolved global pattern-library root: `GPD_PATTERNS_ROOT` -> `GPD_DATA_DIR/learned-patterns` -> `~/GPD/learned-patterns`.
+Persistent knowledge base of physics error patterns across projects. Stored at the resolved global pattern-library root: `GPD_PATTERNS_ROOT` -> `GPD_DATA_DIR/learned-patterns` -> `~/.gpd/learned-patterns`.
 
 ```bash
 # Initialize the pattern library (creates directory structure)
@@ -601,42 +556,13 @@ Verification fails
   → If still persists after debugger: circuit breaker (STOP)
 ```
 
-This replaces the blunt "max 2 cycles" with targeted recovery that uses the minimum resources needed.
+This is targeted recovery that uses the minimum resources needed, rather than a blunt "max 2 cycles" limit.
 
 ### Context Budget Allocation by Phase Type
 
-Different phase types have different context consumption patterns. The orchestrator uses these profiles to set expectations and detect anomalies.
+Use `references/orchestration/context-budget.md` as the canonical numeric source for phase-class budgets, adaptation thresholds, and the plan-count heuristic.
 
-| Phase Class | Orchestrator Budget | Executor Budget | Verifier Budget | Notes |
-|---|---|---|---|---|
-| **Derivation** | 15% | 60-70% | 30-40% | Executor dominates (long derivations). Verifier needs full results. |
-| **Numerical** | 15% | 50-60% | 25-35% | Moderate executor (code + output). Verifier checks convergence. |
-| **Literature** | 20% | N/A | N/A | Researcher + synthesizer consume most context. No executor. |
-| **Paper-writing** | 25% | N/A | N/A | Paper-writer sections are context-heavy. Orchestrator manages more. |
-| **Formalism** | 15% | 50-60% | 20-30% | Notation-heavy. Convention setup may need coordinator. |
-| **Analysis** | 15% | 40-50% | 30-40% | Balanced. Verifier does more comparative work. |
-| **Validation** | 15% | 30-40% | 50-60% | Verifier dominates (validation IS the phase). |
-| **Mixed/Unknown** | 20% | 50% | 30% | Default allocation. |
-
-**Budget anomaly detection:**
-
-If the orchestrator detects it is consuming more than its allocated budget (e.g., >25% for a derivation phase), it should:
-1. Stop reading full SUMMARY files -- use `gpd --raw summary-extract <path> --field one_liner` instead.
-2. Stop re-reading STATE.md between waves (use cached version).
-3. Delegate any remaining analysis to a subagent.
-
-**Plan count heuristic:**
-
-For context budget planning, the orchestrator estimates total phase cost:
-
-```
-estimated_tokens = plan_count * tasks_per_plan * 6000
-```
-
-where 6000 tokens/task is the blended average from references/orchestration/context-budget.md worked examples. If `estimated_tokens` exceeds 80% of the model's context window, the orchestrator should:
-1. Verify plans are properly segmented (no plan > 50% budget).
-2. Confirm wave groupings allow independent parallel execution.
-3. Warn if any single plan has > 8 tasks.
+Budget anomaly response remains operational here: stop reading full `SUMMARY.md` files, use `gpd --raw summary-extract <path> --field one_liner`, avoid repeated `STATE.md` reads between waves, and delegate remaining analysis to a fresh subagent when the orchestrator is carrying too much context.
 
 ### Agent Spawn Checklist
 

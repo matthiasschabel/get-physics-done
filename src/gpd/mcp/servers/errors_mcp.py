@@ -11,13 +11,16 @@ Console script: gpd-mcp-errors
 import re
 import threading
 from pathlib import Path
+from typing import Annotated
 
 from mcp.server.fastmcp import FastMCP
+from pydantic import Field, WithJsonSchema
 
 from gpd.core.observability import gpd_span
 from gpd.mcp.servers import (
     configure_mcp_logging,
     parse_frontmatter_with_error,
+    read_only_tool_annotations,
     run_mcp_server,
     stable_mcp_error,
     stable_mcp_response,
@@ -29,13 +32,25 @@ logger = configure_mcp_logging("gpd-errors")
 
 REFERENCES_DIR = SPECS_DIR / "references"
 
-# The 4 error catalog part files (ordered by error ID range)
-ERROR_CATALOG_FILES = [
-    "verification/errors/llm-errors-core.md",  # #1-25
-    "verification/errors/llm-errors-field-theory.md",  # #26-51
-    "verification/errors/llm-errors-extended.md",  # #52-81, #102-104
-    "verification/errors/llm-errors-deep.md",  # #82-101
-]
+ERROR_CATALOG_FILE_RANGES: tuple[tuple[str, tuple[tuple[int, int], ...]], ...] = (
+    ("verification/errors/llm-errors-core.md", ((1, 25),)),
+    ("verification/errors/llm-errors-field-theory.md", ((26, 51),)),
+    ("verification/errors/llm-errors-extended.md", ((52, 81), (102, 104))),
+    ("verification/errors/llm-errors-deep.md", ((82, 101),)),
+)
+
+# The 4 error catalog part files, ordered by their authoritative ID ranges.
+ERROR_CATALOG_FILES = [filename for filename, _ranges in ERROR_CATALOG_FILE_RANGES]
+
+ERROR_DOMAIN_RANGES: dict[str, tuple[int, int]] = {
+    "core": (1, 25),
+    "field_theory": (26, 51),
+    "extended": (52, 71),
+    "deep_domain": (72, 81),
+    "cross_domain": (82, 101),
+    "newly_identified": (102, 104),
+}
+KNOWN_ERROR_DOMAINS: tuple[str, ...] = tuple(ERROR_DOMAIN_RANGES)
 
 TRACEABILITY_FILE = "verification/errors/llm-errors-traceability.md"
 
@@ -62,6 +77,24 @@ _TABLE_ROW_RE = re.compile(r"^\|(.+)\|$")
 _TABLE_SEP_RE = re.compile(r"^\|[\s\-:|]+\|$")
 
 
+def _declared_ranges_for_catalog(filename: str) -> tuple[tuple[int, int], ...]:
+    """Return the authoritative error ID ranges declared for one catalog file."""
+    for declared_filename, ranges in ERROR_CATALOG_FILE_RANGES:
+        if declared_filename == filename:
+            return ranges
+    return ()
+
+
+def _error_id_in_declared_ranges(error_id: int, ranges: tuple[tuple[int, int], ...]) -> bool:
+    """Return whether an error ID belongs to one of a catalog's declared ranges."""
+    return any(start <= error_id <= end for start, end in ranges)
+
+
+def _format_error_id_ranges(ranges: tuple[tuple[int, int], ...]) -> str:
+    """Render compact human-readable ID ranges for validation errors."""
+    return ", ".join(str(start) if start == end else f"{start}-{end}" for start, end in ranges)
+
+
 def _parse_table_rows(body: str) -> list[list[str]]:
     """Parse all markdown table rows from a body, skipping headers and separators."""
     rows: list[list[str]] = []
@@ -84,19 +117,23 @@ def _strip_bold(text: str) -> str:
 
 def _infer_domain_from_id(error_id: int) -> str:
     """Infer a domain category from error class ID range."""
-    if 1 <= error_id <= 25:
-        return "core"
-    if 26 <= error_id <= 51:
-        return "field_theory"
-    if 52 <= error_id <= 71:
-        return "extended"
-    if 72 <= error_id <= 81:
-        return "deep_domain"
-    if 82 <= error_id <= 101:
-        return "cross_domain"
-    if 102 <= error_id <= 104:
-        return "newly_identified"
+    for domain, (start, end) in ERROR_DOMAIN_RANGES.items():
+        if start <= error_id <= end:
+            return domain
     return "unknown"
+
+
+def _normalize_error_domain(domain: object) -> str | None:
+    """Normalize and validate a list_error_classes domain filter."""
+    if domain is None:
+        return None
+    if not isinstance(domain, str) or not domain.strip():
+        raise ValueError("domain must be a non-empty string")
+    normalized = domain.strip()
+    if normalized not in ERROR_DOMAIN_RANGES:
+        allowed = ", ".join(KNOWN_ERROR_DOMAINS)
+        raise ValueError(f"unknown domain '{normalized}'; expected one of: {allowed}")
+    return normalized
 
 
 def _load_authoritative_markdown_body(path: Path, *, label: str) -> str:
@@ -139,6 +176,7 @@ class ErrorStore:
             body = _load_authoritative_markdown_body(path, label="Error catalog")
             rows = _parse_table_rows(body)
             loaded_rows = 0
+            declared_ranges = _declared_ranges_for_catalog(filename)
 
             for row in rows:
                 # Skip header rows (first cell is "#" or "Error Class")
@@ -150,6 +188,12 @@ class ErrorStore:
                 if not id_match:
                     continue
                 error_id = int(id_match.group(1))
+                if declared_ranges and not _error_id_in_declared_ranges(error_id, declared_ranges):
+                    expected = _format_error_id_ranges(declared_ranges)
+                    raise ValueError(
+                        f"Error catalog {Path(filename).name} declares ID range(s) {expected}; "
+                        f"found out-of-range error class id {error_id}"
+                    )
 
                 name = _strip_bold(row[1].strip())
                 description = row[2].strip()
@@ -201,7 +245,9 @@ class ErrorStore:
                 continue
             error_id = int(id_match.group(1))
             if error_id in self._traceability:
-                raise ValueError(f"Duplicate traceability row for error class {error_id} in {Path(TRACEABILITY_FILE).name}")
+                raise ValueError(
+                    f"Duplicate traceability row for error class {error_id} in {Path(TRACEABILITY_FILE).name}"
+                )
 
             # Map remaining cells to traceability columns
             checks: dict[str, str] = {}
@@ -320,8 +366,34 @@ def _get_store() -> ErrorStore:
 
 mcp = FastMCP("gpd-errors")
 
+ComputationDescriptionInput = Annotated[
+    str,
+    Field(min_length=1, pattern=r"\S"),
+    WithJsonSchema(
+        {
+            "type": "string",
+            "minLength": 1,
+            "pattern": r"\S",
+            "description": "Non-empty physics computation description.",
+        }
+    ),
+]
 
-@mcp.tool()
+_ERROR_DOMAIN_SCHEMA = {
+    "type": "string",
+    "enum": list(KNOWN_ERROR_DOMAINS),
+    "minLength": 1,
+    "pattern": r"\S",
+    "description": "Known error-catalog domain filter.",
+}
+
+ErrorDomainFilterInput = Annotated[
+    str | None,
+    WithJsonSchema({"anyOf": [_ERROR_DOMAIN_SCHEMA, {"type": "null"}]}),
+]
+
+
+@mcp.tool(annotations=read_only_tool_annotations())
 def get_error_class(error_id: int) -> dict[str, object]:
     """Get full details of a physics error class by ID.
 
@@ -349,8 +421,8 @@ def get_error_class(error_id: int) -> dict[str, object]:
             return stable_mcp_error(exc)
 
 
-@mcp.tool()
-def check_error_classes(computation_desc: str) -> dict[str, object]:
+@mcp.tool(annotations=read_only_tool_annotations())
+def check_error_classes(computation_desc: ComputationDescriptionInput) -> dict[str, object]:
     """Identify error classes relevant to a computation description.
 
     Given a description of the physics computation being performed, finds the
@@ -362,6 +434,9 @@ def check_error_classes(computation_desc: str) -> dict[str, object]:
     """
     with gpd_span("mcp.errors.check"):
         try:
+            if not isinstance(computation_desc, str) or not computation_desc.strip():
+                return stable_mcp_error("computation_desc must be a non-empty string")
+            computation_desc = computation_desc.strip()
             store = _get_store()
             matches = store.check_relevant(computation_desc)
             return stable_mcp_response(
@@ -377,7 +452,7 @@ def check_error_classes(computation_desc: str) -> dict[str, object]:
             return stable_mcp_error(exc)
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only_tool_annotations())
 def get_detection_strategy(error_id: int) -> dict[str, object]:
     """Get the detection strategy for a specific error class.
 
@@ -406,7 +481,7 @@ def get_detection_strategy(error_id: int) -> dict[str, object]:
             return stable_mcp_error(exc)
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only_tool_annotations())
 def get_traceability(error_id: int) -> dict[str, object]:
     """Get the verification check coverage for an error class.
 
@@ -452,8 +527,8 @@ def get_traceability(error_id: int) -> dict[str, object]:
             return stable_mcp_error(exc)
 
 
-@mcp.tool()
-def list_error_classes(domain: str | None = None) -> dict[str, object]:
+@mcp.tool(annotations=read_only_tool_annotations())
+def list_error_classes(domain: ErrorDomainFilterInput = None) -> dict[str, object]:
     """List all physics error classes, optionally filtered by domain.
 
     Args:
@@ -464,8 +539,9 @@ def list_error_classes(domain: str | None = None) -> dict[str, object]:
     """
     with gpd_span("mcp.errors.list", domain=domain or "all"):
         try:
+            normalized_domain = _normalize_error_domain(domain)
             store = _get_store()
-            errors = store.list_all(domain)
+            errors = store.list_all(normalized_domain)
             return stable_mcp_response(
                 {
                     "count": len(errors),

@@ -1,4 +1,4 @@
-"""Prompt budget regression tests for the `write-paper` startup surface."""
+"""Prompt budget assertions for the `write-paper` startup surface."""
 
 from __future__ import annotations
 
@@ -29,12 +29,16 @@ def test_write_paper_command_stays_thin_and_only_eagerly_loads_the_workflow() ->
     )
 
     assert metrics.raw_include_count == 1
+    assert "context_mode: project-aware" in command_text
     assert "@{GPD_INSTALL_DIR}/workflows/write-paper.md" in command_text
-    assert "@{GPD_INSTALL_DIR}/references/publication/publication-pipeline-modes.md" not in command_text
+    assert "--intake path/to/write-paper-authoring-input.json" in command_text
+    assert "GPD/publication/{subject_slug}/intake/" in command_text
+    assert command_text.count("{GPD_INSTALL_DIR}/references/publication/publication-pipeline-modes.md") == 1
     assert "@{GPD_INSTALL_DIR}/references/publication/peer-review-panel.md" not in command_text
     assert "@{GPD_INSTALL_DIR}/templates/paper/paper-config-schema.md" not in command_text
     assert "@{GPD_INSTALL_DIR}/templates/paper/review-ledger-schema.md" not in command_text
-    assert "required_evidence:" not in command_text
+    assert "required_evidence:" in command_text
+    assert "external-authoring lane: explicit `--intake` manifest with claim-to-evidence bindings" in command_text
     assert "stage_artifacts:" not in command_text
     assert "GPD/review/CLAIMS{round_suffix}.json" not in command_text
     assert "GPD/review/STAGE-reader{round_suffix}.json" not in command_text

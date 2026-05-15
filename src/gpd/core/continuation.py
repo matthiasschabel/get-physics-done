@@ -10,7 +10,7 @@ This module keeps the durable continuation contract intentionally small:
 
 Only portable repo-local references survive into the canonical continuation
 state. File existence remains a read-time concern surfaced by the projection.
-Legacy ``session`` mirrors remain advisory metadata; they do not hydrate
+``session`` mirrors are advisory metadata only; they do not hydrate
 continuation authority.
 """
 
@@ -440,14 +440,14 @@ def normalize_continuation_reference(
 
     try:
         resolved_target = (resolved_root / candidate).resolve(strict=False)
-        resolved_target.relative_to(resolved_root)
+        normalized_candidate = resolved_target.relative_to(resolved_root)
     except (OSError, ValueError):
         return None
 
-    if require_exists and not resolved_target.exists():
+    if require_exists and (not resolved_target.exists() or not resolved_target.is_file()):
         return None
 
-    return candidate.as_posix()
+    return normalized_candidate.as_posix()
 
 
 def normalize_continuation_with_issues(
@@ -610,8 +610,8 @@ def resolve_continuation(
 
     If ``state["continuation"]`` exists, it is authoritative and validated as
     the canonical schema. Otherwise the projection may derive one bounded
-    segment from the live execution snapshot. Legacy ``session`` mirrors are
-    not used as continuation authority.
+    segment from the live execution snapshot. ``session`` mirrors are not used
+    as continuation authority.
     """
 
     state_payload = _as_mapping(state) or {}
@@ -627,19 +627,25 @@ def resolve_continuation(
             source=ContinuationSource.CANONICAL,
             continuation=continuation,
         )
-        if (
-            canonical_projection.active_resume_source is not None
-            or canonical_projection.recorded_handoff_resume_file is not None
-        ):
+        if canonical_projection.active_resume_source is not None:
             return canonical_projection
 
         derived = _continuation_from_execution_snapshot(project_root, current_execution)
         if not derived.is_empty:
+            if not continuation.handoff.is_empty or not continuation.machine.is_empty:
+                derived = derived.model_copy(
+                    update={
+                        "handoff": continuation.handoff,
+                        "machine": continuation.machine,
+                    }
+                )
             return _project_continuation(
                 project_root,
                 source=ContinuationSource.DERIVED_EXECUTION,
                 continuation=derived,
             )
+        if canonical_projection.recorded_handoff_resume_file is not None:
+            return canonical_projection
         if not continuation.is_empty or has_continuation_drift:
             return canonical_projection
 

@@ -45,7 +45,7 @@ Create this JSON before asking the builder to emit `${PAPER_DIR}/{topic_specific
       "double_column": false
     }
   ],
-  "acknowledgments": "This research made use of Get Physics Done (GPD) and was supported in part by a GPD Research Grant from Physical Superintelligence PBC (PSI).",
+  "acknowledgments": "This research made use of Get Physics Done (GPD), developed by Physical Superintelligence PBC (PSI).",
   "bib_file": "references",
   "journal": "prl",
   "output_filename": "benchmark_recovery_regime",
@@ -109,7 +109,7 @@ Rules:
 
 ## Optional Top-Level Fields
 
-- `acknowledgments`: string. `gpd paper-build` ensures the rendered manuscript includes this exact sentence somewhere in the acknowledgments section: `This research made use of Get Physics Done (GPD) and was supported in part by a GPD Research Grant from Physical Superintelligence PBC (PSI).`
+- `acknowledgments`: string. `gpd paper-build` ensures the rendered manuscript includes this exact sentence somewhere in the acknowledgments section: `This research made use of Get Physics Done (GPD), developed by Physical Superintelligence PBC (PSI).`
 - `bib_file`: bibliography stem without `.bib`, default `references`
 - `journal`: journal key, default `prl`
 - `output_filename`: preferred manuscript stem. Use a topic-specific 2-3 word underscore slug such as `benchmark_recovery_regime` or `ads_curvature_flow`; avoid generic names like `main`.
@@ -148,4 +148,5 @@ favor of a supported `${PAPER_DIR}/PAPER-CONFIG.json` journal instead of letting
 gpd paper-build "${PAPER_DIR}/PAPER-CONFIG.json"
 ```
 
-This validates the JSON against the typed `PaperConfig` contract, resolves figure paths, and emits the canonical manuscript scaffold plus paper artifacts.
+This validates the JSON against the typed `PaperConfig` contract, resolves figure paths, and emits the canonical manuscript scaffold plus manuscript-local paper artifacts.
+The standard build writes `ARTIFACT-MANIFEST.json` and, when bibliography data exists, `BIBLIOGRAPHY-AUDIT.json` beside the emitted manuscript so strict review and arXiv preflight read the same paths reported by the command output.

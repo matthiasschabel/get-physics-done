@@ -14,11 +14,12 @@ Make sure these are already true:
 - Node.js 20+ is available in that same terminal.
 - Python 3.11+ with the standard `venv` module is available there too.
 - Use `--local` while learning so GPD only affects the current folder.
+- Normal installs and `--reinstall` use the PyPI pinned release first, with tagged GitHub release sources only as fallback. `--upgrade` opts into the latest unreleased GitHub `main` source.
 
 <details>
 <summary>What this hub does not do</summary>
 
-- GPD is not a standalone app. It installs commands into Claude Code, Codex, Gemini CLI, or OpenCode.
+- GPD is not a standalone app. It installs commands into Claude Code, Codex, Gemini CLI, GitHub Copilot CLI, or OpenCode.
 - GPD does not install your runtime for you.
 - GPD does not include model access, billing, or API credits.
 - If evidence, references, or artifacts are missing, say so explicitly; GPD should not invent them.
@@ -65,12 +66,12 @@ You will use two different places:
 <details>
 <summary>Common beginner terms</summary>
 
-- **Runtime**: the AI terminal app you talk to, such as Claude Code, Codex, Gemini CLI, or OpenCode.
+- **Runtime**: the AI terminal app you talk to, such as Claude Code, Codex, Gemini CLI, GitHub Copilot CLI, or OpenCode.
 - **API credits**: paid model usage from the provider behind your runtime.
 - **`--local`**: install GPD for just this project or folder.
 - **`gpd resume`**: the terminal-side recovery step.
 - **`resume-work`**: the in-runtime command you use after reopening the right workspace.
-- **`settings`**: the guided runtime command for changing autonomy, workflow defaults, and model-cost posture after your first successful start or later.
+- **`settings`**: after your first successful start or later, use the runtime `settings` command to review autonomy, workflow defaults, model-cost posture, runtime permission sync, and preset/tier overrides. The safest model-cost starting point is `review` plus runtime defaults.
 - **`set-tier-models`**: the direct runtime command for pinning concrete `tier-1`, `tier-2`, and `tier-3` model ids.
 
 </details>
@@ -138,6 +139,16 @@ Use this if you want GPD inside Gemini CLI. Inside the runtime, GPD commands use
 
 - Install: `npx -y get-physics-done --gemini --local`
 - [Gemini CLI quickstart](./gemini-cli.md)
+
+</details>
+
+<details>
+<summary>GitHub Copilot CLI</summary>
+
+Use this if you want GPD inside GitHub Copilot CLI. Inside the runtime, GPD commands use `/gpd-...`.
+
+- Install: `npx -y get-physics-done --copilot --local`
+- [GitHub Copilot CLI quickstart](./github-copilot-cli.md)
 
 </details>
 

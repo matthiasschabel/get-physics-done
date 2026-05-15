@@ -12,6 +12,7 @@ import pytest
 import gpd.core.phases as phases_module
 from gpd.core.phases import (
     MilestoneIncompleteError,
+    PhaseAmbiguityError,
     PhaseIncompleteError,
     PhaseNotFoundError,
     PhaseValidationError,
@@ -20,6 +21,7 @@ from gpd.core.phases import (
     RoadmapNotFoundError,
     find_phase,
     get_milestone_info,
+    list_phase_files,
     list_phases,
     milestone_complete,
     next_decimal_phase,
@@ -177,6 +179,27 @@ def test_find_phase_decimal(tmp_path: Path) -> None:
     assert result.phase_name == "hotfix"
 
 
+def test_find_phase_raises_clear_error_for_duplicate_phase_number(tmp_path: Path) -> None:
+    _setup_project(tmp_path)
+    _create_phase_dir(tmp_path, "01-alpha")
+    _create_phase_dir(tmp_path, "01-beta")
+
+    with pytest.raises(PhaseAmbiguityError, match="01-alpha, 01-beta"):
+        find_phase(tmp_path, "1")
+
+
+def test_find_phase_exact_directory_disambiguates_duplicate_phase_number(tmp_path: Path) -> None:
+    _setup_project(tmp_path)
+    _create_phase_dir(tmp_path, "01-alpha")
+    _create_phase_dir(tmp_path, "01-beta")
+
+    result = find_phase(tmp_path, "01-beta")
+
+    assert result is not None
+    assert result.phase_number == "01"
+    assert result.phase_name == "beta"
+
+
 # ─── list_phases ────────────────────────────────────────────────────────────────
 
 
@@ -196,6 +219,49 @@ def test_list_phases_empty(tmp_path: Path) -> None:
     result = list_phases(tmp_path)
     assert result.count == 0
     assert result.directories == []
+
+
+def test_list_phases_ignores_symlinked_phase_directory(tmp_path: Path) -> None:
+    _setup_project(tmp_path)
+    outside_phase = tmp_path / "outside-phase"
+    outside_phase.mkdir()
+    try:
+        (tmp_path / "GPD" / "phases" / "01-escape").symlink_to(outside_phase, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"symlink creation unavailable: {exc}")
+
+    result = list_phases(tmp_path)
+
+    assert result.count == 0
+    assert result.directories == []
+
+
+def test_list_phase_files_preserves_phase_directory_identity(tmp_path: Path) -> None:
+    _setup_project(tmp_path)
+    first = _create_phase_dir(tmp_path, "01-alpha")
+    second = _create_phase_dir(tmp_path, "02-beta")
+    (first / "shared-PLAN.md").write_text("plan 1", encoding="utf-8")
+    (second / "shared-PLAN.md").write_text("plan 2", encoding="utf-8")
+
+    result = list_phase_files(tmp_path, "plans")
+
+    assert result.files == ["shared-PLAN.md", "shared-PLAN.md"]
+    assert result.files_by_phase == {
+        "01-alpha": ["shared-PLAN.md"],
+        "02-beta": ["shared-PLAN.md"],
+    }
+
+
+def test_list_phase_files_reports_ambiguous_phase_filter(tmp_path: Path) -> None:
+    _setup_project(tmp_path)
+    _create_phase_dir(tmp_path, "01-alpha")
+    _create_phase_dir(tmp_path, "01-beta")
+
+    result = list_phase_files(tmp_path, "plans", phase="1")
+
+    assert result.error is not None
+    assert "Phase 1 is ambiguous" in result.error
+    assert "01-alpha, 01-beta" in result.error
 
 
 # ─── validate_waves ─────────────────────────────────────────────────────────────
@@ -286,6 +352,24 @@ def test_roadmap_analyze_no_roadmap(tmp_path: Path) -> None:
     _setup_project(tmp_path)
     result = roadmap_analyze(tmp_path)
     assert result.phase_count == 0
+
+
+def test_roadmap_analyze_marks_duplicate_phase_directories_ambiguous(tmp_path: Path) -> None:
+    _setup_project(tmp_path)
+    _create_roadmap(
+        tmp_path,
+        """\
+        ### Phase 1: Setup
+        **Goal:** Get started
+        """,
+    )
+    _create_phase_dir(tmp_path, "01-alpha")
+    _create_phase_dir(tmp_path, "01-beta")
+
+    result = roadmap_analyze(tmp_path)
+
+    assert result.phase_count == 1
+    assert result.phases[0].disk_status == "ambiguous"
 
 
 # ─── roadmap_get_phase ──────────────────────────────────────────────────────────
@@ -436,7 +520,9 @@ def test_phase_add_no_roadmap(tmp_path: Path) -> None:
         phase_add(tmp_path, "Something")
 
 
-def test_phase_add_leaves_state_files_unchanged_when_atomic_state_save_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_phase_add_leaves_state_files_unchanged_when_atomic_state_save_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _setup_project(tmp_path)
     _create_roadmap(
         tmp_path,
@@ -467,6 +553,34 @@ def test_phase_add_leaves_state_files_unchanged_when_atomic_state_save_fails(tmp
     assert sorted(d.name for d in (tmp_path / "GPD" / "phases").iterdir() if d.is_dir()) == []
 
 
+def test_phase_add_does_not_create_directory_when_roadmap_write_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _setup_project(tmp_path)
+    _create_roadmap(
+        tmp_path,
+        """\
+        ### Phase 1: Existing Phase
+        **Goal:** exist
+        """,
+    )
+    _seed_state_pair(tmp_path)
+    real_atomic_write = phases_module.atomic_write
+
+    def _fail_roadmap(path: Path, content: str) -> None:
+        if Path(path).name == "ROADMAP.md":
+            raise RuntimeError("roadmap exploded")
+        real_atomic_write(path, content)
+
+    monkeypatch.setattr(phases_module, "atomic_write", _fail_roadmap)
+
+    with pytest.raises(RuntimeError, match="roadmap exploded"):
+        phase_add(tmp_path, "New Feature")
+
+    assert sorted(d.name for d in (tmp_path / "GPD" / "phases").iterdir() if d.is_dir()) == []
+
+
 def test_phase_insert_rolls_back_roadmap_and_directory_when_atomic_state_save_fails(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -492,6 +606,34 @@ def test_phase_insert_rolls_back_roadmap_and_directory_when_atomic_state_save_fa
         phase_insert(tmp_path, "1", "Hotfix")
 
     assert (tmp_path / "GPD" / "ROADMAP.md").read_text(encoding="utf-8") == before_roadmap
+    assert sorted(d.name for d in (tmp_path / "GPD" / "phases").iterdir() if d.is_dir()) == []
+
+
+def test_phase_insert_does_not_create_directory_when_roadmap_write_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _setup_project(tmp_path)
+    _create_roadmap(
+        tmp_path,
+        """\
+        ### Phase 1: Existing Phase
+        **Goal:** exist
+        """,
+    )
+    _seed_state_pair(tmp_path)
+    real_atomic_write = phases_module.atomic_write
+
+    def _fail_roadmap(path: Path, content: str) -> None:
+        if Path(path).name == "ROADMAP.md":
+            raise RuntimeError("roadmap exploded")
+        real_atomic_write(path, content)
+
+    monkeypatch.setattr(phases_module, "atomic_write", _fail_roadmap)
+
+    with pytest.raises(RuntimeError, match="roadmap exploded"):
+        phase_insert(tmp_path, "1", "Hotfix")
+
     assert sorted(d.name for d in (tmp_path / "GPD" / "phases").iterdir() if d.is_dir()) == []
 
 
@@ -533,7 +675,9 @@ def test_phase_add_uses_canonical_state_lock_and_locked_writer(tmp_path: Path, m
     assert not any(path.name == "STATE.md" for path in lock_calls)
 
 
-def test_phase_insert_uses_canonical_state_lock_and_locked_writer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_phase_insert_uses_canonical_state_lock_and_locked_writer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _create_roadmap(
         tmp_path,
         """\
@@ -559,7 +703,9 @@ def test_phase_insert_uses_canonical_state_lock_and_locked_writer(tmp_path: Path
     assert not any(path.name == "STATE.md" for path in lock_calls)
 
 
-def test_phase_remove_uses_canonical_state_lock_and_locked_writer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_phase_remove_uses_canonical_state_lock_and_locked_writer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _create_roadmap(
         tmp_path,
         """\
@@ -640,7 +786,72 @@ def test_phase_remove_rolls_back_roadmap_and_phase_tree_when_atomic_state_save_f
     assert sorted(d.name for d in (tmp_path / "GPD" / "phases").iterdir() if d.is_dir()) == before_dirs
 
 
-def test_phase_complete_uses_canonical_state_lock_and_locked_writer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_phase_remove_rolls_back_when_checkpoint_sync_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _setup_project(tmp_path)
+    _create_roadmap(
+        tmp_path,
+        """\
+        ### Phase 1: First
+        **Goal:** first
+
+        ### Phase 2: Second
+        **Goal:** second
+
+        ### Phase 3: Third
+        **Goal:** third
+        """,
+    )
+    _seed_state_pair(tmp_path, current_phase="02", current_phase_name="Second", total_phases=3, status="in_progress")
+    first_dir = _create_phase_dir(tmp_path, "01-first")
+    (first_dir / "01-01-PLAN.md").write_text("plan", encoding="utf-8")
+    second_dir = _create_phase_dir(tmp_path, "02-second")
+    (second_dir / "02-01-PLAN.md").write_text("plan", encoding="utf-8")
+    third_dir = _create_phase_dir(tmp_path, "03-third")
+    (third_dir / "03-01-PLAN.md").write_text("plan", encoding="utf-8")
+
+    before_roadmap = (tmp_path / "GPD" / "ROADMAP.md").read_text(encoding="utf-8")
+    before_md = (tmp_path / "GPD" / "STATE.md").read_text(encoding="utf-8")
+    before_json = (tmp_path / "GPD" / "state.json").read_text(encoding="utf-8")
+    (tmp_path / "GPD" / "state.json.bak").write_text(before_json, encoding="utf-8")
+    before_json_backup = (tmp_path / "GPD" / "state.json.bak").read_text(encoding="utf-8")
+    checkpoint_index = tmp_path / "GPD" / "CHECKPOINTS.md"
+    checkpoint_index.write_text("before checkpoint index\n", encoding="utf-8")
+    checkpoint_dir = tmp_path / "GPD" / "phase-checkpoints"
+    checkpoint_dir.mkdir()
+    checkpoint_file = checkpoint_dir / "01-first.md"
+    checkpoint_file.write_text("before checkpoint shelf\n", encoding="utf-8")
+    before_checkpoint_index = checkpoint_index.read_text(encoding="utf-8")
+    before_checkpoint_file = checkpoint_file.read_text(encoding="utf-8")
+    before_dirs = sorted(d.name for d in (tmp_path / "GPD" / "phases").iterdir() if d.is_dir())
+
+    def _boom(_cwd: Path) -> None:
+        checkpoint_index.write_text("mutated checkpoint index\n", encoding="utf-8")
+        checkpoint_file.unlink()
+        (checkpoint_dir / "99-mutated.md").write_text("mutated checkpoint shelf\n", encoding="utf-8")
+        (tmp_path / "GPD" / "state.json.bak").write_text('{"position": {"current_phase": "99"}}', encoding="utf-8")
+        raise RuntimeError("checkpoint sync exploded")
+
+    monkeypatch.setattr(phases_module, "sync_phase_checkpoints", _boom)
+
+    with pytest.raises(RuntimeError, match="checkpoint sync exploded"):
+        phase_remove(tmp_path, "2")
+
+    assert (tmp_path / "GPD" / "ROADMAP.md").read_text(encoding="utf-8") == before_roadmap
+    assert (tmp_path / "GPD" / "STATE.md").read_text(encoding="utf-8") == before_md
+    assert (tmp_path / "GPD" / "state.json").read_text(encoding="utf-8") == before_json
+    assert (tmp_path / "GPD" / "state.json.bak").read_text(encoding="utf-8") == before_json_backup
+    assert checkpoint_index.read_text(encoding="utf-8") == before_checkpoint_index
+    assert checkpoint_file.read_text(encoding="utf-8") == before_checkpoint_file
+    assert not (checkpoint_dir / "99-mutated.md").exists()
+    assert sorted(d.name for d in (tmp_path / "GPD" / "phases").iterdir() if d.is_dir()) == before_dirs
+
+
+def test_phase_complete_uses_canonical_state_lock_and_locked_writer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _create_roadmap(
         tmp_path,
         """\
@@ -711,7 +922,66 @@ def test_phase_complete_rolls_back_roadmap_when_atomic_state_save_fails(
     assert (tmp_path / "GPD" / "ROADMAP.md").read_text(encoding="utf-8") == before_roadmap
 
 
-def test_milestone_complete_uses_canonical_state_lock_and_locked_writer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_phase_complete_rolls_back_when_checkpoint_sync_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _setup_project(tmp_path)
+    _create_roadmap(
+        tmp_path,
+        """\
+        ### Phase 1: Setup
+        **Goal:** setup
+        **Plans:** 1 plans
+
+        ### Phase 2: Build
+        **Goal:** build
+        """,
+    )
+    _seed_state_pair(tmp_path, current_phase="01", current_phase_name="Setup", total_phases=2, status="in_progress")
+    phase_dir = _create_phase_dir(tmp_path, "01-setup")
+    (phase_dir / "a-PLAN.md").write_text("plan", encoding="utf-8")
+    (phase_dir / "a-SUMMARY.md").write_text("done", encoding="utf-8")
+    _create_phase_dir(tmp_path, "02-build")
+
+    before_roadmap = (tmp_path / "GPD" / "ROADMAP.md").read_text(encoding="utf-8")
+    before_md = (tmp_path / "GPD" / "STATE.md").read_text(encoding="utf-8")
+    before_json = (tmp_path / "GPD" / "state.json").read_text(encoding="utf-8")
+    (tmp_path / "GPD" / "state.json.bak").write_text(before_json, encoding="utf-8")
+    before_json_backup = (tmp_path / "GPD" / "state.json.bak").read_text(encoding="utf-8")
+    checkpoint_index = tmp_path / "GPD" / "CHECKPOINTS.md"
+    checkpoint_index.write_text("before checkpoint index\n", encoding="utf-8")
+    checkpoint_dir = tmp_path / "GPD" / "phase-checkpoints"
+    checkpoint_dir.mkdir()
+    checkpoint_file = checkpoint_dir / "01-setup.md"
+    checkpoint_file.write_text("before checkpoint shelf\n", encoding="utf-8")
+    before_checkpoint_index = checkpoint_index.read_text(encoding="utf-8")
+    before_checkpoint_file = checkpoint_file.read_text(encoding="utf-8")
+
+    def _boom(_cwd: Path) -> None:
+        checkpoint_index.write_text("mutated checkpoint index\n", encoding="utf-8")
+        checkpoint_file.unlink()
+        (checkpoint_dir / "99-mutated.md").write_text("mutated checkpoint shelf\n", encoding="utf-8")
+        (tmp_path / "GPD" / "state.json.bak").write_text('{"position": {"current_phase": "99"}}', encoding="utf-8")
+        raise RuntimeError("checkpoint sync exploded")
+
+    monkeypatch.setattr(phases_module, "sync_phase_checkpoints", _boom)
+
+    with pytest.raises(RuntimeError, match="checkpoint sync exploded"):
+        phase_complete(tmp_path, "1")
+
+    assert (tmp_path / "GPD" / "ROADMAP.md").read_text(encoding="utf-8") == before_roadmap
+    assert (tmp_path / "GPD" / "STATE.md").read_text(encoding="utf-8") == before_md
+    assert (tmp_path / "GPD" / "state.json").read_text(encoding="utf-8") == before_json
+    assert (tmp_path / "GPD" / "state.json.bak").read_text(encoding="utf-8") == before_json_backup
+    assert checkpoint_index.read_text(encoding="utf-8") == before_checkpoint_index
+    assert checkpoint_file.read_text(encoding="utf-8") == before_checkpoint_file
+    assert not (checkpoint_dir / "99-mutated.md").exists()
+
+
+def test_milestone_complete_uses_canonical_state_lock_and_locked_writer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _create_roadmap(tmp_path, "## Milestone v1.0: Test\n### Phase 1: X\n**Goal:** x\n")
     state = default_state_dict()
     state["status"] = "in_progress"
@@ -729,6 +999,44 @@ def test_milestone_complete_uses_canonical_state_lock_and_locked_writer(tmp_path
     assert result.version == "v1.0"
     assert any(path.name == "state.json" for path in lock_calls)
     assert not any(path.name == "STATE.md" for path in lock_calls)
+
+
+def test_milestone_complete_checks_completion_under_roadmap_lock(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _create_roadmap(tmp_path, "## Milestone v1.0: Test\n### Phase 1: X\n**Goal:** x\n")
+    _write_state_pair(tmp_path, default_state_dict())
+    phase_dir = _create_phase_dir(tmp_path, "01-x")
+    (phase_dir / "a-PLAN.md").write_text("plan", encoding="utf-8")
+    (phase_dir / "a-SUMMARY.md").write_text("---\none-liner: Did the thing\n---\n## Task 1\nDone", encoding="utf-8")
+    original_file_lock = phases_module.file_lock
+    original_snapshot = phases_module._milestone_completion_snapshot
+    roadmap_lock_active = False
+
+    @contextmanager
+    def _recording_lock(path: Path, *args, **kwargs):
+        nonlocal roadmap_lock_active
+        with original_file_lock(path, *args, **kwargs):
+            if Path(path).name == "ROADMAP.md":
+                roadmap_lock_active = True
+                try:
+                    yield
+                finally:
+                    roadmap_lock_active = False
+            else:
+                yield
+
+    def _assert_locked(cwd: Path):
+        assert roadmap_lock_active
+        return original_snapshot(cwd)
+
+    monkeypatch.setattr(phases_module, "file_lock", _recording_lock)
+    monkeypatch.setattr(phases_module, "_milestone_completion_snapshot", _assert_locked)
+
+    result = milestone_complete(tmp_path, "v1.0", name="Test Milestone")
+
+    assert result.version == "v1.0"
 
 
 def test_milestone_complete_rolls_back_archives_when_atomic_state_save_fails(
@@ -802,7 +1110,6 @@ def test_milestone_complete_rolls_back_partial_archives_when_audit_move_fails(
     assert not (tmp_path / "GPD" / "MILESTONES.md").exists()
 
 
-
 # ─── phase_insert ────────────────────────────────────────────────────────────────
 
 
@@ -823,6 +1130,52 @@ def test_phase_insert(tmp_path: Path) -> None:
     assert result.phase_number == "01.1"
     assert result.after_phase == "1"
     assert (tmp_path / result.directory).is_dir()
+
+
+def test_phase_insert_accepts_padded_em_dash_heading(tmp_path: Path) -> None:
+    _setup_project(tmp_path)
+    _create_roadmap(
+        tmp_path,
+        """\
+        ### Phase 01 — First
+        **Goal:** do first
+
+        ### Phase 02 — Second
+        **Goal:** do second
+        """,
+    )
+    _seed_state_pair(tmp_path, current_phase="01", current_phase_name="First", total_phases=2)
+
+    result = phase_insert(tmp_path, "1", "Hotfix")
+
+    assert result.phase_number == "01.1"
+    roadmap = (tmp_path / "GPD" / "ROADMAP.md").read_text(encoding="utf-8")
+    assert "### Phase 01.1 — Hotfix (INSERTED)" in roadmap
+    assert "**Depends on:** Phase 01" in roadmap
+
+
+def test_phase_insert_skips_roadmap_only_decimal_siblings(tmp_path: Path) -> None:
+    _setup_project(tmp_path)
+    _create_roadmap(
+        tmp_path,
+        """\
+        ### Phase 1: First
+        **Goal:** do first
+
+        ### Phase 1.1: Existing roadmap-only fix
+        **Goal:** fix without a directory yet
+
+        ### Phase 2: Second
+        **Goal:** do second
+        """,
+    )
+
+    result = phase_insert(tmp_path, "1", "Hotfix")
+
+    assert result.phase_number == "01.2"
+    roadmap = (tmp_path / "GPD" / "ROADMAP.md").read_text(encoding="utf-8")
+    assert "### Phase 1.1: Existing roadmap-only fix" in roadmap
+    assert "### Phase 1.2: Hotfix (INSERTED)" in roadmap
 
 
 def test_phase_insert_invalid_phase(tmp_path: Path) -> None:
@@ -856,6 +1209,26 @@ def test_next_decimal_with_existing(tmp_path: Path) -> None:
     assert len(result.existing) == 2
 
 
+def test_next_decimal_counts_roadmap_only_decimal_phases(tmp_path: Path) -> None:
+    _setup_project(tmp_path)
+    _create_roadmap(
+        tmp_path,
+        """\
+        ### Phase 3: Analysis
+        **Goal:** analyze
+
+        ### Phase 3.1: Roadmap-only correction
+        **Goal:** correct
+        """,
+    )
+
+    result = next_decimal_phase(tmp_path, "3")
+
+    assert result.found is True
+    assert result.next == "03.2"
+    assert result.existing == ["03.1"]
+
+
 # ─── phase_remove ────────────────────────────────────────────────────────────────
 
 
@@ -884,6 +1257,36 @@ def test_phase_remove_basic(tmp_path: Path) -> None:
 
     roadmap = (tmp_path / "GPD" / "ROADMAP.md").read_text(encoding="utf-8")
     assert "Phase 2: Second" not in roadmap
+
+
+def test_phase_remove_nonexistent_phase_raises(tmp_path: Path) -> None:
+    _setup_project(tmp_path)
+    _create_roadmap(tmp_path, "### Phase 1: Only\n**Goal:** only\n")
+    _create_phase_dir(tmp_path, "01-only")
+    before = (tmp_path / "GPD" / "ROADMAP.md").read_text(encoding="utf-8")
+
+    with pytest.raises(PhaseNotFoundError):
+        phase_remove(tmp_path, "99")
+
+    assert (tmp_path / "GPD" / "ROADMAP.md").read_text(encoding="utf-8") == before
+
+
+def test_phase_remove_refuses_executed_work_without_backup_leak(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _setup_project(tmp_path)
+    _create_roadmap(tmp_path, "### Phase 1: X\n**Goal:** x\n")
+    phase_dir = _create_phase_dir(tmp_path, "01-x")
+    (phase_dir / "a-SUMMARY.md").write_text("done", encoding="utf-8")
+    scratch_tmp = tmp_path / "temp"
+    scratch_tmp.mkdir()
+    monkeypatch.setattr(phases_module.tempfile, "tempdir", str(scratch_tmp))
+
+    with pytest.raises(PhaseValidationError, match="force"):
+        phase_remove(tmp_path, "1")
+
+    assert list(scratch_tmp.glob("gpd-phases-backup-*")) == []
 
 
 def test_phase_remove_renumber_same_slug(tmp_path: Path) -> None:
@@ -1015,7 +1418,7 @@ def test_phase_remove_integer_removes_descendant_subtree_and_clears_removed_curr
     state = (tmp_path / "GPD" / "STATE.md").read_text(encoding="utf-8")
     assert "**Current Phase:** 02" in state
     assert "**Current Phase Name:** Validation" in state
-    assert "**Current Plan:** \u2014" in state
+    assert "**Current Plan:** none" in state
     assert "**Total Plans in Phase:** 1" in state
 
 
@@ -1131,7 +1534,7 @@ def test_phase_remove_decimal_descendant_current_phase_falls_back_to_previous_ph
     state = (tmp_path / "GPD" / "STATE.md").read_text(encoding="utf-8")
     assert "**Current Phase:** 03" in state
     assert "**Current Phase Name:** Base" in state
-    assert "**Current Plan:** \u2014" in state
+    assert "**Current Plan:** none" in state
 
 
 def test_phase_remove_with_summaries_needs_force(tmp_path: Path) -> None:
@@ -1217,6 +1620,55 @@ def test_phase_complete_uses_roadmap_for_unscaffolded_next_phase(tmp_path: Path)
     assert "**Status:** Ready to plan" in state
 
 
+def test_phase_complete_handles_padded_em_dash_roadmap_heading(tmp_path: Path) -> None:
+    _setup_project(tmp_path)
+    _create_roadmap(
+        tmp_path,
+        """\
+        ## Phase Overview
+
+        - [ ] Phase 01 — Setup
+
+        | Phase | Status | Updated |
+        |---|---|---|
+        | 01. Setup | Ready | - |
+
+        ### Phase 01 — Setup
+        **Goal:** setup
+        **Plans:** 1 plans
+
+        ### Phase 02 — Build
+        **Goal:** build
+        **Plans:** 0 plans
+        """,
+    )
+    _create_state(
+        tmp_path,
+        """\
+        **Current Phase:** 01
+        **Current Phase Name:** Setup
+        **Total Phases:** 2
+        **Current Plan:** 1
+        **Total Plans in Phase:** 1
+        **Status:** in_progress
+        **Last Activity:** 2026-03-01
+        **Last Activity Description:** Working
+        """,
+    )
+    phase_dir = _create_phase_dir(tmp_path, "01-setup")
+    (phase_dir / "a-PLAN.md").write_text("plan", encoding="utf-8")
+    (phase_dir / "a-SUMMARY.md").write_text("done", encoding="utf-8")
+
+    result = phase_complete(tmp_path, "1")
+
+    assert result.next_phase == "02"
+    assert result.next_phase_name == "Build"
+    roadmap = (tmp_path / "GPD" / "ROADMAP.md").read_text(encoding="utf-8")
+    assert "- [x] Phase 01 — Setup (completed " in roadmap
+    assert "**Plans:** 1/1 plans complete" in roadmap
+    assert "| 01. Setup | Complete" in roadmap
+
+
 def test_phase_complete_not_found(tmp_path: Path) -> None:
     _setup_project(tmp_path)
     with pytest.raises(PhaseNotFoundError):
@@ -1274,6 +1726,9 @@ def test_milestone_complete_counts_unscaffolded_roadmap_phases(tmp_path: Path) -
     with pytest.raises(MilestoneIncompleteError):
         milestone_complete(tmp_path, "v1.0", name="Test")
 
+    assert not (tmp_path / "GPD" / "milestones").exists()
+    assert not (tmp_path / "GPD" / "MILESTONES.md").exists()
+
 
 def test_milestone_complete_incomplete_phases(tmp_path: Path) -> None:
     _setup_project(tmp_path)
@@ -1289,6 +1744,83 @@ def test_milestone_complete_incomplete_phases(tmp_path: Path) -> None:
 def test_milestone_complete_empty_version(tmp_path: Path) -> None:
     with pytest.raises(PhaseValidationError, match="version required"):
         milestone_complete(tmp_path, "")
+
+
+def test_milestone_complete_empty_cwd_fails_without_nested_artifacts(tmp_path: Path) -> None:
+    nested = tmp_path / "workspace" / "notes"
+    nested.mkdir(parents=True)
+
+    with pytest.raises(PhaseValidationError, match="ROADMAP.md required"):
+        milestone_complete(nested, "v1.0")
+
+    assert not (nested / "GPD").exists()
+
+
+def test_milestone_complete_rejects_project_with_no_phases(tmp_path: Path) -> None:
+    _setup_project(tmp_path)
+    _create_roadmap(tmp_path, "# Roadmap\n\n## Milestone v1.0: Test\n")
+
+    with pytest.raises(PhaseValidationError, match="no phases"):
+        milestone_complete(tmp_path, "v1.0")
+
+    assert not (tmp_path / "GPD" / "milestones").exists()
+    assert not (tmp_path / "GPD" / "MILESTONES.md").exists()
+
+
+def test_milestone_complete_rolls_back_state_and_checkpoints_when_sync_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _setup_project(tmp_path)
+    _create_roadmap(
+        tmp_path,
+        """\
+        ## Milestone v1.0: Test
+
+        ### Phase 1: Setup
+        **Goal:** setup
+        """,
+    )
+    _seed_state_pair(tmp_path, current_phase="01", current_phase_name="Setup", total_phases=1, status="in_progress")
+    phase_dir = _create_phase_dir(tmp_path, "01-setup")
+    (phase_dir / "01-PLAN.md").write_text("plan", encoding="utf-8")
+    (phase_dir / "01-SUMMARY.md").write_text("---\none-liner: Finished setup\n---\n\n## Task 1\n", encoding="utf-8")
+    audit_file = tmp_path / "GPD" / "v1.0-MILESTONE-AUDIT.md"
+    audit_file.write_text("# Audit\n", encoding="utf-8")
+
+    state_md = tmp_path / "GPD" / "STATE.md"
+    state_json = tmp_path / "GPD" / "state.json"
+    before_state_md = state_md.read_text(encoding="utf-8")
+    before_state_json = state_json.read_text(encoding="utf-8")
+    before_audit = audit_file.read_text(encoding="utf-8")
+    checkpoint_index = tmp_path / "GPD" / "CHECKPOINTS.md"
+    checkpoint_index.write_text("before checkpoint index\n", encoding="utf-8")
+    checkpoint_dir = tmp_path / "GPD" / "phase-checkpoints"
+    checkpoint_dir.mkdir()
+    checkpoint_file = checkpoint_dir / "01-setup.md"
+    checkpoint_file.write_text("before checkpoint shelf\n", encoding="utf-8")
+
+    def _boom(_cwd: Path) -> None:
+        checkpoint_index.write_text("mutated checkpoint index\n", encoding="utf-8")
+        checkpoint_file.unlink()
+        (checkpoint_dir / "99-mutated.md").write_text("mutated checkpoint shelf\n", encoding="utf-8")
+        raise RuntimeError("checkpoint sync exploded")
+
+    monkeypatch.setattr(phases_module, "sync_phase_checkpoints", _boom)
+
+    with pytest.raises(RuntimeError, match="checkpoint sync exploded"):
+        milestone_complete(tmp_path, "v1.0", name="Test Milestone")
+
+    archive_dir = tmp_path / "GPD" / "milestones"
+    assert state_md.read_text(encoding="utf-8") == before_state_md
+    assert state_json.read_text(encoding="utf-8") == before_state_json
+    assert audit_file.read_text(encoding="utf-8") == before_audit
+    assert checkpoint_index.read_text(encoding="utf-8") == "before checkpoint index\n"
+    assert checkpoint_file.read_text(encoding="utf-8") == "before checkpoint shelf\n"
+    assert not (checkpoint_dir / "99-mutated.md").exists()
+    assert not (archive_dir / "v1.0-ROADMAP.md").exists()
+    assert not (archive_dir / "v1.0-MILESTONE-AUDIT.md").exists()
+    assert not (tmp_path / "GPD" / "MILESTONES.md").exists()
 
 
 def test_phase_remove_remaps_current_phase_state_after_renumbering(tmp_path: Path) -> None:
@@ -1333,7 +1865,7 @@ def test_phase_remove_remaps_current_phase_state_after_renumbering(tmp_path: Pat
     assert "**Current Phase:** 02" in state
     assert "**Current Phase Name:** Validation" in state
     assert "**Total Phases:** 2" in state
-    assert "**Current Plan:** \u2014" in state
+    assert "**Current Plan:** none" in state
     assert "**Total Plans in Phase:** 1" in state
 
     state_json = json.loads((tmp_path / "GPD" / "state.json").read_text(encoding="utf-8"))
@@ -1392,6 +1924,52 @@ def test_phase_remove_integer_renumbers_decimal_roadmap_references(tmp_path: Pat
     assert "02.1-01-PLAN.md" not in roadmap
 
 
+def test_phase_remove_preserves_padded_em_dash_roadmap_format(tmp_path: Path) -> None:
+    _setup_project(tmp_path)
+    _create_roadmap(
+        tmp_path,
+        """\
+        ## Phase Overview
+
+        - [ ] Phase 01 — Setup
+        - [ ] Phase 02 — Main
+        - [ ] Phase 03 — Validation
+
+        | Phase | Status | Updated |
+        |---|---|---|
+        | 01. Setup | Ready | - |
+        | 02. Main | Ready | - |
+        | 03. Validation | Ready | - |
+
+        ### Phase 01 — Setup
+        **Goal:** setup
+
+        ### Phase 02 — Main
+        **Goal:** main
+
+        ### Phase 03 — Validation
+        **Goal:** validate
+        **Artifact:** 03-01-PLAN.md
+        """,
+    )
+    _seed_state_pair(
+        tmp_path, current_phase="03", current_phase_name="Validation", total_phases=3, status="in_progress"
+    )
+    _create_phase_dir(tmp_path, "01-setup")
+    _create_phase_dir(tmp_path, "02-main")
+    validation_dir = _create_phase_dir(tmp_path, "03-validation")
+    (validation_dir / "03-01-PLAN.md").write_text("plan", encoding="utf-8")
+
+    phase_remove(tmp_path, "2")
+
+    roadmap = (tmp_path / "GPD" / "ROADMAP.md").read_text(encoding="utf-8")
+    assert "### Phase 02 — Validation" in roadmap
+    assert "- [ ] Phase 02 — Validation" in roadmap
+    assert "| 02. Validation | Ready | - |" in roadmap
+    assert "02-01-PLAN.md" in roadmap
+    assert "Phase 03" not in roadmap
+
+
 # ─── get_milestone_info ──────────────────────────────────────────────────────────
 
 
@@ -1427,6 +2005,23 @@ def test_progress_render_json(tmp_path: Path) -> None:
     assert result.total_plans == 1
     assert result.total_summaries == 1
     assert len(result.phases) == 1
+
+
+def test_progress_render_warns_on_non_integer_state_progress_percent(tmp_path: Path) -> None:
+    _setup_project(tmp_path)
+    _create_roadmap(tmp_path, "## v1.0: Test\n")
+    phase_dir = _create_phase_dir(tmp_path, "01-x")
+    (phase_dir / "a-PLAN.md").write_text("plan", encoding="utf-8")
+    (tmp_path / "GPD" / "state.json").write_text(
+        json.dumps({"position": {"progress_percent": "12.5"}}),
+        encoding="utf-8",
+    )
+
+    result = progress_render(tmp_path, "json")
+
+    assert result.state_progress_percent is None
+    assert result.diverged is False
+    assert any("progress_percent is non-integer" in warning for warning in result.warnings)
 
 
 def test_progress_render_bar(tmp_path: Path) -> None:
@@ -1469,11 +2064,32 @@ def test_phase_plan_index_basic(tmp_path: Path) -> None:
     assert result.validation.valid is True
 
 
+def test_phase_plan_index_parses_gap_closure_frontmatter(tmp_path: Path) -> None:
+    _setup_project(tmp_path)
+    phase_dir = _create_phase_dir(tmp_path, "01-setup")
+    (phase_dir / "a-PLAN.md").write_text(
+        "---\nwave: 1\ngap_closure: true\n---\n## Task 1\nFix verification gap",
+        encoding="utf-8",
+    )
+    (phase_dir / "b-PLAN.md").write_text("---\nwave: 1\n---\n## Task 1\nStandard work", encoding="utf-8")
+
+    result = phase_plan_index(tmp_path, "1")
+
+    entries = {entry.id: entry for entry in result.plans}
+    assert entries["a"].gap_closure is True
+    assert entries["b"].gap_closure is False
+    assert result.validation.valid is True
+
+
 def test_phase_plan_index_rejects_scalar_dependency_fields(tmp_path: Path) -> None:
     _setup_project(tmp_path)
     phase_dir = _create_phase_dir(tmp_path, "01-setup")
-    (phase_dir / "a-PLAN.md").write_text("---\nwave: 1\ndepends_on: []\nfiles_modified: []\n---\n## Task 1\nDo stuff", encoding="utf-8")
-    (phase_dir / "b-PLAN.md").write_text("---\nwave: 2\ndepends_on: a\nfiles_modified: []\n---\n## Task 1\nMore stuff", encoding="utf-8")
+    (phase_dir / "a-PLAN.md").write_text(
+        "---\nwave: 1\ndepends_on: []\nfiles_modified: []\n---\n## Task 1\nDo stuff", encoding="utf-8"
+    )
+    (phase_dir / "b-PLAN.md").write_text(
+        "---\nwave: 2\ndepends_on: a\nfiles_modified: []\n---\n## Task 1\nMore stuff", encoding="utf-8"
+    )
 
     result = phase_plan_index(tmp_path, "1")
     assert result.validation.valid is False
@@ -1493,7 +2109,8 @@ def test_phase_plan_index_detects_checkpoint_tasks_without_interactive_flag(tmp_
               <name>Review the checkpoint</name>
             </task>
             """
-        ), encoding="utf-8"
+        ),
+        encoding="utf-8",
     )
 
     result = phase_plan_index(tmp_path, "1")
@@ -1509,6 +2126,19 @@ def test_validate_phase_waves_reports_malformed_frontmatter(tmp_path: Path) -> N
     result = validate_phase_waves(tmp_path, "1")
     assert result.validation.valid is False
     assert any("a-PLAN.md" in error for error in result.validation.errors)
+
+
+def test_validate_phase_waves_reports_ambiguous_phase_filter(tmp_path: Path) -> None:
+    _setup_project(tmp_path)
+    _create_phase_dir(tmp_path, "01-alpha")
+    _create_phase_dir(tmp_path, "01-beta")
+
+    result = validate_phase_waves(tmp_path, "1")
+
+    assert result.error is not None
+    assert "Phase 1 is ambiguous" in result.error
+    assert result.validation.valid is False
+    assert result.validation.errors == [result.error]
 
 
 def test_validate_phase_waves_rejects_coercive_wave_values(tmp_path: Path) -> None:
@@ -1533,17 +2163,31 @@ def test_phase_plan_index_rejects_coercive_wave_values(tmp_path: Path) -> None:
     assert any("wave must be an integer" in error for error in result.validation.errors)
 
 
+def test_phase_plan_index_reports_ambiguous_phase_filter(tmp_path: Path) -> None:
+    _setup_project(tmp_path)
+    _create_phase_dir(tmp_path, "01-alpha")
+    _create_phase_dir(tmp_path, "01-beta")
+
+    result = phase_plan_index(tmp_path, "1")
+
+    assert result.plans == []
+    assert result.validation.valid is False
+    assert result.validation.errors == [
+        "Phase 1 is ambiguous; matching directories: 01-alpha, 01-beta. Use the exact phase directory name to disambiguate."
+    ]
+
+
 def test_phase_plan_index_not_found(tmp_path: Path) -> None:
     _setup_project(tmp_path)
     result = phase_plan_index(tmp_path, "99")
     assert result.plans == []
 
 
-# ─── Bug-fix regression tests ────────────────────────────────────────────────
+# ─── Focused invariant assertions ────────────────────────────────────────────
 
 
-def test_phase_complete_sets_current_plan_to_em_dash(tmp_path: Path) -> None:
-    """After phase_complete the Current Plan field must be the em-dash placeholder,
+def test_phase_complete_sets_current_plan_to_inactive_sentinel(tmp_path: Path) -> None:
+    """After phase_complete the Current Plan field must be the inactive sentinel,
     not the string 'Not started', so that state_advance_plan can parse it correctly."""
     _setup_project(tmp_path)
     _create_roadmap(
@@ -1579,7 +2223,7 @@ def test_phase_complete_sets_current_plan_to_em_dash(tmp_path: Path) -> None:
     phase_complete(tmp_path, "1")
 
     state = (tmp_path / "GPD" / "STATE.md").read_text(encoding="utf-8")
-    assert "**Current Plan:** \u2014" in state
+    assert "**Current Plan:** none" in state
     assert "Not started" not in state
 
 

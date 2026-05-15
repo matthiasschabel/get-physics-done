@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -28,7 +29,12 @@ from gpd.core.frontmatter import (
     _validate_contract_mapping,
     extract_frontmatter,
 )
-from gpd.core.manuscript_artifacts import locate_publication_artifact, resolve_current_manuscript_resolution
+from gpd.core.manuscript_artifacts import (
+    PublicationSubjectResolution,
+    infer_publication_artifact_base,
+    locate_publication_artifact,
+    resolve_current_publication_subject,
+)
 from gpd.core.paper_quality import (
     _CITE_CMD_PREFIX,
     BinaryCheck,
@@ -41,6 +47,7 @@ from gpd.core.paper_quality import (
     ResultsQualityInput,
     VerificationConfidence,
     VerificationQualityInput,
+    _visible_tex_content,
     validate_tex_draft,
 )
 from gpd.mcp.paper.bibliography import BibliographyAudit
@@ -49,7 +56,7 @@ from gpd.mcp.paper.models import ArtifactManifest, PaperConfig, is_supported_pap
 __all__ = ["build_paper_quality_input"]
 
 
-_PLACEHOLDER_RE = re.compile(r"TODO|FIXME|PENDING|TBD|\\text\{\[PENDING\]\}")
+_RESULT_PENDING_RE = re.compile(r"RESULT PENDING")
 _MISSING_CITE_RE = re.compile(_CITE_CMD_PREFIX + r"(?:\[[^\]]*\])*\{MISSING:")
 _ABSTRACT_RE = re.compile(
     r"(\\begin\{abstract\}[\s\S]*?\\end\{abstract\}|^\s{0,3}#{1,6}\s*abstract\b)",
@@ -72,7 +79,7 @@ _MANUSCRIPT_CONTENT_SUFFIXES = (".tex", ".md")
 
 
 class _FigureTrackerEntry(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     id: str = ""
     label: str = ""
@@ -126,7 +133,7 @@ def _coverage_metric(satisfied: int, total: int) -> CoverageMetric:
 def _read_text(path: Path) -> str | None:
     try:
         return path.read_text(encoding="utf-8")
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         return None
 
 
@@ -151,6 +158,17 @@ def _load_artifact_manifest(path: Path | None) -> ArtifactManifest | None:
         return ArtifactManifest.model_validate(payload)
     except PydanticValidationError:
         return None
+
+
+def _sha256_file(path: Path) -> str | None:
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(8192), b""):
+                digest.update(chunk)
+    except OSError:
+        return None
+    return digest.hexdigest()
 
 
 def _load_bibliography_audit(path: Path | None) -> BibliographyAudit | None:
@@ -258,38 +276,14 @@ def _load_manuscript_config(manuscript_dir: Path) -> dict[str, object]:
     try:
         return PaperConfig.model_validate(payload).model_dump(mode="python")
     except PydanticValidationError:
-        return payload
-
-
-def _best_effort_manuscript_root(project_root: Path) -> Path | None:
-    resolution = resolve_current_manuscript_resolution(project_root, allow_markdown=True)
-    if resolution.status == "resolved" and resolution.manuscript_root is not None:
-        return resolution.manuscript_root
-    if resolution.status == "ambiguous":
-        return None
-
-    candidates: list[Path] = []
-    for root_name in ("paper", "manuscript", "draft"):
-        candidate = project_root / root_name
-        if not candidate.exists() or not candidate.is_dir():
-            continue
-        has_publication_artifacts = any(
-            (candidate / artifact_name).exists()
-            for artifact_name in (
-                "PAPER-CONFIG.json",
-                "ARTIFACT-MANIFEST.json",
-                "BIBLIOGRAPHY-AUDIT.json",
-                "FIGURE_TRACKER.md",
-                "reproducibility-manifest.json",
-            )
-        )
-        has_manuscript_content = any(
-            path.is_file() and path.suffix.lower() in _MANUSCRIPT_CONTENT_SUFFIXES for path in candidate.rglob("*")
-        )
-        if has_publication_artifacts or has_manuscript_content:
-            candidates.append(candidate)
-
-    return candidates[0] if len(candidates) == 1 else None
+        fallback: dict[str, object] = {}
+        title = payload.get("title")
+        if isinstance(title, str) and title.strip():
+            fallback["title"] = title
+        journal = payload.get("journal")
+        if is_supported_paper_journal(journal):
+            fallback["journal"] = str(journal)
+        return fallback
 
 
 def _derivation_artifacts(project_root: Path) -> list[Path]:
@@ -381,22 +375,34 @@ def _manuscript_reference_status(
     return status_entries
 
 
-def _load_figure_registry(manuscript_dir: Path) -> list[_FigureTrackerEntry]:
+def _load_figure_registry(manuscript_dir: Path) -> tuple[list[_FigureTrackerEntry], bool]:
     tracker_path = manuscript_dir / "FIGURE_TRACKER.md"
-    meta = _extract_meta(tracker_path)
+    if not tracker_path.exists():
+        return [], True
+    parse_errors: list[str] = []
+    meta = _extract_meta(tracker_path, parse_errors=parse_errors)
+    if parse_errors:
+        return [], False
+    if "figure_registry" not in meta:
+        return [], True
     raw = meta.get("figure_registry")
+    if raw is None:
+        return [], False
     if not isinstance(raw, list):
-        return []
+        return [], False
 
     entries: list[_FigureTrackerEntry] = []
+    parse_ok = True
     for item in raw:
         if not isinstance(item, dict):
+            parse_ok = False
             continue
         try:
             entries.append(_FigureTrackerEntry.model_validate(item))
         except PydanticValidationError:
+            parse_ok = False
             continue
-    return entries
+    return entries, parse_ok
 
 
 def _parse_comparison_verdict_entries(
@@ -497,8 +503,13 @@ def _manifest_metadata_matches_active_entrypoint(
         if artifact.category != "tex":
             continue
         candidate = manuscript_root / artifact.path
-        if candidate.exists() and candidate.resolve(strict=False) == resolved_entrypoint:
-            return True
+        if not candidate.exists() or candidate.resolve(strict=False) != resolved_entrypoint:
+            continue
+        active_sha256 = _sha256_file(resolved_entrypoint)
+        if active_sha256 is None:
+            return False
+        manifest_sha256 = artifact_manifest.manuscript_sha256 or artifact.sha256
+        return manifest_sha256.lower() == active_sha256.lower()
     return False
 
 
@@ -772,14 +783,14 @@ def _build_figures_input(
             else CoverageMetric(not_applicable=True)
         )
         decisive_artifact_roles_clear = (
-            _coverage_metric(sum(1 for entry in decisive_entries if entry.role and entry.role != "other"), len(decisive_entries))
+            _coverage_metric(
+                sum(1 for entry in decisive_entries if entry.role and entry.role != "other"), len(decisive_entries)
+            )
             if decisive_entries
             else CoverageMetric(not_applicable=True)
         )
         decisive_uncertainties_present = (
-            _coverage_metric(uncertainty_count, len(decisive_entries))
-            if decisive_entries
-            else CoverageMetric()
+            _coverage_metric(uncertainty_count, len(decisive_entries)) if decisive_entries else CoverageMetric()
         )
         decisive_artifacts_with_explicit_verdicts = (
             _coverage_metric(decisive_with_verdict, len(decisive_entries))
@@ -802,8 +813,12 @@ def _build_figures_input(
 
     figures = FiguresQualityInput(
         axes_labeled_with_units=_coverage_metric(sum(1 for entry in figure_registry if entry.has_units), total_figures),
-        error_bars_present=_coverage_metric(sum(1 for entry in figure_registry if entry.has_uncertainty), total_figures),
-        referenced_in_text=_coverage_metric(sum(1 for entry in figure_registry if entry.referenced_in_text), total_figures),
+        error_bars_present=_coverage_metric(
+            sum(1 for entry in figure_registry if entry.has_uncertainty), total_figures
+        ),
+        referenced_in_text=_coverage_metric(
+            sum(1 for entry in figure_registry if entry.referenced_in_text), total_figures
+        ),
         captions_self_contained=_coverage_metric(
             sum(1 for entry in figure_registry if entry.caption_self_contained),
             total_figures,
@@ -825,19 +840,33 @@ def _build_figures_input(
     return figures, results
 
 
-def build_paper_quality_input(project_root: Path) -> PaperQualityInput:
+def build_paper_quality_input(
+    project_root: Path,
+    *,
+    publication_subject: PublicationSubjectResolution | None = None,
+) -> PaperQualityInput:
     """Build a conservative :class:`PaperQualityInput` from project artifacts."""
 
     root = Path(project_root)
-    manuscript_resolution = resolve_current_manuscript_resolution(root, allow_markdown=True)
+    subject = publication_subject or resolve_current_publication_subject(root, allow_markdown=True)
+    manuscript_resolution = subject.as_manuscript_resolution()
     if manuscript_resolution.status in {"ambiguous", "invalid"}:
         raise GPDError(
             "paper-quality artifact resolution requires an unambiguous manuscript root; "
             f"found {manuscript_resolution.status}: {manuscript_resolution.detail}"
         )
+    if manuscript_resolution.status == "resolved" and manuscript_resolution.manuscript_root is not None:
+        paper_dir = subject.artifact_base or manuscript_resolution.manuscript_root
+        manuscript_entrypoint = manuscript_resolution.manuscript_entrypoint
+    elif publication_subject is not None:
+        raise GPDError(
+            "paper-quality artifact resolution requires a resolved publication subject; "
+            f"found {manuscript_resolution.status}: {manuscript_resolution.detail}"
+        )
+    else:
+        paper_dir = infer_publication_artifact_base(root, allow_markdown=True)
+        manuscript_entrypoint = None
 
-    paper_dir = manuscript_resolution.manuscript_root or _best_effort_manuscript_root(root)
-    manuscript_entrypoint = manuscript_resolution.manuscript_entrypoint
     artifact_manifest = None
     bibliography_audit = None
     paper_config: dict[str, object] = {}
@@ -845,10 +874,14 @@ def build_paper_quality_input(project_root: Path) -> PaperQualityInput:
     manuscript_content = ""
     if paper_dir is not None:
         artifact_manifest = _load_artifact_manifest(
-            locate_publication_artifact(paper_dir, "ARTIFACT-MANIFEST.json")
+            (subject.artifact_manifest or locate_publication_artifact(paper_dir, "ARTIFACT-MANIFEST.json"))
+            if manuscript_resolution.status == "resolved"
+            else locate_publication_artifact(paper_dir, "ARTIFACT-MANIFEST.json")
         )
         bibliography_audit = _load_bibliography_audit(
-            locate_publication_artifact(paper_dir, "BIBLIOGRAPHY-AUDIT.json")
+            (subject.bibliography_audit or locate_publication_artifact(paper_dir, "BIBLIOGRAPHY-AUDIT.json"))
+            if manuscript_resolution.status == "resolved"
+            else locate_publication_artifact(paper_dir, "BIBLIOGRAPHY-AUDIT.json")
         )
         paper_config = _load_manuscript_config(paper_dir)
         manuscript_files, manuscript_content = _collect_manuscript_content(
@@ -871,7 +904,11 @@ def build_paper_quality_input(project_root: Path) -> PaperQualityInput:
     )
     journal = _resolve_paper_journal(trusted_artifact_manifest, paper_config)
 
-    figure_registry = _load_figure_registry(paper_dir) if paper_dir is not None else {}
+    if paper_dir is not None:
+        figure_registry, figure_tracker_parse_ok = _load_figure_registry(paper_dir)
+    else:
+        figure_registry = []
+        figure_tracker_parse_ok = True
     verdicts, verdicts_parse_ok = _collect_comparison_verdicts(
         root,
         manuscript_root=paper_dir,
@@ -884,15 +921,17 @@ def build_paper_quality_input(project_root: Path) -> PaperQualityInput:
         comparison_required=contract_coverage.requires_decisive_comparison,
     )
 
-    placeholder_count = len(_PLACEHOLDER_RE.findall(manuscript_content))
-    missing_cites = len(_MISSING_CITE_RE.findall(manuscript_content))
+    visible_manuscript_content = _visible_tex_content(manuscript_content)
+    missing_cites = len(_MISSING_CITE_RE.findall(visible_manuscript_content))
     draft_findings = validate_tex_draft(manuscript_content)
+    placeholder_count = sum(1 for finding in draft_findings if finding.check == "placeholder_marker")
+    placeholder_count += len(_RESULT_PENDING_RE.findall(manuscript_content))
     empty_citation_commands = sum(1 for finding in draft_findings if finding.check == "empty_citation_command")
     empty_reference_commands = sum(1 for finding in draft_findings if finding.check == "empty_reference_command")
     cite_keys = list(
         dict.fromkeys(
             part.strip()
-            for match in _CITE_RE.findall(manuscript_content)
+            for match in _CITE_RE.findall(visible_manuscript_content)
             for part in match.split(",")
             if part.strip()
         )
@@ -911,7 +950,9 @@ def build_paper_quality_input(project_root: Path) -> PaperQualityInput:
     partial_sources = bibliography_audit.partial_sources if bibliography_audit is not None else 0
     unverified_sources = bibliography_audit.unverified_sources if bibliography_audit is not None else 0
     failed_sources = bibliography_audit.failed_sources if bibliography_audit is not None else 0
-    available_citation_keys = _available_citation_keys(paper_dir, bibliography_audit) if paper_dir is not None else set()
+    available_citation_keys = (
+        _available_citation_keys(paper_dir, bibliography_audit) if paper_dir is not None else set()
+    )
 
     if cite_keys:
         resolved_citations = sum(1 for key in cite_keys if key in available_citation_keys)
@@ -931,9 +972,7 @@ def build_paper_quality_input(project_root: Path) -> PaperQualityInput:
     )
 
     journal_extra_checks: dict[str, bool] = {}
-    raw_journal_extra_checks = paper_config.get("journal_extra_checks")
-    if isinstance(raw_journal_extra_checks, dict):
-        journal_extra_checks.update(raw_journal_extra_checks)
+    journal_extra_checks["figure_tracker_parse_ok"] = figure_tracker_parse_ok
     journal_extra_checks["manuscript_reference_status_present"] = bool(manuscript_reference_status)
     journal_extra_checks["manuscript_reference_bridge_complete"] = manuscript_reference_bridge_complete
     journal_extra_checks["empty_citation_commands_absent"] = empty_citation_commands == 0
@@ -941,7 +980,9 @@ def build_paper_quality_input(project_root: Path) -> PaperQualityInput:
     if contract_coverage.contract_results_seen:
         journal_extra_checks["contract_results_parse_ok"] = contract_coverage.contract_results_parse_ok
         journal_extra_checks["contract_results_alignment_ok"] = contract_coverage.contract_results_alignment_ok
-    journal_extra_checks["comparison_verdicts_valid"] = verdicts_parse_ok and contract_coverage.comparison_verdicts_valid
+    journal_extra_checks["comparison_verdicts_valid"] = (
+        verdicts_parse_ok and contract_coverage.comparison_verdicts_valid
+    )
 
     citations = CitationsQualityInput(
         citation_keys_resolve=citation_key_coverage,

@@ -69,8 +69,23 @@ With diagnosis: "Result disagrees with literature" -> "Missing factor of 2 from 
 
 <process>
 
+<step name="route_mode">
+**Route before loading evidence:**
+
+- Interactive mode (direct user invocation): do not parse `VERIFICATION.md`. Run `gpd --raw init progress --include state,roadmap,config --no-project-reentry`, list active `GPD/debug/*.md` sessions when `$ARGUMENTS` is empty, gather the missing symptom fields with `ask_user`, and spawn one diagnosis-only `gpd-debugger`.
+- Batch mode (verify-work handoff): parse `VERIFICATION.md` gaps and spawn one diagnosis-only `gpd-debugger` per gap.
+
+Interactive symptom fields: expected result, actual result, discrepancy character, parameter/regime where it breaks, and checks already tried. If an active session is resumed, the continuation prompt points the child to `GPD/debug/{slug}.md`; do not inline an `@GPD/debug/{slug}.md` attachment.
+
+Interactive typed-return handling:
+
+- `gpd_return.status: completed` -- verify `GPD/debug/{slug}.md`, present the evidence-backed root cause, and offer: Fix now, Plan fix, Manual fix.
+- `gpd_return.status: checkpoint` -- present the checkpoint, collect the user response, and spawn a fresh continuation that first reads the session file.
+- `gpd_return.status: blocked` or `failed` -- show what was checked and offer: Continue investigating, Manual investigation, Add more context, Simplify the problem.
+</step>
+
 <step name="parse_gaps">
-**Extract gaps from VERIFICATION.md:**
+**Batch mode: extract gaps from VERIFICATION.md:**
 
 Read the "Gaps" section (YAML format):
 
@@ -126,12 +141,12 @@ This runs in parallel - all issues investigated simultaneously.
 
 ```bash
 DEBUGGER_MODEL=$(gpd resolve-model gpd-debugger)
-AUTONOMY=$(gpd --raw config get autonomy 2>/dev/null | gpd json get .value --default balanced 2>/dev/null || echo "balanced")
+AUTONOMY=$(gpd --raw config get autonomy 2>/dev/null | gpd json get .value --default supervised 2>/dev/null || echo "supervised")
 ```
 
 **Mode-aware behavior:**
-- `autonomy=supervised`: Pause after each debugger agent returns findings. Present the diagnosis to the user before proceeding to a fix.
-- `autonomy=balanced` (default): Spawn the debugger agents, collect findings, and apply routine fixes automatically. Pause only if there are multiple plausible root causes or the fix changes assumptions or scope.
+- `autonomy=supervised` (default): Pause after each debugger agent returns findings. Present the diagnosis to the user before proceeding to a fix.
+- `autonomy=balanced`: Spawn the debugger agents, collect findings, and apply routine fixes automatically. Pause only if there are multiple plausible root causes or the fix changes assumptions or scope.
 - `autonomy=yolo`: Spawn debuggers and continue automatically only after a specific evidence-backed root cause is identified. Do not apply a merely plausible fix.
 
 **Spawn investigation agents in parallel:**
@@ -139,7 +154,7 @@ AUTONOMY=$(gpd --raw config get autonomy 2>/dev/null | gpd json get .value --def
 For each gap, fill the debug subagent prompt template (see `{GPD_INSTALL_DIR}/templates/debug-subagent-prompt.md` for the full template with placeholders, continuation format, and failure protocol) and spawn:
 @{GPD_INSTALL_DIR}/references/orchestration/runtime-delegation-note.md
 
-> If subagent spawning is unavailable, execute these steps sequentially in the main context.
+> Apply the canonical runtime delegation convention already loaded above.
 
 ```
 task(
@@ -198,7 +213,7 @@ Each agent returns one typed `gpd_return` envelope and points to `GPD/debug/{slu
 
 For each gap in the Gaps section, record the diagnosis fields the verifier actually consumes: `root_cause`, `missing`, `physics_impact`, and `debug_session`. Keep the update focused on the diagnosis rather than restating artifact inventories or path lists.
 
-Keep canonical verification `status` unchanged and set `session_status: diagnosed` in frontmatter.
+Keep canonical verification `status` unchanged and set `session_status: diagnosed` in that verification frontmatter. The debug session file at `GPD/debug/{slug}.md` keeps the debug-session `status` lifecycle and does not use `session_status`.
 
 Commit the updated VERIFICATION.md:
 
@@ -212,7 +227,7 @@ gpd commit "docs({phase}): add root causes from diagnosis" --files "${phase_dir}
 </step>
 
 <step name="report_results">
-**Report diagnosis results and hand off:**
+**Batch mode: report diagnosis results and hand off:**
 
 Display:
 
@@ -233,13 +248,14 @@ Proceeding to plan fixes...
 ```
 
 Return to verify-work orchestrator for automatic planning.
-Do NOT offer manual next steps - verify-work handles the rest.
+Do NOT offer manual next steps in batch mode - verify-work handles the rest.
 </step>
 
 </process>
 
 <context_efficiency>
-Agents start with symptoms pre-filled from validation (no symptom gathering).
+Batch agents start with symptoms pre-filled from validation (no symptom gathering).
+Interactive agents gather only missing symptom fields before spawn.
 Agents only diagnose -- plan-phase --gaps handles fixes (no fix application).
 </context_efficiency>
 

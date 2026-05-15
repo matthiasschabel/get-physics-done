@@ -1,4 +1,4 @@
-"""Behavior-focused phase regression coverage."""
+"""Behavior-focused phase assertions."""
 
 from __future__ import annotations
 
@@ -57,7 +57,9 @@ class TestRoadmapCheckboxMatching:
         (gpd_dir / "ROADMAP.md").write_text(roadmap_content, encoding="utf-8")
         return tmp_path
 
-    def test_phase1_not_matched_by_phase10(self, tmp_path: Path) -> None:
+    def test_roadmap_checkbox_matching_keeps_phase_one_separate_from_phase_ten(
+        self, tmp_path: Path
+    ) -> None:
         from gpd.core.phases import roadmap_analyze
 
         roadmap = (
@@ -81,7 +83,9 @@ class TestRoadmapCheckboxMatching:
         assert phase1.roadmap_complete is False
         assert phase10.roadmap_complete is True
 
-    def test_phase1_checked_independently_of_phase10(self, tmp_path: Path) -> None:
+    def test_roadmap_completion_tracks_phase_one_independently_from_phase_ten(
+        self, tmp_path: Path
+    ) -> None:
         from gpd.core.phases import roadmap_analyze
 
         roadmap = (
@@ -269,7 +273,7 @@ def test_milestone_complete_uses_utc_date_near_midnight(tmp_path: Path) -> None:
     assert result.date == "2026-03-31"
 
 
-# ─── BUG-018: phase_add / phase_insert heading consistency ────────────────────
+# ─── phase_add / phase_insert heading consistency ─────────────────────────────
 
 
 def test_phase_add_matches_existing_heading_level(tmp_path: Path) -> None:
@@ -366,12 +370,12 @@ def test_phase_insert_matches_heading_level(tmp_path: Path) -> None:
     phase_insert(tmp_path, "1", "Hotfix")
 
     roadmap = (tmp_path / "GPD" / "ROADMAP.md").read_text(encoding="utf-8")
-    assert "## Phase 01.1" in roadmap
+    assert "## Phase 1.1" in roadmap
     assert "### Phase 01.1" not in roadmap
 
 
-def test_phase_insert_depends_on_uses_normalized_form(tmp_path: Path) -> None:
-    """phase_insert Depends-on should use normalized (padded) phase number."""
+def test_phase_insert_depends_on_preserves_roadmap_number_style(tmp_path: Path) -> None:
+    """phase_insert Depends-on should follow the roadmap's visible number style."""
     from gpd.core.phases import phase_insert
 
     _setup_project(tmp_path)
@@ -389,9 +393,4 @@ def test_phase_insert_depends_on_uses_normalized_form(tmp_path: Path) -> None:
     phase_insert(tmp_path, "1", "Urgent Fix")
 
     roadmap = (tmp_path / "GPD" / "ROADMAP.md").read_text(encoding="utf-8")
-    # NOTE: phase_normalize always pads the top-level segment to 2 digits
-    # (e.g., "1" -> "01"), so the Depends-on line says "Phase 01" even though
-    # the ROADMAP uses unpadded headings ("Phase 1:").  This is a known
-    # pre-existing inconsistency in phase_normalize's design, not a bug in
-    # phase_insert.  Changing phase_normalize is out of scope for BUG-018.
-    assert "**Depends on:** Phase 01" in roadmap
+    assert "**Depends on:** Phase 1" in roadmap

@@ -358,7 +358,16 @@ def test_runtime_cli_classifies_bridge_failures_with_stable_kinds(
 
     assert failure is not None
     assert failure.kind is expected_kind
+    assert failure.exit_code == 127
+    assert failure.details["kind"] == expected_kind.value
+    assert failure.details["exit_code"] == 127
+    assert failure.details["readiness_state"] == "blocked"
     assert expected_phrase in failure.message
+    if expected_kind is runtime_cli._BridgeFailureKind.MISSING_INSTALL_ARTIFACTS:
+        assert failure.repairable_by_install is True
+        assert failure.repair_command is not None
+    else:
+        assert failure.repairable_by_install is False
 
 
 @pytest.mark.parametrize(

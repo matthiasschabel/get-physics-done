@@ -55,6 +55,10 @@ from gpd.core.public_surface_contract import (
     local_cli_permissions_sync_command,
 )
 from gpd.core.root_resolution import resolve_project_root
+from gpd.core.runtime_bridge_failures import (
+    runtime_bridge_failure_details,
+    runtime_bridge_failure_from_assessment,
+)
 from gpd.core.runtime_command_surfaces import format_active_runtime_command
 from gpd.core.state import (
     peek_state_json,
@@ -1917,7 +1921,8 @@ def _doctor_runtime_target_details(
 ) -> dict[str, object]:
     """Return the structured details payload for the runtime config target."""
     target_assessment = _doctor_runtime_target_assessment(assessment, runtime=runtime)
-    return {
+    bridge_failure = runtime_bridge_failure_from_assessment(assessment, runtime=runtime)
+    details = {
         "target": str(assessment.config_dir),
         "install_state": assessment.state,
         "target_readiness_state": target_assessment.readiness_state,
@@ -1928,6 +1933,8 @@ def _doctor_runtime_target_details(
         "has_managed_markers": assessment.has_managed_markers,
         "missing_install_artifacts": list(assessment.missing_install_artifacts),
     }
+    details.update(runtime_bridge_failure_details(bridge_failure))
+    return details
 
 
 def _doctor_check_runtime_target(

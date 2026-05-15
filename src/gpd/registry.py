@@ -8,26 +8,23 @@ discovery surfaces without re-parsing the canonical content.
 
 from __future__ import annotations
 
-import dataclasses
 import re
 import textwrap
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
 
 import yaml
 
 from gpd.adapters.install_utils import expand_at_includes
 from gpd.command_labels import (
-    CANONICAL_COMMAND_PREFIX,
     canonical_command_label,
     canonical_skill_label,
     command_slug_from_label,
     parse_command_label,
-    runtime_public_command_prefixes,
 )
+from gpd.core import registry_command_policy as _registry_command_policy
 from gpd.core.agent_role_kits import (
     AGENT_ROLE_KITS_FRONTMATTER_KEY,
     parse_agent_role_kit_ids,
@@ -49,9 +46,52 @@ from gpd.core.model_visible_text import (
     command_visibility_note,
     skeptical_rigor_guardrails_section,
 )
-from gpd.core.review_contract_prompt import (
-    normalize_review_contract_frontmatter_payload,
-    render_review_contract_prompt,
+from gpd.core.registry_command_help import (
+    _COMMAND_HELP_KEYS as _REGISTRY_COMMAND_HELP_KEYS,
+)
+from gpd.core.registry_command_help import (
+    _COMMAND_HELP_VARIANT_KEYS as _REGISTRY_COMMAND_HELP_VARIANT_KEYS,
+)
+from gpd.core.registry_command_help import (
+    _parse_command_help_metadata,
+)
+from gpd.core.registry_frontmatter import (
+    _frontmatter_parts as _registry_frontmatter_parts,
+)
+from gpd.core.registry_frontmatter import (
+    _load_frontmatter_mapping as _registry_load_frontmatter_mapping,
+)
+from gpd.core.registry_frontmatter import (
+    _merge_tool_lists,
+    _parse_allowed_tools,
+    _parse_bool_field,
+    _parse_frontmatter_string_field,
+    _parse_requires,
+    _parse_tools,
+    _validate_raw_boolean_frontmatter_field,
+    _validate_raw_nonempty_string_frontmatter_field,
+)
+from gpd.core.registry_frontmatter import (
+    _parse_frontmatter as _registry_parse_frontmatter,
+)
+from gpd.core.registry_frontmatter import (
+    _raw_scalar_frontmatter_value as _registry_raw_scalar_frontmatter_value,
+)
+from gpd.core.registry_review_contract import _parse_review_contract, render_review_contract_section
+from gpd.core.registry_types import (
+    AgentDef,
+    CommandDef,
+    CommandHelpMetadata,
+    CommandHelpVariant,
+    CommandNameFormat,
+    CommandOutputPolicy,
+    CommandPolicy,
+    CommandSubjectPolicy,
+    CommandSupportingContextPolicy,
+    ReviewCommandContract,
+    ReviewContractConditionalRequirement,
+    ReviewContractScopeVariant,
+    SkillDef,
 )
 from gpd.core.strict_yaml import load_strict_yaml
 from gpd.core.workflow_staging import (
@@ -70,12 +110,9 @@ AGENTS_DIR = _PKG_ROOT / "agents"
 COMMANDS_DIR = _PKG_ROOT / "commands"
 _MODEL_VISIBLE_INCLUDE_PATH_PREFIX = "{GPD_INSTALL_DIR}/__gpd_registry_include__/"
 LOCAL_CLI_BRIDGE_WORKFLOW_EXEMPT_COMMANDS: frozenset[str] = frozenset({"health", "suggest-next"})
-CommandNameFormat = Literal["slug", "label"]
 
 # ─── Frontmatter parsing helpers ────────────────────────────────────────────
 
-_LEADING_BLANK_LINES_BEFORE_FRONTMATTER_RE = re.compile(r"^(?:[ \t]*\r?\n)+(?=---\r?\n)")
-_FRONTMATTER_DELIMITER_RE = re.compile(r"^---[ \t]*(?:\r?\n)?$")
 _MODEL_VISIBLE_INCLUDE_START_RE = re.compile(r"^[ \t]*<!-- \[included:.*?\] -->[ \t]*$")
 _MODEL_VISIBLE_INCLUDE_END_RE = re.compile(r"^[ \t]*<!-- \[end included\] -->[ \t]*$")
 _MODEL_VISIBLE_FENCE_RE = re.compile(r"^[ \t]*(?P<fence>`{3,}|~{3,})")
@@ -126,52 +163,16 @@ _AGENT_FRONTMATTER_KEYS = frozenset(
         "color",
     }
 )
-_COMMAND_POLICY_FIELD_ORDER = (
-    "schema_version",
-    "subject_policy",
-    "supporting_context_policy",
-    "output_policy",
-)
-_COMMAND_POLICY_SUBJECT_FIELD_ORDER = (
-    "subject_kind",
-    "resolution_mode",
-    "explicit_input_kinds",
-    "allow_external_subjects",
-    "allow_interactive_without_subject",
-    "supported_roots",
-    "allowed_suffixes",
-    "bootstrap_allowed",
-)
-_COMMAND_POLICY_SUPPORTING_CONTEXT_FIELD_ORDER = (
-    "project_context_mode",
-    "project_reentry_mode",
-    "required_file_patterns",
-    "optional_file_patterns",
-)
-_COMMAND_POLICY_OUTPUT_FIELD_ORDER = (
-    "output_mode",
-    "managed_root_kind",
-    "default_output_subtree",
-    "stage_artifact_policy",
-)
-_COMMAND_POLICY_KEYS = frozenset(_COMMAND_POLICY_FIELD_ORDER)
-_COMMAND_POLICY_SUBJECT_KEYS = frozenset(_COMMAND_POLICY_SUBJECT_FIELD_ORDER)
-_COMMAND_POLICY_SUPPORTING_CONTEXT_KEYS = frozenset(_COMMAND_POLICY_SUPPORTING_CONTEXT_FIELD_ORDER)
-_COMMAND_POLICY_OUTPUT_KEYS = frozenset(_COMMAND_POLICY_OUTPUT_FIELD_ORDER)
-_COMMAND_HELP_KEYS = frozenset(
-    {
-        "group",
-        "order",
-        "compact_description",
-        "display_signature",
-        "detail_signature",
-        "examples",
-        "notes",
-        "root_detail_order",
-        "variants",
-    }
-)
-_COMMAND_HELP_VARIANT_KEYS = frozenset({"command", "description", "examples", "notes"})
+_COMMAND_POLICY_FIELD_ORDER = _registry_command_policy._COMMAND_POLICY_FIELD_ORDER
+_COMMAND_POLICY_SUBJECT_FIELD_ORDER = _registry_command_policy._COMMAND_POLICY_SUBJECT_FIELD_ORDER
+_COMMAND_POLICY_SUPPORTING_CONTEXT_FIELD_ORDER = _registry_command_policy._COMMAND_POLICY_SUPPORTING_CONTEXT_FIELD_ORDER
+_COMMAND_POLICY_OUTPUT_FIELD_ORDER = _registry_command_policy._COMMAND_POLICY_OUTPUT_FIELD_ORDER
+_COMMAND_POLICY_KEYS = _registry_command_policy._COMMAND_POLICY_KEYS
+_COMMAND_POLICY_SUBJECT_KEYS = _registry_command_policy._COMMAND_POLICY_SUBJECT_KEYS
+_COMMAND_POLICY_SUPPORTING_CONTEXT_KEYS = _registry_command_policy._COMMAND_POLICY_SUPPORTING_CONTEXT_KEYS
+_COMMAND_POLICY_OUTPUT_KEYS = _registry_command_policy._COMMAND_POLICY_OUTPUT_KEYS
+_COMMAND_HELP_KEYS = _REGISTRY_COMMAND_HELP_KEYS
+_COMMAND_HELP_VARIANT_KEYS = _REGISTRY_COMMAND_HELP_VARIANT_KEYS
 _WRITE_PAPER_EXTERNAL_AUTHORING_INPUT_KIND = "authoring_intake_manifest"
 _WRITE_PAPER_EXTERNAL_AUTHORING_SCOPE = "explicit_intake_manifest"
 _WRITE_PAPER_EXTERNAL_AUTHORING_REQUIRED_OUTPUTS = (
@@ -286,1206 +287,57 @@ def _inline_model_visible_includes(content: str) -> str:
     )
 
 
-# ─── Dataclasses ─────────────────────────────────────────────────────────────
-
-
-@dataclass(frozen=True, slots=True)
-class AgentDef:
-    """Parsed agent definition from a .md file."""
-
-    name: str
-    description: str
-    system_prompt: str
-    tools: list[str]
-    color: str
-    path: str
-    source: str  # "agents"
-    commit_authority: str = "orchestrator"
-    surface: str = "internal"
-    role_family: str = "analysis"
-    artifact_write_authority: str = "scoped_write"
-    shared_state_authority: str = "return_only"
-    role_kits: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
-class CommandHelpVariant:
-    """Display-only documented variant for a registry command."""
-
-    command: str
-    description: str
-    examples: tuple[str, ...] = ()
-    notes: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
-class CommandHelpMetadata:
-    """Display-only help metadata parsed from command frontmatter."""
-
-    group: str
-    order: int
-    compact_description: str | None = None
-    display_signature: str | None = None
-    detail_signature: str | None = None
-    examples: tuple[str, ...] = ()
-    notes: tuple[str, ...] = ()
-    root_detail_order: int | None = None
-    variants: tuple[CommandHelpVariant, ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
-class CommandDef:
-    """Parsed command/skill definition from a .md file."""
-
-    name: str
-    description: str
-    argument_hint: str
-    requires: dict[str, object]
-    allowed_tools: list[str]
-    content: str
-    path: str
-    source: str  # "commands"
-    context_mode: str = "project-required"
-    project_reentry_capable: bool = False
-    command_policy: CommandPolicy | None = None
-    review_contract: ReviewCommandContract | None = None
-    help: CommandHelpMetadata | None = None
-    agent: str | None = None
-    staged_loading: WorkflowStageManifest | None = None
-    spawn_contracts: tuple[dict[str, object], ...] = ()
-    interactive_spawn_contracts: tuple[dict[str, object], ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
-class CommandSubjectPolicy:
-    """Typed command subject-resolution policy."""
-
-    subject_kind: str | None = None
-    resolution_mode: str | None = None
-    explicit_input_kinds: list[str] = field(default_factory=list)
-    allow_external_subjects: bool | None = None
-    allow_interactive_without_subject: bool | None = None
-    supported_roots: list[str] = field(default_factory=list)
-    allowed_suffixes: list[str] = field(default_factory=list)
-    bootstrap_allowed: bool | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class CommandSupportingContextPolicy:
-    """Typed command supporting-context policy."""
-
-    project_context_mode: str | None = None
-    project_reentry_mode: str | None = None
-    required_file_patterns: list[str] = field(default_factory=list)
-    optional_file_patterns: list[str] = field(default_factory=list)
-
-
-@dataclass(frozen=True, slots=True)
-class CommandOutputPolicy:
-    """Typed command output policy."""
-
-    output_mode: str | None = None
-    managed_root_kind: str | None = None
-    default_output_subtree: str | None = None
-    stage_artifact_policy: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class CommandPolicy:
-    """Typed additive command policy compiled from frontmatter and companion fields."""
-
-    schema_version: int = 1
-    subject_policy: CommandSubjectPolicy | None = None
-    supporting_context_policy: CommandSupportingContextPolicy | None = None
-    output_policy: CommandOutputPolicy | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class ReviewContractConditionalRequirement:
-    """Condition-scoped review-contract requirements."""
-
-    when: str
-    required_outputs: list[str] = field(default_factory=list)
-    required_evidence: list[str] = field(default_factory=list)
-    blocking_conditions: list[str] = field(default_factory=list)
-    preflight_checks: list[str] = field(default_factory=list)
-    blocking_preflight_checks: list[str] = field(default_factory=list)
-    stage_artifacts: list[str] = field(default_factory=list)
-
-
-@dataclass(frozen=True, slots=True)
-class ReviewContractScopeVariant:
-    """Scope-specific review-contract overrides and relaxed preflight metadata."""
-
-    scope: str
-    activation: str
-    relaxed_preflight_checks: list[str] = field(default_factory=list)
-    optional_preflight_checks: list[str] = field(default_factory=list)
-    required_outputs_override: list[str] = field(default_factory=list)
-    required_evidence_override: list[str] = field(default_factory=list)
-    blocking_conditions_override: list[str] = field(default_factory=list)
-
-
-@dataclass(frozen=True, slots=True)
-class ReviewCommandContract:
-    """Typed orchestration contract for review-grade commands."""
-
-    review_mode: str
-    required_outputs: list[str]
-    required_evidence: list[str]
-    blocking_conditions: list[str]
-    preflight_checks: list[str]
-    stage_artifacts: list[str] = field(default_factory=list)
-    conditional_requirements: list[ReviewContractConditionalRequirement] = field(default_factory=list)
-    scope_variants: list[ReviewContractScopeVariant] = field(default_factory=list)
-    required_state: str = ""
-    schema_version: int = 1
-
-
-@dataclass(frozen=True, slots=True)
-class SkillDef:
-    """Canonical skill exposure derived from primary commands and agents."""
-
-    name: str
-    description: str
-    content: str
-    category: str
-    path: str
-    source_kind: str  # "command" or "agent"
-    registry_name: str
-    spawn_contracts: tuple[dict[str, object], ...] = ()
-    interactive_spawn_contracts: tuple[dict[str, object], ...] = ()
-
-
 # ─── Parsing helpers ─────────────────────────────────────────────────────────
 
 
 def _frontmatter_parts(text: str) -> tuple[str | None, str]:
-    """Return raw frontmatter YAML and body from markdown text when present."""
+    """Compatibility facade for registry frontmatter splitting."""
 
-    text = text.lstrip("﻿")
-    frontmatter_candidate = _LEADING_BLANK_LINES_BEFORE_FRONTMATTER_RE.sub("", text, count=1)
-    frontmatter_parts = _split_frontmatter_block(frontmatter_candidate)
-    if frontmatter_parts is None:
-        return None, text
-    return frontmatter_parts
+    return _registry_frontmatter_parts(text)
 
 
 def _parse_frontmatter(text: str) -> tuple[dict[str, object], str]:
-    """Parse YAML frontmatter from markdown text. Returns (meta, body)."""
-    yaml_str, body = _frontmatter_parts(text)
-    if yaml_str is None:
-        return {}, text
-    meta = _load_frontmatter_mapping(yaml_str, error_prefix="Malformed YAML frontmatter")
-    return meta, body
+    """Compatibility facade for registry frontmatter parsing."""
+
+    return _registry_parse_frontmatter(text, yaml_loader=load_strict_yaml)
 
 
 def _load_frontmatter_mapping(frontmatter: str, *, error_prefix: str) -> dict[str, object]:
-    """Load YAML frontmatter into a mapping while rejecting duplicate keys."""
+    """Compatibility facade for strict registry frontmatter loading."""
 
-    try:
-        meta = load_strict_yaml(frontmatter) if frontmatter.strip() else {}
-    except yaml.YAMLError as exc:
-        raise ValueError(f"{error_prefix}: {exc}") from exc
-    if meta is None:
-        return {}
-    if not isinstance(meta, dict):
-        raise ValueError(f"Frontmatter must parse to a mapping, got {type(meta).__name__}")
-    return meta
-
-
-def _split_frontmatter_block(text: str) -> tuple[str, str] | None:
-    """Return ``(frontmatter, body)`` when *text* begins with markdown frontmatter."""
-    lines = text.splitlines(keepends=True)
-    if not lines or not _is_frontmatter_delimiter(lines[0]):
-        return None
-
-    frontmatter_lines: list[str] = []
-    for index, line in enumerate(lines[1:], start=1):
-        if _is_frontmatter_delimiter(line):
-            return "".join(frontmatter_lines), "".join(lines[index + 1 :])
-        frontmatter_lines.append(line)
-    return None
-
-
-def _is_frontmatter_delimiter(line: str) -> bool:
-    """Return whether *line* is a frontmatter delimiter line."""
-    return _FRONTMATTER_DELIMITER_RE.fullmatch(line) is not None
-
-
-def _format_frontmatter_field_subject(field_name: str, owner_name: str | None = None) -> str:
-    """Return a field label suitable for targeted validation errors."""
-    if owner_name:
-        return f"{field_name} for {owner_name}"
-    return field_name
-
-
-def _raw_scalar_frontmatter_value(frontmatter: str | None, *, field_name: str) -> str | None:
-    """Return the raw scalar text for one frontmatter field when present."""
-
-    if not frontmatter:
-        return None
-
-    pattern = re.compile(rf"(?m)^[ \t]*{re.escape(field_name)}:[ \t]*(?P<value>[^#\r\n]*)[ \t]*(?:#.*)?$")
-    match = pattern.search(frontmatter)
-    if match is None:
-        return None
-    return match.group("value").strip()
-
-
-def _parse_frontmatter_string_field(
-    raw: object,
-    *,
-    field_name: str,
-    owner_name: str,
-    default: str = "",
-    required: bool = False,
-) -> str:
-    """Validate frontmatter scalar fields that must stay strings."""
-    if raw is None:
-        if default:
-            return default
-        if required:
-            subject = _format_frontmatter_field_subject(field_name, owner_name)
-            raise ValueError(f"{subject} must be a non-empty string")
-        return default
-    if not isinstance(raw, str):
-        subject = _format_frontmatter_field_subject(field_name, owner_name)
-        raise ValueError(f"{subject} must be a string")
-    value = raw.strip()
-    if required and not value:
-        subject = _format_frontmatter_field_subject(field_name, owner_name)
-        raise ValueError(f"{subject} must be a non-empty string")
-    return value
-
-
-def _parse_tools(raw: object, *, field_name: str = "tools", owner_name: str | None = None) -> list[str]:
-    """Normalize tools-like frontmatter fields with explicit validation."""
-    if raw is None:
-        return []
-    values: list[str] = []
-    seen: set[str] = set()
-    subject = _format_frontmatter_field_subject(field_name, owner_name)
-
-    def _append(value: str) -> None:
-        if not value:
-            raise ValueError(f"{subject} must not contain blank entries")
-        if value not in seen:
-            seen.add(value)
-            values.append(value)
-
-    if isinstance(raw, str):
-        for item in raw.split(","):
-            _append(item.strip())
-        return values
-    if not isinstance(raw, list):
-        raise ValueError(f"{subject} must be a string or list of strings")
-
-    for item in raw:
-        if not isinstance(item, str):
-            raise ValueError(f"{subject} must contain only strings")
-        _append(item.strip())
-    return values
-
-
-def _merge_tool_lists(*tool_lists: list[str]) -> list[str]:
-    """Merge multiple tool lists while preserving first-seen order."""
-    merged: list[str] = []
-    seen: set[str] = set()
-    for tool_list in tool_lists:
-        for tool in tool_list:
-            if tool in seen:
-                continue
-            seen.add(tool)
-            merged.append(tool)
-    return merged
-
-
-def _parse_requires(raw: object, *, command_name: str) -> dict[str, object]:
-    """Normalize command requires frontmatter without accepting malformed mappings."""
-    if raw is None:
-        return {}
-    if not isinstance(raw, dict):
-        raise ValueError(f"requires for {command_name} must be a mapping")
-    unsupported_keys = sorted(str(key) for key in raw if str(key) != "files")
-    if unsupported_keys:
-        formatted = ", ".join(unsupported_keys)
-        raise ValueError(f"requires for {command_name} only supports files; got {formatted}")
-    files = raw.get("files")
-    if files is None:
-        return {}
-    normalized_files: list[str] = []
-    seen: set[str] = set()
-    if isinstance(files, str):
-        candidates = [files]
-    elif isinstance(files, list):
-        candidates = files
-    else:
-        raise ValueError(f"files for {command_name} must be a string or list of strings")
-    for item in candidates:
-        if not isinstance(item, str):
-            raise ValueError(f"files for {command_name} must contain only strings")
-        normalized = item.strip()
-        if not normalized:
-            raise ValueError(f"files for {command_name} must not contain blank entries")
-        if normalized in seen:
-            continue
-        seen.add(normalized)
-        normalized_files.append(normalized)
-    return {"files": normalized_files}
-
-
-def _parse_allowed_tools(raw: object, *, command_name: str) -> list[str]:
-    """Normalize command allowed-tools frontmatter without coercing invalid entries."""
-    if raw is None:
-        return []
-    if not isinstance(raw, list):
-        raise ValueError(f"allowed-tools for {command_name} must be a list of strings")
-
-    values: list[str] = []
-    seen: set[str] = set()
-    for item in raw:
-        if not isinstance(item, str):
-            raise ValueError(f"allowed-tools for {command_name} must contain only strings")
-        value = item.strip()
-        if not value:
-            raise ValueError(f"allowed-tools for {command_name} must not contain blank entries")
-        if value not in seen:
-            seen.add(value)
-            values.append(value)
-    return values
-
-
-@lru_cache(maxsize=1)
-def _runtime_specific_help_label_pattern() -> re.Pattern[str]:
-    prefixes = tuple(prefix for prefix in runtime_public_command_prefixes() if prefix != CANONICAL_COMMAND_PREFIX)
-    if not prefixes:
-        return re.compile(r"$^")
-    escaped_prefixes = "|".join(re.escape(prefix) for prefix in prefixes)
-    return re.compile(rf"(?<![A-Za-z0-9_-])(?P<label>(?:{escaped_prefixes})[A-Za-z0-9][A-Za-z0-9-]*)")
-
-
-def _reject_runtime_specific_help_labels(value: str, *, field_name: str, command_name: str) -> None:
-    """Reject runtime-specific command labels in canonical help metadata."""
-
-    match = _runtime_specific_help_label_pattern().search(value)
-    if match is not None:
-        raise ValueError(
-            f"{field_name} for {command_name} must use canonical gpd: labels; "
-            f"got runtime-specific label {match.group('label')!r}"
-        )
-
-
-def _parse_command_help_string(
-    raw: object,
-    *,
-    field_name: str,
-    command_name: str,
-    required: bool = False,
-) -> str | None:
-    """Validate display-only help scalar string fields."""
-
-    subject = f"{field_name} for {command_name}"
-    if raw is None:
-        if required:
-            raise ValueError(f"{subject} must be a non-empty string")
-        return None
-    if not isinstance(raw, str):
-        raise ValueError(f"{subject} must be a string")
-    value = raw.strip()
-    if not value:
-        raise ValueError(f"{subject} must be a non-empty string")
-    _reject_runtime_specific_help_labels(value, field_name=field_name, command_name=command_name)
-    return value
-
-
-def _parse_command_help_int(raw: object, *, field_name: str, command_name: str, required: bool = False) -> int | None:
-    """Validate display-only help integer fields without accepting YAML booleans."""
-
-    subject = f"{field_name} for {command_name}"
-    if raw is None:
-        if required:
-            raise ValueError(f"{subject} must be an integer")
-        return None
-    if isinstance(raw, bool) or not isinstance(raw, int):
-        raise ValueError(f"{subject} must be an integer")
-    return raw
-
-
-def _parse_command_help_string_list(
-    raw: object,
-    *,
-    field_name: str,
-    command_name: str,
-) -> tuple[str, ...]:
-    """Validate ordered help examples/notes as duplicate-free strings."""
-
-    if raw is None:
-        return ()
-    subject = f"{field_name} for {command_name}"
-    if not isinstance(raw, list):
-        raise ValueError(f"{subject} must be a list of strings")
-
-    values: list[str] = []
-    seen: set[str] = set()
-    duplicates: list[str] = []
-    for item in raw:
-        if not isinstance(item, str):
-            raise ValueError(f"{subject} must contain only strings")
-        value = item.strip()
-        if not value:
-            raise ValueError(f"{subject} must not contain blank entries")
-        _reject_runtime_specific_help_labels(value, field_name=field_name, command_name=command_name)
-        if value in seen:
-            duplicates.append(value)
-            continue
-        seen.add(value)
-        values.append(value)
-
-    if duplicates:
-        formatted = ", ".join(repr(value) for value in duplicates)
-        raise ValueError(f"{subject} must not contain duplicate entries: {formatted}")
-    return tuple(values)
-
-
-def _parse_command_help_variant(raw: object, *, command_name: str, variant_index: int) -> CommandHelpVariant:
-    """Validate one documented help variant for a command."""
-
-    subject = f"help.variants[{variant_index}] for {command_name}"
-    if not isinstance(raw, Mapping):
-        raise ValueError(f"{subject} must be a mapping")
-    unknown_keys = sorted(str(key) for key in raw if str(key) not in _COMMAND_HELP_VARIANT_KEYS)
-    if unknown_keys:
-        raise ValueError(f"{subject} has unknown keys: {', '.join(unknown_keys)}")
-
-    command = _parse_command_help_string(
-        raw.get("command"),
-        field_name=f"help.variants[{variant_index}].command",
-        command_name=command_name,
-        required=True,
-    )
-    assert command is not None
-    parsed_variant = parse_command_label(command)
-    if parsed_variant.canonical_command != command_name:
-        raise ValueError(
-            f"help.variants[{variant_index}].command for {command_name} must normalize to {command_name}; "
-            f"got {parsed_variant.canonical_command}"
-        )
-
-    description = _parse_command_help_string(
-        raw.get("description"),
-        field_name=f"help.variants[{variant_index}].description",
-        command_name=command_name,
-        required=True,
-    )
-    assert description is not None
-    return CommandHelpVariant(
-        command=command,
-        description=description,
-        examples=_parse_command_help_string_list(
-            raw.get("examples"),
-            field_name=f"help.variants[{variant_index}].examples",
-            command_name=command_name,
-        ),
-        notes=_parse_command_help_string_list(
-            raw.get("notes"),
-            field_name=f"help.variants[{variant_index}].notes",
-            command_name=command_name,
-        ),
+    return _registry_load_frontmatter_mapping(
+        frontmatter,
+        error_prefix=error_prefix,
+        yaml_loader=load_strict_yaml,
     )
 
 
-def _parse_command_help_variants(raw: object, *, command_name: str) -> tuple[CommandHelpVariant, ...]:
-    """Validate documented help variants."""
-
-    if raw is None:
-        return ()
-    if not isinstance(raw, list):
-        raise ValueError(f"help.variants for {command_name} must be a list of mappings")
-
-    variants: list[CommandHelpVariant] = []
-    seen_commands: set[str] = set()
-    duplicate_commands: list[str] = []
-    for index, item in enumerate(raw):
-        variant = _parse_command_help_variant(item, command_name=command_name, variant_index=index)
-        if variant.command in seen_commands:
-            duplicate_commands.append(variant.command)
-            continue
-        seen_commands.add(variant.command)
-        variants.append(variant)
-
-    if duplicate_commands:
-        formatted = ", ".join(repr(command) for command in duplicate_commands)
-        raise ValueError(f"help.variants for {command_name} must not contain duplicate commands: {formatted}")
-    return tuple(variants)
-
-
-def _parse_command_help_metadata(meta: Mapping[object, object], *, command_name: str) -> CommandHelpMetadata | None:
-    """Parse strict display-only help metadata from command frontmatter."""
-
-    if "help" not in meta:
-        return None
-
-    raw = meta.get("help")
-    if not isinstance(raw, Mapping):
-        raise ValueError(f"help for {command_name} must be a mapping")
-
-    unknown_keys = sorted(str(key) for key in raw if str(key) not in _COMMAND_HELP_KEYS)
-    if unknown_keys:
-        raise ValueError(f"help for {command_name} has unknown keys: {', '.join(unknown_keys)}")
-
-    group = _parse_command_help_string(
-        raw.get("group"),
-        field_name="help.group",
-        command_name=command_name,
-        required=True,
-    )
-    assert group is not None
-    order = _parse_command_help_int(
-        raw.get("order"),
-        field_name="help.order",
-        command_name=command_name,
-        required=True,
-    )
-    assert order is not None
-
-    return CommandHelpMetadata(
-        group=group,
-        order=order,
-        compact_description=_parse_command_help_string(
-            raw.get("compact_description"),
-            field_name="help.compact_description",
-            command_name=command_name,
-        ),
-        display_signature=_parse_command_help_string(
-            raw.get("display_signature"),
-            field_name="help.display_signature",
-            command_name=command_name,
-        ),
-        detail_signature=_parse_command_help_string(
-            raw.get("detail_signature"),
-            field_name="help.detail_signature",
-            command_name=command_name,
-        ),
-        examples=_parse_command_help_string_list(
-            raw.get("examples"),
-            field_name="help.examples",
-            command_name=command_name,
-        ),
-        notes=_parse_command_help_string_list(
-            raw.get("notes"),
-            field_name="help.notes",
-            command_name=command_name,
-        ),
-        root_detail_order=_parse_command_help_int(
-            raw.get("root_detail_order"),
-            field_name="help.root_detail_order",
-            command_name=command_name,
-        ),
-        variants=_parse_command_help_variants(raw.get("variants"), command_name=command_name),
-    )
-
-
-def _normalize_command_policy_string(
-    value: object,
-    *,
-    field_name: str,
-    command_name: str,
-) -> str:
-    if not isinstance(value, str):
-        raise ValueError(f"{field_name} for {command_name} must be a string")
-    normalized = value.strip()
-    if not normalized:
-        raise ValueError(f"{field_name} for {command_name} must be a non-empty string")
-    return normalized
-
-
-def _normalize_command_policy_bool(
-    value: object,
-    *,
-    field_name: str,
-    command_name: str,
-) -> bool:
-    if isinstance(value, bool):
-        return value
-    raise ValueError(f"{field_name} for {command_name} must be a boolean")
-
-
-def _normalize_command_policy_string_list(
-    value: object,
-    *,
-    field_name: str,
-    command_name: str,
-) -> list[str]:
-    if value is None:
-        return []
-    if not isinstance(value, list):
-        raise ValueError(f"{field_name} for {command_name} must be a list of strings")
-
-    normalized: list[str] = []
-    seen: set[str] = set()
-    for item in value:
-        if not isinstance(item, str):
-            raise ValueError(f"{field_name} for {command_name} must contain only strings")
-        entry = item.strip()
-        if not entry:
-            raise ValueError(f"{field_name} for {command_name} must not contain blank entries")
-        if entry in seen:
-            raise ValueError(f"{field_name} for {command_name} must not contain duplicates")
-        seen.add(entry)
-        normalized.append(entry)
-    return normalized
-
-
-def _normalize_command_policy_context_mode(
-    value: object,
-    *,
-    field_name: str,
-    command_name: str,
-) -> str:
-    normalized = _normalize_command_policy_string(
-        value,
-        field_name=field_name,
-        command_name=command_name,
-    ).lower()
-    if normalized not in VALID_CONTEXT_MODES:
-        valid = ", ".join(VALID_CONTEXT_MODES)
-        raise ValueError(f"{field_name} for {command_name} must be one of: {valid}")
-    return normalized
-
-
-def _command_policy_frontmatter_value(
-    meta: dict[str, object],
-    *,
-    command_name: str,
-) -> tuple[object, bool]:
-    """Return the canonical command-policy frontmatter payload and whether it was explicit."""
-
-    if COMMAND_POLICY_PROMPT_WRAPPER_KEY in meta:
-        raise ValueError(
-            f"command-policy for {command_name} must use the canonical frontmatter key "
-            f"'{COMMAND_POLICY_FRONTMATTER_KEY}'"
-        )
-    if COMMAND_POLICY_FRONTMATTER_KEY not in meta:
-        return None, False
-    return meta.get(COMMAND_POLICY_FRONTMATTER_KEY), True
-
-
-def _command_policy_supporting_context_from_frontmatter(
-    *,
-    context_mode: str,
-    project_reentry_capable: bool,
-    requires: dict[str, object],
-) -> dict[str, object]:
-    payload: dict[str, object] = {
-        "project_context_mode": context_mode,
-        "project_reentry_mode": "allowed" if project_reentry_capable else "disallowed",
-    }
-    required_files = requires.get("files")
-    if isinstance(required_files, list) and required_files:
-        payload["required_file_patterns"] = list(required_files)
-    return payload
-
-
-def _command_policy_requests_check(
-    review_contract: ReviewCommandContract | None,
-    check_name: str,
-) -> bool:
-    if review_contract is None:
-        return False
-    return check_name in list(getattr(review_contract, "preflight_checks", []) or [])
-
-
-def _command_policy_is_publication_contract(review_contract: ReviewCommandContract | None) -> bool:
-    return str(getattr(review_contract, "review_mode", "") or "").strip() == "publication"
-
-
-def _command_policy_supported_roots_from_patterns(patterns: list[str]) -> list[str]:
-    supported_roots: list[str] = []
-    seen: set[str] = set()
-    for pattern in patterns:
-        parts = Path(pattern).parts
-        if not parts:
-            continue
-        root = parts[0].strip()
-        if not root or root in seen:
-            continue
-        seen.add(root)
-        supported_roots.append(root)
-    return supported_roots
-
-
-def _publication_contract_mentions_external_artifact(review_contract: ReviewCommandContract | None) -> bool:
-    if review_contract is None:
-        return False
-    textual_cues = [
-        *(str(item) for item in list(getattr(review_contract, "required_evidence", []) or [])),
-        *(str(item) for item in list(getattr(review_contract, "blocking_conditions", []) or [])),
-    ]
-    return any("external-artifact review" in cue.casefold() for cue in textual_cues)
-
-
-def _publication_subject_policy_defaults(
-    *,
-    review_contract: ReviewCommandContract | None,
-    frontmatter_supporting_context: dict[str, object],
-) -> dict[str, object] | None:
-    if not _command_policy_is_publication_contract(review_contract):
-        return None
-    if not _command_policy_requests_check(review_contract, "manuscript"):
-        return None
-
-    required_patterns = [
-        str(pattern).strip()
-        for pattern in list(frontmatter_supporting_context.get("required_file_patterns", []) or [])
-        if str(pattern).strip()
-    ]
-    supported_roots = _command_policy_supported_roots_from_patterns(required_patterns)
-    allow_external_subjects = _publication_contract_mentions_external_artifact(review_contract)
-    bootstrap_allowed = (
-        not required_patterns
-        and not _command_policy_requests_check(review_contract, "compiled_manuscript")
-        and not _command_policy_requests_check(review_contract, "referee_report_source")
-    )
-
-    explicit_input_kinds: list[str] = []
-    if _command_policy_requests_check(review_contract, "referee_report_source"):
-        explicit_input_kinds.extend(["referee_report_path", "paste_referee_report"])
-    elif supported_roots:
-        explicit_input_kinds.extend(["manuscript_root", "manuscript_path"])
-    if allow_external_subjects:
-        explicit_input_kinds.append("publication_artifact_path")
-
-    allowed_suffixes = [".tex"]
-    if not _command_policy_requests_check(review_contract, "compiled_manuscript"):
-        allowed_suffixes.append(".md")
-    if allow_external_subjects:
-        for suffix in (".txt", ".pdf"):
-            if suffix not in allowed_suffixes:
-                allowed_suffixes.append(suffix)
-
-    resolution_mode = "project_manuscript"
-    if bootstrap_allowed:
-        resolution_mode = "project_manuscript_or_bootstrap"
-    elif _command_policy_requests_check(review_contract, "referee_report_source"):
-        resolution_mode = "project_manuscript_with_report_source"
-    elif explicit_input_kinds:
-        resolution_mode = "explicit_or_project_manuscript"
-
-    payload: dict[str, object] = {
-        "subject_kind": "publication",
-        "resolution_mode": resolution_mode,
-        "allowed_suffixes": allowed_suffixes,
-    }
-    if explicit_input_kinds:
-        payload["explicit_input_kinds"] = explicit_input_kinds
-    if supported_roots:
-        payload["supported_roots"] = supported_roots
-    if allow_external_subjects:
-        payload["allow_external_subjects"] = True
-    if (
-        allow_external_subjects
-        and str(frontmatter_supporting_context.get("project_context_mode", "")).strip() == "project-aware"
-    ):
-        payload["allow_interactive_without_subject"] = True
-    if bootstrap_allowed:
-        payload["bootstrap_allowed"] = True
-    return payload
-
-
-def _merge_command_policy_defaults(
-    explicit_mapping: dict[str, object] | None,
-    default_mapping: dict[str, object] | None,
-) -> dict[str, object] | None:
-    if default_mapping is None:
-        return dict(explicit_mapping) if explicit_mapping is not None else None
-    if explicit_mapping is None:
-        return dict(default_mapping)
-    merged = dict(default_mapping)
-    merged.update(explicit_mapping)
-    return merged
-
-
-def _merge_command_policy_submapping(
-    explicit_mapping: dict[str, object] | None,
-    companion_mapping: dict[str, object] | None,
-    *,
-    field_name: str,
-    command_name: str,
-    allow_explicit_override: bool = False,
-) -> dict[str, object] | None:
-    if explicit_mapping is None:
-        if companion_mapping:
-            return dict(companion_mapping)
-        return None
-    if not companion_mapping:
-        return dict(explicit_mapping)
-
-    merged = dict(companion_mapping)
-    for key, value in explicit_mapping.items():
-        companion_value = merged.get(key)
-        if companion_value is None or companion_value == []:
-            merged[key] = value
-            continue
-        if allow_explicit_override:
-            merged[key] = value
-            continue
-        if value != companion_value:
-            raise ValueError(f"{field_name}.{key} for {command_name} must stay aligned with companion command metadata")
-    return merged
-
-
-def _normalize_command_subject_policy(
-    raw: object,
-    *,
-    command_name: str,
-) -> dict[str, object] | None:
-    if raw is None:
-        return None
-    if not isinstance(raw, Mapping):
-        raise ValueError(f"command_policy.subject_policy for {command_name} must be a mapping")
-    raw_mapping = dict(raw)
-    unknown_keys = sorted(str(key) for key in raw_mapping if str(key) not in _COMMAND_POLICY_SUBJECT_KEYS)
-    if unknown_keys:
-        formatted = ", ".join(unknown_keys)
-        raise ValueError(f"Unknown command-policy field(s): subject_policy.{formatted}")
-
-    normalized: dict[str, object] = {}
-    for field_name in ("subject_kind", "resolution_mode"):
-        if field_name in raw_mapping:
-            normalized[field_name] = _normalize_command_policy_string(
-                raw_mapping.get(field_name),
-                field_name=f"command_policy.subject_policy.{field_name}",
-                command_name=command_name,
-            )
-    for field_name in ("allow_external_subjects", "allow_interactive_without_subject", "bootstrap_allowed"):
-        if field_name in raw_mapping:
-            normalized[field_name] = _normalize_command_policy_bool(
-                raw_mapping.get(field_name),
-                field_name=f"command_policy.subject_policy.{field_name}",
-                command_name=command_name,
-            )
-    for field_name in ("explicit_input_kinds", "supported_roots", "allowed_suffixes"):
-        if field_name in raw_mapping:
-            normalized[field_name] = _normalize_command_policy_string_list(
-                raw_mapping.get(field_name),
-                field_name=f"command_policy.subject_policy.{field_name}",
-                command_name=command_name,
-            )
-    allowed_suffixes = normalized.get("allowed_suffixes")
-    if isinstance(allowed_suffixes, list):
-        invalid_suffixes = [suffix for suffix in allowed_suffixes if not suffix.startswith(".")]
-        if invalid_suffixes:
-            formatted = ", ".join(repr(item) for item in invalid_suffixes)
-            raise ValueError(
-                f"command_policy.subject_policy.allowed_suffixes for {command_name} "
-                f"must contain dotted suffixes like '.tex'; got {formatted}"
-            )
-    return normalized or None
-
-
-def _normalize_command_supporting_context_policy(
-    raw: object,
-    *,
-    command_name: str,
-) -> dict[str, object] | None:
-    if raw is None:
-        return None
-    if not isinstance(raw, Mapping):
-        raise ValueError(f"command_policy.supporting_context_policy for {command_name} must be a mapping")
-    raw_mapping = dict(raw)
-    unknown_keys = sorted(str(key) for key in raw_mapping if str(key) not in _COMMAND_POLICY_SUPPORTING_CONTEXT_KEYS)
-    if unknown_keys:
-        formatted = ", ".join(unknown_keys)
-        raise ValueError(f"Unknown command-policy field(s): supporting_context_policy.{formatted}")
-
-    normalized: dict[str, object] = {}
-    if "project_context_mode" in raw_mapping:
-        normalized["project_context_mode"] = _normalize_command_policy_context_mode(
-            raw_mapping.get("project_context_mode"),
-            field_name="command_policy.supporting_context_policy.project_context_mode",
-            command_name=command_name,
-        )
-    if "project_reentry_mode" in raw_mapping:
-        normalized["project_reentry_mode"] = _normalize_command_policy_string(
-            raw_mapping.get("project_reentry_mode"),
-            field_name="command_policy.supporting_context_policy.project_reentry_mode",
-            command_name=command_name,
-        )
-    for field_name in ("required_file_patterns", "optional_file_patterns"):
-        if field_name in raw_mapping:
-            normalized[field_name] = _normalize_command_policy_string_list(
-                raw_mapping.get(field_name),
-                field_name=f"command_policy.supporting_context_policy.{field_name}",
-                command_name=command_name,
-            )
-    return normalized or None
-
-
-def _normalize_command_output_policy(
-    raw: object,
-    *,
-    command_name: str,
-) -> dict[str, object] | None:
-    if raw is None:
-        return None
-    if not isinstance(raw, Mapping):
-        raise ValueError(f"command_policy.output_policy for {command_name} must be a mapping")
-    raw_mapping = dict(raw)
-    unknown_keys = sorted(str(key) for key in raw_mapping if str(key) not in _COMMAND_POLICY_OUTPUT_KEYS)
-    if unknown_keys:
-        formatted = ", ".join(unknown_keys)
-        raise ValueError(f"Unknown command-policy field(s): output_policy.{formatted}")
-
-    normalized: dict[str, object] = {}
-    for field_name in _COMMAND_POLICY_OUTPUT_FIELD_ORDER:
-        if field_name in raw_mapping:
-            normalized[field_name] = _normalize_command_policy_string(
-                raw_mapping.get(field_name),
-                field_name=f"command_policy.output_policy.{field_name}",
-                command_name=command_name,
-            )
-    return normalized or None
-
-
-def _command_policy_payload(command_policy: object) -> dict[str, object] | None:
-    def _strip_none_fields(value: object) -> object:
-        if isinstance(value, dict):
-            return {key: _strip_none_fields(item) for key, item in value.items() if item is not None}
-        if isinstance(value, list):
-            return [_strip_none_fields(item) for item in value]
-        return value
-
-    if command_policy is None:
-        return None
-    if isinstance(command_policy, Mapping):
-        return dict(_strip_none_fields(dict(command_policy)))
-    if dataclasses.is_dataclass(command_policy):
-        payload = _strip_none_fields(dataclasses.asdict(command_policy))
-        return payload if isinstance(payload, dict) else None
-    raise ValueError("command policy must be a mapping or dataclass instance")
-
-
-def _normalize_command_policy_payload(
-    command_policy: object,
-    *,
-    command_name: str,
-    context_mode: str,
-    project_reentry_capable: bool,
-    requires: dict[str, object],
-    review_contract: ReviewCommandContract | None = None,
-    explicit: bool = False,
-) -> dict[str, object]:
-    frontmatter_supporting_context = _command_policy_supporting_context_from_frontmatter(
-        context_mode=context_mode,
-        project_reentry_capable=project_reentry_capable,
-        requires=requires,
-    )
-    default_subject_policy = _publication_subject_policy_defaults(
-        review_contract=review_contract,
-        frontmatter_supporting_context=frontmatter_supporting_context,
-    )
-    inferred_payload: dict[str, object] = {
-        "schema_version": 1,
-        "subject_policy": default_subject_policy,
-        "supporting_context_policy": frontmatter_supporting_context,
-    }
-
-    payload = _command_policy_payload(command_policy)
-    if payload is None:
-        if explicit:
-            raise ValueError("command policy must set schema_version")
-        return inferred_payload
-    if not isinstance(payload, dict):
-        raise ValueError(f"command policy for {command_name} must be a mapping")
-
-    unknown_keys = sorted(str(key) for key in payload if str(key) not in _COMMAND_POLICY_KEYS)
-    if unknown_keys:
-        formatted = ", ".join(unknown_keys)
-        raise ValueError(f"Unknown command-policy field(s): {formatted}")
-
-    if "schema_version" not in payload:
-        raise ValueError("command policy must set schema_version")
-    schema_version = payload.get("schema_version")
-    if isinstance(schema_version, bool) or not isinstance(schema_version, int):
-        raise ValueError("command policy schema_version must be the integer 1")
-    if schema_version != 1:
-        raise ValueError("command policy schema_version must be 1")
-
-    subject_policy = _merge_command_policy_defaults(
-        _normalize_command_subject_policy(payload.get("subject_policy"), command_name=command_name),
-        default_subject_policy,
-    )
-    supporting_context_policy = _normalize_command_supporting_context_policy(
-        payload.get("supporting_context_policy"),
-        command_name=command_name,
-    )
-    effective_frontmatter_supporting_context = frontmatter_supporting_context
-    if (
-        supporting_context_policy is not None
-        and supporting_context_policy.get("project_reentry_mode") == "current-workspace"
-        and frontmatter_supporting_context.get("project_reentry_mode") == "allowed"
-    ):
-        effective_frontmatter_supporting_context = dict(frontmatter_supporting_context)
-        effective_frontmatter_supporting_context["project_reentry_mode"] = "current-workspace"
-    output_policy = _normalize_command_output_policy(payload.get("output_policy"), command_name=command_name)
-
-    return {
-        "schema_version": schema_version,
-        "subject_policy": subject_policy,
-        "supporting_context_policy": _merge_command_policy_submapping(
-            supporting_context_policy,
-            effective_frontmatter_supporting_context,
-            field_name="command_policy.supporting_context_policy",
-            command_name=command_name,
-            allow_explicit_override=_command_policy_is_publication_contract(review_contract),
-        ),
-        "output_policy": output_policy,
-    }
-
-
-def _render_command_policy_submapping(
-    payload: dict[str, object] | None,
-    *,
-    field_order: tuple[str, ...],
-) -> dict[str, object] | None:
-    if not payload:
-        return None
-    rendered: dict[str, object] = {}
-    for field_name in field_order:
-        if field_name not in payload:
-            continue
-        value = payload[field_name]
-        if isinstance(value, list):
-            if value:
-                rendered[field_name] = value
-            continue
-        if isinstance(value, bool):
-            rendered[field_name] = value
-            continue
-        if value is not None:
-            rendered[field_name] = value
-    return rendered or None
-
-
-def _render_command_policy_payload(
-    command_policy: CommandPolicy | dict[str, object] | None,
-) -> dict[str, object] | None:
-    payload = _command_policy_payload(command_policy)
-    if not payload:
-        return None
-
-    rendered: dict[str, object] = {"schema_version": int(payload["schema_version"])}
-    subject_policy = payload.get("subject_policy")
-    if isinstance(subject_policy, dict):
-        rendered_subject = _render_command_policy_submapping(
-            subject_policy,
-            field_order=_COMMAND_POLICY_SUBJECT_FIELD_ORDER,
-        )
-        if rendered_subject:
-            rendered["subject_policy"] = rendered_subject
-    supporting_context_policy = payload.get("supporting_context_policy")
-    if isinstance(supporting_context_policy, dict):
-        rendered_supporting_context = _render_command_policy_submapping(
-            supporting_context_policy,
-            field_order=_COMMAND_POLICY_SUPPORTING_CONTEXT_FIELD_ORDER,
-        )
-        if rendered_supporting_context:
-            rendered["supporting_context_policy"] = rendered_supporting_context
-    output_policy = payload.get("output_policy")
-    if isinstance(output_policy, dict):
-        rendered_output = _render_command_policy_submapping(
-            output_policy,
-            field_order=_COMMAND_POLICY_OUTPUT_FIELD_ORDER,
-        )
-        if rendered_output:
-            rendered["output_policy"] = rendered_output
-    return rendered
-
-
-def _parse_command_policy(
-    raw: object,
-    *,
-    command_name: str,
-    context_mode: str,
-    project_reentry_capable: bool,
-    requires: dict[str, object],
-    review_contract: ReviewCommandContract | None = None,
-    explicit: bool = False,
-) -> CommandPolicy:
-    if isinstance(raw, CommandPolicy):
-        return raw
-    try:
-        payload = _normalize_command_policy_payload(
-            raw,
-            command_name=command_name,
-            context_mode=context_mode,
-            project_reentry_capable=project_reentry_capable,
-            requires=requires,
-            review_contract=review_contract,
-            explicit=explicit,
-        )
-    except ValueError as exc:
-        raise ValueError(f"command-policy for {command_name}: {exc}") from exc
-
-    subject_policy_payload = payload.get("subject_policy")
-    supporting_context_payload = payload.get("supporting_context_policy")
-    output_policy_payload = payload.get("output_policy")
-    return CommandPolicy(
-        schema_version=int(payload["schema_version"]),
-        subject_policy=(
-            CommandSubjectPolicy(**subject_policy_payload) if isinstance(subject_policy_payload, dict) else None
-        ),
-        supporting_context_policy=(
-            CommandSupportingContextPolicy(**supporting_context_payload)
-            if isinstance(supporting_context_payload, dict)
-            else None
-        ),
-        output_policy=(
-            CommandOutputPolicy(**output_policy_payload) if isinstance(output_policy_payload, dict) else None
-        ),
-    )
-
-
-def _parse_bool_field(raw: object, *, field_name: str, command_name: str, default: bool = False) -> bool:
-    """Parse a strict YAML boolean and reject non-boolean coercion aliases."""
-    if raw is None:
-        return default
-    if isinstance(raw, bool):
-        return raw
-    raise ValueError(f"{field_name} for {command_name} must be a boolean")
-
-
-def _validate_raw_boolean_frontmatter_field(
-    frontmatter: str | None,
-    *,
-    field_name: str,
-    command_name: str,
-) -> None:
-    """Reject non-boolean scalar spellings before YAML coercion can hide them."""
-
-    raw_value = _raw_scalar_frontmatter_value(frontmatter, field_name=field_name)
-    if raw_value is None:
-        return
-    if raw_value.casefold() in {"true", "false"}:
-        return
-    raise ValueError(f"{field_name} for {command_name} must be a boolean")
-
-
-def _validate_raw_nonempty_string_frontmatter_field(
-    frontmatter: str | None,
-    *,
-    field_name: str,
-    owner_name: str,
-) -> None:
-    """Reject explicit blank or null scalar spellings before YAML hides them."""
-
-    raw_value = _raw_scalar_frontmatter_value(frontmatter, field_name=field_name)
-    if raw_value is None:
-        return
-    if raw_value.casefold() not in {"", "null", "~"}:
-        return
-    raise ValueError(f"{field_name} for {owner_name} must be a non-empty string")
+_raw_scalar_frontmatter_value = _registry_raw_scalar_frontmatter_value
+
+
+_command_policy_frontmatter_value = _registry_command_policy._command_policy_frontmatter_value
+_command_policy_is_publication_contract = _registry_command_policy._command_policy_is_publication_contract
+_command_policy_payload = _registry_command_policy._command_policy_payload
+_command_policy_requests_check = _registry_command_policy._command_policy_requests_check
+_command_policy_supported_roots_from_patterns = _registry_command_policy._command_policy_supported_roots_from_patterns
+_command_policy_supporting_context_from_frontmatter = (
+    _registry_command_policy._command_policy_supporting_context_from_frontmatter
+)
+_merge_command_policy_defaults = _registry_command_policy._merge_command_policy_defaults
+_merge_command_policy_submapping = _registry_command_policy._merge_command_policy_submapping
+_normalize_command_output_policy = _registry_command_policy._normalize_command_output_policy
+_normalize_command_policy_bool = _registry_command_policy._normalize_command_policy_bool
+_normalize_command_policy_context_mode = _registry_command_policy._normalize_command_policy_context_mode
+_normalize_command_policy_payload = _registry_command_policy._normalize_command_policy_payload
+_normalize_command_policy_string = _registry_command_policy._normalize_command_policy_string
+_normalize_command_policy_string_list = _registry_command_policy._normalize_command_policy_string_list
+_normalize_command_subject_policy = _registry_command_policy._normalize_command_subject_policy
+_normalize_command_supporting_context_policy = _registry_command_policy._normalize_command_supporting_context_policy
+_parse_command_policy = _registry_command_policy._parse_command_policy
+_publication_contract_mentions_external_artifact = _registry_command_policy._publication_contract_mentions_external_artifact
+_publication_subject_policy_defaults = _registry_command_policy._publication_subject_policy_defaults
+_render_command_policy_payload = _registry_command_policy._render_command_policy_payload
+_render_command_policy_submapping = _registry_command_policy._render_command_policy_submapping
 
 
 def _validate_raw_command_frontmatter(frontmatter: str | None, *, command_name: str) -> None:
@@ -1643,14 +495,6 @@ def _parse_agent_metadata_enum(
         valid = ", ".join(valid_values)
         raise ValueError(f"Invalid {field_name} {value!r} for {agent_name}; expected one of: {valid}")
     return value
-
-
-def render_review_contract_section(review_contract: ReviewCommandContract | None) -> str:
-    """Render a model-visible review-contract block for command prompt bodies."""
-
-    if review_contract is None:
-        return ""
-    return render_review_contract_prompt(review_contract)
 
 
 def _agent_requirements_payload(
@@ -2017,78 +861,6 @@ def _command_model_content(
     if body:
         sections.append(body)
     return "\n\n".join(sections)
-
-
-def _parse_review_contract(raw: object, command_name: str) -> ReviewCommandContract | None:
-    """Parse review-contract frontmatter through the canonical shared normalizer."""
-    try:
-        payload = normalize_review_contract_frontmatter_payload(raw)
-    except ValueError as exc:
-        raise ValueError(f"review-contract for {command_name}: {exc}") from exc
-
-    if not payload:
-        return None
-
-    scope_variants_payload = list(payload["scope_variants"])
-    if str(payload["review_mode"]) == "publication" and not scope_variants_payload:
-        required_evidence = [str(item) for item in payload["required_evidence"]]
-        if any("external-artifact review" in item.casefold() for item in required_evidence):
-            scope_variants_payload = [
-                {
-                    "scope": "explicit_artifact",
-                    "activation": "explicit external artifact subject was supplied",
-                    "relaxed_preflight_checks": [
-                        "project_state",
-                        "roadmap",
-                        "conventions",
-                        "research_artifacts",
-                        "verification_reports",
-                        "manuscript_proof_review",
-                    ],
-                    "optional_preflight_checks": [
-                        "artifact_manifest",
-                        "bibliography_audit",
-                        "bibliography_audit_clean",
-                        "reproducibility_manifest",
-                        "reproducibility_ready",
-                    ],
-                }
-            ]
-
-    return ReviewCommandContract(
-        review_mode=str(payload["review_mode"]),
-        required_outputs=list(payload["required_outputs"]),
-        required_evidence=list(payload["required_evidence"]),
-        blocking_conditions=list(payload["blocking_conditions"]),
-        preflight_checks=list(payload["preflight_checks"]),
-        stage_artifacts=list(payload["stage_artifacts"]),
-        conditional_requirements=[
-            ReviewContractConditionalRequirement(
-                when=str(requirement["when"]),
-                required_outputs=list(requirement.get("required_outputs", [])),
-                required_evidence=list(requirement.get("required_evidence", [])),
-                blocking_conditions=list(requirement.get("blocking_conditions", [])),
-                preflight_checks=list(requirement.get("preflight_checks", [])),
-                blocking_preflight_checks=list(requirement.get("blocking_preflight_checks", [])),
-                stage_artifacts=list(requirement.get("stage_artifacts", [])),
-            )
-            for requirement in payload["conditional_requirements"]
-        ],
-        scope_variants=[
-            ReviewContractScopeVariant(
-                scope=str(variant["scope"]),
-                activation=str(variant["activation"]),
-                relaxed_preflight_checks=list(variant.get("relaxed_preflight_checks", [])),
-                optional_preflight_checks=list(variant.get("optional_preflight_checks", [])),
-                required_outputs_override=list(variant.get("required_outputs_override", [])),
-                required_evidence_override=list(variant.get("required_evidence_override", [])),
-                blocking_conditions_override=list(variant.get("blocking_conditions_override", [])),
-            )
-            for variant in scope_variants_payload
-        ],
-        required_state=str(payload["required_state"]),
-        schema_version=int(payload["schema_version"]),
-    )
 
 
 def _validate_write_paper_external_authoring_frontmatter(

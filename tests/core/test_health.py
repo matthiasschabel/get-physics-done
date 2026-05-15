@@ -2528,6 +2528,10 @@ trigger:
         assert target_check.status == CheckStatus.FAIL
         assert target_check.details["install_state"] == "untrusted_manifest"
         assert target_check.details["target_assessment"]["manifest_state"] == expected_manifest_state
+        assert target_check.details["runtime_bridge_failure_kind"] == expected_manifest_state
+        assert target_check.details["runtime_bridge_exit_code"] == 127
+        assert target_check.details["runtime_bridge_readiness_state"] == "blocked"
+        assert target_check.details["runtime_bridge_repairable_by_install"] is False
 
     def test_runtime_readiness_fails_for_non_clean_install_states(self, tmp_path: Path) -> None:
         cases = (
@@ -2541,6 +2545,8 @@ trigger:
                     ),
                 },
                 "incomplete GPD install",
+                "missing_install_artifacts",
+                True,
             ),
             (
                 "foreign_runtime",
@@ -2549,6 +2555,8 @@ trigger:
                     "manifest_runtime": FOREIGN_RUNTIME,
                 },
                 "belongs to",
+                "runtime_mismatch",
+                False,
             ),
             (
                 "untrusted_manifest",
@@ -2558,10 +2566,12 @@ trigger:
                     "manifest_runtime": None,
                 },
                 "untrusted GPD manifest",
+                "corrupt_manifest",
+                False,
             ),
         )
 
-        for install_state, assessment_kwargs, expected_issue in cases:
+        for install_state, assessment_kwargs, expected_issue, expected_bridge_kind, expected_repairable in cases:
             case_root = tmp_path / install_state
             assessment = self._assessment(
                 target_dir=runtime_target_dir(case_root, PRIMARY_RUNTIME),
@@ -2582,6 +2592,12 @@ trigger:
             assert checks["Runtime Config Target"].details["install_state"] == install_state
             assert checks["Runtime Config Target"].details["target_readiness_state"] == "blocked"
             assert checks["Runtime Config Target"].details["target_assessment"]["state"] == install_state
+            assert checks["Runtime Config Target"].details["runtime_bridge_failure_kind"] == expected_bridge_kind
+            assert checks["Runtime Config Target"].details["runtime_bridge_exit_code"] == 127
+            assert (
+                checks["Runtime Config Target"].details["runtime_bridge_repairable_by_install"]
+                is expected_repairable
+            )
             assert any(expected_issue in issue for issue in checks["Runtime Config Target"].issues)
 
 

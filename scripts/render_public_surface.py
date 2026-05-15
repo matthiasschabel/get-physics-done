@@ -14,14 +14,10 @@ if __package__ in {None, ""}:
 
 from gpd.core.public_surface_renderer import (
     public_surface_block_ids,
-    public_surface_context,
     render_public_surface_block,
-    runtime_doc_filename,
-    runtime_quickstart_block_id,
 )
 from scripts.generated_region_support import (
     GeneratedRegionDiff,
-    GeneratedRegionSpec,
     check_region_inventory,
     marker_pair,
     render_region,
@@ -29,9 +25,14 @@ from scripts.generated_region_support import (
     unified_diff_text,
     write_stale_check_result,
 )
+from scripts.generated_surface_targets import (
+    PUBLIC_SURFACE_MARKER_PREFIX,
+    PUBLIC_SURFACE_REGION_SPEC,
+    public_surface_region_targets,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-MARKER_PREFIX = "gpd-public-surface"
+MARKER_PREFIX = PUBLIC_SURFACE_MARKER_PREFIX
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,12 +42,7 @@ class PublicSurfaceTarget:
     allowed_duplicate_blocks: tuple[str, ...] = ()
 
 
-_PUBLIC_REGION_SPEC = GeneratedRegionSpec(
-    marker_prefix=MARKER_PREFIX,
-    known_block_ids=lambda: frozenset(public_surface_block_ids()),
-    block_label="public surface generated block",
-    invalid_block_id_message="Generated public surface block ids must be kebab-case: {block_id!r}",
-)
+_PUBLIC_REGION_SPEC = PUBLIC_SURFACE_REGION_SPEC
 
 
 def generated_region_markers(block_id: str) -> tuple[str, str]:
@@ -62,54 +58,13 @@ def default_target_paths() -> tuple[Path, ...]:
 
 
 def default_target_contracts() -> tuple[PublicSurfaceTarget, ...]:
-    runtime_doc_paths = tuple(
+    return tuple(
         PublicSurfaceTarget(
-            Path("docs") / runtime_doc_filename(surface),
-            (runtime_quickstart_block_id(surface),),
+            path=target.path,
+            required_blocks=target.required_blocks,
+            allowed_duplicate_blocks=target.allowed_duplicate_blocks,
         )
-        for surface in public_surface_context().runtime_surfaces
-    )
-    os_doc_blocks = (
-        "runtime-doc-links",
-        "os-install-matrix",
-        "supported-runtimes-table",
-        "os-next-steps-table",
-        "recovery-note",
-    )
-    os_doc_paths = tuple(
-        PublicSurfaceTarget(Path(f"docs/{os_name}.md"), os_doc_blocks) for os_name in ("macos", "linux", "windows")
-    )
-    return (
-        PublicSurfaceTarget(
-            Path("README.md"),
-            (
-                "terminal-runtime-bridge",
-                "beginner-startup-ladder",
-                "recovery-note",
-                "local-cli-bridge-summary",
-                "supported-runtimes-table",
-                "recovery-note",
-                "local-cli-bridge-summary",
-            ),
-            allowed_duplicate_blocks=("recovery-note", "local-cli-bridge-summary"),
-        ),
-        PublicSurfaceTarget(
-            Path("docs/README.md"),
-            (
-                "beginner-preflight",
-                "beginner-caveats",
-                "beginner-startup-ladder",
-                "recovery-note",
-                "terminal-runtime-bridge",
-                "post-start-settings",
-            ),
-        ),
-        *os_doc_paths,
-        *runtime_doc_paths,
-        PublicSurfaceTarget(
-            Path("src/gpd/specs/workflows/help.md"),
-            ("local-cli-bridge-summary", "recovery-note"),
-        ),
+        for target in public_surface_region_targets()
     )
 
 

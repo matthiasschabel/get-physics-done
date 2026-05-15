@@ -7,6 +7,25 @@ from dataclasses import dataclass
 from functools import lru_cache
 from importlib.resources import files
 
+from gpd.core.strict_json_contract import (
+    require_allowed_keys as _strict_require_allowed_keys,
+)
+from gpd.core.strict_json_contract import (
+    require_object as _strict_require_object,
+)
+from gpd.core.strict_json_contract import (
+    require_required_keys as _strict_require_required_keys,
+)
+from gpd.core.strict_json_contract import (
+    require_schema_version as _strict_require_schema_version,
+)
+from gpd.core.strict_json_contract import (
+    require_string as _strict_require_string,
+)
+from gpd.core.strict_json_contract import (
+    require_unique_string_tuple as _strict_require_unique_string_tuple,
+)
+
 __all__ = [
     "BeginnerOnboardingContract",
     "LocalCliBridgeContract",
@@ -180,23 +199,15 @@ _LOCAL_CLI_VALIDATE_COMMAND_CONTEXT_COMMAND = "gpd validate command-context <nam
 
 
 def _require_object(payload: object, *, label: str) -> dict[str, object]:
-    if not isinstance(payload, dict):
-        raise ValueError(f"{label} must be a JSON object")
-    return payload
+    return _strict_require_object(payload, label=label)
 
 
 def _require_present_keys(payload: dict[str, object], *, label: str, keys: tuple[str, ...]) -> None:
-    missing = sorted(key for key in keys if key not in payload)
-    if not missing:
-        return
-    raise ValueError(f"{label} is missing required key(s): {', '.join(missing)}")
+    _strict_require_required_keys(payload, label=label, keys=keys)
 
 
 def _require_allowed_keys(payload: dict[str, object], *, label: str, keys: tuple[str, ...]) -> None:
-    unknown = sorted(key for key in payload if key not in keys)
-    if not unknown:
-        return
-    raise ValueError(f"{label} contains unknown key(s): {', '.join(unknown)}")
+    _strict_require_allowed_keys(payload, label=label, keys=keys)
 
 
 @dataclass(frozen=True, slots=True)
@@ -240,19 +251,16 @@ def _require_schema_matches_code(schema: PublicSurfaceContractSchema) -> None:
 
 
 def _require_schema_string_tuple(value: object, *, label: str) -> tuple[str, ...]:
-    if not isinstance(value, list) or not value:
-        raise ValueError(f"{label} must be a non-empty list")
-    items: list[str] = []
-    seen: set[str] = set()
-    for item in value:
-        if not isinstance(item, str) or not item.strip():
-            raise ValueError(f"{label} entries must be non-empty strings")
-        normalized = item.strip()
-        if normalized in seen:
-            raise ValueError(f"{label} must not contain duplicates")
-        seen.add(normalized)
-        items.append(normalized)
-    return tuple(items)
+    return _strict_require_unique_string_tuple(
+        value,
+        label=label,
+        allow_empty=False,
+        trim=True,
+        list_label="non-empty list",
+        empty_message=f"{label} must be a non-empty list",
+        entry_message=f"{label} entries must be non-empty strings",
+        duplicate_message=f"{label} must not contain duplicates",
+    )
 
 
 @lru_cache(maxsize=1)
@@ -273,9 +281,12 @@ def load_public_surface_contract_schema() -> PublicSurfaceContractSchema:
         keys=("schema_version", "top_level_keys", "sections"),
     )
 
-    schema_version = payload.get("schema_version")
-    if not isinstance(schema_version, int) or isinstance(schema_version, bool) or schema_version != 1:
-        raise ValueError(f"Unsupported public surface contract schema_version: {schema_version!r}")
+    _strict_require_schema_version(
+        payload.get("schema_version"),
+        label="public_surface_contract_schema.schema_version",
+        expected=1,
+        invalid_message="Unsupported public surface contract schema_version: {value!r}",
+    )
 
     top_level_keys = _require_schema_string_tuple(
         payload.get("top_level_keys"),
@@ -366,27 +377,21 @@ def load_public_surface_contract_schema() -> PublicSurfaceContractSchema:
 
 
 def _require_string(payload: dict[str, object], key: str, *, label: str) -> str:
-    value = payload.get(key)
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{label}.{key} must be a non-empty string")
-    return value.strip()
+    return _strict_require_string(payload.get(key), label=f"{label}.{key}", trim=True)
 
 
 def _require_string_list(payload: dict[str, object], key: str, *, label: str) -> tuple[str, ...]:
-    value = payload.get(key)
-    if not isinstance(value, list) or not value:
-        raise ValueError(f"{label}.{key} must be a non-empty list")
-    items: list[str] = []
-    seen: set[str] = set()
-    for item in value:
-        if not isinstance(item, str) or not item.strip():
-            raise ValueError(f"{label}.{key} entries must be non-empty strings")
-        normalized = item.strip()
-        if normalized in seen:
-            raise ValueError(f"{label}.{key} must not contain duplicates")
-        seen.add(normalized)
-        items.append(normalized)
-    return tuple(items)
+    item_label = f"{label}.{key}"
+    return _strict_require_unique_string_tuple(
+        payload.get(key),
+        label=item_label,
+        allow_empty=False,
+        trim=True,
+        list_label="non-empty list",
+        empty_message=f"{item_label} must be a non-empty list",
+        entry_message=f"{item_label} entries must be non-empty strings",
+        duplicate_message=f"{item_label} must not contain duplicates",
+    )
 
 
 def _require_exact_command(commands: tuple[str, ...], *, label: str, command: str) -> str:
@@ -480,9 +485,12 @@ def load_public_surface_contract() -> PublicSurfaceContract:
     )
     _require_allowed_keys(payload, label="public_surface_contract", keys=schema.top_level_keys)
 
-    schema_version = payload.get("schema_version")
-    if not isinstance(schema_version, int) or isinstance(schema_version, bool) or schema_version != 1:
-        raise ValueError(f"Unsupported public surface contract schema_version: {schema_version!r}")
+    _strict_require_schema_version(
+        payload.get("schema_version"),
+        label="public_surface_contract.schema_version",
+        expected=1,
+        invalid_message="Unsupported public surface contract schema_version: {value!r}",
+    )
 
     beginner_payload = _require_object(payload.get("beginner_onboarding"), label="beginner_onboarding")
     _require_present_keys(

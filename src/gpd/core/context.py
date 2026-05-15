@@ -240,12 +240,6 @@ from gpd.core.staged_context_fields import (
     PROJECT_CONTRACT_GATE_FIELDS as _PROJECT_CONTRACT_GATE_FIELDS,
 )
 from gpd.core.staged_context_fields import (
-    QUICK_CONTRACT_GATE_FIELDS as _QUICK_CONTRACT_GATE_FIELDS,
-)
-from gpd.core.staged_context_fields import (
-    QUICK_REFERENCE_RUNTIME_FIELDS as _QUICK_REFERENCE_RUNTIME_FIELDS,
-)
-from gpd.core.staged_context_fields import (
     RESEARCH_PHASE_FILE_CONTENT_FIELDS as _RESEARCH_PHASE_FILE_CONTENT_FIELDS,
 )
 from gpd.core.staged_context_fields import (
@@ -271,12 +265,6 @@ from gpd.core.staged_context_fields import (
 )
 from gpd.core.staged_context_fields import (
     STRUCTURED_STATE_FIELDS as _STRUCTURED_STATE_FIELDS,
-)
-from gpd.core.staged_context_fields import (
-    SYNC_STATE_FILE_CONTENT_FIELDS as _SYNC_STATE_FILE_CONTENT_FIELDS,
-)
-from gpd.core.staged_context_fields import (
-    SYNC_STATE_STRUCTURED_STATE_FIELDS as _SYNC_STATE_STRUCTURED_STATE_FIELDS,
 )
 from gpd.core.staged_context_fields import (
     VERIFY_WORK_CONTRACT_GATE_FIELDS as _VERIFY_WORK_CONTRACT_GATE_FIELDS,
@@ -322,6 +310,11 @@ from gpd.core.utils import phase_sort_key as _phase_sort_key
 from gpd.core.utils import safe_read_file as _safe_read_file
 from gpd.core.utils import safe_read_file_truncated as _safe_read_file_truncated
 from gpd.core.verification_status import read_verification_status
+from gpd.core.workflow_init.dependencies import WorkflowInitDependencies
+from gpd.core.workflow_init.literature_review import init_literature_review as _init_literature_review_builder
+from gpd.core.workflow_init.map_research import init_map_research as _init_map_research_builder
+from gpd.core.workflow_init.quick import init_quick as _init_quick_builder
+from gpd.core.workflow_init.sync_state import init_sync_state as _init_sync_state_builder
 from gpd.core.workflow_staging import (
     AUTONOMOUS_INIT_FIELDS as _AUTONOMOUS_INIT_FIELDS,
 )
@@ -427,11 +420,6 @@ _RESUME_FILE_CONTEXT_PATHS = {
     "project_content": f"{PLANNING_DIR_NAME}/{PROJECT_FILENAME}",
     "roadmap_content": f"{PLANNING_DIR_NAME}/{ROADMAP_FILENAME}",
     "derivation_state_content": f"{PLANNING_DIR_NAME}/DERIVATION-STATE.md",
-}
-_SYNC_STATE_FILE_CONTEXT_PATHS = {
-    "state_md_content": f"{PLANNING_DIR_NAME}/{STATE_MD_FILENAME}",
-    "state_json_content": f"{PLANNING_DIR_NAME}/state.json",
-    "state_json_backup_content": f"{PLANNING_DIR_NAME}/{STATE_JSON_BACKUP_FILENAME}",
 }
 _RESEARCH_PHASE_FILE_CONTEXT_PATHS = {
     "state_content": f"{PLANNING_DIR_NAME}/{STATE_MD_FILENAME}",
@@ -3051,6 +3039,26 @@ def _resolve_model(
     return _resolve_model_canonical(cwd, agent_type, runtime=active_runtime)
 
 
+def _workflow_init_dependencies() -> WorkflowInitDependencies:
+    """Return current context helper aliases for extracted init builders."""
+
+    return WorkflowInitDependencies(
+        load_config=load_config,
+        resolve_model=_resolve_model,
+        path_exists=_path_exists,
+        detect_platform=_detect_platform,
+        state_exists=_state_exists,
+        backup_only_state_guidance=_backup_only_state_guidance,
+        resolve_project_scoped_cwd=_resolve_project_scoped_cwd,
+        build_reference_runtime_context=_build_reference_runtime_context,
+        build_staged_reference_runtime_context=_build_staged_reference_runtime_context,
+        build_state_memory_runtime_context=_build_state_memory_runtime_context,
+        build_structured_state_runtime_context=_build_structured_state_runtime_context,
+        build_new_project_contract_runtime_context=_build_new_project_contract_runtime_context,
+        read_file_truncated=_safe_read_file_truncated,
+    )
+
+
 def _try_find_phase(cwd: Path, phase: str) -> dict | None:
     """Attempt to find phase info. Returns a plain dict or None."""
     from gpd.core.phases import find_phase
@@ -3840,78 +3848,7 @@ def init_new_milestone(cwd: Path, stage: str | None = None) -> dict:
 
 def init_quick(cwd: Path, description: str | None = None, stage: str | None = None) -> dict:
     """Assemble context for quick task execution."""
-    config = load_config(cwd)
-    now = datetime.now(UTC)
-    normalized_description = description.strip() if isinstance(description, str) else description
-    slug = _generate_slug(normalized_description)
-    if normalized_description and slug is None:
-        slug = "task"
-    if slug:
-        slug = slug[:40]
-
-    # Find next quick task number
-    quick_dir = cwd / PLANNING_DIR_NAME / "quick"
-    next_num = 1
-    try:
-        existing = []
-        for entry in quick_dir.iterdir():
-            match = re.match(r"^(\d+)-", entry.name)
-            if match:
-                existing.append(int(match.group(1)))
-        if existing:
-            next_num = max(existing) + 1
-    except (FileNotFoundError, PermissionError):
-        pass
-
-    result = {
-        # Models
-        "planner_model": _resolve_model(cwd, "gpd-planner", config),
-        "executor_model": _resolve_model(cwd, "gpd-executor", config),
-        # Config
-        "commit_docs": config["commit_docs"],
-        "autonomy": config["autonomy"],
-        "research_mode": config["research_mode"],
-        # Quick task info
-        "next_num": next_num,
-        "slug": slug,
-        "description": normalized_description,
-        # Timestamps
-        "date": now.strftime("%Y-%m-%d"),
-        "timestamp": now.isoformat(),
-        # Paths
-        "quick_dir": f"{PLANNING_DIR_NAME}/quick",
-        "task_dir": f"{PLANNING_DIR_NAME}/quick/{next_num}-{slug}" if slug else None,
-        # File existence
-        "roadmap_exists": _path_exists(cwd, f"{PLANNING_DIR_NAME}/{ROADMAP_FILENAME}"),
-        "project_exists": _path_exists(cwd, f"{PLANNING_DIR_NAME}/{PROJECT_FILENAME}"),
-        "planning_exists": _path_exists(cwd, PLANNING_DIR_NAME),
-        # Platform
-        "platform": _detect_platform(cwd),
-    }
-
-    if stage is None:
-        result.update(_build_reference_runtime_context(cwd))
-        result.update(_build_state_memory_runtime_context(cwd))
-        return result
-
-    if not result["project_exists"]:
-        raise ValueError(
-            "quick staged init requires an initialized GPD project (GPD/PROJECT.md); "
-            "run command-context validation before loading staged quick authoring context"
-        )
-
-    from gpd.core.workflow_staging import load_workflow_stage_manifest
-
-    manifest = load_workflow_stage_manifest("quick")
-
-    return _assemble_staged_init_payload(
-        workflow_id="quick",
-        stage_id=stage,
-        cwd=cwd,
-        base_payload=result,
-        manifest=manifest,
-        providers=(_staged_reference_provider(cwd, _QUICK_REFERENCE_RUNTIME_FIELDS, _QUICK_CONTRACT_GATE_FIELDS),),
-    )
+    return _init_quick_builder(cwd, description=description, stage=stage, deps=_workflow_init_dependencies())
 
 
 def init_resume(cwd: Path, *, data_root: Path | None = None, stage: str | None = None) -> dict:
@@ -4092,64 +4029,7 @@ def init_resume(cwd: Path, *, data_root: Path | None = None, stage: str | None =
 
 def init_sync_state(cwd: Path, *, stage: str | None = None) -> dict:
     """Assemble context for state reconciliation."""
-    requested_cwd = cwd.expanduser().resolve(strict=False)
-    effective_cwd = _resolve_project_scoped_cwd(requested_cwd)
-    sync_state_reentry_guidance = (
-        "sync-state is current-workspace-only because it can mutate state files. "
-        "It will not inspect or repair a recent project from another folder; open the target project folder "
-        "or pass --cwd to that project before rerunning sync-state."
-    )
-
-    base_result = {
-        "workspace_root": requested_cwd.as_posix(),
-        "project_root": effective_cwd.as_posix(),
-        "project_root_source": "current_workspace",
-        "project_root_auto_selected": False,
-        "init_root_policy": InitRootPolicy.CURRENT_WORKSPACE_ONLY.value,
-        "project_reentry_mode": "current-workspace",
-        "project_reentry_guidance": sync_state_reentry_guidance,
-        "state_md_exists": _path_exists(effective_cwd, f"{PLANNING_DIR_NAME}/{STATE_MD_FILENAME}"),
-        "state_json_exists": _path_exists(effective_cwd, f"{PLANNING_DIR_NAME}/state.json"),
-        "state_json_backup_exists": _path_exists(effective_cwd, f"{PLANNING_DIR_NAME}/{STATE_JSON_BACKUP_FILENAME}"),
-        "state_recovery_guidance": _backup_only_state_guidance(effective_cwd),
-        "platform": _detect_platform(effective_cwd),
-    }
-
-    if stage is None:
-        result = dict(base_result)
-        result.update(_build_structured_state_runtime_context(effective_cwd))
-        result.update(_build_new_project_contract_runtime_context(effective_cwd))
-        result.update(
-            _build_selected_file_context(
-                effective_cwd,
-                _SYNC_STATE_FILE_CONTENT_FIELDS,
-                _SYNC_STATE_FILE_CONTEXT_PATHS,
-                _safe_read_file_truncated,
-            )
-        )
-        return result
-
-    from gpd.core.workflow_staging import load_workflow_stage_manifest
-
-    manifest = load_workflow_stage_manifest("sync-state")
-
-    return _assemble_staged_init_payload(
-        workflow_id="sync-state",
-        stage_id=stage,
-        cwd=effective_cwd,
-        base_payload=base_result,
-        manifest=manifest,
-        providers=(
-            _staged_structured_state_provider(effective_cwd, _SYNC_STATE_STRUCTURED_STATE_FIELDS),
-            _staged_contract_provider(effective_cwd, _PROJECT_CONTRACT_GATE_FIELDS),
-            _staged_file_context_provider(
-                _SYNC_STATE_FILE_CONTENT_FIELDS,
-                cwd=effective_cwd,
-                field_paths=_SYNC_STATE_FILE_CONTEXT_PATHS,
-                read_file=_safe_read_file_truncated,
-            ),
-        ),
-    )
+    return _init_sync_state_builder(cwd, stage=stage, deps=_workflow_init_dependencies())
 
 
 def init_verify_work(cwd: Path, phase: str | None, stage: str | None = None) -> dict:
@@ -4649,52 +4529,7 @@ def init_research_phase(
 
 def init_literature_review(cwd: Path, topic: str | None = None, stage: str | None = None) -> dict:
     """Assemble context for literature review orchestration."""
-    requested_cwd = cwd.expanduser().resolve(strict=False)
-    effective_cwd = _resolve_project_scoped_cwd(requested_cwd)
-    config = load_config(effective_cwd)
-    normalized_topic = topic.strip() if isinstance(topic, str) and topic.strip() else None
-    slug = _generate_slug(normalized_topic)
-    if normalized_topic and slug is None:
-        slug = "literature-review"
-    if slug:
-        slug = slug[:40]
-
-    result: dict[str, object] = {
-        "topic": normalized_topic,
-        "slug": slug,
-        "init_root_policy": InitRootPolicy.PROJECT_SCOPED.value,
-        "workspace_root": requested_cwd.as_posix(),
-        "project_root": effective_cwd.as_posix(),
-        "commit_docs": config["commit_docs"],
-        "state_exists": _state_exists(effective_cwd),
-        "project_exists": _path_exists(effective_cwd, f"{PLANNING_DIR_NAME}/{PROJECT_FILENAME}"),
-        "research_mode": config["research_mode"],
-        "autonomy": config["autonomy"],
-        "roadmap_exists": _path_exists(effective_cwd, f"{PLANNING_DIR_NAME}/{ROADMAP_FILENAME}"),
-        "platform": _detect_platform(effective_cwd),
-    }
-    if stage is None:
-        result.update(_build_reference_runtime_context(effective_cwd))
-        return result
-
-    from gpd.core.workflow_staging import load_workflow_stage_manifest
-
-    manifest = load_workflow_stage_manifest("literature-review")
-
-    return _assemble_staged_init_payload(
-        workflow_id="literature-review",
-        stage_id=stage,
-        cwd=effective_cwd,
-        base_payload=result,
-        manifest=manifest,
-        providers=(
-            _staged_reference_provider(
-                effective_cwd,
-                _STAGED_FULL_REFERENCE_RUNTIME_FIELDS | _STAGED_REFERENCE_SUMMARY_FIELDS,
-                _EXECUTE_PHASE_CONTRACT_GATE_FIELDS,
-            ),
-        ),
-    )
+    return _init_literature_review_builder(cwd, topic=topic, stage=stage, deps=_workflow_init_dependencies())
 
 
 def init_todos(cwd: Path, area: str | None = None) -> dict:
@@ -4999,69 +4834,7 @@ def init_milestone_op(cwd: Path) -> dict:
 
 def init_map_research(cwd: Path, focus: str | None = None, stage: str | None = None) -> dict:
     """Assemble context for research mapping."""
-    requested_cwd = cwd.expanduser().resolve(strict=False)
-    effective_cwd = _resolve_project_scoped_cwd(requested_cwd)
-    config = load_config(effective_cwd)
-    normalized_focus = focus.strip() if isinstance(focus, str) and focus.strip() else ""
-
-    # Check for existing research maps
-    research_map_dir = effective_cwd / PLANNING_DIR_NAME / RESEARCH_MAP_DIR_NAME
-    research_map_dir_absolute = research_map_dir.resolve(strict=False).as_posix()
-    existing_maps: list[str] = []
-    try:
-        existing_maps = sorted(f.name for f in research_map_dir.iterdir() if f.is_file() and f.name.endswith(".md"))
-    except FileNotFoundError:
-        pass
-
-    result = {
-        # Models
-        "mapper_model": _resolve_model(effective_cwd, "gpd-research-mapper", config),
-        "init_root_policy": InitRootPolicy.PROJECT_SCOPED.value,
-        "workspace_root": requested_cwd.as_posix(),
-        "project_root": effective_cwd.as_posix(),
-        "project_root_source": "workspace",
-        "project_root_auto_selected": False,
-        # Config
-        "commit_docs": config["commit_docs"],
-        "autonomy": config["autonomy"],
-        "research_mode": config["research_mode"],
-        "map_focus": normalized_focus,
-        "map_focus_provided": bool(normalized_focus),
-        "parallelization": config["parallelization"],
-        # Paths
-        "research_map_dir": f"{PLANNING_DIR_NAME}/{RESEARCH_MAP_DIR_NAME}",
-        "research_map_dir_absolute": research_map_dir_absolute,
-        # Existing maps
-        "existing_maps": existing_maps,
-        "has_maps": len(existing_maps) > 0,
-        # File existence
-        "planning_exists": _path_exists(effective_cwd, PLANNING_DIR_NAME),
-        "research_map_dir_exists": _path_exists(effective_cwd, f"{PLANNING_DIR_NAME}/{RESEARCH_MAP_DIR_NAME}"),
-        # Platform
-        "platform": _detect_platform(effective_cwd),
-    }
-    if stage is None:
-        result.update(_build_reference_runtime_context(effective_cwd))
-        return result
-
-    from gpd.core.workflow_staging import load_workflow_stage_manifest
-
-    manifest = load_workflow_stage_manifest("map-research")
-
-    return _assemble_staged_init_payload(
-        workflow_id="map-research",
-        stage_id=stage,
-        cwd=effective_cwd,
-        base_payload=result,
-        manifest=manifest,
-        providers=(
-            _staged_reference_provider(
-                effective_cwd,
-                _STAGED_FULL_REFERENCE_RUNTIME_FIELDS | _STAGED_REFERENCE_SUMMARY_FIELDS,
-                _EXECUTE_PHASE_CONTRACT_GATE_FIELDS,
-            ),
-        ),
-    )
+    return _init_map_research_builder(cwd, focus=focus, stage=stage, deps=_workflow_init_dependencies())
 
 
 def init_progress(

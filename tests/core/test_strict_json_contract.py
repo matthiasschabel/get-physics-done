@@ -5,8 +5,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import gpd.core.strict_json_contract as strict_json
 import pytest
+
+import gpd.core.strict_json_contract as strict_json
 
 
 def test_load_json_file_and_require_object_preserve_labels(tmp_path: Path) -> None:

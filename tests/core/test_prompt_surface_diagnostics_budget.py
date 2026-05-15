@@ -80,6 +80,9 @@ EXECUTE_PHASE_SPLIT_FAMILY_STAGES = (
 )
 MUST_NOT_EAGER_LOAD_VIOLATION_BUDGET = 0
 MUST_NOT_EAGER_LOAD_PRIOR_STAGE_RESIDUE_BUDGET = 8
+PRIOR_STAGE_RESIDUE_BUDGET = {"lines": 8_300, "chars": 360_000}
+PRIOR_STAGE_RESIDUE_STAGE_COUNT_BUDGET = 72
+MAX_SINGLE_STAGE_PRIOR_STAGE_RESIDUE_CHAR_BUDGET = 10_000
 ROOT_WORKFLOW_AUTHORITY_STAGE_BUDGET = 0
 ROOT_AUTHORITY_FREE_WORKFLOWS = frozenset(
     {
@@ -368,6 +371,180 @@ def _manifest_duplicate_contributors(payload: dict[str, object]) -> list[str]:
     ]
 
 
+def _format_prior_stage_residue_budget_failure(
+    metric: str,
+    observed: int,
+    budget: int,
+    contributors: list[str],
+) -> str:
+    preview = "; ".join(contributors[:8]) if contributors else "no prior-stage residue contributors"
+    return (
+        f"prior-stage residue {metric} budget exceeded: observed={observed} max={budget}; top contributors: {preview}"
+    )
+
+
+def _prior_stage_residue_stage_rows(payload: dict[str, object]) -> list[dict[str, object]]:
+    workflows = payload["stage_diagnostics"]
+    assert isinstance(workflows, list)
+    rows: list[dict[str, object]] = []
+    for workflow in workflows:
+        assert isinstance(workflow, dict)
+        workflow_id = workflow["workflow_id"]
+        assert isinstance(workflow_id, str)
+        stages = workflow["stages"]
+        assert isinstance(stages, list)
+        for stage in stages:
+            assert isinstance(stage, dict)
+            char_count = stage["prior_stage_residue_char_count"]
+            line_count = stage["prior_stage_residue_line_count"]
+            residue_count = stage["must_not_eager_load_prior_stage_residue_count"]
+            assert isinstance(char_count, int)
+            assert isinstance(line_count, int)
+            assert isinstance(residue_count, int)
+            if not char_count and not line_count and not residue_count:
+                continue
+            metrics = stage["prior_stage_residue_authority_metrics"]
+            assert isinstance(metrics, list)
+            authorities = sorted(
+                {
+                    metric["authority"]
+                    for metric in metrics
+                    if isinstance(metric, dict) and isinstance(metric.get("authority"), str)
+                }
+            )
+            stage_id = stage["stage_id"]
+            assert isinstance(stage_id, str)
+            rows.append(
+                {
+                    "workflow_id": workflow_id,
+                    "stage_id": stage_id,
+                    "prior_stage_residue_char_count": char_count,
+                    "prior_stage_residue_line_count": line_count,
+                    "prior_stage_residue_count": residue_count,
+                    "authorities": tuple(authorities),
+                }
+            )
+    return sorted(
+        rows,
+        key=lambda row: (
+            -int(row["prior_stage_residue_char_count"]),
+            -int(row["prior_stage_residue_line_count"]),
+            str(row["workflow_id"]),
+            str(row["stage_id"]),
+        ),
+    )
+
+
+def _prior_stage_residue_stage_contributors(payload: dict[str, object]) -> list[str]:
+    rows = _prior_stage_residue_stage_rows(payload)
+    return [
+        (
+            f"{row['workflow_id']}.{row['stage_id']} "
+            f"chars={row['prior_stage_residue_char_count']} "
+            f"lines={row['prior_stage_residue_line_count']} "
+            f"records={row['prior_stage_residue_count']} "
+            f"authorities={','.join(row['authorities'])}"
+        )
+        for row in rows
+    ]
+
+
+def _prior_stage_residue_authority_contributors(payload: dict[str, object]) -> list[str]:
+    grouped: dict[str, dict[str, object]] = {}
+    workflows = payload["stage_diagnostics"]
+    assert isinstance(workflows, list)
+    for workflow in workflows:
+        assert isinstance(workflow, dict)
+        workflow_id = workflow["workflow_id"]
+        assert isinstance(workflow_id, str)
+        stages = workflow["stages"]
+        assert isinstance(stages, list)
+        for stage in stages:
+            assert isinstance(stage, dict)
+            stage_id = stage["stage_id"]
+            assert isinstance(stage_id, str)
+            stage_key = f"{workflow_id}.{stage_id}"
+            metrics = stage["prior_stage_residue_authority_metrics"]
+            assert isinstance(metrics, list)
+            for metric in metrics:
+                assert isinstance(metric, dict)
+                authority = metric["authority"]
+                char_count = metric["expanded_char_count"]
+                line_count = metric["expanded_line_count"]
+                chain_count = metric["first_turn_chain_count"]
+                assert isinstance(authority, str)
+                assert isinstance(char_count, int)
+                assert isinstance(line_count, int)
+                assert isinstance(chain_count, int)
+                aggregate = grouped.setdefault(
+                    authority,
+                    {
+                        "authority": authority,
+                        "chars": 0,
+                        "lines": 0,
+                        "occurrences": 0,
+                        "chains": 0,
+                        "workflows": set(),
+                        "stages": set(),
+                    },
+                )
+                aggregate["chars"] = int(aggregate["chars"]) + char_count
+                aggregate["lines"] = int(aggregate["lines"]) + line_count
+                aggregate["occurrences"] = int(aggregate["occurrences"]) + 1
+                aggregate["chains"] = int(aggregate["chains"]) + chain_count
+                workflows_for_authority = aggregate["workflows"]
+                stages_for_authority = aggregate["stages"]
+                assert isinstance(workflows_for_authority, set)
+                assert isinstance(stages_for_authority, set)
+                workflows_for_authority.add(workflow_id)
+                stages_for_authority.add(stage_key)
+
+    if not grouped:
+        for row in _prior_stage_residue_stage_rows(payload):
+            authorities = row["authorities"]
+            assert isinstance(authorities, tuple)
+            stage_key = f"{row['workflow_id']}.{row['stage_id']}"
+            for authority in authorities:
+                assert isinstance(authority, str)
+                aggregate = grouped.setdefault(
+                    authority,
+                    {
+                        "authority": authority,
+                        "chars": 0,
+                        "lines": 0,
+                        "occurrences": 0,
+                        "chains": 0,
+                        "workflows": set(),
+                        "stages": set(),
+                    },
+                )
+                aggregate["chars"] = int(aggregate["chars"]) + int(row["prior_stage_residue_char_count"])
+                aggregate["lines"] = int(aggregate["lines"]) + int(row["prior_stage_residue_line_count"])
+                aggregate["occurrences"] = int(aggregate["occurrences"]) + 1
+                workflows_for_authority = aggregate["workflows"]
+                stages_for_authority = aggregate["stages"]
+                assert isinstance(workflows_for_authority, set)
+                assert isinstance(stages_for_authority, set)
+                workflows_for_authority.add(row["workflow_id"])
+                stages_for_authority.add(stage_key)
+
+    def sort_key(row: dict[str, object]) -> tuple[int, int, int, str]:
+        return (-int(row["chars"]), -int(row["lines"]), -int(row["occurrences"]), str(row["authority"]))
+
+    contributors: list[str] = []
+    for row in sorted(grouped.values(), key=sort_key):
+        workflows = row["workflows"]
+        stages = row["stages"]
+        assert isinstance(workflows, set)
+        assert isinstance(stages, set)
+        contributors.append(
+            f"{row['authority']} chars={row['chars']} lines={row['lines']} "
+            f"occurrences={row['occurrences']} chains={row['chains']} "
+            f"stages={len(stages)} workflows={','.join(sorted(workflows))}"
+        )
+    return contributors
+
+
 def _workflow_stage_diagnostics(payload: dict[str, object], workflow_id: str) -> dict[str, object]:
     workflows = payload["stage_diagnostics"]
     assert isinstance(workflows, list)
@@ -523,6 +700,54 @@ def test_phase1_pressure_counters_stay_within_advisory_budgets() -> None:
             manifest_duplicate_rows,
         )
     assert manifest_duplicate_rows == []
+
+
+def test_prior_stage_residue_pressure_stays_under_phase1_budgets() -> None:
+    payload = _prompt_surface_payload(("all",), (), False)
+    totals = payload["totals"]
+    assert isinstance(totals, dict)
+    stage_diagnostics = totals["stage_diagnostics"]
+    assert isinstance(stage_diagnostics, dict)
+
+    residue_stage_rows = _prior_stage_residue_stage_rows(payload)
+    authority_contributors = _prior_stage_residue_authority_contributors(payload)
+    stage_contributors = _prior_stage_residue_stage_contributors(payload)
+
+    residue_lines = _required_stage_diagnostic_count(stage_diagnostics, "prior_stage_residue_line_count")
+    residue_chars = _required_stage_diagnostic_count(stage_diagnostics, "prior_stage_residue_char_count")
+    assert residue_lines == sum(int(row["prior_stage_residue_line_count"]) for row in residue_stage_rows)
+    assert residue_chars == sum(int(row["prior_stage_residue_char_count"]) for row in residue_stage_rows)
+
+    assert residue_lines <= PRIOR_STAGE_RESIDUE_BUDGET["lines"], _format_prior_stage_residue_budget_failure(
+        "lines",
+        residue_lines,
+        PRIOR_STAGE_RESIDUE_BUDGET["lines"],
+        authority_contributors,
+    )
+    assert residue_chars <= PRIOR_STAGE_RESIDUE_BUDGET["chars"], _format_prior_stage_residue_budget_failure(
+        "chars",
+        residue_chars,
+        PRIOR_STAGE_RESIDUE_BUDGET["chars"],
+        authority_contributors,
+    )
+
+    residue_stage_count = len(residue_stage_rows)
+    assert residue_stage_count <= PRIOR_STAGE_RESIDUE_STAGE_COUNT_BUDGET, _format_prior_stage_residue_budget_failure(
+        "stage count",
+        residue_stage_count,
+        PRIOR_STAGE_RESIDUE_STAGE_COUNT_BUDGET,
+        authority_contributors,
+    )
+
+    max_single_stage_chars = int(residue_stage_rows[0]["prior_stage_residue_char_count"]) if residue_stage_rows else 0
+    assert max_single_stage_chars <= MAX_SINGLE_STAGE_PRIOR_STAGE_RESIDUE_CHAR_BUDGET, (
+        _format_prior_stage_residue_budget_failure(
+            "single-stage chars",
+            max_single_stage_chars,
+            MAX_SINGLE_STAGE_PRIOR_STAGE_RESIDUE_CHAR_BUDGET,
+            stage_contributors,
+        )
+    )
 
 
 def test_staged_init_field_pressure_totals_do_not_grow_from_phase6_baseline() -> None:

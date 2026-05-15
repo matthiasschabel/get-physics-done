@@ -191,9 +191,50 @@ def test_prompt_surface_diagnostics_stage_authority_and_init_pressure_raw_shape(
         "selected_init_content_field_count",
         "likely_bulky_init_field_count",
         "must_not_eager_load_prior_stage_residue_count",
+        "repeated_prior_stage_residue_authority_count",
+        "repeated_prior_stage_residue_occurrence_count",
+        "repeated_prior_stage_residue_char_count",
+        "repeated_prior_stage_residue_line_count",
     ):
         assert isinstance(stage_totals[key], int)
         assert stage_totals[key] >= 0
+
+    residue_rows = payload["repeated_prior_stage_residue_rows"]
+    assert isinstance(residue_rows, list)
+    assert 1 <= len(residue_rows) <= 20
+    residue_row = residue_rows[0]
+    assert {
+        "authority",
+        "occurrence_count",
+        "workflow_count",
+        "stage_count",
+        "expanded_char_count",
+        "expanded_line_count",
+        "first_turn_chain_count",
+        "transitive_include_count",
+        "workflows",
+        "stages",
+        "eager_via",
+    } <= set(residue_row)
+    assert isinstance(residue_row["authority"], str)
+    assert residue_row["authority"].endswith(".md")
+    for key in (
+        "occurrence_count",
+        "workflow_count",
+        "stage_count",
+        "expanded_char_count",
+        "expanded_line_count",
+        "first_turn_chain_count",
+        "transitive_include_count",
+    ):
+        assert isinstance(residue_row[key], int)
+        assert residue_row[key] > 0 if key != "transitive_include_count" else residue_row[key] >= 0
+    assert isinstance(residue_row["workflows"], list)
+    assert isinstance(residue_row["stages"], list)
+    assert isinstance(residue_row["eager_via"], list)
+    assert stage_totals["repeated_prior_stage_residue_occurrence_count"] >= residue_row["occurrence_count"]
+    assert stage_totals["repeated_prior_stage_residue_char_count"] >= residue_row["expanded_char_count"]
+    assert stage_totals["repeated_prior_stage_residue_line_count"] >= residue_row["expanded_line_count"]
 
     authority_rows = payload["stage_authority_top_prompts"]
     assert isinstance(authority_rows, list)
@@ -314,6 +355,22 @@ def test_prompt_surface_diagnostics_stage_authority_and_init_pressure_renderers(
         "Selections",
     ):
         assert column in markdown_init_fields
+    markdown_stage_loading = _rendered_tail_after(markdown_result.output, "## Stage-Aware Staged Loading")
+    for column in ("Residue chars", "Residue lines", "Residue records"):
+        assert column in markdown_stage_loading
+    markdown_residue = _rendered_tail_after(markdown_result.output, "## Prior-Stage Residue Contributors")
+    for column in (
+        "Authority",
+        "Occurrences",
+        "Workflows",
+        "Stages",
+        "Expanded chars",
+        "Expanded lines",
+        "First-turn chains",
+        "Transitive includes",
+        "Eager via",
+    ):
+        assert column in markdown_residue
 
     assert table_result.exit_code == 0, table_result.output
     table_authority = _rendered_tail_after(table_result.output, "stage authority hotspots")
@@ -331,6 +388,22 @@ def test_prompt_surface_diagnostics_stage_authority_and_init_pressure_renderers(
         "selections",
     ):
         assert column in table_init_fields
+    table_stage_loading = _rendered_tail_after(table_result.output, "stage top prompts")
+    for column in ("residue_chars", "residue_lines", "residue_records"):
+        assert column in table_stage_loading
+    table_residue = _rendered_tail_after(table_result.output, "prior-stage residue contributors")
+    for column in (
+        "authority",
+        "occurrences",
+        "workflows",
+        "stages",
+        "expanded_chars",
+        "expanded_lines",
+        "first_turn_chains",
+        "transitive_includes",
+        "eager_via",
+    ):
+        assert column in table_residue
 
 
 def test_prompt_surface_diagnostics_runtime_projection_and_renderers() -> None:

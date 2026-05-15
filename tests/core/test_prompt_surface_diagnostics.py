@@ -16,10 +16,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 PROMPT_DIAGNOSTICS_PATH = REPO_ROOT / "src" / "gpd" / "core" / "prompt_diagnostics.py"
 PROMPT_MARKDOWN_SCAN_PATH = REPO_ROOT / "src" / "gpd" / "core" / "prompt_markdown_scan.py"
 STAGE_PROMPT_DIAGNOSTICS_PATH = REPO_ROOT / "src" / "gpd" / "core" / "stage_prompt_diagnostics.py"
-PROMPT_DIAGNOSTICS_TOTAL_LOC_CAP = 3_300
+PROMPT_DIAGNOSTICS_TOTAL_LOC_CAP = 3_450
 PROMPT_DIAGNOSTICS_SPLIT_FACADE_LOC_CAP = 1_100
-PROMPT_DIAGNOSTICS_SUPPORT_MODULE_LOC_CAP = 800
-STAGE_PROMPT_DIAGNOSTICS_LOC_CAP = 1_210
+PROMPT_DIAGNOSTICS_SUPPORT_MODULE_LOC_CAP = 850
+STAGE_PROMPT_DIAGNOSTICS_LOC_CAP = 1_275
 COMPACT_ONLY_MANIFEST_KEYS = {
     "authority_groups",
     "cold_authority_policy",
@@ -103,6 +103,88 @@ def _extract_markdown_heading_section(text: str, heading: str) -> str:
     if next_heading == -1:
         return text[start:].rstrip("\r\n")
     return text[start:next_heading].rstrip("\r\n")
+
+
+def _write_repeated_residue_probe_project(root: Path) -> dict[str, int]:
+    router_body = "Router alpha.\nRouter beta.\nRouter gamma.\n"
+    bootstrap_body = "Bootstrap active body.\n"
+    finalize_body = "Finalize active body.\n"
+    _write(
+        root,
+        "src/gpd/commands/probe.md",
+        """
+        ---
+        name: gpd:probe
+        description: Probe command
+        ---
+        @{GPD_INSTALL_DIR}/workflows/probe-router.md
+        """,
+    )
+    _write(root, "src/gpd/specs/workflows/probe-router.md", router_body)
+    _write(root, "src/gpd/specs/workflows/probe-bootstrap.md", bootstrap_body)
+    _write(root, "src/gpd/specs/workflows/probe-finalize.md", finalize_body)
+    _write(
+        root,
+        "src/gpd/specs/workflows/probe-stage-manifest.json",
+        """
+        {
+          "schema_version": 1,
+          "workflow_id": "probe",
+          "stages": [
+            {
+              "id": "session_router",
+              "order": 1,
+              "purpose": "Route into the staged workflow.",
+              "mode_paths": ["workflows/probe-router.md"],
+              "required_init_fields": [],
+              "loaded_authorities": ["workflows/probe-router.md"],
+              "conditional_authorities": [],
+              "must_not_eager_load": [],
+              "allowed_tools": [],
+              "writes_allowed": [],
+              "produced_state": [],
+              "next_stages": ["phase_bootstrap"],
+              "checkpoints": []
+            },
+            {
+              "id": "phase_bootstrap",
+              "order": 2,
+              "purpose": "Bootstrap the selected phase without reloading the router.",
+              "mode_paths": ["workflows/probe-bootstrap.md"],
+              "required_init_fields": [],
+              "loaded_authorities": ["workflows/probe-bootstrap.md"],
+              "conditional_authorities": [],
+              "must_not_eager_load": ["workflows/probe-router.md"],
+              "allowed_tools": [],
+              "writes_allowed": [],
+              "produced_state": [],
+              "next_stages": ["phase_finalize"],
+              "checkpoints": []
+            },
+            {
+              "id": "phase_finalize",
+              "order": 3,
+              "purpose": "Finalize the selected phase without reloading the router.",
+              "mode_paths": ["workflows/probe-finalize.md"],
+              "required_init_fields": [],
+              "loaded_authorities": ["workflows/probe-finalize.md"],
+              "conditional_authorities": [],
+              "must_not_eager_load": ["workflows/probe-router.md"],
+              "allowed_tools": [],
+              "writes_allowed": [],
+              "produced_state": [],
+              "next_stages": [],
+              "checkpoints": []
+            }
+          ]
+        }
+        """,
+    )
+    return {
+        "router_chars": len(router_body),
+        "router_lines": len(router_body.splitlines()),
+        "occurrences": 2,
+    }
 
 
 def test_report_includes_registered_command_agent_and_workflow_sources() -> None:
@@ -508,6 +590,77 @@ def test_stage_diagnostics_classifies_prior_stage_first_turn_residue_without_cou
     assert residue_metrics[0]["eager_via"] == ["workflows/probe-router.md"]
     assert payload["totals"]["stage_diagnostics"]["must_not_eager_load_violation_count"] == 0
     assert payload["totals"]["stage_diagnostics"]["prior_stage_residue_count"] == 1
+
+
+def test_stage_diagnostics_measures_repeated_prior_stage_residue_chars_and_lines(
+    tmp_path: Path,
+) -> None:
+    expected = _write_repeated_residue_probe_project(tmp_path)
+
+    payload = _diagnostics().report_to_dict(_report(tmp_path, surfaces=("command",), runtime_names=()), top=1)
+
+    bootstrap = _stage_by_id(payload, "phase_bootstrap")
+    finalize = _stage_by_id(payload, "phase_finalize")
+    for stage in (bootstrap, finalize):
+        assert stage["must_not_eager_load_violations"] == []
+        assert stage["prior_stage_residue_char_count"] == expected["router_chars"]
+        assert stage["prior_stage_residue_line_count"] == expected["router_lines"]
+        assert stage["must_not_eager_load_prior_stage_residue_count"] == 1
+        [residue_metric] = stage["prior_stage_residue_authority_metrics"]
+        assert residue_metric["authority"] == "workflows/probe-router.md"
+        assert residue_metric["expanded_char_count"] == expected["router_chars"]
+        assert residue_metric["expanded_line_count"] == expected["router_lines"]
+        assert residue_metric["first_turn_chain_count"] == 1
+        assert residue_metric["eager_via"] == ["workflows/probe-router.md"]
+
+    stage_totals = payload["totals"]["stage_diagnostics"]
+    assert stage_totals["must_not_eager_load_violation_count"] == 0
+    assert stage_totals["prior_stage_residue_count"] == expected["occurrences"]
+    assert stage_totals["prior_stage_residue_char_count"] == expected["router_chars"] * expected["occurrences"]
+    assert stage_totals["prior_stage_residue_line_count"] == expected["router_lines"] * expected["occurrences"]
+    assert stage_totals["repeated_prior_stage_residue_authority_count"] == 1
+    assert stage_totals["repeated_prior_stage_residue_occurrence_count"] == expected["occurrences"]
+    assert stage_totals["repeated_prior_stage_residue_char_count"] == (
+        expected["router_chars"] * expected["occurrences"]
+    )
+    assert stage_totals["repeated_prior_stage_residue_line_count"] == (
+        expected["router_lines"] * expected["occurrences"]
+    )
+
+
+def test_report_to_dict_exposes_repeated_prior_stage_residue_rows(tmp_path: Path) -> None:
+    expected = _write_repeated_residue_probe_project(tmp_path)
+
+    payload = _diagnostics().report_to_dict(_report(tmp_path, surfaces=("command",), runtime_names=()), top=1)
+
+    residue_rows = payload["repeated_prior_stage_residue_rows"]
+    assert isinstance(residue_rows, list)
+    assert len(residue_rows) == 1
+    [row] = residue_rows
+    assert {
+        "authority",
+        "occurrence_count",
+        "workflow_count",
+        "stage_count",
+        "expanded_char_count",
+        "expanded_line_count",
+        "first_turn_chain_count",
+        "transitive_include_count",
+        "workflows",
+        "stages",
+        "eager_via",
+    } <= set(row)
+    assert row["authority"] == "workflows/probe-router.md"
+    assert row["occurrence_count"] == expected["occurrences"]
+    assert row["workflow_count"] == 1
+    assert row["stage_count"] == expected["occurrences"]
+    assert row["expanded_char_count"] == expected["router_chars"] * expected["occurrences"]
+    assert row["expanded_line_count"] == expected["router_lines"] * expected["occurrences"]
+    assert row["first_turn_chain_count"] == expected["occurrences"]
+    assert row["transitive_include_count"] == 0
+    assert row["workflows"] == ["probe"]
+    assert row["stages"] == ["probe.phase_bootstrap", "probe.phase_finalize"]
+    assert row["eager_via"] == ["workflows/probe-router.md"]
 
 
 def test_stage_diagnostics_exposes_conditional_authority_bucket_and_metrics(tmp_path: Path) -> None:

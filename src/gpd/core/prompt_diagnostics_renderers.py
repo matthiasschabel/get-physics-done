@@ -17,6 +17,9 @@ from gpd.core.prompt_exactness_diagnostics import (
 )
 from gpd.core.prompt_markdown_scan import top_limit as _top_limit
 from gpd.core.prompt_stage_diagnostics import (
+    repeated_prior_stage_residue_rows as _core_repeated_prior_stage_residue_rows,
+)
+from gpd.core.prompt_stage_diagnostics import (
     stage_authority_top_rows as _stage_authority_top_rows,
 )
 from gpd.core.prompt_stage_diagnostics import (
@@ -56,6 +59,12 @@ from gpd.core.prompt_surface_phase1_rendering import (
     phase1_table_sections as _phase1_table_sections,
 )
 from gpd.core.prompt_surface_phase1_rendering import (
+    prior_stage_residue_markdown as _prior_stage_residue_markdown,
+)
+from gpd.core.prompt_surface_phase1_rendering import (
+    prior_stage_residue_table_section as _prior_stage_residue_table_section,
+)
+from gpd.core.prompt_surface_phase1_rendering import (
     stage_mechanics_prose_rows as _stage_mechanics_prose_rows,
 )
 from gpd.core.prompt_surface_serialization import (
@@ -67,12 +76,18 @@ from gpd.core.prompt_surface_serialization import (
 from gpd.core.prompt_surface_serialization import (
     invalid_gpd_return_example_to_dict as _invalid_gpd_return_example_to_dict,
 )
-from gpd.core.prompt_surface_serialization import prompt_item_to_dict as _prompt_item_to_dict
+from gpd.core.prompt_surface_serialization import (
+    prompt_item_to_dict as _prompt_item_to_dict,
+)
 from gpd.core.prompt_surface_serialization import (
     return_field_mention_to_dict as _return_field_mention_to_dict,
 )
-from gpd.core.prompt_surface_serialization import runtime_top_prompt_rows as _runtime_top_prompt_rows
-from gpd.core.prompt_surface_serialization import runtime_top_prompts_to_dict as _runtime_top_prompts_to_dict
+from gpd.core.prompt_surface_serialization import (
+    runtime_top_prompt_rows as _runtime_top_prompt_rows,
+)
+from gpd.core.prompt_surface_serialization import (
+    runtime_top_prompts_to_dict as _runtime_top_prompts_to_dict,
+)
 
 
 def report_to_dict(report: PromptSurfaceReport, top: int | None = None) -> dict[str, object]:
@@ -82,6 +97,7 @@ def report_to_dict(report: PromptSurfaceReport, top: int | None = None) -> dict[
     semantic_example_limit = prompt_semantic_duplicate_diagnostics.semantic_example_limit(top)
     stage_authority_rows = _stage_authority_top_prompt_rows(report.stage_diagnostics, top)
     stage_init_field_rows = _stage_init_field_pressure_rows(report.stage_diagnostics, top)
+    repeated_residue_rows = _repeated_prior_stage_residue_rows(report.stage_diagnostics, top)
     stage_mechanics_rows = _stage_mechanics_prose_rows(report, top)
     manifest_duplicate_rows = _manifest_must_not_duplicate_rows(report, top)
     exactness = _bounded_exactness_diagnostics(report.exact_assertion_diagnostics, top)
@@ -98,6 +114,7 @@ def report_to_dict(report: PromptSurfaceReport, top: int | None = None) -> dict[
         "stage_authority_top": list(stage_authority_rows),
         "stage_init_field_diagnostics": list(stage_init_field_rows),
         "stage_field_payload_pressure": list(stage_init_field_rows),
+        "repeated_prior_stage_residue_rows": list(repeated_residue_rows),
         "stage_mechanics_prose_mentions": list(stage_mechanics_rows),
         "manifest_must_not_duplicate_entries": list(manifest_duplicate_rows),
         "invalid_gpd_return_examples": [
@@ -167,6 +184,28 @@ def _stage_init_field_pressure_rows(
     top: int | None,
 ) -> tuple[dict[str, object], ...]:
     return tuple(dict(row) for row in _stage_init_field_top_rows(stage_diagnostics, top))
+
+
+def _repeated_prior_stage_residue_rows(
+    stage_diagnostics: Sequence[StageAwareWorkflowPromptMetric],
+    top: int | None,
+) -> tuple[dict[str, object], ...]:
+    return tuple(
+        _qualified_repeated_residue_row(dict(row))
+        for row in _core_repeated_prior_stage_residue_rows(stage_diagnostics, top)
+    )
+
+
+def _qualified_repeated_residue_row(row: dict[str, object]) -> dict[str, object]:
+    workflows = row.get("workflows")
+    stages = row.get("stages")
+    if not isinstance(workflows, Sequence) or isinstance(workflows, (str, bytes, bytearray)) or len(workflows) != 1:
+        return row
+    if not isinstance(stages, Sequence) or isinstance(stages, (str, bytes, bytearray)):
+        return row
+    prefix = f"{workflows[0]}."
+    row["stages"] = [stage if (stage := str(value)).startswith(prefix) else f"{prefix}{stage}" for value in stages]
+    return row
 
 
 def _row_int(row: Mapping[str, object], *keys: str) -> int:
@@ -366,15 +405,19 @@ def render_prompt_surface_markdown(report: PromptSurfaceReport, top: int | None 
                 "",
                 "## Stage-Aware Staged Loading",
                 "",
-                "| Workflow | Stage | First-turn chars | Eager chars | Lazy chars | Violations |",
-                "|---|---|---:|---:|---:|---:|",
+                "| Workflow | Stage | First-turn chars | Eager chars | Lazy chars | Residue chars | Residue lines | Residue records | Violations |",
+                "|---|---|---:|---:|---:|---:|---:|---:|---:|",
             ]
         )
         for row in stage_top_prompts:
             lines.append(
                 f"| `{row['workflow_id']}` | `{row['stage_id']}` | {row['first_turn_char_count']} | "
-                f"{row['eager_char_count']} | {row['lazy_char_count']} | {row['violation_count']} |"
+                f"{row['eager_char_count']} | {row['lazy_char_count']} | "
+                f"{row['prior_stage_residue_char_count']} | {row['prior_stage_residue_line_count']} | "
+                f"{row['prior_stage_residue_count']} | {row['violation_count']} |"
             )
+
+    lines.extend(_prior_stage_residue_markdown(_repeated_prior_stage_residue_rows(report.stage_diagnostics, top)))
 
     stage_authority_rows = _stage_authority_top_prompt_rows(report.stage_diagnostics, top)
     if stage_authority_rows:
@@ -564,6 +607,9 @@ def render_prompt_surface_table(report: PromptSurfaceReport, top: int | None = N
             str(row["first_turn_char_count"]),
             str(row["eager_char_count"]),
             str(row["lazy_char_count"]),
+            str(row["prior_stage_residue_char_count"]),
+            str(row["prior_stage_residue_line_count"]),
+            str(row["prior_stage_residue_count"]),
             str(row["violation_count"]),
         )
         for row in _stage_top_prompt_rows(report.stage_diagnostics, top)
@@ -574,9 +620,13 @@ def render_prompt_surface_table(report: PromptSurfaceReport, top: int | None = N
         "first_turn_chars",
         "eager_chars",
         "lazy_chars",
+        "residue_chars",
+        "residue_lines",
+        "residue_records",
         "violations",
     )
     lines.extend(_fixed_table_section_lines("stage top prompts", stage_headers, stage_rows))
+    lines.extend(_prior_stage_residue_table_section(_repeated_prior_stage_residue_rows(report.stage_diagnostics, top)))
     authority_rows = [
         (
             _row_text(row, "workflow_id"),

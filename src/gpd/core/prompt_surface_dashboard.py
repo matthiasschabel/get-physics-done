@@ -7,6 +7,9 @@ from typing import TYPE_CHECKING, TypeVar, cast
 
 from gpd.core.prompt_markdown_scan import top_limit as _top_limit
 from gpd.core.stage_prompt_diagnostics import (
+    repeated_prior_stage_residue_rows as _repeated_prior_stage_residue_rows,
+)
+from gpd.core.stage_prompt_diagnostics import (
     stage_init_field_top_rows as _stage_init_field_top_rows,
 )
 from gpd.core.stage_prompt_diagnostics import (
@@ -63,6 +66,7 @@ def render_prompt_surface_dashboard(report: PromptSurfaceReport, top: int | None
     lines.extend(_stage_mechanics_prose_section(report, top))
     lines.extend(_top_stage_eager_loads_section(report, top))
     lines.extend(_prior_stage_residue_section(report, top))
+    lines.extend(_repeated_prior_stage_residue_section(report, top))
     lines.extend(_staged_init_pressure_section(report, top))
     lines.extend(_manifest_must_not_duplicate_section(report, top))
     lines.extend(_exactness_section(report, top))
@@ -273,6 +277,7 @@ def _top_stage_eager_loads_section(report: PromptSurfaceReport, top: int | None)
             _int(row, "first_turn_char_count"),
             _int(row, "first_turn_active_char_count"),
             _int(row, "prior_stage_residue_char_count"),
+            _int(row, "prior_stage_residue_line_count"),
             _int(row, "conditional_char_count"),
             _int(row, "lazy_char_count"),
             _int(row, "actionable_violation_count", "violation_count"),
@@ -297,6 +302,7 @@ def _top_stage_eager_loads_section(report: PromptSurfaceReport, top: int | None)
             "First-turn chars",
             "Active first-turn chars",
             "Residue chars",
+            "Residue lines",
             "Conditional chars",
             "Lazy chars",
             "Actionable violations",
@@ -367,6 +373,48 @@ def _prior_stage_residue_rows(
         key=lambda row: (-cast(int, row[4]), str(row[0]), str(row[1]), str(row[2])),
     )
     return tuple(_limit_rows(sorted_rows, top))
+
+
+def _repeated_prior_stage_residue_section(report: PromptSurfaceReport, top: int | None) -> list[str]:
+    rows = [
+        (
+            _text(row, "authority"),
+            _int(row, "occurrence_count"),
+            _int(row, "workflow_count"),
+            _int(row, "stage_count"),
+            _int(row, "expanded_char_count"),
+            _int(row, "expanded_line_count"),
+            _int(row, "first_turn_chain_count"),
+            _int(row, "transitive_include_count"),
+            _sequence_text(row, "workflows"),
+            _sequence_text(row, "stages"),
+            _sequence_text(row, "eager_via"),
+        )
+        for row in _repeated_prior_stage_residue_rows(report.stage_diagnostics, top)
+    ]
+    if not rows:
+        if not report.stage_diagnostics:
+            message = "Stage diagnostics not collected; repeated prior-stage residue not collected."
+        else:
+            message = "No prior-stage residue authorities found."
+        return _empty_section("Repeated prior-stage residue (Repeated Prior-Stage Residue)", message)
+    return _table(
+        "Repeated prior-stage residue (Repeated Prior-Stage Residue)",
+        (
+            "Authority",
+            "Occurrences",
+            "Workflow count",
+            "Stage count",
+            "Expanded chars",
+            "Expanded lines",
+            "First-turn chains",
+            "Transitive includes",
+            "Workflows",
+            "Stages",
+            "Eager via",
+        ),
+        rows,
+    )
 
 
 def _staged_init_pressure_section(report: PromptSurfaceReport, top: int | None) -> list[str]:
@@ -802,6 +850,7 @@ def _numeric_header(header: str) -> bool:
         "rigidity",
         "schemas",
         "selections",
+        "occurrences",
     )
     return any(term in lowered for term in numeric_terms)
 
@@ -848,6 +897,13 @@ def _maybe_text(row: Mapping[str, object], key: str) -> str:
     if value is None:
         return ""
     return str(value)
+
+
+def _sequence_text(row: Mapping[str, object], key: str) -> str:
+    value = row.get(key)
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
+        return "" if value is None else str(value)
+    return ", ".join(str(item) for item in value)
 
 
 def _object_get(value: object, key: str, default: object = None) -> object:

@@ -22,6 +22,7 @@ DASHBOARD_SECTION_LABELS = (
     "Stage loading totals",
     "Top stage eager loads",
     "Top prior-stage residue contributors",
+    "Repeated prior-stage residue",
     "Staged-init pressure by stage",
     "Top staged-init fields",
     "Exactness totals",
@@ -279,6 +280,35 @@ def _with_phase1_rendering_probe_data(report):
     )
 
 
+def _with_repeated_prior_stage_residue(report):
+    stage_diagnostics = tuple(report.stage_diagnostics)
+    assert stage_diagnostics
+    workflow = stage_diagnostics[0]
+    residue_stage = next(stage for stage in workflow.stages if stage.must_not_eager_load_prior_stage_residue_count)
+    repeated_stage = replace(residue_stage, stage_id="phase_followup", order=residue_stage.order + 1)
+    repeated_workflow = replace(
+        workflow,
+        stage_count=workflow.stage_count + 1,
+        stages=(*workflow.stages, repeated_stage),
+    )
+
+    totals = dict(report.totals)
+    stage_totals = dict(totals.get("stage_diagnostics", {}))
+    stage_totals["stage_count"] = stage_totals.get("stage_count", 0) + 1
+    stage_totals["prior_stage_residue_count"] = (
+        stage_totals.get("prior_stage_residue_count", 0) + repeated_stage.must_not_eager_load_prior_stage_residue_count
+    )
+    stage_totals["must_not_eager_load_prior_stage_residue_count"] = stage_totals["prior_stage_residue_count"]
+    stage_totals["prior_stage_residue_char_count"] = (
+        stage_totals.get("prior_stage_residue_char_count", 0) + repeated_stage.prior_stage_residue_char_count
+    )
+    stage_totals["prior_stage_residue_line_count"] = (
+        stage_totals.get("prior_stage_residue_line_count", 0) + repeated_stage.prior_stage_residue_line_count
+    )
+    totals["stage_diagnostics"] = stage_totals
+    return replace(report, totals=totals, stage_diagnostics=(repeated_workflow, *stage_diagnostics[1:]))
+
+
 def _section_text(output: str, section_label: str) -> str:
     folded_output = output.casefold()
     folded_section_label = section_label.casefold()
@@ -320,6 +350,7 @@ def test_dashboard_renders_required_phase0_sections(tmp_path: Path) -> None:
                 "hard_gate_line_count",
                 "must_not_eager_load_violation_count",
                 "prior_stage_residue_count",
+                "prior_stage_residue_line_count",
                 "field_name",
                 "field_pressure_class",
                 "files_scanned",
@@ -422,6 +453,7 @@ def test_dashboard_keeps_prior_stage_residue_distinct_from_eager_violations(tmp_
 
     dashboard = render_prompt_surface_dashboard(report, top=5)
     loading_section = _section_text(dashboard, "Stage loading totals")
+    eager_section = _section_text(dashboard, "Top stage eager loads")
     residue_section = _section_text(dashboard, "Top prior-stage residue contributors")
 
     assert_prompt_contracts(
@@ -432,9 +464,38 @@ def test_dashboard_keeps_prior_stage_residue_distinct_from_eager_violations(tmp_
         ),
     )
     assert_prompt_contracts(
+        eager_section,
+        machine_exact("top eager residue line labels", ("Residue chars", "Residue lines")),
+    )
+    assert_prompt_contracts(
         residue_section,
         machine_exact(
             "prior-stage residue row",
             ("phase_bootstrap", "workflows/probe-router.md", "prior_stage_residue"),
         ),
     )
+
+
+def test_dashboard_groups_repeated_prior_stage_residue_by_authority(tmp_path: Path) -> None:
+    _write_dashboard_probe_project(tmp_path)
+    report = _with_repeated_prior_stage_residue(_report(tmp_path, include_runtime_projections=False))
+
+    dashboard = render_prompt_surface_dashboard(report, top=5)
+    repeated_section = _section_text(dashboard, "Repeated prior-stage residue")
+
+    assert_prompt_contracts(
+        repeated_section,
+        machine_exact(
+            "repeated prior-stage residue row",
+            (
+                "Occurrences",
+                "Workflow count",
+                "Stage count",
+                "Expanded lines",
+                "workflows/probe-router.md",
+                "phase_bootstrap",
+                "phase_followup",
+            ),
+        ),
+    )
+    assert "| workflows/probe-router.md | 2 | 1 | 2 |" in repeated_section

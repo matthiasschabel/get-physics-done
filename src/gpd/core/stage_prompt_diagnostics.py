@@ -290,6 +290,77 @@ def stage_authority_top_rows(
     return tuple(sorted_rows[:limit])
 
 
+def repeated_prior_stage_residue_rows(
+    stage_diagnostics: Sequence[StageAwareWorkflowPromptMetric],
+    top: int | None,
+) -> tuple[dict[str, object], ...]:
+    totals_by_authority: dict[str, dict[str, int]] = {}
+    workflows_by_authority: dict[str, set[str]] = defaultdict(set)
+    stages_by_authority: dict[str, set[str]] = defaultdict(set)
+    eager_via_by_authority: dict[str, set[str]] = defaultdict(set)
+
+    for workflow in stage_diagnostics:
+        for stage in workflow.stages:
+            residue_violations = {
+                violation.authority: violation
+                for violation in stage.must_not_eager_load_violations
+                if violation.classification == "prior_stage_residue"
+            }
+            for metric in stage.authority_usage_metrics:
+                if metric.first_turn_role != "prior_stage_residue":
+                    continue
+                authority = metric.authority
+                totals = totals_by_authority.setdefault(
+                    authority,
+                    {
+                        "occurrence_count": 0,
+                        "expanded_char_count": 0,
+                        "expanded_line_count": 0,
+                        "first_turn_chain_count": 0,
+                        "transitive_include_count": 0,
+                    },
+                )
+                totals["occurrence_count"] += 1
+                totals["expanded_char_count"] += metric.expanded_char_count
+                totals["expanded_line_count"] += metric.expanded_line_count
+                totals["first_turn_chain_count"] += len(metric.first_turn_chains)
+                totals["transitive_include_count"] += len(metric.transitive_include_authorities)
+                workflows_by_authority[authority].add(workflow.workflow_id)
+                stages_by_authority[authority].add(f"{workflow.workflow_id}.{stage.stage_id}")
+
+                violation = residue_violations.get(authority)
+                eager_via = violation.eager_via if violation is not None else _authority_usage_eager_via(metric)
+                eager_via_by_authority[authority].update(eager_via)
+
+    rows = [
+        {
+            "authority": authority,
+            "occurrence_count": totals["occurrence_count"],
+            "workflow_count": len(workflows_by_authority[authority]),
+            "stage_count": len(stages_by_authority[authority]),
+            "expanded_char_count": totals["expanded_char_count"],
+            "expanded_line_count": totals["expanded_line_count"],
+            "first_turn_chain_count": totals["first_turn_chain_count"],
+            "transitive_include_count": totals["transitive_include_count"],
+            "workflows": sorted(workflows_by_authority[authority]),
+            "stages": sorted(stages_by_authority[authority]),
+            "eager_via": sorted(eager_via_by_authority[authority]),
+        }
+        for authority, totals in totals_by_authority.items()
+    ]
+    sorted_rows = sorted(
+        rows,
+        key=lambda row: (
+            -cast(int, row["occurrence_count"]),
+            -cast(int, row["expanded_char_count"]),
+            -cast(int, row["expanded_line_count"]),
+            cast(str, row["authority"]),
+        ),
+    )
+    limit = _top_limit(top)
+    return tuple(sorted_rows[:limit])
+
+
 def stage_init_field_top_rows(
     stage_diagnostics: Sequence[StageAwareWorkflowPromptMetric],
     top: int | None,

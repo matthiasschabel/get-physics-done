@@ -235,6 +235,65 @@ def exactness_migration_table_section(diagnostics: Mapping[str, object], top: in
     )
 
 
+def prior_stage_residue_markdown(rows: Sequence[Mapping[str, object]]) -> list[str]:
+    if not rows:
+        return []
+    lines = [
+        "",
+        "## Prior-Stage Residue Contributors",
+        "",
+        "| Authority | Occurrences | Workflows | Stages | Expanded chars | Expanded lines | First-turn chains | Transitive includes | Workflow IDs | Stage IDs | Eager via |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---|---|---|",
+    ]
+    for row in rows:
+        lines.append(
+            f"| `{_row_text(row, 'authority')}` | {_row_int(row, 'occurrence_count')} | "
+            f"{_row_int(row, 'workflow_count')} | {_row_int(row, 'stage_count')} | "
+            f"{_row_int(row, 'expanded_char_count')} | {_row_int(row, 'expanded_line_count')} | "
+            f"{_row_int(row, 'first_turn_chain_count')} | {_row_int(row, 'transitive_include_count')} | "
+            f"{_markdown_cell(_row_sequence_text(row, 'workflows'))} | "
+            f"{_markdown_cell(_row_sequence_text(row, 'stages'))} | "
+            f"{_markdown_cell(_row_sequence_text(row, 'eager_via'))} |"
+        )
+    return lines
+
+
+def prior_stage_residue_table_section(rows: Sequence[Mapping[str, object]]) -> list[str]:
+    table_rows = [
+        (
+            _row_text(row, "authority"),
+            str(_row_int(row, "occurrence_count")),
+            str(_row_int(row, "workflow_count")),
+            str(_row_int(row, "stage_count")),
+            str(_row_int(row, "expanded_char_count")),
+            str(_row_int(row, "expanded_line_count")),
+            str(_row_int(row, "first_turn_chain_count")),
+            str(_row_int(row, "transitive_include_count")),
+            _row_sequence_text(row, "workflows"),
+            _row_sequence_text(row, "stages"),
+            _row_sequence_text(row, "eager_via"),
+        )
+        for row in rows
+    ]
+    return _fixed_table_section_lines(
+        "prior-stage residue contributors",
+        (
+            "authority",
+            "occurrences",
+            "workflows",
+            "stages",
+            "expanded_chars",
+            "expanded_lines",
+            "first_turn_chains",
+            "transitive_includes",
+            "workflow_ids",
+            "stage_ids",
+            "eager_via",
+        ),
+        table_rows,
+    )
+
+
 def _review_contract_frontload_markdown(report: PromptSurfaceReport, top: int | None) -> list[str]:
     rows = review_contract_frontload_rows(report.items, top)
     if not rows:
@@ -386,6 +445,18 @@ def _row_text(row: Mapping[str, object], *keys: str) -> str:
         if value is not None:
             return str(value)
     return ""
+
+
+def _row_sequence_text(row: Mapping[str, object], key: str) -> str:
+    value = row.get(key)
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
+        return "" if value is None else str(value)
+    return ", ".join(
+        " > ".join(str(part) for part in item)
+        if isinstance(item, Sequence) and not isinstance(item, (str, bytes, bytearray))
+        else str(item)
+        for item in value
+    )
 
 
 def _mapping_get(row: Mapping[str, object], *keys: str) -> Mapping[str, object]:

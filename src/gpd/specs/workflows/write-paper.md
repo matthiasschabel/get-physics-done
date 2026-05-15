@@ -1033,6 +1033,52 @@ gpd --raw validate reproducibility-manifest "${PAPER_DIR}/reproducibility-manife
 If validation fails, stop and fix the manifest now. Do not enter `pre_submission_review` with a missing or non-review-ready reproducibility manifest, because strict review preflight will block on it.
 </step>
 
+<step name="critique_revision_loop">
+## Proactive Critique Loop ("Ralph loop")
+
+Run a bounded internal-critique loop BEFORE the staged peer-review panel to surface and fix improvable issues the section authors missed. Empirically this raises manuscript quality enough that downstream `pre_submission_review` spends its budget on substantive review rather than easy clean-up. The loop asks one question — **"How can we improve this paper?"** — and applies the concrete answers.
+
+**Distinguished from `paper_revision`:** that step is reactive (responds to an external referee report after `pre_submission_review`). This step is proactive (no external input, runs before the staged panel sees the draft).
+
+**Skip conditions** — do NOT run when any holds:
+
+- `research_mode=exploit` AND `autonomy=supervised` (already optimised for tight delivery; user is gating each step manually)
+- `paper_revision` has already run for this manuscript at the current round suffix (avoid double-critique of the same content)
+- Finalization budget is at risk for the required `pre_submission_review` panel — that gate is non-negotiable; the critique loop is not
+- `external_authoring_intake` lane (bounded intake exits earlier; if the user wants critique, they can route to standalone `gpd:peer-review`)
+
+When skipped, write a one-line note to `${PAPER_DIR}/CRITIQUE-LOG.md` recording the skip reason and proceed.
+
+**Iteration flow (max 2 passes):**
+
+1. **Spawn a critic.** Apply the canonical runtime delegation convention already loaded above.
+
+   ```
+   task(
+     subagent_type="gpd-review-significance",
+     model="{reviewer_model}",
+     readonly=false,
+     prompt="First, read {GPD_AGENTS_DIR}/gpd-review-significance.md for your role and instructions.\n\nYou are running a PROACTIVE critique pass before staged peer review. Read the current manuscript at ${manuscript_entrypoint} and the artifact manifest at ${artifact_manifest_path}.\n\n<autonomy_mode>{AUTONOMY}</autonomy_mode>\n<research_mode>{RESEARCH_MODE}</research_mode>\n\nAnswer ONE question: How can we improve this paper?\n\nOutput a JSON array of up to 8 items, each:\n  {\n    \"section\": \"<section name or `global`>\",\n    \"issue\": \"<one-sentence description of the weakness>\",\n    \"severity\": \"low\" | \"medium\" | \"high\",\n    \"suggested_change\": \"<concrete edit, not vague advice>\"\n  }\n\nRules:\n  - severity=high reserved for items that would draw a referee objection\n  - suggested_change MUST be actionable by a section-revision agent without further interpretation\n  - do NOT propose new computations or new figures here; flag them as `acknowledged` items the user must approve out of band\n  - return [] (empty array) if the manuscript has nothing material to improve at this gate",
+     description="Critique pass {iteration}"
+   )
+   ```
+
+2. **Filter to actionable items.** Keep only `severity in {medium, high}` AND `suggested_change` is a concrete edit (not a vague suggestion). If zero remain after filtering, the manuscript is converged for this gate — exit the loop, write the empty-pass record, and proceed to `pre_submission_review`.
+
+3. **Apply.** For each remaining item, spawn a `gpd-paper-writer` (`readonly=false`) targeted at the affected section with the `suggested_change` as the directive. Treat each application as a small, scoped revision — do NOT broaden the edit beyond the item.
+
+4. **Re-run minimal `consistency_check` over edited sections only.** Do not re-run the full audit; a section-local check is enough at this gate.
+
+5. **Repeat from step 1.** Stop when ANY holds:
+   - Two consecutive passes returned `[]` after filtering
+   - 2 passes have completed
+   - The critic returns an item with the same `(section, issue)` pair it returned in the previous pass (oscillation guard — the section author and critic disagree; surface to user instead of looping)
+
+**Transcript.** Append every pass to `${PAPER_DIR}/CRITIQUE-LOG.md` with timestamps, the raw critique JSON, the filtered actionable subset, and a note of which suggestions were applied vs. deferred. The log is consumed by `pre_submission_review` for traceability — referees can see the proactive pass already happened.
+
+**Failure handling.** If a critic spawn fails (`status: failed` or `status: blocked`), record the failure in `CRITIQUE-LOG.md` and proceed to `pre_submission_review` rather than blocking the pipeline. The proactive loop is best-effort; the staged panel remains the gate.
+</step>
+
 <step name="pre_submission_review">
 Branch by write-paper lane before finalizing:
 
@@ -1205,6 +1251,7 @@ Options:
 - [ ] Every citation present in bibliography
 - [ ] All citations verified via gpd-bibliographer (no hallucinated references)
 - [ ] BibTeX formatting matches target journal requirements
+- [ ] Proactive critique loop ran (or its skip condition was recorded in `${PAPER_DIR}/CRITIQUE-LOG.md`) before staged peer review
 - [ ] Project-backed lane: pre-submission staged peer-review round completed, including final `gpd-referee` adjudication and proof-redteam artifacts when required
 - [ ] External-authoring lane: authored manuscript plus manuscript-root artifacts exist under `GPD/publication/{subject_slug}/manuscript`, and the workflow routed to standalone `gpd:peer-review`
 - [ ] Major staged-review issues were addressed or acknowledged before finalization for project-backed runs

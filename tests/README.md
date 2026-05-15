@@ -36,7 +36,7 @@ It covers:
 - `src/gpd/agents/*.md`: `24`
 - `src/gpd/specs/workflows/*.md`: `72`
 - `src/gpd/specs/templates/**/*.md`: `81`
-- `src/gpd/specs/references/**/*.md`: `239`
+- `src/gpd/specs/references/**/*.md`: `240`
 - `src/gpd/adapters/*.py`: `15`
 - `src/gpd/hooks/*.py`: `11`
 - `src/gpd/mcp/*.py`: `5`

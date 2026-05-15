@@ -167,6 +167,7 @@ def test_write_paper_workflow_defers_stage_authorities_until_the_manifest_stages
             "templates/paper/referee-response.md",
         ),
         "advisory_paper_quality_scoring": ("references/publication/paper-quality-scoring.md",),
+        "proactive_critique_loop": ("references/publication/proactive-critique-loop.md",),
         "review_failure_or_round_state_debug": ("references/publication/peer-review-reliability.md",),
     }
     assert "references/publication/peer-review-panel.md" in publication_review.must_not_eager_load

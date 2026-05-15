@@ -488,6 +488,12 @@
           ]
         },
         {
+          "when": "proactive_critique_loop",
+          "authorities": [
+            "references/publication/proactive-critique-loop.md"
+          ]
+        },
+        {
           "when": "review_failure_or_round_state_debug",
           "authorities": [
             "references/publication/peer-review-reliability.md"
@@ -505,6 +511,7 @@
         "references/publication/peer-review-reliability.md",
         "references/publication/stage-recovery-gate.md",
         "references/publication/paper-quality-scoring.md",
+        "references/publication/proactive-critique-loop.md",
         "references/publication/publication-pipeline-modes.md",
         "references/shared/canonical-schema-discipline.md"
       ],

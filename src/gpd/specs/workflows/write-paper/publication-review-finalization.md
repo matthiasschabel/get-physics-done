@@ -39,6 +39,7 @@ Branch by write-paper lane before finalizing.
 `ARTIFACT-MANIFEST.json`. Use the peer-review stage manifest for panel
 execution, final adjudication, review-ledger/referee-decision schemas, and any
 proof-redteam gate. Do not inline those authorities here.
+Load `proactive_critique_loop` when budget allows; log run/skip/failure.
 
 This write-paper stage may read review-round artifacts after peer review returns.
 Load the conditional `response_pair_authoring` authorities only when paired

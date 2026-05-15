@@ -19,14 +19,18 @@ Do not load this index as a stage authority.
   Notation, placeholders, bibliography verification, bibliography audit refresh,
   and reproducibility manifest.
 - `publication_review` -> `workflows/write-paper/publication-review-finalization.md`
-  Project-backed staged peer-review handoff, external-authoring review routing,
-  final review, and in-workflow revision/response artifacts. Response routing
-  uses `templates/paper/author-response.md` and can classify `needs-calculation`.
+  Proactive critique, project-backed staged peer-review handoff,
+  external-authoring review routing, final review, and in-workflow
+  revision/response artifacts. Response routing uses
+  `templates/paper/author-response.md` and can classify `needs-calculation`.
 </stage_authorities>
 
 <stage_loading_rule>
-The public command includes only `workflows/write-paper/paper-bootstrap.md`; later stage loading is manifest-owned, and each active payload supplies `staged_loading.field_access_instruction`.
-Keep downstream authoring, bibliography, referee, review-panel, and response-routing authorities lazy until their matching stage.
+The public command includes only `workflows/write-paper/paper-bootstrap.md`;
+later stage loading is manifest-owned, and each active payload supplies
+`staged_loading.field_access_instruction`.
+Keep downstream authoring, bibliography, critique, referee, review-panel, and
+response-routing authorities lazy until their matching stage.
 </stage_loading_rule>
 
 <canonical_references>

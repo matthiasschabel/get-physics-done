@@ -51,6 +51,7 @@ WRITE_PAPER_PUBLICATION_REVIEW_CONDITIONALS = {
         }
     ),
     "advisory_paper_quality_scoring": frozenset({"references/publication/paper-quality-scoring.md"}),
+    "proactive_critique_loop": frozenset({"references/publication/proactive-critique-loop.md"}),
     "review_failure_or_round_state_debug": frozenset({"references/publication/peer-review-reliability.md"}),
 }
 PEER_REVIEW_PANEL_REQUIRED_EAGER = frozenset(

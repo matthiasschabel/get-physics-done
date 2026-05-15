@@ -30,6 +30,7 @@ NON_EAGER_AUTHORITIES = {
     "references/publication/peer-review-panel.md",
     "references/publication/peer-review-reliability.md",
     "references/publication/paper-quality-scoring.md",
+    "references/publication/proactive-critique-loop.md",
     "templates/paper/review-ledger-schema.md",
     "templates/paper/referee-decision-schema.md",
 }
@@ -55,6 +56,9 @@ def test_publication_review_stage_is_a_compact_router_not_a_panel_owner() -> Non
     assert conditional["response_pair_authoring"] == RESPONSE_PAIR_AUTHORITIES
     assert conditional["advisory_paper_quality_scoring"] == (
         "references/publication/paper-quality-scoring.md",
+    )
+    assert conditional["proactive_critique_loop"] == (
+        "references/publication/proactive-critique-loop.md",
     )
     assert conditional["review_failure_or_round_state_debug"] == (
         "references/publication/peer-review-reliability.md",

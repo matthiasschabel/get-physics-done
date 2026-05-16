@@ -144,6 +144,7 @@ _EXECUTOR_FAILURE_ROUTE: tuple[tuple[str, str], ...] = (
     ("return_missing", "repair_prompt_once"),
     ("return_malformed_repairable", "repair_prompt_once"),
     ("return_malformed_blocking", "wave_failure_menu"),
+    ("return_status_route", "status_route"),
     ("artifact_missing", "retry_once_or_main_context_fallback"),
     ("artifact_stale", "retry_once"),
     ("artifact_path_repairable", "repair_path_once"),
@@ -156,6 +157,7 @@ _PROOF_CRITIC_FAILURE_ROUTE: tuple[tuple[str, str], ...] = (
     ("return_missing", "repair_prompt_once"),
     ("return_malformed_repairable", "repair_prompt_once"),
     ("return_malformed_blocking", "wave_failure_menu"),
+    ("return_status_route", "status_route"),
     ("artifact_missing", "retry_once_then_wave_failure_menu"),
     ("artifact_stale", "retry_once_then_wave_failure_menu"),
     ("artifact_path_repairable", "repair_path_once"),
@@ -228,8 +230,7 @@ CHILD_GATE_PROFILES: dict[str, ChildGateProfile] = {
         ),
         applicator_command="none; closeout/update_roadmap is allowed only after verifier and consistency gates pass",
         failure_route=(
-            "fail_closed -> gpd:verify-work {PHASE_NUMBER} | repair_prompt_once | "
-            "retry_once_then_gpd_verify_work"
+            "fail_closed -> gpd:verify-work {PHASE_NUMBER} | repair_prompt_once | retry_once_then_gpd_verify_work"
         ),
     ),
     "execute.gap_reverification_report.v1": ChildGateProfile(
@@ -252,8 +253,7 @@ CHILD_GATE_PROFILES: dict[str, ChildGateProfile] = {
             "none; closeout/update_roadmap is allowed only after re-verifier and consistency gates pass"
         ),
         failure_route=(
-            "fail_closed -> gpd:verify-work {PHASE_NUMBER} | repair_prompt_once | "
-            "retry_once_then_verify_work"
+            "fail_closed -> gpd:verify-work {PHASE_NUMBER} | repair_prompt_once | retry_once_then_verify_work"
         ),
     ),
     "execute.consistency_report.v1": ChildGateProfile(
@@ -267,17 +267,14 @@ CHILD_GATE_PROFILES: dict[str, ChildGateProfile] = {
         return_profile="checker",
         required_status="completed",
         validators=(
-            "gpd validate handoff-artifacts - --expected $ARTIFACT --allowed-root $ALLOWED_ROOT --required-suffix=CONSISTENCY-CHECK.md --require-status completed --require-files-written --fresh-after \"$FRESHNESS_MARKER\"",
+            'gpd validate handoff-artifacts - --expected $ARTIFACT --allowed-root $ALLOWED_ROOT --required-suffix=CONSISTENCY-CHECK.md --require-status completed --require-files-written --fresh-after "$FRESHNESS_MARKER"',
             "readable artifact check",
         ),
         failure_route="fail_closed -> gpd:validate-conventions | repair_prompt_once | retry_once",
     ),
 }
 
-_PROFILE_ALIASES: dict[str, str] = {
-    _profile_key(profile_id): profile_id
-    for profile_id in CHILD_GATE_PROFILES
-}
+_PROFILE_ALIASES: dict[str, str] = {_profile_key(profile_id): profile_id for profile_id in CHILD_GATE_PROFILES}
 for _profile in CHILD_GATE_PROFILES.values():
     for _alias in _profile.aliases:
         _PROFILE_ALIASES[_profile_key(_alias)] = _profile.profile_id
@@ -299,8 +296,7 @@ def list_child_gate_profiles() -> dict[str, object]:
 
     return {
         "profiles": {
-            profile_id: profile.registry_payload()
-            for profile_id, profile in sorted(CHILD_GATE_PROFILES.items())
+            profile_id: profile.registry_payload() for profile_id, profile in sorted(CHILD_GATE_PROFILES.items())
         },
         "aliases": {
             alias: profile_id
@@ -425,11 +421,7 @@ def _merge_overrides(payload: Mapping[str, object]) -> dict[str, object]:
 
 
 def _profile_artifact_path(payload: Mapping[str, object], profile: ChildGateProfile) -> str:
-    artifact_sources = [
-        key
-        for key in ("artifact", "artifact_path", "expected_artifacts")
-        if key in payload
-    ]
+    artifact_sources = [key for key in ("artifact", "artifact_path", "expected_artifacts") if key in payload]
     if not artifact_sources:
         raise ValueError("child_gate profile payload requires artifact or expected_artifacts")
     if len(artifact_sources) > 1:
@@ -545,15 +537,11 @@ def _validate_profile_owned_passthrough(
     if "return_profile" in payload:
         normalized = normalize_return_profile_id(payload["return_profile"])
         if normalized != profile.return_profile:
-            raise ValueError(
-                f"profile {profile.profile_id!r} requires return_profile {profile.return_profile!r}"
-            )
+            raise ValueError(f"profile {profile.profile_id!r} requires return_profile {profile.return_profile!r}")
     if "required_status" in payload:
         normalized = normalize_return_status(payload["required_status"], field_name="required_status")
         if normalized != profile.required_status:
-            raise ValueError(
-                f"profile {profile.profile_id!r} requires required_status {profile.required_status!r}"
-            )
+            raise ValueError(f"profile {profile.profile_id!r} requires required_status {profile.required_status!r}")
     _require_optional_text_sequence(payload, "validators", expanded["validators"])
     if "applicator" in payload:
         _require_applicator(payload["applicator"], expanded["applicator"], profile)
@@ -642,8 +630,7 @@ def _render_template(
 
 def _normalize_text_sequence(value: object, *, field_name: str) -> tuple[str, ...]:
     return tuple(
-        _normalize_text(item, field_name=field_name)
-        for item in _normalize_sequence(value, field_name=field_name)
+        _normalize_text(item, field_name=field_name) for item in _normalize_sequence(value, field_name=field_name)
     )
 
 

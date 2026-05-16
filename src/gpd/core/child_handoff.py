@@ -350,6 +350,7 @@ _DEFAULT_FAILURE_ROUTE: dict[HandoffFailureClass, str] = {
     HandoffFailureClass.RETURN_MISSING: "retry_once",
     HandoffFailureClass.RETURN_MALFORMED_REPAIRABLE: "repair_prompt_once",
     HandoffFailureClass.RETURN_MALFORMED_BLOCKING: "fail_closed",
+    HandoffFailureClass.RETURN_STATUS_ROUTE: "route_by_status",
     HandoffFailureClass.ARTIFACT_MISSING: "retry_once_or_main_context_fallback",
     HandoffFailureClass.ARTIFACT_STALE: "retry_once",
     HandoffFailureClass.ARTIFACT_PATH_REPAIRABLE: "repair_path_once",

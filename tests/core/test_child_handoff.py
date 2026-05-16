@@ -58,6 +58,7 @@ def _gate(
             "return_missing": "retry_once",
             "return_malformed_repairable": "repair_prompt_once",
             "return_malformed_blocking": "fail_closed",
+            "return_status_route": "route_by_status",
             "artifact_missing": "retry_once",
             "artifact_stale": "retry_once",
             "artifact_path_repairable": "repair_path_once",

@@ -69,7 +69,7 @@ STRUCTURED_AUTHORITY_CLASSES: tuple[str, ...] = (
     "prompt_diagnostics",
 )
 
-_SCHEMA_NONE_CLASSES = frozenset({"valid", "valid_non_completed"})
+_SCHEMA_NONE_CLASSES = frozenset({"valid", "valid_non_completed", "required_status_mismatch", "return_status_route"})
 _SCHEMA_MINOR_CLASSES = frozenset(
     {
         "return_missing",

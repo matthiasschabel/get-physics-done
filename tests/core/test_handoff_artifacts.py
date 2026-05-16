@@ -296,8 +296,8 @@ def test_handoff_artifact_validator_require_completed_rejects_non_completed_stat
         assert result.passed is False
         assert result.mutates is False
         assert result.status == status
-        assert result.primary_failure_class == HandoffFailureClass.RETURN_MALFORMED_BLOCKING
-        assert result.failure_classes == [HandoffFailureClass.RETURN_MALFORMED_BLOCKING]
+        assert result.primary_failure_class == HandoffFailureClass.RETURN_STATUS_ROUTE
+        assert result.failure_classes == [HandoffFailureClass.RETURN_STATUS_ROUTE]
         assert result.failures[0].code == "required_status_mismatch"
         assert f"gpd_return.status must be 'completed' for this artifact gate, got '{status}'" in result.errors
 
@@ -522,8 +522,8 @@ def test_validate_handoff_artifacts_cli_require_status_completed_rejects_checkpo
     assert payload["passed"] is False
     assert payload["mutated"] is False
     assert payload["mutates"] is False
-    assert payload["primary_failure_class"] == "return_malformed_blocking"
-    assert payload["failure_classes"] == ["return_malformed_blocking"]
+    assert payload["primary_failure_class"] == "return_status_route"
+    assert payload["failure_classes"] == ["return_status_route"]
     assert payload["failures"][0]["code"] == "required_status_mismatch"
     assert payload["status"] == "checkpoint"
     assert "gpd_return.status must be 'completed' for this artifact gate, got 'checkpoint'" in payload["errors"]

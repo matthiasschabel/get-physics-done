@@ -24,6 +24,7 @@ class HandoffFailureClass(StrEnum):
     RETURN_MISSING = "return_missing"
     RETURN_MALFORMED_REPAIRABLE = "return_malformed_repairable"
     RETURN_MALFORMED_BLOCKING = "return_malformed_blocking"
+    RETURN_STATUS_ROUTE = "return_status_route"
     ARTIFACT_MISSING = "artifact_missing"
     ARTIFACT_STALE = "artifact_stale"
     ARTIFACT_PATH_REPAIRABLE = "artifact_path_repairable"
@@ -137,7 +138,7 @@ def validate_handoff_artifacts_markdown(
         errors.append(message)
         failures.append(
             _failure(
-                HandoffFailureClass.RETURN_MALFORMED_BLOCKING,
+                HandoffFailureClass.RETURN_STATUS_ROUTE,
                 "required_status_mismatch",
                 message,
                 repairable=False,
@@ -518,6 +519,7 @@ _HANDOFF_RETURN_CODE_BY_REPAIR_CLASS: dict[ReturnRepairClass, str] = {
     "applicator_owned_metadata": "applicator_owned_metadata",
     "continuation_schema_error": "invalid_continuation_update",
     "valid_non_completed": "required_status_mismatch",
+    "required_status_mismatch": "required_status_mismatch",
     "ambiguous_multiple_returns": "ambiguous_multiple_returns",
 }
 

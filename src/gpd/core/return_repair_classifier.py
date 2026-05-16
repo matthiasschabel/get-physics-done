@@ -44,6 +44,7 @@ ReturnRepairClass = Literal[
     "applicator_owned_metadata",
     "continuation_schema_error",
     "valid_non_completed",
+    "required_status_mismatch",
     "ambiguous_multiple_returns",
 ]
 
@@ -59,6 +60,7 @@ ReturnRepairFailureClass = Literal[
     "return_missing",
     "return_malformed_repairable",
     "return_malformed_blocking",
+    "return_status_route",
 ]
 
 ReturnRepairConfidence = Literal["high", "medium", "low"]
@@ -140,6 +142,7 @@ RETURN_REPAIR_HINTS: Mapping[ReturnRepairClass, str] = {
     "applicator_owned_metadata": "Stop and surface the applicator-owned metadata; the applicator must supply it.",
     "continuation_schema_error": "Stop and surface the continuation schema error before any durable application.",
     "valid_non_completed": "Route by the typed non-completed status instead of treating it as a malformed return.",
+    "required_status_mismatch": "Route by the typed status instead of treating the valid return as malformed.",
     "ambiguous_multiple_returns": "Retry with exactly one canonical gpd_return block.",
 }
 
@@ -173,7 +176,8 @@ _RETURN_FAILURE_CLASS_BY_REPAIR_CLASS: Mapping[str, ReturnRepairFailureClass] = 
     "transport_payload_in_return": "return_malformed_blocking",
     "applicator_owned_metadata": "return_malformed_blocking",
     "continuation_schema_error": "return_malformed_blocking",
-    "valid_non_completed": "return_malformed_blocking",
+    "valid_non_completed": "return_status_route",
+    "required_status_mismatch": "return_status_route",
     "ambiguous_multiple_returns": "return_malformed_blocking",
 }
 
@@ -225,7 +229,7 @@ def classify_gpd_return_repair(
             )
 
         return _classification(
-            "valid_non_completed",
+            "required_status_mismatch",
             valid=True,
             accepted_for_success=False,
             original_errors=original_errors,
@@ -390,7 +394,7 @@ def _is_continuation_schema_error(error_text: str) -> bool:
 def _recovery_route(primary_class: ReturnRepairClass) -> ReturnRepairRecoveryRoute:
     if primary_class == "valid":
         return "accept"
-    if primary_class == "valid_non_completed":
+    if primary_class in {"valid_non_completed", "required_status_mismatch"}:
         return "route_by_status"
     if primary_class in {
         "status_field_forbidden",

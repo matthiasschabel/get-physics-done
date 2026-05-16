@@ -246,9 +246,10 @@ def test_classifies_valid_non_completed_return_without_treating_it_as_malformed(
 
     assert result.valid is True
     assert result.accepted_for_success is False
-    assert result.primary_class == "valid_non_completed"
+    assert result.primary_class == "required_status_mismatch"
     assert result.recovery_route == "route_by_status"
     assert result.status == "checkpoint"
+    assert return_failure_class_from_repair_class(result.primary_class) == "return_status_route"
     assert result.original_errors == []
     assert result.safe_to_apply is False
     assert result.mutated is False

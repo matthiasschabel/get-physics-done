@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import pytest
 
-from gpd.adapters.install_utils import hook_python_interpreter
+from gpd.adapters.install_utils import build_runtime_managed_mcp_servers, runtime_managed_mcp_server_keys
 from gpd.core.public_surface_contract import local_cli_bridge_commands
 from gpd.mcp.builtin_servers import GPD_MCP_SERVER_KEYS
 
@@ -138,32 +138,21 @@ def test_write_mcp_servers_opencode_fails_closed_for_non_dict_mcp_key(tmp_path: 
     assert (config_dir / "opencode.json").read_text(encoding="utf-8") == before
 
 
-@pytest.mark.parametrize(
-    ("module_name", "helper_name"),
-    [
-        ("gpd.adapters.codex", "_build_managed_optional_mcp_servers"),
-        ("gpd.adapters.claude_code", "_build_managed_optional_mcp_servers"),
-        ("gpd.adapters.gemini", "_project_managed_mcp_servers"),
-        ("gpd.adapters.opencode", "_project_managed_mcp_servers"),
-    ],
-)
-def test_managed_wolfram_projection_helpers_hide_api_key_and_preserve_endpoint(
-    module_name: str,
-    helper_name: str,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    module = importlib.import_module(module_name)
-    helper = getattr(module, helper_name)
+def test_runtime_managed_mcp_projection_helper_hides_api_key_and_preserves_endpoint() -> None:
+    env = {
+        "GPD_WOLFRAM_MCP_API_KEY": "super-secret-token",
+        "GPD_WOLFRAM_MCP_ENDPOINT": "https://example.invalid/api/mcp",
+    }
 
-    monkeypatch.setenv("GPD_WOLFRAM_MCP_API_KEY", "super-secret-token")
-    monkeypatch.setenv("GPD_WOLFRAM_MCP_ENDPOINT", "https://example.invalid/api/mcp")
-    monkeypatch.setenv("GPD_PYTHON", "/tmp/gpd-managed-python")
-
-    servers = helper()
+    servers = build_runtime_managed_mcp_servers(
+        env=env,
+        python_path="/tmp/gpd-managed-python",
+        include_builtin=False,
+    )
     wolfram = servers["gpd-wolfram"]
     payload = json.dumps(wolfram)
 
-    assert wolfram["command"] == hook_python_interpreter()
+    assert wolfram["command"] == "/tmp/gpd-managed-python"
     assert wolfram["args"] == ["-m", "gpd.mcp.integrations.wolfram_bridge"]
     assert "super-secret-token" not in payload
     assert "GPD_WOLFRAM_MCP_API_KEY" not in payload
@@ -171,39 +160,17 @@ def test_managed_wolfram_projection_helpers_hide_api_key_and_preserve_endpoint(
 
 
 @pytest.mark.parametrize(
-    ("module_name", "helper_name", "expected_keys"),
+    ("include_builtin", "expected_keys"),
     [
-        (
-            "gpd.adapters.codex",
-            "_managed_optional_mcp_server_keys",
-            frozenset({"gpd-wolfram"}),
-        ),
-        (
-            "gpd.adapters.claude_code",
-            "_managed_mcp_server_keys",
-            frozenset({*GPD_MCP_SERVER_KEYS, "gpd-wolfram"}),
-        ),
-        (
-            "gpd.adapters.gemini",
-            "_managed_mcp_server_keys",
-            frozenset({*GPD_MCP_SERVER_KEYS, "gpd-wolfram"}),
-        ),
-        (
-            "gpd.adapters.opencode",
-            "_managed_mcp_server_keys",
-            frozenset({*GPD_MCP_SERVER_KEYS, "gpd-wolfram"}),
-        ),
+        (False, frozenset({"gpd-wolfram"})),
+        (True, frozenset({*GPD_MCP_SERVER_KEYS, "gpd-wolfram"})),
     ],
 )
-def test_managed_mcp_key_helpers_include_registry_backed_optional_keys(
-    module_name: str,
-    helper_name: str,
+def test_runtime_managed_mcp_key_helper_includes_registry_backed_optional_keys(
+    include_builtin: bool,
     expected_keys: frozenset[str],
 ) -> None:
-    module = importlib.import_module(module_name)
-    helper = getattr(module, helper_name)
-
-    keys = helper()
+    keys = runtime_managed_mcp_server_keys(include_builtin=include_builtin)
 
     assert keys == expected_keys
 

@@ -20,7 +20,12 @@ from gpd._python_compat import (
     PREFERRED_VERSIONED_PYTHON_MINORS,
     RECOMMENDED_PYTHON_VERSION,
 )
-from gpd.adapters.runtime_catalog import GlobalConfigPolicy, RuntimeDescriptor, iter_runtime_descriptors
+from gpd.adapters.runtime_catalog import (
+    GlobalConfigPolicy,
+    RuntimeDescriptor,
+    get_shared_install_metadata,
+    iter_runtime_descriptors,
+)
 from gpd.core.public_surface_contract import PublicSurfaceContract, load_public_surface_contract
 from scripts.generated_region_support import GeneratedRegionDiff, unified_diff_text, write_stale_check_result
 
@@ -79,6 +84,18 @@ def _runtime_payload(descriptor: RuntimeDescriptor) -> dict[str, object]:
         "public_command_surface_prefix": descriptor.public_command_surface_prefix,
         "installer_help_example_scope": descriptor.installer_help_example_scope,
         "global_config": _global_config_payload(descriptor.global_config),
+    }
+
+
+def _shared_install_metadata_payload() -> dict[str, object]:
+    metadata = get_shared_install_metadata()
+    return {
+        "schemaVersion": 1,
+        "bootstrapPackageName": metadata.bootstrap_package_name,
+        "bootstrapCommand": metadata.bootstrap_command,
+        "installRootDirName": metadata.install_root_dir_name,
+        "manifestName": metadata.manifest_name,
+        "patchesDirName": metadata.patches_dir_name,
     }
 
 
@@ -143,6 +160,7 @@ def build_installer_metadata(*, repo_root: Path = REPO_ROOT) -> dict[str, object
         "source_hashes": _source_hashes(repo_root=repo_root),
         "python_compatibility": _python_compatibility_payload(),
         "runtimes": [_runtime_payload(descriptor) for descriptor in iter_runtime_descriptors()],
+        "shared_install_metadata": _shared_install_metadata_payload(),
         "shared_public_surface_text": _shared_public_surface_text(load_public_surface_contract()),
     }
 

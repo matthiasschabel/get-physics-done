@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from typing import cast
 
 import pytest
 
 from gpd.core.workflow_manifest_compaction import canonicalize_workflow_stage_manifest_payload
-from gpd.core.workflow_staging import validate_workflow_stage_manifest_payload
+from gpd.core.workflow_staging import (
+    staged_loading_payload_contract_keys,
+    staged_protocol_bundle_required_init_fields,
+    validate_workflow_stage_manifest_payload,
+)
 
 _KNOWN_INIT_FIELDS = {
     "autonomy",
@@ -189,18 +194,47 @@ def test_compact_manifest_keys_do_not_reach_runtime_payloads() -> None:
     manifest = _validate(_compact_payload())
     manifest_payload = manifest.to_payload()
     staged_loading = manifest.staged_loading_payload("reference_context")
+    required_keys, optional_keys = staged_loading_payload_contract_keys(manifest)
+    optional_payload = _explicit_payload()
+    optional_stages = cast("list[dict[str, object]]", optional_payload["stages"])
+    init_spec_key = "init_spec_id"
+    optional_stages[0][init_spec_key] = "quick.task_bootstrap.v1"
+    optional_required_keys, optional_stage_keys = staged_loading_payload_contract_keys(_validate(optional_payload))
 
     assert not (_COMPACT_ONLY_TOP_LEVEL_KEYS & set(manifest_payload))
     for stage_payload in manifest_payload["stages"]:
         assert not (_COMPACT_ONLY_STAGE_KEYS & set(stage_payload))
     assert not (_COMPACT_ONLY_TOP_LEVEL_KEYS & set(staged_loading))
     assert not (_COMPACT_ONLY_STAGE_KEYS & set(staged_loading))
-    assert staged_loading["required_init_fields"] == [
-        "selected_protocol_bundle_ids",
-        "protocol_bundle_count",
-        "protocol_bundle_load_manifest",
-        "protocol_bundle_context",
-    ]
+    assert (
+        staged_loading["required_init_fields"],
+        required_keys,
+        optional_keys,
+        bool(_COMPACT_ONLY_STAGE_KEYS & set(required_keys)),
+        bool(_COMPACT_ONLY_TOP_LEVEL_KEYS & set(required_keys)),
+        staged_protocol_bundle_required_init_fields(manifest),
+        init_spec_key in optional_required_keys,
+        optional_stage_keys,
+    ) == (
+        [
+            "selected_protocol_bundle_ids",
+            "protocol_bundle_count",
+            "protocol_bundle_load_manifest",
+            "protocol_bundle_context",
+        ],
+        tuple(manifest.staged_loading_payload("task_bootstrap")),
+        (),
+        False,
+        False,
+        (
+            "selected_protocol_bundle_ids",
+            "protocol_bundle_count",
+            "protocol_bundle_load_manifest",
+            "protocol_bundle_context",
+        ),
+        False,
+        ("init_spec_id",),
+    )
 
 
 @pytest.mark.parametrize(

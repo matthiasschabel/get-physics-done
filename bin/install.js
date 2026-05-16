@@ -2,14 +2,7 @@
 /**
  * GPD bootstrap installer — installs or uninstalls Get Physics Done.
  *
- * Usage:
- *   npx -y get-physics-done
- *   npx -y get-physics-done --<runtime-flag> --global
- *   npx -y get-physics-done --<runtime-flag> --local
- *   npx -y get-physics-done --all --global
- *   npx -y get-physics-done --uninstall
- *   npx -y get-physics-done --uninstall --<runtime-flag> --global
- *   npx -y get-physics-done uninstall --all --local
+ * Run with --help to see usage rendered from generated installer metadata.
  */
 
 const fs = require("fs");
@@ -120,6 +113,7 @@ function runtimeInstallerHelpExampleScope(runtime) {
 const RUNTIME_ID_RE = /^[a-z0-9][a-z0-9-]*$/;
 const RUNTIME_FLAG_RE = /^--[a-z0-9][a-z0-9-]*$/;
 const RUNTIME_ENV_VAR_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const BOOTSTRAP_PACKAGE_NAME_RE = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/;
 
 function requireJsonObject(payload, label) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
@@ -609,6 +603,53 @@ function validateRuntimeMetadataList(runtimes) {
   return entries;
 }
 
+function validateSharedInstallMetadata(installMetadata) {
+  const label = "bootstrap installer metadata.shared_install_metadata";
+  const keys = [
+    "schemaVersion",
+    "bootstrapPackageName",
+    "bootstrapCommand",
+    "installRootDirName",
+    "manifestName",
+    "patchesDirName",
+  ];
+  const payload = requireJsonObject(installMetadata, label);
+  requireKnownKeys(payload, new Set(keys), label);
+  requirePresentKeys(payload, keys, label);
+  if (payload.schemaVersion !== 1) {
+    throw new Error(
+      `Unsupported bootstrap shared install metadata schemaVersion: ${JSON.stringify(payload.schemaVersion)}`
+    );
+  }
+
+  const bootstrapPackageName = requireStrictPatternString(
+    payload.bootstrapPackageName,
+    `${label}.bootstrapPackageName`,
+    BOOTSTRAP_PACKAGE_NAME_RE,
+    "a lowercase npm package name"
+  );
+  const bootstrapCommand = requireStrictString(payload.bootstrapCommand, `${label}.bootstrapCommand`);
+  const expectedBootstrapCommand = `npx -y ${bootstrapPackageName}`;
+  if (bootstrapCommand !== expectedBootstrapCommand) {
+    throw new Error(`${label}.bootstrapCommand must be ${JSON.stringify(expectedBootstrapCommand)}`);
+  }
+
+  return {
+    schemaVersion: 1,
+    bootstrapPackageName,
+    bootstrapCommand,
+    installRootDirName: requireRelativeCatalogPath(payload.installRootDirName, `${label}.installRootDirName`, {
+      allowSlash: false,
+    }),
+    manifestName: requireRelativeCatalogPath(payload.manifestName, `${label}.manifestName`, {
+      allowSlash: false,
+    }),
+    patchesDirName: requireRelativeCatalogPath(payload.patchesDirName, `${label}.patchesDirName`, {
+      allowSlash: false,
+    }),
+  };
+}
+
 function validateSharedPublicSurfaceTextMetadata(publicSurfaceText) {
   const sharedPublicSurfaceTextLabel = "bootstrap installer metadata.shared_public_surface_text";
   const sharedPublicSurfaceTextKeys = [
@@ -772,12 +813,26 @@ function validateBootstrapInstallerMetadata(metadataPayload, options = {}) {
   const payload = requireJsonObject(metadataPayload, "bootstrap installer metadata");
   requireKnownKeys(
     payload,
-    new Set(["schema_version", "source_hashes", "python_compatibility", "runtimes", "shared_public_surface_text"]),
+    new Set([
+      "schema_version",
+      "source_hashes",
+      "python_compatibility",
+      "runtimes",
+      "shared_install_metadata",
+      "shared_public_surface_text",
+    ]),
     "bootstrap installer metadata"
   );
   requirePresentKeys(
     payload,
-    ["schema_version", "source_hashes", "python_compatibility", "runtimes", "shared_public_surface_text"],
+    [
+      "schema_version",
+      "source_hashes",
+      "python_compatibility",
+      "runtimes",
+      "shared_install_metadata",
+      "shared_public_surface_text",
+    ],
     "bootstrap installer metadata"
   );
   if (payload.schema_version !== 1) {
@@ -789,6 +844,7 @@ function validateBootstrapInstallerMetadata(metadataPayload, options = {}) {
     sourceHashes: validateSourceHashes(payload.source_hashes, options),
     pythonCompatibility: validatePythonCompatibilityMetadata(payload.python_compatibility),
     runtimes: validateRuntimeMetadataList(payload.runtimes),
+    sharedInstallMetadata: validateSharedInstallMetadata(payload.shared_install_metadata),
     sharedPublicSurfaceText: validateSharedPublicSurfaceTextMetadata(payload.shared_public_surface_text),
   };
 }
@@ -810,10 +866,19 @@ const PREFERRED_VERSIONED_PYTHON_MINORS = PYTHON_COMPATIBILITY.preferredVersione
 RUNTIME_CATALOG = BOOTSTRAP_INSTALLER_METADATA.runtimes;
 ALL_RUNTIMES = RUNTIME_CATALOG.map((runtime) => runtime.runtime_name);
 RUNTIME_BY_NAME = Object.fromEntries(RUNTIME_CATALOG.map((runtime) => [runtime.runtime_name, runtime]));
+const SHARED_INSTALL_METADATA = BOOTSTRAP_INSTALLER_METADATA.sharedInstallMetadata;
 const SHARED_PUBLIC_SURFACE_TEXT = BOOTSTRAP_INSTALLER_METADATA.sharedPublicSurfaceText;
+
+function loadSharedInstallMetadata() {
+  return cloneJson(SHARED_INSTALL_METADATA);
+}
 
 function loadSharedPublicSurfaceText() {
   return cloneJson(SHARED_PUBLIC_SURFACE_TEXT);
+}
+
+function sharedBootstrapCommand() {
+  return SHARED_INSTALL_METADATA.bootstrapCommand;
 }
 
 function beginnerStartupLadderText() {
@@ -1161,7 +1226,7 @@ function probeHttpCandidate(urlString, redirectCount = 0) {
       {
         method: "HEAD",
         headers: {
-          "User-Agent": `get-physics-done-bootstrap/${packageVersion}`,
+          "User-Agent": `${SHARED_INSTALL_METADATA.bootstrapPackageName}-bootstrap/${packageVersion}`,
         },
       },
       (response) => {
@@ -1459,7 +1524,7 @@ async function installManagedPackage(python, pythonVersion, options = {}) {
       : "Installing GPD";
 
   // 1. Try PyPI first — fast, reliable, no auth needed.
-  const pypiSpec = `get-physics-done==${pythonVersion}`;
+  const pypiSpec = `${SHARED_INSTALL_METADATA.bootstrapPackageName}==${pythonVersion}`;
   log(`${action} from PyPI (${pypiSpec}) into the managed environment...`);
   const pypiResult = runPipInstall(python, pypiSpec, pipInstallEnv, { forceReinstall });
   if (pypiResult.status === 0) {
@@ -1909,7 +1974,7 @@ function printBanner() {
 }
 
 function printHelp() {
-  const installCommand = "npx -y get-physics-done";
+  const installCommand = sharedBootstrapCommand();
   const primaryRuntime = ALL_RUNTIMES[0];
   const globalHelpRuntime = runtimeHelpExampleRuntime("global", primaryRuntime);
   const localHelpRuntime = runtimeHelpExampleRuntime("local", globalHelpRuntime);
@@ -2036,7 +2101,7 @@ function validateBootstrapArgs(args) {
     const label = typeof arg === "string" && arg.startsWith("-")
       ? "Unknown bootstrap option"
       : "Unexpected bootstrap argument";
-    error(`${label}: ${arg}. Run npx -y get-physics-done --help for usage.`);
+    error(`${label}: ${arg}. Run ${sharedBootstrapCommand()} --help for usage.`);
     process.exit(1);
   }
 }
@@ -2440,6 +2505,7 @@ if (require.main === module) {
 module.exports = {
   ensureSupportedNodeVersion,
   loadBootstrapInstallerMetadata,
+  loadSharedInstallMetadata,
   loadSharedPublicSurfaceText,
   nodeMajorVersion,
   resolveRuntimeSelectionChoice,

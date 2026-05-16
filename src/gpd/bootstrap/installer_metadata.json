@@ -147,6 +147,14 @@
       }
     }
   ],
+  "shared_install_metadata": {
+    "schemaVersion": 1,
+    "bootstrapPackageName": "get-physics-done",
+    "bootstrapCommand": "npx -y get-physics-done",
+    "installRootDirName": "get-physics-done",
+    "manifestName": "gpd-file-manifest.json",
+    "patchesDirName": "gpd-local-patches"
+  },
   "shared_public_surface_text": {
     "schemaVersion": 1,
     "beginnerHubUrl": "https://github.com/psi-oss/get-physics-done/tree/main/docs",

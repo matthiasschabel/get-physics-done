@@ -40,24 +40,25 @@ from gpd.adapters.install_utils import (
     _markdown_fence_language,
     _markdown_fence_marker,
     build_hook_command,
+    build_runtime_managed_mcp_servers,
+    cleanup_settings_json_managed_entries,
     compile_command_markdown_for_runtime,
     compile_markdown_for_runtime,
     convert_tool_references_in_body,
     ensure_update_hook,
-    hook_python_interpreter,
     parse_jsonc,
     process_attribution,
     protect_runtime_agent_prompt,
     prune_empty_ancestors,
     read_settings,
-    remove_empty_json_object_file,
     remove_stale_agents,
     render_markdown_frontmatter,
+    runtime_managed_mcp_server_keys,
     split_markdown_frontmatter,
     strip_sub_tags,
     verify_installed,
     write_manifest,
-    write_settings,
+    write_settings_if_modified_and_prune_empty,
 )
 from gpd.adapters.install_utils import (
     finish_install as _finish_install,
@@ -65,7 +66,6 @@ from gpd.adapters.install_utils import (
 from gpd.adapters.runtime_catalog import get_manifest_metadata_list_policy_key, get_runtime_descriptor
 from gpd.adapters.tool_names import build_runtime_alias_map, reference_translation_map, translate_for_runtime
 from gpd.command_labels import rewrite_runtime_command_surfaces_to_public, validated_public_command_prefix
-from gpd.mcp import managed_integrations as _managed_integrations
 
 logger = logging.getLogger(__name__)
 
@@ -264,24 +264,6 @@ def _gemini_policy_command_prefixes(bridge_command: str) -> tuple[str, ...]:
 def _render_gemini_shell_allowlist(bridge_command: str) -> str:
     """Render the enforced Gemini shell-prefix allowlist for model-facing content."""
     return "\n".join(f"  - `{prefix}`" for prefix in _gemini_policy_command_prefixes(bridge_command))
-
-
-def _project_managed_mcp_servers(
-    env: Mapping[str, str] | None = None,
-    *,
-    cwd: Path | None = None,
-    python_path: str | None = None,
-) -> dict[str, dict[str, object]]:
-    """Project shared optional integrations into Gemini's ``mcpServers`` shape."""
-    python_path = python_path or hook_python_interpreter()
-    return _managed_integrations.projected_managed_optional_mcp_servers(env, cwd=cwd, python_path=python_path)
-
-
-def _managed_mcp_server_keys() -> frozenset[str]:
-    """Return GPD-managed Gemini MCP server keys, including optional integrations."""
-    from gpd.mcp.builtin_servers import GPD_MCP_SERVER_KEYS
-
-    return frozenset(set(GPD_MCP_SERVER_KEYS) | set(_managed_integrations.managed_optional_mcp_server_keys()))
 
 
 def _rewrite_gpd_cli_invocations(content: str, bridge_command: str) -> str:
@@ -1243,14 +1225,10 @@ class GeminiAdapter(RuntimeAdapter):
         self._managed_policy_paths = added_policy_paths
 
         # Wire MCP servers into settings so they start automatically.
-        from gpd.mcp.builtin_servers import build_mcp_servers_dict, merge_managed_mcp_servers
+        from gpd.mcp.builtin_servers import merge_managed_mcp_servers
 
-        python_path = hook_python_interpreter()
-        mcp_servers = build_mcp_servers_dict(python_path=python_path)
-        project_cwd = None if is_global or getattr(self, "_install_explicit_target", False) else target_dir.parent
-        managed_mcp_servers = _project_managed_mcp_servers(cwd=project_cwd, python_path=python_path)
-        if managed_mcp_servers:
-            mcp_servers.update(managed_mcp_servers)
+        project_cwd = self._project_cwd_for_runtime_config(target_dir, is_global)
+        mcp_servers = build_runtime_managed_mcp_servers(cwd=project_cwd)
         if mcp_servers:
             existing_mcp = settings.get("mcpServers", {})
             merged_mcp = merge_managed_mcp_servers(existing_mcp, mcp_servers)
@@ -1470,36 +1448,14 @@ class GeminiAdapter(RuntimeAdapter):
             settings = read_settings(settings_path)
             modified = False
 
-            # Remove GPD statusline
-            status_line = settings.get("statusLine")
-            if isinstance(status_line, dict):
-                cmd = status_line.get("command", "")
-                if _is_hook_command_for_script(
-                    cmd,
-                    HOOK_SCRIPTS["statusline"],
-                    target_dir=target_dir,
-                    config_dir_name=self.config_dir_name,
-                ):
-                    del settings["statusLine"]
-                    modified = True
-
-            # Remove GPD hooks from SessionStart
-            hooks = settings.get("hooks")
-            if isinstance(hooks, dict):
-                session_start = hooks.get("SessionStart")
-                if isinstance(session_start, list):
-                    before = len(session_start)
-                    session_start[:] = [
-                        entry
-                        for entry in session_start
-                        if not _entry_has_gpd_hook(entry, target_dir=target_dir, config_dir_name=self.config_dir_name)
-                    ]
-                    if len(session_start) < before:
-                        modified = True
-                    if not session_start:
-                        del hooks["SessionStart"]
-                    if not hooks:
-                        del settings["hooks"]
+            cleanup = cleanup_settings_json_managed_entries(
+                settings,
+                target_dir=target_dir,
+                config_dir_name=self.config_dir_name,
+                session_start_hook_filenames=(HOOK_SCRIPTS["check_update"],),
+                mcp_server_keys=runtime_managed_mcp_server_keys(),
+            )
+            modified = cleanup.modified
 
             # Remove experimental.enableAgents only when GPD introduced it.
             experimental = settings.get("experimental")
@@ -1527,22 +1483,15 @@ class GeminiAdapter(RuntimeAdapter):
                     else:
                         settings.pop("policyPaths", None)
 
-            # Remove GPD MCP servers
-            mcp_servers = settings.get("mcpServers")
-            if isinstance(mcp_servers, dict):
-                removed_keys = [key for key in list(mcp_servers) if key in _managed_mcp_server_keys()]
-                if removed_keys:
-                    for key in removed_keys:
-                        del mcp_servers[key]
-                    if not mcp_servers:
-                        del settings["mcpServers"]
-                    modified = True
-
-            if modified:
-                write_settings(settings_path, settings)
-                logger.info("Cleaned up Gemini settings.json (statusline, hooks, experimental, MCP)")
-            if has_authoritative_manifest and remove_empty_json_object_file(settings_path):
+            if write_settings_if_modified_and_prune_empty(
+                settings_path,
+                settings,
+                modified=modified,
+                prune_empty=has_authoritative_manifest,
+            ):
                 result.setdefault("removed", []).append(settings_path.name)
+            if modified:
+                logger.info("Cleaned up Gemini settings.json (statusline, hooks, experimental, MCP)")
 
         policy_dir = _managed_gemini_policy_path(target_dir).parent
         if has_authoritative_manifest:

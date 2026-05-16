@@ -57,7 +57,7 @@ from tests.adapters.projection_test_utils import (
     runtime_bridge_command,
     shell_fences,
     single_runtime_note_block,
-    staged_command_has_protocol_bundle_fields,
+    staged_command_protocol_bundle_fields,
     tag_count,
 )
 from tests.assertion_taxonomy_support import assert_prompt_contracts, semantic_anchor
@@ -709,7 +709,7 @@ def test_installed_smoke_staged_command_surfaces_protocol_bundle_jit_without_cat
         prompt,
         case=case,
         runtime=runtime,
-        has_bundle_fields=staged_command_has_protocol_bundle_fields(WORKFLOWS_DIR, command_name),
+        expected_bundle_fields=staged_command_protocol_bundle_fields(WORKFLOWS_DIR, command_name),
     )
 
 

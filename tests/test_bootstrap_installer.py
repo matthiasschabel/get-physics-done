@@ -736,10 +736,16 @@ def test_bootstrap_installer_consumes_generated_metadata_without_python() -> Non
     assert isinstance(shared_text, dict)
     local_cli_bridge = shared_text["localCliBridge"]
     assert isinstance(local_cli_bridge, dict)
+    shared_install = _BOOTSTRAP_INSTALLER_METADATA_PAYLOAD["shared_install_metadata"]
+    assert isinstance(shared_install, dict)
     result = _run_node_contract_validation(
         f"""
 const assert = require("node:assert/strict");
 const installer = require("./bin/install.js");
+
+const sharedInstall = installer.loadSharedInstallMetadata();
+assert.equal(sharedInstall.bootstrapCommand, {shared_install["bootstrapCommand"]!r});
+assert.equal(sharedInstall.manifestName, {shared_install["manifestName"]!r});
 
 const sharedText = installer.loadSharedPublicSurfaceText();
 assert.equal(sharedText.localCliBridge.helpCommand, {local_cli_bridge["helpCommand"]!r});
@@ -777,6 +783,13 @@ delete missingPublicSurface.shared_public_surface_text;
 assert.throws(
   () => validateBootstrapInstallerMetadata(missingPublicSurface),
   /bootstrap installer metadata is missing required key\\(s\\): shared_public_surface_text/
+);
+
+const missingSharedInstall = JSON.parse(JSON.stringify(metadata));
+delete missingSharedInstall.shared_install_metadata;
+assert.throws(
+  () => validateBootstrapInstallerMetadata(missingSharedInstall),
+  /bootstrap installer metadata is missing required key\\(s\\): shared_install_metadata/
 );
 
 const hashDrift = JSON.parse(JSON.stringify(metadata));
@@ -880,6 +893,61 @@ for (const [label, mutate, expectedError] of cases) {
     assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
 
 
+def test_bootstrap_installer_metadata_validator_checks_shared_install_metadata() -> None:
+    result = _run_node_contract_validation(
+        r"""
+const assert = require("node:assert/strict");
+const { validateBootstrapInstallerMetadata } = require("./bin/install.js");
+const metadata = JSON.parse(process.env.GPD_BOOTSTRAP_TEST_INSTALLER_METADATA_JSON);
+
+const cases = [
+  [
+    "unknown key",
+    (candidate) => { candidate.shared_install_metadata.extraUnexpectedKey = "unexpected"; },
+    /bootstrap installer metadata\.shared_install_metadata contains unknown key\(s\): extraUnexpectedKey/,
+  ],
+  [
+    "bad package name",
+    (candidate) => { candidate.shared_install_metadata.bootstrapPackageName = "Bad Package"; },
+    /bootstrap installer metadata\.shared_install_metadata\.bootstrapPackageName must be a lowercase npm package name/,
+  ],
+  [
+    "unsafe install root",
+    (candidate) => { candidate.shared_install_metadata.installRootDirName = "../get-physics-done"; },
+    /bootstrap installer metadata\.shared_install_metadata\.installRootDirName must be a safe relative path segment without traversal/,
+  ],
+  [
+    "unsafe manifest name",
+    (candidate) => { candidate.shared_install_metadata.manifestName = "/tmp/gpd-file-manifest.json"; },
+    /bootstrap installer metadata\.shared_install_metadata\.manifestName must be a safe relative path segment without traversal/,
+  ],
+];
+
+for (const [label, mutate, expectedError] of cases) {
+  const candidate = JSON.parse(JSON.stringify(metadata));
+  mutate(candidate);
+  assert.throws(
+    () => validateBootstrapInstallerMetadata(candidate),
+    expectedError,
+    `${label} metadata should reject invalid shared install metadata`
+  );
+}
+
+const commandMismatch = JSON.parse(JSON.stringify(metadata));
+commandMismatch.shared_install_metadata.bootstrapCommand = "npx -y other-package";
+assert.throws(
+  () => validateBootstrapInstallerMetadata(commandMismatch),
+  (err) => err.message.includes(
+    `bootstrap installer metadata.shared_install_metadata.bootstrapCommand must be ${JSON.stringify(metadata.shared_install_metadata.bootstrapCommand)}`
+  ),
+  "command/package mismatch metadata should reject invalid shared install metadata"
+);
+"""
+    )
+
+    assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
+
+
 def test_bootstrap_installer_metadata_validator_rejects_shared_surface_unknown_keys() -> None:
     result = _run_node_contract_validation(
         r"""
@@ -949,6 +1017,50 @@ assert.equal(sharedText.localCliBridge.helpCommand, "gpd generated-help");
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is required for bootstrap installer tests")
+def test_bootstrap_help_and_usage_use_generated_shared_install_command() -> None:
+    metadata_payload = json.loads(json.dumps(_BOOTSTRAP_INSTALLER_METADATA_PAYLOAD))
+    shared_install = metadata_payload["shared_install_metadata"]
+    assert isinstance(shared_install, dict)
+    shared_install["bootstrapPackageName"] = "gpd-bootstrap-test"
+    shared_install["bootstrapCommand"] = "npx -y gpd-bootstrap-test"
+
+    node_path = shutil.which("node")
+    assert node_path is not None
+    env = os.environ.copy()
+    env[_BOOTSTRAP_INSTALLER_METADATA_JSON_ENV] = json.dumps(
+        metadata_payload,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+    help_result = subprocess.run(
+        [node_path, "bin/install.js", "--help"],
+        cwd=REPO_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert help_result.returncode == 0, f"{help_result.stdout}\n{help_result.stderr}"
+    assert "npx -y gpd-bootstrap-test [install|uninstall] [options]" in help_result.stdout
+    assert "npx -y get-physics-done" not in help_result.stdout
+
+    error_result = subprocess.run(
+        [node_path, "bin/install.js", "--bogus"],
+        cwd=REPO_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert error_result.returncode == 1
+    assert "Run npx -y gpd-bootstrap-test --help for usage." in error_result.stderr
+    assert "npx -y get-physics-done" not in error_result.stderr
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is required for bootstrap installer tests")
 def test_bootstrap_target_dir_selection_menu_requires_one_runtime() -> None:
     result = _run_node_contract_validation(
         r"""
@@ -1014,10 +1126,12 @@ def test_bootstrap_rejects_unknown_or_unconsumed_argument_before_python(
     expected_error: str,
 ) -> None:
     result, _, log_path = _run_bootstrap_with_fake_python(tmp_path, installer_args=installer_args)
+    shared_install = _BOOTSTRAP_INSTALLER_METADATA_PAYLOAD["shared_install_metadata"]
+    assert isinstance(shared_install, dict)
 
     assert result.returncode == 1
     assert expected_error in result.stderr
-    assert "Run npx -y get-physics-done --help for usage." in result.stderr
+    assert f"Run {shared_install['bootstrapCommand']} --help for usage." in result.stderr
     assert not log_path.exists()
 
 
@@ -1037,6 +1151,9 @@ def test_bootstrap_help_uses_catalog_driven_example_runtimes() -> None:
     )
 
     assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
+    shared_install = _BOOTSTRAP_INSTALLER_METADATA_PAYLOAD["shared_install_metadata"]
+    assert isinstance(shared_install, dict)
+    assert f"{shared_install['bootstrapCommand']} [install|uninstall] [options]" in result.stdout
     for descriptor in _RUNTIME_HELP_EXAMPLE_DESCRIPTORS:
         assert f"# Install for {descriptor.display_name} {descriptor.installer_help_example_scope}" in result.stdout
     _assert_in_order(

@@ -17,7 +17,10 @@ from gpd.adapters.install_utils import (
 from gpd.adapters.runtime_catalog import get_runtime_descriptor
 from gpd.adapters.shell_fence_projection import shell_fence_runnable_lines
 from gpd.core import prompt_diagnostics
-from gpd.core.workflow_staging import load_workflow_stage_manifest_from_path
+from gpd.core.workflow_staging import (
+    load_workflow_stage_manifest_from_path,
+    staged_protocol_bundle_required_init_fields,
+)
 from tests.prompt_metrics_support import MarkdownFence, iter_markdown_fences
 
 __all__ = [
@@ -25,8 +28,6 @@ __all__ = [
     "HELP_BRIDGE_SHIM_SENTINELS",
     "NORMALIZED_RUNTIME_BRIDGE_MARKER",
     "PROTOCOL_BUNDLE_INLINE_CATALOG_MARKERS",
-    "PROTOCOL_BUNDLE_JIT_COMMANDS",
-    "PROTOCOL_BUNDLE_JIT_FIELDS",
     "ProjectedSection",
     "ProjectedText",
     "RUNTIME_BRIDGE_COMMAND_RE",
@@ -64,6 +65,7 @@ __all__ = [
     "shell_fence_bodies",
     "shell_fences",
     "staged_command_has_protocol_bundle_fields",
+    "staged_command_protocol_bundle_fields",
     "single_runtime_note_block",
     "tag_count",
 ]
@@ -101,23 +103,6 @@ STAGED_SHIM_CONTRACT_FRAGMENTS = (
     "payload_contract_version",
     "required_staged_loading_keys",
     "raw_stage_loader_command",
-)
-PROTOCOL_BUNDLE_JIT_FIELDS = (
-    "selected_protocol_bundle_ids",
-    "protocol_bundle_count",
-    "protocol_bundle_context",
-    "protocol_bundle_verifier_extensions",
-)
-PROTOCOL_BUNDLE_JIT_COMMANDS = (
-    "execute-phase",
-    "literature-review",
-    "map-research",
-    "plan-phase",
-    "quick",
-    "research-phase",
-    "respond-to-referees",
-    "verify-work",
-    "write-paper",
 )
 PROTOCOL_BUNDLE_INLINE_CATALOG_MARKERS = (
     "Statistical Mechanics Simulation",
@@ -481,10 +466,10 @@ def assert_protocol_bundle_jit_shape(
     *,
     case: StagedCommandProjectionCase,
     runtime: str,
-    has_bundle_fields: bool,
+    expected_bundle_fields: tuple[str, ...],
 ) -> None:
     descriptor = get_runtime_descriptor(runtime)
-    if not has_bundle_fields:
+    if not expected_bundle_fields:
         assert "<protocol_bundle_jit>" not in text
         return
 
@@ -499,7 +484,7 @@ def assert_protocol_bundle_jit_shape(
 
     assert has_staged_shim_sentinel(text)
     block = compact_tag_block(text, "protocol_bundle_jit")
-    for field in PROTOCOL_BUNDLE_JIT_FIELDS:
+    for field in expected_bundle_fields:
         assert field in block.body or any(field in value for value in block.attrs.values())
 
 
@@ -655,18 +640,16 @@ def _list_items_after_field(lines: list[str], *, start_index: int, field_indent:
 def staged_command_has_protocol_bundle_fields(
     workflows_dir: Path,
     command_name: str,
-    *,
-    jit_commands: tuple[str, ...] = PROTOCOL_BUNDLE_JIT_COMMANDS,
 ) -> bool:
-    if command_name not in jit_commands:
-        return False
+    return bool(staged_command_protocol_bundle_fields(workflows_dir, command_name))
+
+
+def staged_command_protocol_bundle_fields(workflows_dir: Path, command_name: str) -> tuple[str, ...]:
     manifest = load_workflow_stage_manifest_from_path(
         workflows_dir / f"{command_name}-stage-manifest.json",
         expected_workflow_id=command_name,
     )
-    return any(
-        any(field in stage.required_init_fields for field in PROTOCOL_BUNDLE_JIT_FIELDS) for stage in manifest.stages
-    )
+    return staged_protocol_bundle_required_init_fields(manifest)
 
 
 def _sections(text: str) -> tuple[ProjectedSection, ...]:

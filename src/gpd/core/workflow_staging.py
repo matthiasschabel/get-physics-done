@@ -908,6 +908,59 @@ class WorkflowStageManifest:
         return payload
 
 
+def staged_loading_payload_contract_keys(manifest: WorkflowStageManifest) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Return staged-loading keys required for every stage and keys used only sometimes."""
+
+    payloads = tuple(stage.to_staged_loading_payload(manifest.workflow_id) for stage in manifest.stages)
+    if not payloads:
+        return (), ()
+
+    required_key_set = set(payloads[0])
+    for payload in payloads[1:]:
+        required_key_set.intersection_update(payload)
+
+    required_keys = tuple(key for key in payloads[0] if key in required_key_set)
+    seen = set(required_keys)
+    optional_keys: list[str] = []
+    for payload in payloads:
+        for key in payload:
+            if key in seen:
+                continue
+            seen.add(key)
+            optional_keys.append(key)
+    return required_keys, tuple(optional_keys)
+
+
+def staged_protocol_bundle_required_init_fields(manifest: WorkflowStageManifest) -> tuple[str, ...]:
+    """Return protocol-bundle init fields selected by any stage in manifest order."""
+
+    fields: list[str] = []
+    seen: set[str] = set()
+    for stage in manifest.stages:
+        for field in stage.required_init_fields:
+            if not _is_protocol_bundle_required_init_field(field) or field in seen:
+                continue
+            seen.add(field)
+            fields.append(field)
+    return tuple(fields)
+
+
+def staged_ids_requiring_init_fields(
+    manifest: WorkflowStageManifest,
+    field_names: Iterable[str],
+) -> tuple[str, ...]:
+    """Return stage ids whose required init fields intersect *field_names*."""
+
+    selected = set(field_names)
+    if not selected:
+        return ()
+    return tuple(stage.id for stage in manifest.stages if selected.intersection(stage.required_init_fields))
+
+
+def _is_protocol_bundle_required_init_field(field: str) -> bool:
+    return field == "selected_protocol_bundle_ids" or field.startswith("protocol_bundle_")
+
+
 def _require_string(raw: object, *, label: str) -> str:
     if not isinstance(raw, str):
         raise ValueError(f"{label} must be a non-empty string")

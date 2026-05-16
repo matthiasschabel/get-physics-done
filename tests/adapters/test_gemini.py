@@ -2023,6 +2023,41 @@ class TestUninstall:
         ]
         assert "python3 /tmp/third-party/check_update.py" in commands
 
+    def test_uninstall_preserves_unmanaged_hooks_inside_mixed_sessionstart_entries(
+        self,
+        adapter: GeminiAdapter,
+        gpd_root: Path,
+        tmp_path: Path,
+    ) -> None:
+        target = tmp_path / ".gemini"
+        target.mkdir()
+        result = adapter.install(gpd_root, target)
+        adapter.finish_install(
+            result["settingsPath"],
+            result["settings"],
+            result["statuslineCommand"],
+            True,
+        )
+
+        settings_path = target / "settings.json"
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        session_start = settings.setdefault("hooks", {}).setdefault("SessionStart", [])
+        session_start[0]["hooks"].append({"type": "command", "command": "echo keep-mixed-update-peer"})
+        settings_path.write_text(json.dumps(settings), encoding="utf-8")
+
+        adapter.uninstall(target)
+
+        cleaned = json.loads(settings_path.read_text(encoding="utf-8"))
+        session_start = cleaned.get("hooks", {}).get("SessionStart", [])
+        commands = [
+            hook["command"]
+            for entry in session_start
+            if isinstance(entry, dict)
+            for hook in entry.get("hooks", [])
+            if isinstance(hook, dict) and isinstance(hook.get("command"), str)
+        ]
+        assert commands == ["echo keep-mixed-update-peer"]
+
     def test_uninstall_on_empty_dir(self, adapter: GeminiAdapter, tmp_path: Path) -> None:
         target = tmp_path / "empty"
         target.mkdir()

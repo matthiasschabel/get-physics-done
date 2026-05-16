@@ -55,7 +55,7 @@ from tests.adapters.projection_test_utils import (
     runtime_bridge_command,
     shell_fence_bodies,
     single_runtime_note_block,
-    staged_command_has_protocol_bundle_fields,
+    staged_command_protocol_bundle_fields,
 )
 from tests.prompt_metrics_support import runtime_command_visibility_note
 from tests.runtime_command_prefix_support import assert_no_incompatible_beginner_command_labels
@@ -892,13 +892,13 @@ def test_runtime_projected_staged_commands_keep_protocol_bundle_jit_visible_with
     runtime: str,
 ) -> None:
     projected = _project_markdown(COMMANDS_DIR / f"{case.command_name}.md", runtime, is_agent=False)
-    has_bundle_fields = staged_command_has_protocol_bundle_fields(WORKFLOWS_DIR, case.command_name)
+    bundle_fields = staged_command_protocol_bundle_fields(WORKFLOWS_DIR, case.command_name)
 
     assert_protocol_bundle_jit_shape(
         projected,
         case=case,
         runtime=runtime,
-        has_bundle_fields=has_bundle_fields,
+        expected_bundle_fields=bundle_fields,
     )
 
 

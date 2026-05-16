@@ -13,7 +13,9 @@ import os
 import re
 import shlex
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Set as AbstractSet
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from gpd.adapters.runtime_catalog import (
@@ -66,6 +68,17 @@ _RESERVED_MANIFEST_METADATA_KEYS = frozenset(
         "files",
     }
 )
+
+
+@dataclass(frozen=True, slots=True)
+class SettingsCleanupResult:
+    """Summary of managed entries removed from a parsed settings object."""
+
+    modified: bool = False
+    removed_statusline: bool = False
+    removed_session_start_hooks: int = 0
+    removed_mcp_server_keys: tuple[str, ...] = ()
+
 
 # Subdirectories of specs/ that make up the installed get-physics-done/ content.
 # Shared by all adapters.
@@ -257,6 +270,44 @@ def build_runtime_install_repair_command(
     if explicit_target:
         command = f"{command} --target-dir {shlex.quote(str(target_dir))}"
     return command
+
+
+def build_runtime_managed_mcp_servers(
+    *,
+    cwd: Path | None = None,
+    env: Mapping[str, str] | None = None,
+    python_path: str | None = None,
+    include_builtin: bool = True,
+) -> dict[str, dict[str, object]]:
+    """Return neutral managed MCP server entries for runtime adapters."""
+    from gpd.mcp import managed_integrations as _managed_integrations
+    from gpd.mcp.builtin_servers import build_mcp_servers_dict
+
+    resolved_python_path = python_path or hook_python_interpreter()
+    servers: dict[str, dict[str, object]] = {}
+    if include_builtin:
+        servers.update(build_mcp_servers_dict(python_path=resolved_python_path))
+    servers.update(
+        _managed_integrations.projected_managed_optional_mcp_servers(
+            env,
+            cwd=cwd,
+            python_path=resolved_python_path,
+        )
+    )
+    return servers
+
+
+def runtime_managed_mcp_server_keys(*, include_builtin: bool = True) -> frozenset[str]:
+    """Return neutral managed MCP server keys owned by GPD runtime installs."""
+    from gpd.mcp import managed_integrations as _managed_integrations
+
+    optional_keys = set(_managed_integrations.managed_optional_mcp_server_keys())
+    if not include_builtin:
+        return frozenset(optional_keys)
+
+    from gpd.mcp.builtin_servers import GPD_MCP_SERVER_KEYS
+
+    return frozenset(set(GPD_MCP_SERVER_KEYS) | optional_keys)
 
 
 def projection_target_dir_from_path_prefix(path_prefix: str, *, config_dir_name: str) -> Path:
@@ -768,24 +819,6 @@ COMPACT_STAGED_COMMAND_SHIM_SENTINEL = "<gpd_staged_bootstrap_shim"
 COMPACT_HELP_BRIDGE_SHIM_SENTINEL = "<gpd_help_bridge_shim"
 COMPACT_WORKFLOW_COMMAND_SHIM_SENTINEL = "<gpd_workflow_reference_shim"
 _COMPACT_STAGED_PAYLOAD_CONTRACT_VERSION = "1"
-_COMPACT_STAGED_LOADING_REQUIRED_KEYS = (
-    "workflow_id",
-    "stage_id",
-    "order",
-    "required_init_fields",
-    "field_access_instruction",
-    "mode_paths",
-    "loaded_authorities",
-    "eager_authorities",
-    "conditional_authorities",
-    "must_not_eager_load",
-    "allowed_tools",
-    "writes_allowed",
-    "produced_state",
-    "next_stages",
-    "checkpoints",
-)
-_COMPACT_STAGED_LOADING_OPTIONAL_KEYS = ("init_spec_id",)
 _COMPACT_STAGED_COMMAND_NO_ARGUMENTS = frozenset(
     {
         "new-milestone",
@@ -898,7 +931,10 @@ def compact_staged_command_shim_for_runtime(
         )
 
     try:
-        from gpd.core.workflow_staging import load_workflow_stage_manifest_from_path
+        from gpd.core.workflow_staging import (
+            load_workflow_stage_manifest_from_path,
+            staged_loading_payload_contract_keys,
+        )
 
         manifest = load_workflow_stage_manifest_from_path(manifest_path, expected_workflow_id=workflow_id)
     except ValueError:
@@ -909,11 +945,14 @@ def compact_staged_command_shim_for_runtime(
         return None
 
     first_stage = manifest.stages[0]
+    required_keys, optional_keys = staged_loading_payload_contract_keys(manifest)
     shim = _render_compact_staged_command_shim(
         workflow_id=workflow_id,
         public_label=public_label,
         first_stage_id=first_stage.id,
         stage_count=len(manifest.stages),
+        required_staged_loading_keys=required_keys,
+        optional_staged_loading_keys=optional_keys,
         bridge_command=bridge_command or "gpd",
         protocol_bundle_jit_hint=_compact_staged_protocol_bundle_jit_hint(manifest),
     )
@@ -946,13 +985,15 @@ def _render_compact_staged_command_shim(
     public_label: str,
     first_stage_id: str,
     stage_count: int,
+    required_staged_loading_keys: Sequence[str],
+    optional_staged_loading_keys: Sequence[str],
     bridge_command: str,
     protocol_bundle_jit_hint: str = "",
 ) -> str:
     init_command = _compact_staged_init_command(workflow_id, first_stage_id, bridge_command=bridge_command)
     bundle_hint = f"\n\n{protocol_bundle_jit_hint}" if protocol_bundle_jit_hint else ""
-    required_keys = ", ".join(_COMPACT_STAGED_LOADING_REQUIRED_KEYS)
-    optional_keys = ", ".join(_COMPACT_STAGED_LOADING_OPTIONAL_KEYS)
+    required_keys = ", ".join(required_staged_loading_keys)
+    optional_keys = ", ".join(optional_staged_loading_keys)
     return (
         f'{COMPACT_STAGED_COMMAND_SHIM_SENTINEL} command="{public_label}" workflow="{workflow_id}" '
         f'first_stage="{first_stage_id}" stage_count="{stage_count}" '
@@ -989,43 +1030,28 @@ def _render_compact_staged_command_shim(
 
 def _compact_staged_protocol_bundle_jit_hint(manifest: object) -> str:
     """Return compact bundle-loading guidance for staged workflows that expose bundle fields."""
-    jit_workflows = {
-        "execute-phase",
-        "literature-review",
-        "map-research",
-        "plan-phase",
-        "quick",
-        "research-phase",
-        "respond-to-referees",
-        "verify-work",
-        "write-paper",
-    }
-    if getattr(manifest, "workflow_id", "") not in jit_workflows:
+    try:
+        from gpd.core.workflow_staging import (
+            staged_ids_requiring_init_fields,
+            staged_protocol_bundle_required_init_fields,
+        )
+
+        bundle_fields = staged_protocol_bundle_required_init_fields(manifest)  # type: ignore[arg-type]
+        stages_with_bundle_fields = staged_ids_requiring_init_fields(manifest, bundle_fields)  # type: ignore[arg-type]
+    except AttributeError:
         return ""
 
-    bundle_fields = (
-        "selected_protocol_bundle_ids",
-        "protocol_bundle_count",
-        "protocol_bundle_context",
-        "protocol_bundle_verifier_extensions",
-    )
-    stages_with_bundle_fields: list[str] = []
-    for stage in getattr(manifest, "stages", ()):
-        required_fields = tuple(getattr(stage, "required_init_fields", ()))
-        if any(field in required_fields for field in bundle_fields):
-            stages_with_bundle_fields.append(str(getattr(stage, "id", "")))
-
-    if not stages_with_bundle_fields:
+    if not bundle_fields or not stages_with_bundle_fields:
         return ""
 
     rendered_stages = ", ".join(f"`{stage_id}`" for stage_id in stages_with_bundle_fields if stage_id)
+    rendered_fields = ", ".join(f"`{field}`" for field in bundle_fields)
     return (
         "<protocol_bundle_jit>\n"
-        "When an active stage names `selected_protocol_bundle_ids`, `protocol_bundle_count`, "
-        "`protocol_bundle_context`, or `protocol_bundle_verifier_extensions` in "
-        "`staged_loading.required_init_fields`, use those init payload fields as the selected-bundle loading map. "
-        "Keep bundle guidance JIT: load only selected asset paths named by `protocol_bundle_context`, do not inline "
-        "protocol bundle catalogs during bootstrap, and keep unselected bundles absent.\n"
+        f"When an active stage names {rendered_fields} in `staged_loading.required_init_fields`, use those init "
+        "payload fields as the selected-bundle loading map. Keep bundle guidance JIT: follow only the handles, "
+        "load manifests, and rendered context fields named by the active payload, do not inline protocol bundle "
+        "catalogs during bootstrap, and keep unselected bundles absent.\n"
         f"Bundle-aware stages: {rendered_stages}.\n"
         "</protocol_bundle_jit>"
     )
@@ -2965,6 +2991,194 @@ def _is_hook_command_for_script(
         if path.name == hook_filename and path.parent.name == "hooks":
             return True
 
+    return False
+
+
+def remove_managed_statusline(
+    settings: dict[str, object],
+    *,
+    target_dir: Path,
+    config_dir_name: str | None,
+) -> bool:
+    """Remove a statusline command only when it points at the managed hook."""
+    status_line = settings.get("statusLine")
+    if not isinstance(status_line, dict):
+        return False
+    command = status_line.get("command", "")
+    if not _is_hook_command_for_script(
+        command,
+        HOOK_SCRIPTS["statusline"],
+        target_dir=target_dir,
+        config_dir_name=config_dir_name,
+    ):
+        return False
+    del settings["statusLine"]
+    return True
+
+
+def _is_managed_session_start_hook(
+    hook: object,
+    *,
+    managed_hook_filenames: tuple[str, ...],
+    target_dir: Path,
+    config_dir_name: str | None,
+) -> bool:
+    if not isinstance(hook, dict):
+        return False
+    command = hook.get("command")
+    return any(
+        _is_hook_command_for_script(
+            command,
+            hook_filename,
+            target_dir=target_dir,
+            config_dir_name=config_dir_name,
+        )
+        for hook_filename in managed_hook_filenames
+    )
+
+
+def remove_session_start_managed_hooks(
+    settings: dict[str, object],
+    *,
+    managed_hook_filenames: Iterable[str],
+    target_dir: Path,
+    config_dir_name: str | None,
+) -> tuple[int, bool]:
+    """Remove managed SessionStart hook items while preserving mixed entries.
+
+    Returns ``(removed_hook_count, modified)``. The helper also prunes an empty
+    ``SessionStart`` list and empty ``hooks`` object after managed hooks are
+    removed.
+    """
+    hook_filenames = tuple(managed_hook_filenames)
+    if not hook_filenames:
+        return 0, False
+
+    hooks = settings.get("hooks")
+    if not isinstance(hooks, dict):
+        return 0, False
+    session_start = hooks.get("SessionStart")
+    if not isinstance(session_start, list):
+        return 0, False
+
+    removed_count = 0
+    modified = False
+    normalized_session_start: list[object] = []
+
+    for entry in session_start:
+        if not isinstance(entry, dict):
+            normalized_session_start.append(entry)
+            continue
+        entry_hooks = entry.get("hooks")
+        if not isinstance(entry_hooks, list):
+            normalized_session_start.append(entry)
+            continue
+
+        normalized_hooks: list[object] = []
+        entry_removed_count = 0
+        for hook in entry_hooks:
+            if _is_managed_session_start_hook(
+                hook,
+                managed_hook_filenames=hook_filenames,
+                target_dir=target_dir,
+                config_dir_name=config_dir_name,
+            ):
+                removed_count += 1
+                entry_removed_count += 1
+                modified = True
+                continue
+            normalized_hooks.append(hook)
+
+        if not entry_removed_count:
+            normalized_session_start.append(entry)
+            continue
+        if not normalized_hooks:
+            continue
+        normalized_entry = dict(entry)
+        normalized_entry["hooks"] = normalized_hooks
+        normalized_session_start.append(normalized_entry)
+
+    if normalized_session_start:
+        if modified:
+            hooks["SessionStart"] = normalized_session_start
+    elif "SessionStart" in hooks:
+        del hooks["SessionStart"]
+        modified = True
+
+    if not hooks:
+        del settings["hooks"]
+        modified = True
+
+    return removed_count, modified
+
+
+def remove_managed_mcp_server_keys(
+    settings_or_config: dict[str, object],
+    *,
+    managed_keys: AbstractSet[str],
+) -> tuple[str, ...]:
+    """Remove exact managed ``mcpServers`` keys from a parsed JSON object."""
+    mcp_servers = settings_or_config.get("mcpServers")
+    if not isinstance(mcp_servers, dict):
+        return ()
+
+    removed_keys = tuple(key for key in list(mcp_servers) if isinstance(key, str) and key in managed_keys)
+    if not removed_keys:
+        return ()
+
+    for key in removed_keys:
+        del mcp_servers[key]
+    if not mcp_servers:
+        del settings_or_config["mcpServers"]
+    return removed_keys
+
+
+def cleanup_settings_json_managed_entries(
+    settings: dict[str, object],
+    *,
+    target_dir: Path,
+    config_dir_name: str | None,
+    session_start_hook_filenames: Iterable[str],
+    mcp_server_keys: AbstractSet[str],
+    remove_statusline: bool = True,
+) -> SettingsCleanupResult:
+    """Remove runtime-neutral managed settings entries from a parsed object."""
+    removed_statusline = False
+    if remove_statusline:
+        removed_statusline = remove_managed_statusline(
+            settings,
+            target_dir=target_dir,
+            config_dir_name=config_dir_name,
+        )
+
+    removed_session_start_hooks, session_start_modified = remove_session_start_managed_hooks(
+        settings,
+        managed_hook_filenames=session_start_hook_filenames,
+        target_dir=target_dir,
+        config_dir_name=config_dir_name,
+    )
+    removed_mcp_server_keys = remove_managed_mcp_server_keys(settings, managed_keys=mcp_server_keys)
+    return SettingsCleanupResult(
+        modified=removed_statusline or session_start_modified or bool(removed_mcp_server_keys),
+        removed_statusline=removed_statusline,
+        removed_session_start_hooks=removed_session_start_hooks,
+        removed_mcp_server_keys=removed_mcp_server_keys,
+    )
+
+
+def write_settings_if_modified_and_prune_empty(
+    settings_path: str | Path,
+    settings: dict[str, object],
+    *,
+    modified: bool,
+    prune_empty: bool,
+) -> bool:
+    """Write settings when modified, then optionally prune an empty JSON object."""
+    path = Path(settings_path)
+    if modified:
+        write_settings(path, settings)
+    if prune_empty:
+        return remove_empty_json_object_file(path)
     return False
 
 

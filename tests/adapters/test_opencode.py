@@ -7,11 +7,13 @@ import re
 from pathlib import Path
 
 import pytest
+import yaml
 
 from gpd.adapters.install_utils import (
     COMPACT_WORKFLOW_COMMAND_SHIM_SENTINEL,
     MANIFEST_NAME,
     hook_python_interpreter,
+    split_markdown_frontmatter,
 )
 from gpd.adapters.opencode import (
     OpenCodeAdapter,
@@ -60,6 +62,13 @@ def _assert_no_manifestless_gpd_artifacts(target: Path) -> None:
     assert not (target / "command").exists()
     assert not (target / "agents").exists()
     assert not (target / "hooks").exists()
+
+
+def _opencode_frontmatter_metadata(content: str) -> tuple[dict[str, object], str]:
+    _preamble, frontmatter, _separator, _body = split_markdown_frontmatter(content)
+    metadata = yaml.safe_load(frontmatter) if frontmatter.strip() else {}
+    assert isinstance(metadata, dict)
+    return metadata, frontmatter
 
 
 def test_opencode_command_projection_downgrades_non_runnable_shell_examples(tmp_path: Path) -> None:
@@ -141,18 +150,21 @@ class TestConvertFrontmatter:
     def test_name_stripped(self) -> None:
         content = "---\nname: gpd:help\ndescription: Help\n---\nBody"
         result = convert_claude_to_opencode_frontmatter(content)
+        metadata, _frontmatter = _opencode_frontmatter_metadata(result)
         assert "name:" not in result
-        assert "description: Help" in result
+        assert metadata["description"] == "Help"
 
     def test_color_name_to_hex(self) -> None:
         content = "---\ncolor: cyan\ndescription: D\n---\nBody"
         result = convert_claude_to_opencode_frontmatter(content)
-        assert '"#00FFFF"' in result
+        metadata, _frontmatter = _opencode_frontmatter_metadata(result)
+        assert metadata["color"] == "#00FFFF"
 
     def test_color_hex_preserved(self) -> None:
         content = "---\ncolor: #FF0000\ndescription: D\n---\nBody"
         result = convert_claude_to_opencode_frontmatter(content)
-        assert "#FF0000" in result
+        metadata, _frontmatter = _opencode_frontmatter_metadata(result)
+        assert metadata["color"] == "#FF0000"
 
     def test_color_invalid_hex_stripped(self) -> None:
         content = "---\ncolor: #GGGGGG\ndescription: D\n---\nBody"
@@ -167,11 +179,65 @@ class TestConvertFrontmatter:
     def test_allowed_tools_to_tools_object(self) -> None:
         content = "---\ndescription: D\nallowed-tools:\n  - Read\n  - Bash\n  - AskUserQuestion\n---\nBody"
         result = convert_claude_to_opencode_frontmatter(content)
-        assert "tools:" in result
-        assert "read_file: true" in result
-        assert "shell: true" in result
-        assert "question: true" in result
+        metadata, _frontmatter = _opencode_frontmatter_metadata(result)
+        assert metadata["tools"] == {
+            "read_file": True,
+            "shell": True,
+            "question": True,
+        }
         assert "allowed-tools:" not in result
+
+    def test_inline_allowed_tools_yaml_list(self) -> None:
+        content = "---\ndescription: D\nallowed-tools: [Read, Bash, AskUserQuestion]\n---\nBody"
+        result = convert_claude_to_opencode_frontmatter(content)
+        metadata, _frontmatter = _opencode_frontmatter_metadata(result)
+        assert metadata["tools"] == {
+            "read_file": True,
+            "shell": True,
+            "question": True,
+        }
+        assert "allowed-tools:" not in result
+
+    def test_tools_bool_map_filters_false_and_translates_true_keys(self) -> None:
+        content = (
+            "---\n"
+            "description: D\n"
+            "tools:\n"
+            "  Read: true\n"
+            "  Bash: false\n"
+            "  AskUserQuestion: true\n"
+            "---\n"
+            "Body"
+        )
+        result = convert_claude_to_opencode_frontmatter(content)
+        metadata, _frontmatter = _opencode_frontmatter_metadata(result)
+        assert metadata["tools"] == {"read_file": True, "question": True}
+        assert {"Read", "Bash", "AskUserQuestion"}.isdisjoint(metadata)
+
+    def test_tools_are_deduped_across_allowed_tools_and_tools_fields(self) -> None:
+        content = (
+            "---\n"
+            "description: D\n"
+            "allowed-tools: [Read, Bash, Read]\n"
+            "tools: Read, AskUserQuestion, Bash\n"
+            "---\n"
+            "Body"
+        )
+        result = convert_claude_to_opencode_frontmatter(content)
+        metadata, frontmatter = _opencode_frontmatter_metadata(result)
+        assert metadata["tools"] == {
+            "read_file": True,
+            "shell": True,
+            "question": True,
+        }
+        assert frontmatter.count("read_file: true") == 1
+        assert frontmatter.count("shell: true") == 1
+
+    def test_icon_field_preserved(self) -> None:
+        content = "---\ndescription: D\nicon: zap\nallowed-tools: [Read]\n---\nBody"
+        result = convert_claude_to_opencode_frontmatter(content)
+        metadata, _frontmatter = _opencode_frontmatter_metadata(result)
+        assert metadata["icon"] == "zap"
 
     def test_slash_command_conversion_is_boundary_aware(self) -> None:
         content = (
@@ -212,7 +278,8 @@ class TestConvertFrontmatter:
     def test_inline_tools_field(self) -> None:
         content = "---\ndescription: D\ntools: Read, Write\n---\nBody"
         result = convert_claude_to_opencode_frontmatter(content)
-        assert "tools:" in result
+        metadata, _frontmatter = _opencode_frontmatter_metadata(result)
+        assert metadata["tools"] == {"read_file": True, "write_file": True}
 
     def test_description_with_triple_dash_is_preserved(self) -> None:
         content = "---\ndescription: before --- after\nallowed-tools:\n  - Read\n---\nBody"

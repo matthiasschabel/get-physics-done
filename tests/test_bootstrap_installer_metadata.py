@@ -10,7 +10,7 @@ from gpd._python_compat import (
     PREFERRED_VERSIONED_PYTHON_MINORS,
     RECOMMENDED_PYTHON_VERSION,
 )
-from gpd.adapters.runtime_catalog import iter_runtime_descriptors
+from gpd.adapters.runtime_catalog import get_shared_install_metadata, iter_runtime_descriptors
 from gpd.core.public_surface_contract import load_public_surface_contract
 from scripts.render_bootstrap_installer_metadata import (
     INSTALLER_METADATA_PATH,
@@ -35,6 +35,7 @@ def test_bootstrap_installer_metadata_is_current() -> None:
         "source_hashes",
         "python_compatibility",
         "runtimes",
+        "shared_install_metadata",
         "shared_public_surface_text",
     ]
     assert metadata["schema_version"] == 1
@@ -120,6 +121,28 @@ def test_bootstrap_installer_runtime_metadata_contains_only_node_consumed_fields
             key: value for key, value in asdict(descriptor.global_config).items() if value is not None
         }
 
+
+def test_bootstrap_installer_shared_install_metadata_matches_node_loader_shape() -> None:
+    metadata = _load_metadata()
+    install_metadata = metadata["shared_install_metadata"]
+    shared_install = get_shared_install_metadata()
+
+    assert list(install_metadata) == [
+        "schemaVersion",
+        "bootstrapPackageName",
+        "bootstrapCommand",
+        "installRootDirName",
+        "manifestName",
+        "patchesDirName",
+    ]
+    assert install_metadata == {
+        "schemaVersion": 1,
+        "bootstrapPackageName": shared_install.bootstrap_package_name,
+        "bootstrapCommand": shared_install.bootstrap_command,
+        "installRootDirName": shared_install.install_root_dir_name,
+        "manifestName": shared_install.manifest_name,
+        "patchesDirName": shared_install.patches_dir_name,
+    }
 
 def test_bootstrap_installer_public_surface_text_matches_node_loader_shape() -> None:
     metadata = _load_metadata()

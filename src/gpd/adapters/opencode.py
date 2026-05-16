@@ -16,7 +16,6 @@ import json
 import logging
 import re
 import shutil
-from collections.abc import Mapping
 from pathlib import Path
 
 from gpd.adapters.base import RuntimeAdapter
@@ -30,22 +29,29 @@ from gpd.adapters.flat_command_surface import (
 from gpd.adapters.flat_command_surface import (
     copy_flattened_commands as _copy_flattened_command_surface,
 )
+from gpd.adapters.frontmatter_projection import (
+    FieldProjection,
+    FrontmatterProjectionPolicy,
+    ToolFieldProjection,
+    project_markdown_frontmatter,
+)
 from gpd.adapters.install_utils import (
     CACHE_DIR_NAME,
     MANIFEST_NAME,
     PATCHES_DIR_NAME,
     UPDATE_CACHE_FILENAME,
+    build_runtime_managed_mcp_servers,
     compile_markdown_for_runtime,
     compute_path_prefix,
     convert_tool_references_in_body,
     get_global_dir,
-    hook_python_interpreter,
     install_gpd_content,
     parse_jsonc,
     prune_empty_ancestors,
     remove_empty_json_object_file,
     remove_stale_agents,
     render_markdown_frontmatter,
+    runtime_managed_mcp_server_keys,
     split_markdown_frontmatter,
 )
 from gpd.adapters.install_utils import (
@@ -54,7 +60,6 @@ from gpd.adapters.install_utils import (
 from gpd.adapters.runtime_catalog import get_manifest_metadata_list_policy_key, get_runtime_descriptor
 from gpd.adapters.tool_names import build_runtime_alias_map, reference_translation_map, translate_for_runtime
 from gpd.command_labels import rewrite_runtime_command_surfaces_to_public, validated_public_command_prefix
-from gpd.mcp import managed_integrations as _managed_integrations
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +104,19 @@ _COLOR_NAME_TO_HEX: dict[str, str] = {
     "grey": "#808080",
 }
 
-_HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{3}$|^#[0-9a-fA-F]{6}$")
+_OPENCODE_UNQUOTED_HEX_COLOR_RE = re.compile(r"(?m)^(\s*color:\s*)(#[0-9a-fA-F]{3}(?:[0-9a-fA-F]{3})?)(\r?)$")
+_OPENCODE_FRONTMATTER_POLICY = FrontmatterProjectionPolicy(
+    runtime="opencode",
+    surface="markdown",
+    tools=ToolFieldProjection(target_shape="yaml-bool-map"),
+    name=FieldProjection("drop"),
+    color=FieldProjection(
+        "map_color_name_to_hex",
+        color_name_map=_COLOR_NAME_TO_HEX,
+        preserve_valid_hex=True,
+    ),
+    icon=FieldProjection("preserve"),
+)
 _OPENCODE_PERMISSION_DECISIONS = frozenset({"allow", "ask", "deny"})
 _OPENCODE_YOLO_PERMISSION = "allow"
 _GPD_OPENCODE_COMMAND_MARKER = "<!-- Managed by Get Physics Done (GPD). -->"
@@ -159,27 +176,28 @@ def convert_tool_name(tool_name: str) -> str:
     return mapped if mapped is not None else tool_name
 
 
-def _project_managed_mcp_servers(
-    env: Mapping[str, str] | None = None,
-    *,
-    cwd: Path | None = None,
-    python_path: str | None = None,
-) -> dict[str, dict[str, object]]:
-    """Project shared optional integrations into OpenCode's neutral MCP shape."""
-    python_path = python_path or hook_python_interpreter()
-    return _managed_integrations.projected_managed_optional_mcp_servers(env, cwd=cwd, python_path=python_path)
-
-
-def _managed_mcp_server_keys() -> frozenset[str]:
-    """Return GPD-managed OpenCode MCP server keys, including optional integrations."""
-    from gpd.mcp.builtin_servers import GPD_MCP_SERVER_KEYS
-
-    return frozenset(set(GPD_MCP_SERVER_KEYS) | set(_managed_integrations.managed_optional_mcp_server_keys()))
-
-
 # ---------------------------------------------------------------------------
 # Frontmatter conversion
 # ---------------------------------------------------------------------------
+
+
+def _quote_unquoted_opencode_hex_colors(content: str) -> str:
+    """Normalize legacy ``color: #RRGGBB`` values into YAML string values."""
+    preamble, frontmatter, separator, body = split_markdown_frontmatter(content)
+    if not frontmatter:
+        return content
+    normalized_frontmatter = _OPENCODE_UNQUOTED_HEX_COLOR_RE.sub(r'\1"\2"\3', frontmatter)
+    if normalized_frontmatter == frontmatter:
+        return content
+    return render_markdown_frontmatter(preamble, normalized_frontmatter, separator, body)
+
+
+def _translate_opencode_markdown_content(content: str) -> str:
+    converted = convert_tool_references_in_body(content, _TOOL_REFERENCE_MAP)
+    public_prefix = validated_public_command_prefix(get_runtime_descriptor("opencode"))
+    converted = converted.replace("`gpd:`", f"`{public_prefix}`")
+    converted = rewrite_runtime_command_surfaces_to_public(converted, public_prefix=public_prefix)
+    return _quote_unquoted_opencode_hex_colors(converted)
 
 
 def convert_claude_to_opencode_frontmatter(content: str, path_prefix: str | None = None) -> str:
@@ -193,76 +211,13 @@ def convert_claude_to_opencode_frontmatter(content: str, path_prefix: str | None
       - Convert color names to hex
       - Convert allowed-tools: YAML array to tools: object with {tool: true}
     """
-    converted = content
-    converted = convert_tool_references_in_body(converted, _TOOL_REFERENCE_MAP)
-    public_prefix = validated_public_command_prefix(get_runtime_descriptor("opencode"))
-    converted = converted.replace("`gpd:`", f"`{public_prefix}`")
-    converted = rewrite_runtime_command_surfaces_to_public(converted, public_prefix=public_prefix)
-
-    preamble, frontmatter, separator, body = split_markdown_frontmatter(converted)
-    if not frontmatter:
-        return converted
-
-    lines = frontmatter.split("\n")
-    new_lines: list[str] = []
-    in_allowed_tools = False
-    allowed_tools: list[str] = []
-
-    for line in lines:
-        trimmed = line.strip()
-
-        # Detect start of allowed-tools array
-        if trimmed.startswith("allowed-tools:"):
-            in_allowed_tools = True
-            continue
-
-        # Detect inline tools: field (comma-separated string)
-        if trimmed.startswith("tools:"):
-            tools_value = trimmed[6:].strip()
-            if tools_value:
-                tools = [t.strip() for t in tools_value.split(",") if t.strip()]
-                allowed_tools.extend(tools)
-            else:
-                in_allowed_tools = True
-            continue
-
-        # Remove name: field — OpenCode uses filename for command name
-        if trimmed.startswith("name:"):
-            continue
-
-        # Convert color names to hex for OpenCode
-        if trimmed.startswith("color:"):
-            color_raw = trimmed[6:].strip()
-            color_value = color_raw.lower()
-            hex_color = _COLOR_NAME_TO_HEX.get(color_value)
-            if hex_color:
-                new_lines.append(f'color: "{hex_color}"')
-            elif color_value.startswith("#"):
-                if _HEX_COLOR_RE.match(color_value):
-                    new_lines.append(f'color: "{color_raw}"')
-                # Skip invalid hex colors
-            # Skip unknown color names
-            continue
-
-        # Collect allowed-tools items
-        if in_allowed_tools:
-            if trimmed.startswith("- "):
-                allowed_tools.append(trimmed[2:].strip())
-                continue
-            elif trimmed and not trimmed.startswith("-"):
-                in_allowed_tools = False
-
-        if not in_allowed_tools:
-            new_lines.append(line)
-
-    # Add tools object if we had allowed-tools or tools
-    if allowed_tools:
-        new_lines.append("tools:")
-        for tool in allowed_tools:
-            new_lines.append(f"  {convert_tool_name(tool)}: true")
-
-    new_frontmatter = "\n".join(new_lines).strip()
-    return render_markdown_frontmatter(preamble, new_frontmatter, separator, body)
+    del path_prefix  # OpenCode intentionally preserves foreign-runtime paths in markdown bodies.
+    return project_markdown_frontmatter(
+        content,
+        policy=_OPENCODE_FRONTMATTER_POLICY,
+        translate_tool_name=convert_tool_name,
+        content_transform=_translate_opencode_markdown_content,
+    )
 
 
 def _rewrite_gpd_cli_invocations(content: str, bridge_command: str) -> str:
@@ -749,7 +704,7 @@ def uninstall_opencode(
         if oc_config_parse_error is not None:
             oc_mcp = None
         if isinstance(oc_mcp, dict) and isinstance(oc_mcp.get("mcp"), dict):
-            gpd_keys = [k for k in oc_mcp["mcp"] if k in _managed_mcp_server_keys()]
+            gpd_keys = [k for k in oc_mcp["mcp"] if k in runtime_managed_mcp_server_keys()]
             for k in gpd_keys:
                 del oc_mcp["mcp"][k]
             if gpd_keys:
@@ -1030,14 +985,8 @@ class OpenCodeAdapter(RuntimeAdapter):
         _, self._opencode_permission_restore_state = _configure_opencode_permissions_with_restore(target_dir)
 
         # Wire MCP servers into opencode.json.
-        from gpd.mcp.builtin_servers import build_mcp_servers_dict
-
-        python_path = hook_python_interpreter()
-        mcp_servers = build_mcp_servers_dict(python_path=python_path)
-        project_cwd = None if is_global or getattr(self, "_install_explicit_target", False) else target_dir.parent
-        managed_mcp_servers = _project_managed_mcp_servers(cwd=project_cwd, python_path=python_path)
-        if managed_mcp_servers:
-            mcp_servers.update(managed_mcp_servers)
+        project_cwd = self._project_cwd_for_runtime_config(target_dir, is_global)
+        mcp_servers = build_runtime_managed_mcp_servers(cwd=project_cwd)
         mcp_count = 0
         if mcp_servers:
             mcp_count = _write_mcp_servers_opencode(target_dir, mcp_servers)

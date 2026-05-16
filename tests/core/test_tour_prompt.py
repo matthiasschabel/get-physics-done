@@ -78,7 +78,11 @@ def test_tour_command_references_workflow() -> None:
     assert "gpd:help --all" in command_prompt
     assert "gpd:set-tier-models" in command_prompt
     assert "gpd:settings" in command_prompt
-    assert "This is a read-only tour of the main GPD commands. It will not change your files." in command_prompt
+    _assert_anchor(
+        command_prompt,
+        "tour command opens with read-only main-command orientation",
+        ("read-only", "tour", "main GPD commands", "will not change", "files"),
+    )
     _assert_anchor(command_prompt, "tour uses runtime-native command labels", ("runtime-native command labels", "gpd:"))
 
 
@@ -164,15 +168,19 @@ def test_tour_workflow_reference_mode_contains_broader_table() -> None:
         ("runtime-facing only", "gpd resume", "terminal/runtime distinction"),
     )
 
-    for public_label in (
-        "Use a compact table with four columns:",
-        "Use this when",
-        "Do not use this when",
-        "Example",
-        "A few terms in plain English",
-        '"If you are still unsure, run `gpd:start`."',
-    ):
-        assert public_label in workflow
+    _assert_anchor(
+        workflow,
+        "tour reference mode keeps table, glossary, and start fallback concepts",
+        (
+            "compact table",
+            "four columns",
+            "Use this when",
+            "Do not use this when",
+            "Example",
+            "plain English",
+            "gpd:start",
+        ),
+    )
 
     _assert_anchor(
         _extract_step(workflow, "show_broader_capabilities"),
@@ -207,9 +215,14 @@ def test_tour_workflow_reference_mode_contains_broader_table() -> None:
         _extract_step(workflow, "highlight_common_mistakes"),
         "tour highlights common command boundaries",
         (
-            "Use `gpd:start` when you are still deciding, not `gpd:new-project`",
-            "Use `gpd:resume-work` only when the project already has GPD state",
-            "Use `gpd:help` when you want the command reference, not a setup wizard",
+            "gpd:start",
+            "still deciding",
+            "not `gpd:new-project`",
+            "gpd:resume-work",
+            "project already has GPD state",
+            "gpd:help",
+            "command reference",
+            "not a setup wizard",
         ),
     )
     _assert_anchor(

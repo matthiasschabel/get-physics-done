@@ -223,9 +223,21 @@ def test_help_wrapper_followups_do_not_hard_code_gpd_help_runtime_syntax() -> No
         "runtime-neutral command surface note",
         ("command that invoked this wrapper", "this help command", "do not print adapter-specific examples"),
     )
-    assert "Run this help command with --all for the compact command index." in help_command
-    assert "Run this help command with --command <name> for detailed help on one command." in help_command
-    assert "Unknown command. Run this help command with --all for the compact command index." in help_command
+    _assert_anchor(
+        help_command,
+        "runtime-neutral all-commands follow-up",
+        ("this help command", "--all", "compact command index"),
+    )
+    _assert_anchor(
+        help_command,
+        "runtime-neutral command-detail follow-up",
+        ("this help command", "--command <name>", "detailed help", "one command"),
+    )
+    _assert_anchor(
+        help_command,
+        "runtime-neutral unknown-command follow-up",
+        ("Unknown command", "this help command", "--all", "compact command index"),
+    )
 
 
 def test_help_wrapper_documents_inline_argument_command_lookup_normalization() -> None:

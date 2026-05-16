@@ -95,6 +95,9 @@ _TAXONOMY_HELPER_NAMES = tuple(
     "semantic_anchor semantic_concept".split()
 )
 _TAXONOMY_HELPER_ALIASES = {"_assert_prompt_contracts": "assert_prompt_contracts"}
+_SEMANTIC_TAXONOMY_HELPER_NAMES = frozenset(("semantic_anchor", "semantic_concept"))
+_SEMANTIC_HELPER_LONG_PROSE_MIN_WORDS = 8
+_SEMANTIC_HELPER_LONG_PROSE_EXAMPLES_PER_FILE = 5
 
 ExactAssertionCategory = Literal["machine_contract", "public_ux", "brittle_prose"]
 ExactAssertionPolarity = Literal["required", "forbidden", "counted", "indexed"]
@@ -278,14 +281,33 @@ def _exact_assertion_totals(files_scanned: int, file_rows: Sequence[Mapping[str,
 
 def _taxonomy_helper_usage_for_tree(tree: ast.AST, *, path: str) -> dict[str, object] | None:
     helper_counts: dict[str, int] = dict.fromkeys(_TAXONOMY_HELPER_NAMES, 0)
+    semantic_fragment_count = 0
+    long_prose_examples: list[dict[str, object]] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Call) and (helper_name := _taxonomy_helper_name(node.func)) is not None:
             helper_counts[helper_name] += 1
+            if helper_name in _SEMANTIC_TAXONOMY_HELPER_NAMES:
+                for fragment in _semantic_helper_literal_fragments(node, helper_name=helper_name):
+                    semantic_fragment_count += 1
+                    if _is_long_semantic_helper_prose(fragment["literal"]):
+                        fragment["reason"] = "long_semantic_helper_prose_fragment"
+                        long_prose_examples.append(fragment)
 
     used_helpers = {helper_name: count for helper_name, count in helper_counts.items() if count}
     if not used_helpers:
         return None
-    return {"path": path, "helper_call_count": sum(used_helpers.values()), "helpers": used_helpers}
+    semantic_helper_call_count = sum(
+        used_helpers.get(helper_name, 0) for helper_name in _SEMANTIC_TAXONOMY_HELPER_NAMES
+    )
+    return {
+        "path": path,
+        "helper_call_count": sum(used_helpers.values()),
+        "helpers": used_helpers,
+        "semantic_helper_call_count": semantic_helper_call_count,
+        "semantic_helper_literal_fragment_count": semantic_fragment_count,
+        "semantic_helper_long_prose_fragment_count": len(long_prose_examples),
+        "semantic_helper_long_prose_examples": long_prose_examples[:_SEMANTIC_HELPER_LONG_PROSE_EXAMPLES_PER_FILE],
+    }
 
 
 def _taxonomy_helper_name(node: ast.AST) -> str | None:
@@ -305,6 +327,15 @@ def _taxonomy_helper_usage_diagnostics(
         "files_scanned": files_scanned,
         "taxonomy_helper_file_count": len(sorted_rows),
         "taxonomy_helper_call_count": sum(cast(int, row["helper_call_count"]) for row in sorted_rows),
+        "semantic_helper_literal_fragment_count": sum(
+            cast(int, row.get("semantic_helper_literal_fragment_count", 0)) for row in sorted_rows
+        ),
+        "semantic_helper_long_prose_file_count": sum(
+            1 for row in sorted_rows if cast(int, row.get("semantic_helper_long_prose_fragment_count", 0)) > 0
+        ),
+        "semantic_helper_long_prose_fragment_count": sum(
+            cast(int, row.get("semantic_helper_long_prose_fragment_count", 0)) for row in sorted_rows
+        ),
     }
     for helper_name in _TAXONOMY_HELPER_NAMES:
         totals[helper_name] = sum(
@@ -315,6 +346,65 @@ def _taxonomy_helper_usage_diagnostics(
         "totals": totals,
         "files": [dict(row) for row in sorted_rows],
     }
+
+
+def _semantic_helper_literal_fragments(node: ast.Call, *, helper_name: str) -> tuple[dict[str, object], ...]:
+    if helper_name == "semantic_anchor":
+        fragment_nodes = _semantic_anchor_fragment_nodes(node)
+    elif helper_name == "semantic_concept":
+        fragment_nodes = _semantic_concept_fragment_nodes(node)
+    else:
+        return ()
+
+    fragments: list[dict[str, object]] = []
+    for field, fragment_node in fragment_nodes:
+        for literal in _literal_fragment_strings(fragment_node):
+            fragments.append(
+                {
+                    "line": getattr(fragment_node, "lineno", getattr(node, "lineno", 0)),
+                    "helper": helper_name,
+                    "field": field,
+                    "literal": literal,
+                    "word_count": _english_word_count(literal),
+                }
+            )
+    return tuple(fragments)
+
+
+def _semantic_anchor_fragment_nodes(node: ast.Call) -> tuple[tuple[str, ast.AST], ...]:
+    fragment_nodes: list[tuple[str, ast.AST]] = []
+    if len(node.args) >= 2:
+        fragment_nodes.append(("fragments", node.args[1]))
+    fragment_nodes.extend(("fragments", keyword.value) for keyword in node.keywords if keyword.arg == "fragments")
+    return tuple(fragment_nodes)
+
+
+def _semantic_concept_fragment_nodes(node: ast.Call) -> tuple[tuple[str, ast.AST], ...]:
+    fragment_nodes: list[tuple[str, ast.AST]] = []
+    for keyword in node.keywords:
+        field = keyword.arg
+        if field is None or field not in {"required", "forbidden"}:
+            continue
+        fragment_nodes.append((field, keyword.value))
+    return tuple(fragment_nodes)
+
+
+def _literal_fragment_strings(node: ast.AST) -> tuple[str, ...]:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return (node.value,)
+    if isinstance(node, (ast.List, ast.Set, ast.Tuple)):
+        fragments: list[str] = []
+        for item in node.elts:
+            fragments.extend(_literal_fragment_strings(item))
+        return tuple(fragments)
+    return ()
+
+
+def _is_long_semantic_helper_prose(literal: str) -> bool:
+    stripped = literal.strip()
+    if not stripped:
+        return False
+    return _english_word_count(stripped) >= _SEMANTIC_HELPER_LONG_PROSE_MIN_WORDS
 
 
 def _exact_assertion_to_dict(assertion: _ExactPromptAssertion, *, path: str) -> dict[str, object]:

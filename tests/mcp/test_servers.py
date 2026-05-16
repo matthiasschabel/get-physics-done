@@ -34,6 +34,29 @@ def _assert_semantic_surface(
     assert_prompt_contracts(text, *semantic_concept(label, required=required, forbidden=forbidden))
 
 
+def _assert_error_surface(
+    error: object,
+    label: str,
+    *,
+    required: tuple[str, ...] = (),
+    forbidden: tuple[str, ...] = (),
+) -> None:
+    assert isinstance(error, str)
+    _assert_semantic_surface(error, f"{label} error surface", required=required, forbidden=forbidden)
+
+
+def _assert_loading_hint(
+    result: dict[str, object],
+    label: str,
+    *,
+    required: tuple[str, ...] = (),
+    forbidden: tuple[str, ...] = (),
+) -> None:
+    loading_hint = result["loading_hint"]
+    assert isinstance(loading_hint, str)
+    _assert_semantic_surface(loading_hint, f"{label} loading hint", required=required, forbidden=forbidden)
+
+
 def _assert_body_free_task_overlay_metadata(payload: dict[str, object]) -> None:
     assert payload["body_policy"] == "metadata_only"
     for entry in payload["overlays"]:
@@ -669,7 +692,7 @@ class TestConventionsServer:
 
         result = subfield_defaults("   ")
         assert "error" in result
-        assert "domain must be a non-empty string" in result["error"]
+        _assert_error_surface(result["error"], "blank subfield domain", required=("domain", "non-empty string"))
 
     def test_subfield_defaults_all_domains_valid(self):
         from gpd.mcp.servers.conventions_server import SUBFIELD_DEFAULTS, subfield_defaults
@@ -813,7 +836,7 @@ class TestConventionsServer:
 
         result = convention_set(str(tmp_path), "custom:bad key", "my_value")
         assert "error" in result
-        assert "Custom convention keys" in result["error"]
+        _assert_error_surface(result["error"], "invalid custom convention key", required=("custom", "keys"))
 
     def test_load_lock_non_dict_state_json_fails_closed(self, tmp_path):
         """If state exists but is unrecoverable, the helper should fail closed."""
@@ -913,7 +936,7 @@ class TestConventionsServer:
         result = convention_set(str(tmp_path), "fourier_convention", "physics")
 
         assert "error" in result
-        assert "not recoverable" in result["error"]
+        _assert_error_surface(result["error"], "backup-only convention state", required=("not recoverable",))
         assert not (planning / "state.json").exists()
         backup = json.loads((planning / "state.json.bak").read_text(encoding="utf-8"))
         assert backup["position"]["current_phase"] == "09"
@@ -930,7 +953,7 @@ class TestConventionsServer:
 
         result = convention_set(str(tmp_path), "metric_signature", "(+,-,-,-)")
         assert "error" in result
-        assert "Malformed" in result["error"] or "state.json" in result["error"]
+        _assert_error_surface(result["error"], "malformed convention state mutation", required=("malformed",))
 
     def test_convention_set_returns_error_on_empty_custom_key(self, tmp_path):
         """convention_set returns error dict for empty custom key."""
@@ -942,7 +965,7 @@ class TestConventionsServer:
 
         result = convention_set(str(tmp_path), "custom:", "val")
         assert "error" in result
-        assert "empty" in result["error"].lower()
+        _assert_error_surface(result["error"], "empty custom convention key", required=("empty",))
 
     def test_convention_set_returns_error_on_os_error(self, tmp_path):
         """convention_set returns error dict when state.json is a directory (IsADirectoryError)."""
@@ -966,7 +989,7 @@ class TestConventionsServer:
 
         result = convention_lock_status(str(tmp_path))
         assert "error" in result
-        assert "Malformed" in result["error"] or "state.json" in result["error"]
+        _assert_error_surface(result["error"], "malformed convention state status", required=("malformed",))
 
     def test_convention_lock_status_returns_error_on_os_error(self, tmp_path):
         """convention_lock_status returns error dict when state.json is a directory."""
@@ -1064,7 +1087,9 @@ class TestErrorsMcp:
 
         result = check_error_classes("   ")
         assert "error" in result
-        assert "computation_desc must be a non-empty string" in result["error"]
+        _assert_error_surface(
+            result["error"], "blank error-class computation", required=("computation_desc", "non-empty string")
+        )
 
     def test_get_detection_strategy(self):
         from gpd.mcp.servers.errors_mcp import get_detection_strategy
@@ -1504,8 +1529,11 @@ class TestSkillsServer:
             "requires": "mirrored",
             "review_contract": "mirrored",
         }
-        assert "Treat `content` as the wrapper/context surface." in result["loading_hint"]
-        assert "It already embeds the model-visible `Command Requirements` section." in result["loading_hint"]
+        _assert_loading_hint(
+            result,
+            "command skill wrapper and requirements",
+            required=("content", "wrapper", "context", "Command Requirements"),
+        )
         assert result["file_count"] == 1
         assert result["allowed_tools_surface"] == "command.allowed-tools"
 
@@ -1834,8 +1862,11 @@ class TestSkillsServer:
         assert "referee-decision-schema.md" in schema_documents
         assert "Referee Decision Schema" in schema_documents["referee-decision-schema.md"]["body"]
         assert "review-ledger-schema.md" not in contract_documents
-        assert "Treat `content` as the wrapper/context surface." in result["loading_hint"]
-        assert "Load `schema_documents` and `contract_documents` too when present" in result["loading_hint"]
+        _assert_loading_hint(
+            result,
+            "skill schema and contract body availability",
+            required=("content", "wrapper", "context", "schema_documents", "contract_documents"),
+        )
         assert result["content_authority"] == "canonical"
         assert result["structured_metadata_authority"] == {
             "content": "canonical",
@@ -1845,7 +1876,11 @@ class TestSkillsServer:
             "requires": "mirrored",
             "review_contract": "mirrored",
         }
-        assert "It already embeds the model-visible `Command Requirements` section." in result["loading_hint"]
+        _assert_loading_hint(
+            result,
+            "skill command requirements visibility",
+            required=("content", "Command Requirements"),
+        )
         assert result["context_mode"] == "project-required"
         assert result["project_reentry_capable"] is False
         assert result["review_contract"] is not None
@@ -1981,9 +2016,12 @@ class TestSkillsServer:
         assert schema_documents == {}
         assert contract_documents == {}
         assert any(path.endswith("peer-review-panel.md") for path in result["contract_references"])
-        assert "Treat `content` as the wrapper/context surface." in result["loading_hint"]
-        assert "See `referenced_files` for external markdown dependencies." in result["loading_hint"]
-        assert "Load `schema_documents` and `contract_documents` too when present" not in result["loading_hint"]
+        _assert_loading_hint(
+            result,
+            "proof redteam external dependencies",
+            required=("content", "wrapper", "context", "referenced_files", "external markdown dependencies"),
+            forbidden=("schema_documents", "contract_documents"),
+        )
 
     def test_get_skill_resume_work_surfaces_project_reentry_metadata(self):
         from gpd.mcp.servers.skills_server import get_skill
@@ -2301,10 +2339,11 @@ class TestSkillsServer:
         assert result["reference_count"] > 0
         assert result["schema_documents"] == []
         assert result["contract_documents"] == []
-        assert "See `referenced_files` for external markdown dependencies." in result["loading_hint"]
-        assert (
-            "schema_documents and contract_documents mirror loaded schema and contract markdown bodies."
-            not in result["loading_hint"]
+        _assert_loading_hint(
+            result,
+            "skill references without loaded schema bodies",
+            required=("referenced_files", "external markdown dependencies"),
+            forbidden=("schema_documents", "contract_documents", "markdown bodies"),
         )
 
     def test_get_skill_canonicalizes_runtime_command_examples(self):

@@ -37,7 +37,13 @@ from gpd.core.review_contract_prompt import (
     render_review_contract_prompt,
     review_contract_payload,
 )
-from tests.assertion_taxonomy_support import FragmentMode, fragment_count, machine_exact, semantic_anchor
+from tests.assertion_taxonomy_support import (
+    FragmentMode,
+    fragment_count,
+    machine_exact,
+    semantic_anchor,
+    semantic_concept,
+)
 from tests.markdown_test_support import extract_markdown_section, parse_yaml_fences, require_mapping
 from tests.workflow_authority_support import workflow_authority_text
 
@@ -1511,9 +1517,19 @@ def test_peer_review_contract_surfaces_typed_conditional_proof_requirements() ->
         ),
     ]
     source = _read_command("peer-review")
-    assert "conditional_requirements:" in source
-    assert "when: project-backed manuscript review" in source
-    assert "when: theorem-bearing claims are present" in source
+    _assert_prompt_contracts(
+        source,
+        machine_exact(
+            "peer-review conditional source keys stay exact",
+            ("conditional_requirements:", "when: project-backed manuscript review"),
+            owner=REVIEW_CONTRACT_OWNER,
+            rationale="review-contract conditional frontmatter keys and structured route labels are parsed literally",
+        ),
+        *semantic_concept(
+            "theorem-bearing peer-review conditional remains visible in source",
+            required=("when:", "theorem-bearing", "claims"),
+        ),
+    )
 
 
 def test_verify_work_review_contract_uses_phase_scoped_output_path() -> None:
@@ -1656,7 +1672,13 @@ def test_author_response_template_is_canonical_and_mentions_new_calculation_trac
 
     assert "issues_needing_calculation" in author_response
     assert "needs-calculation" in author_response
-    assert "Source phase for new work" in author_response
+    _assert_prompt_contracts(
+        author_response,
+        *semantic_concept(
+            "author response tracks source phase for new work",
+            required=("source phase", "new work"),
+        ),
+    )
     assert "templates/paper/author-response.md" in referee_response
     assert "needs-calculation" in referee_response
     assert "templates/paper/author-response.md" in writer
@@ -1674,7 +1696,13 @@ def test_referee_response_template_reuses_canonical_issue_fields_in_worked_secti
         assert "**Classification:**" in section
         assert "**Blocking issue:**" in section
         assert "**Decision-artifact context:**" in section
-        assert "**Source phase for new work:**" in section
+        _assert_prompt_contracts(
+            section,
+            *semantic_concept(
+                "referee response issue section keeps source phase field",
+                required=("source phase", "new work"),
+            ),
+        )
         assert "**Category:**" not in section
 
 
@@ -1931,8 +1959,20 @@ def test_comparison_templates_match_full_comparison_verdict_subject_kind_enum() 
     assert "uncertainty_markers:" in contract_results
     assert "weakest_anchors: [anchor-1]" in contract_results
     assert "disconfirming_observations: [observation-1]" in contract_results
-    assert "Only `subject_role: decisive` closes a decisive requirement" in internal
-    assert "Only `subject_role: decisive` closes a decisive requirement" in experimental
+    for comparison_template in (internal, experimental):
+        _assert_prompt_contracts(
+            comparison_template,
+            machine_exact(
+                "decisive subject role literal stays exact",
+                "`subject_role: decisive`",
+                owner=REVIEW_CONTRACT_OWNER,
+                rationale="comparison verdict templates use this literal schema example",
+            ),
+            *semantic_concept(
+                "decisive subject role closure rule remains visible",
+                required=("only", "closes", "decisive requirement"),
+            ),
+        )
     assert (
         "Must be the canonical project-root-relative `GPD/phases/XX-name/XX-YY-PLAN.md#/contract` path"
         in contract_results
@@ -2105,11 +2145,26 @@ def test_referee_schema_and_panel_surface_strict_stage_artifact_naming_and_round
     assert "proof_audits" in panel
     assert "theorem_assumptions" in panel
     assert "theorem_parameters" in panel
-    assert (
-        "Strict-stage specialist artifacts must use canonical names `STAGE-reader`, `STAGE-literature`, `STAGE-math`, `STAGE-physics`, `STAGE-interestingness`."
-        in panel
+    _assert_prompt_contracts(
+        panel,
+        machine_exact(
+            "strict stage specialist artifact names stay exact",
+            (
+                "`STAGE-reader`",
+                "`STAGE-literature`",
+                "`STAGE-math`",
+                "`STAGE-physics`",
+                "`STAGE-interestingness`",
+                "`-R<round>`",
+            ),
+            owner=REVIEW_CONTRACT_OWNER,
+            rationale="strict stage-review artifact names and round suffix tokens are machine-visible contracts",
+        ),
+        *semantic_concept(
+            "strict stage artifact naming rule remains visible",
+            required=("strict-stage specialist artifacts", "canonical names", "same optional", "suffix"),
+        ),
     )
-    assert "all five must share the same optional `-R<round>` suffix." in panel
     for source in (panel, review_math):
         semantic_anchor(
             "theorem-bearing Stage 1 claims require review and proof audit",

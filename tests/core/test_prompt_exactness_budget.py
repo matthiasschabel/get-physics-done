@@ -11,14 +11,24 @@ from gpd.core.prompt_exactness_diagnostics import bounded_exact_assertion_diagno
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 EXACTNESS_TOTAL_BUDGETS = {
-    # Phase 8 observed 548/5184 after long-tail taxonomy-helper migration.
-    "brittle_prose_assertions": 560,
-    "exact_assertion_count": 5_210,
+    # Phase 5 pass4 observed 517/5134 after semantic-helper migration.
+    "brittle_prose_assertions": 525,
+    "exact_assertion_count": 5_150,
 }
 TAXONOMY_HELPER_TOTAL_FLOORS = {
     # Phase 8 observed 80 files and 735 helper calls; keep a small call-count cushion.
     "taxonomy_helper_file_count": 80,
     "taxonomy_helper_call_count": 725,
+}
+SEMANTIC_HELPER_LITERAL_FRAGMENT_FLOORS = {
+    # Phase 5 worker 6 observed 617 direct literal fragments in semantic helpers.
+    "semantic_helper_literal_fragment_count": 600,
+}
+SEMANTIC_HELPER_LONG_PROSE_BUDGETS = {
+    # Phase 5 worker 6 observed 37 files / 117 fragments; keep a small cushion
+    # so semantic helpers cannot absorb large exact-sentence assertions silently.
+    "semantic_helper_long_prose_file_count": 40,
+    "semantic_helper_long_prose_fragment_count": 125,
 }
 HIGH_SEVERITY_BASELINES: dict[str, dict[str, int]] = {}
 TAXONOMY_HELPER_BRITTLE_BASELINES = {
@@ -88,7 +98,12 @@ def test_taxonomy_helper_usage_tracks_semantic_concept_without_hiding_raw_exactn
                 semantic_concept,
             )
 
-            PROMPT = "Quick Start\\ngpd_return.status\\nstable semantic anchor\\n"
+            PROMPT = (
+                "Quick Start\\n"
+                "gpd_return.status\\n"
+                "stable semantic anchor\\n"
+                "this full sentence remains visible inside semantic helper diagnostics\\n"
+            )
 
             def test_prompt_contracts():
                 assert "gpd_return.status" in PROMPT
@@ -100,7 +115,10 @@ def test_taxonomy_helper_usage_tracks_semantic_concept_without_hiding_raw_exactn
                     semantic_anchor("meaning", "stable semantic anchor"),
                     *semantic_concept(
                         "meaning concept",
-                        required=("stable semantic anchor",),
+                        required=(
+                            "stable semantic anchor",
+                            "this full sentence remains visible inside semantic helper diagnostics",
+                        ),
                         forbidden=("the exact old sentence is gone forever",),
                     ),
                 )
@@ -126,6 +144,17 @@ def test_taxonomy_helper_usage_tracks_semantic_concept_without_hiding_raw_exactn
     assert usage_totals["public_exact"] == 1
     assert usage_totals["semantic_anchor"] == 1
     assert usage_totals["semantic_concept"] == 1
+    assert usage_totals["semantic_helper_literal_fragment_count"] == 4
+    assert usage_totals["semantic_helper_long_prose_file_count"] == 1
+    assert usage_totals["semantic_helper_long_prose_fragment_count"] == 1
+    usage_row = usage["files"][0]
+    assert isinstance(usage_row, dict)
+    assert usage_row["semantic_helper_literal_fragment_count"] == 4
+    assert usage_row["semantic_helper_long_prose_fragment_count"] == 1
+    examples = usage_row["semantic_helper_long_prose_examples"]
+    assert isinstance(examples, list)
+    assert examples[0]["helper"] == "semantic_concept"
+    assert examples[0]["field"] == "required"
 
     migration = exactness["migration"]
     assert isinstance(migration, dict)
@@ -214,6 +243,24 @@ def test_taxonomy_helper_usage_reaches_phase8_floor() -> None:
         observed = totals[field]
         assert isinstance(observed, int)
         assert observed >= floor, f"{field} floor missed: observed={observed} min={floor}"
+
+
+def test_semantic_helper_literal_fragments_are_measured_and_long_prose_is_bounded() -> None:
+    exactness = _exactness_payload()
+    usage = exactness["taxonomy_helper_usage"]
+    assert isinstance(usage, dict)
+    totals = usage["totals"]
+    assert isinstance(totals, dict)
+
+    for field, floor in SEMANTIC_HELPER_LITERAL_FRAGMENT_FLOORS.items():
+        observed = totals[field]
+        assert isinstance(observed, int)
+        assert observed >= floor, f"{field} floor missed: observed={observed} min={floor}"
+
+    for field, budget in SEMANTIC_HELPER_LONG_PROSE_BUDGETS.items():
+        observed = totals[field]
+        assert isinstance(observed, int)
+        assert observed <= budget, f"{field} budget exceeded: observed={observed} max={budget}"
 
 
 def test_exactness_migration_ledger_preserves_existing_exactness_totals() -> None:

@@ -63,6 +63,19 @@ def _numbered_choices(section: str) -> list[str]:
     return [line.strip() for line in section.splitlines() if re.match(r"\s*\d+\.\s+", line)]
 
 
+def _numbered_choice_entries(section: str) -> list[tuple[str, str]]:
+    entries: list[tuple[str, str]] = []
+    for line in _numbered_choices(section):
+        match = re.match(r"\d+\.\s+(?P<label>.+?)\s+- use `(?P<command>gpd:[^`]+)`\.", line)
+        if match is not None:
+            entries.append((match.group("label"), match.group("command")))
+    return entries
+
+
+def _bold_section_headings(section: str) -> list[str]:
+    return re.findall(r"(?m)^\*\*(.+?)\*\*$", section)
+
+
 def _assert_anchor(text: str, label: str, fragments: tuple[str, ...] | str) -> None:
     semantic_anchor(label, fragments).check(text)
 
@@ -194,23 +207,45 @@ def test_start_workflow_routes_to_existing_entrypoints() -> None:
             "project scaffolding",
         ),
     )
-    for heading in (
-        "This folder already has saved GPD work (`GPD project`)",
-        "This folder has partial/recoverable GPD state",
-        "This folder already has GPD's folder summary (`research map`)",
-        "This folder already has research files, but GPD is not set up here yet",
-        "This folder looks new or mostly empty",
-    ):
-        assert heading in offer_step
+    folder_state_headings = _bold_section_headings(offer_step)
+    assert len(folder_state_headings) == 5
+    _assert_anchor(
+        "\n".join(folder_state_headings),
+        "start chooser covers each folder-state family",
+        (
+            "saved GPD work",
+            "GPD project",
+            "partial/recoverable GPD state",
+            "research map",
+            "research files",
+            "not set up",
+            "new",
+            "mostly empty",
+        ),
+    )
+    _assert_anchor(
+        "\n".join(_displayed_choice_labels(workflow)),
+        "start chooser labels preserve action concepts without exact menu prose",
+        (
+            "Resume",
+            "recommended",
+            "Review",
+            "Map",
+            "brand-new",
+            "Fast start",
+            "Full guided setup",
+            "full GPD project",
+        ),
+    )
     assert {
-        "Resume this project (recommended)",
-        "Review the project status first",
-        "Map this folder first (recommended)",
-        "Start a brand-new GPD project anyway",
-        "Fast start (recommended)",
-        "Full guided setup",
-        "Turn this into a full GPD project (recommended)",
-    } <= _displayed_choice_labels(workflow)
+        "gpd:resume-work",
+        "gpd:progress",
+        "gpd:tour",
+        "gpd:new-project",
+        "gpd:new-project --minimal",
+        "gpd:map-research",
+        "gpd:sync-state",
+    } <= set(re.findall(r"`(gpd:[^`]+)`", offer_step))
     _assert_anchor(
         offer_step,
         "start first chooser stays short and state-specific",
@@ -243,8 +278,7 @@ def test_start_workflow_routes_to_existing_entrypoints() -> None:
         "old internal structuring rule leak",
         "this is an internal structuring rule, not a line to show the researcher",
     )
-    assert "Other useful options" not in workflow
-    assert "other useful options" not in workflow
+    _assert_absent(workflow, "start chooser excludes a secondary options menu", "Other useful options")
 
     assert "Read `{GPD_INSTALL_DIR}/workflows/new-project.md` with the file-read tool." not in workflow
     assert "Read `{GPD_INSTALL_DIR}/workflows/help.md` with the file-read tool." not in workflow
@@ -260,12 +294,15 @@ def test_start_workflow_routes_to_existing_entrypoints() -> None:
         "**This folder already has GPD's folder summary",
     )
     _assert_anchor(partial_state_choices, "partial state choices are renumbered after filtering", "contiguously")
-    assert "1. Inspect recovery state" not in partial_state_choices
-    assert "2. Reconcile state files" not in partial_state_choices
+    _assert_absent(
+        partial_state_choices,
+        "partial state choices do not preserve stale absolute numbering",
+        ("1. Inspect recovery state", "2. Reconcile state files"),
+    )
     _assert_anchor(
         offer_step, "partial state excludes progress route", ("Do not list", "gpd:progress", "partial state")
     )
-    assert "Review visible progress - use `gpd:progress`" not in workflow
+    _assert_absent(offer_step, "partial state excludes visible progress menu prose", "Review visible progress")
 
 
 def test_start_workflow_existing_research_unmapped_first_chooser_is_only_three_choices() -> None:
@@ -276,24 +313,32 @@ def test_start_workflow_existing_research_unmapped_first_chooser_is_only_three_c
         "**This folder looks new or mostly empty**",
     )
 
-    assert _numbered_choices(existing_research_choices) == [
-        "1. Map this folder first (recommended) - use `gpd:map-research`.",
-        "2. Take a guided tour first - use `gpd:tour`.",
-        "3. Start a brand-new GPD project anyway - use `gpd:new-project --minimal`.",
-    ]
-    assert re.findall(r"`(gpd:[^`]+)`", existing_research_choices) == [
+    choice_entries = _numbered_choice_entries(existing_research_choices)
+    assert len(choice_entries) == 3
+    assert [command for _label, command in choice_entries] == [
         "gpd:map-research",
         "gpd:tour",
         "gpd:new-project --minimal",
     ]
+    _assert_anchor(
+        "\n".join(label for label, _command in choice_entries),
+        "existing research chooser offers map, tour, and explicit new-project escape hatch",
+        ("Map", "recommended", "tour", "brand-new GPD project"),
+    )
     assert not re.search(r"(?m)^\s*-\s+.+\s+- use `gpd:", existing_research_choices)
-    assert "Other useful options" not in existing_research_choices
-    assert "capabilities menu" not in existing_research_choices
-    assert "help menu" not in existing_research_choices
-    assert "gpd:help" not in existing_research_choices
-    assert "gpd:quick" not in existing_research_choices
-    assert "gpd:explain" not in existing_research_choices
-    assert "gpd:suggest-next" not in existing_research_choices
+    _assert_absent(
+        existing_research_choices,
+        "existing research first chooser excludes broad help/capability detours",
+        (
+            "Other useful options",
+            "capabilities menu",
+            "help menu",
+            "gpd:help",
+            "gpd:quick",
+            "gpd:explain",
+            "gpd:suggest-next",
+        ),
+    )
 
 
 def test_start_workflow_displayed_choice_labels_route_verbatim() -> None:

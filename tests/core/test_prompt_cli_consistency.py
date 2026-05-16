@@ -543,8 +543,9 @@ def test_start_prompt_delegates_routing_to_workflow_only() -> None:
     assert "@{GPD_INSTALL_DIR}/references/onboarding/beginner-command-taxonomy.md" in start_command
     assert start_registry.argument_hint == "[optional short goal]"
     assert start_registry.context_mode == "projectless"
-    _assert_normalized_fragments(
+    _assert_semantic_fragments(
         start_command_expanded,
+        "start command wrapper delegates chooser semantics",
         (
             "actual first-run chooser",
             "read-only walkthrough",
@@ -552,8 +553,9 @@ def test_start_prompt_delegates_routing_to_workflow_only() -> None:
             "same-message explicit choice counts only as the chooser answer",
         ),
     )
-    _assert_normalized_fragments(
+    _assert_semantic_fragments(
         start_command,
+        "start command wrapper explains terms without parallel routing",
         (
             "explain official terms",
             "first time they appear",
@@ -562,8 +564,9 @@ def test_start_prompt_delegates_routing_to_workflow_only() -> None:
     )
     assert_start_workflow_router_contract(start_workflow)
     assert local_cli_resume_recent_command() in reopen_recent_branch
-    _assert_normalized_fragments(
+    _assert_semantic_fragments(
         reopen_recent_branch,
+        "start reopen recent branch keeps terminal picker and runtime continuation boundary",
         (
             "normal terminal",
             "recent-project picker",
@@ -616,10 +619,17 @@ def test_tour_prompt_delegates_routing_to_workflow_only() -> None:
             "the runtime, where you use the GPD command prefix provided for that runtime",
         ),
     )
-    assert "80 lines or fewer" in tour_workflow
-    assert "4500 characters or fewer" in tour_workflow
-    assert "gpd:help --all` remains the canonical complete command index" in tour_workflow
-    assert "Normal terminal vs runtime" in tour_workflow
+    _assert_semantic_fragments(
+        tour_workflow,
+        "tour workflow keeps concise default and reference-mode boundaries",
+        (
+            "80 lines or fewer",
+            "4500 characters or fewer",
+            "gpd:help --all",
+            "canonical complete command index",
+            "Normal terminal vs runtime",
+        ),
+    )
 
 
 def test_help_workflow_surfaces_start_as_first_run_router() -> None:
@@ -628,8 +638,9 @@ def test_help_workflow_surfaces_start_as_first_run_router() -> None:
 
     assert get_command("start").name in help_workflow
     assert get_command("tour").name in help_workflow
-    _assert_normalized_fragments(
+    _assert_semantic_fragments(
         quick_start_reference,
+        "help quick start surfaces start as first-run router and tour as explainer",
         (
             "gpd:start",
             "first-run router",

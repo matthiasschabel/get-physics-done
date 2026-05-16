@@ -36,6 +36,7 @@ from gpd.core.public_surface_contract import (
     resume_authority_fields,
 )
 from tests import doc_surface_contracts as doc_surface_contracts_module
+from tests.assertion_taxonomy_support import FragmentMode, MatchMode, semantic_anchor
 from tests.workflow_authority_support import workflow_authority_text
 
 
@@ -105,21 +106,49 @@ def _expected_beginner_runtime_surface(descriptor: object) -> BeginnerRuntimeSur
     )
 
 
+def _assert_anchor(text: str, label: str, fragments: tuple[str, ...] | str) -> None:
+    semantic_anchor(label, fragments, match=MatchMode.CASEFOLD_NORMALIZED).check(text)
+
+
+def _assert_absent(text: str, label: str, fragments: tuple[str, ...] | str) -> None:
+    semantic_anchor(
+        label,
+        fragments,
+        mode=FragmentMode.ABSENT,
+        match=MatchMode.CASEFOLD_NORMALIZED,
+    ).check(text)
+
+
 def test_beginner_onboarding_surface_contract_exposes_hub_and_ladder() -> None:
+    preflight = beginner_preflight_requirements()
+    caveats = beginner_onboarding_caveats()
+
     assert beginner_onboarding_hub_url() == "https://github.com/psi-oss/get-physics-done/tree/main/docs"
     assert "blob/main" not in beginner_onboarding_hub_url()
     assert beginner_startup_ladder_text() == "`help -> start -> tour -> new-project / map-research -> resume-work`"
-    assert beginner_preflight_requirements() == (
-        "One supported runtime is already installed and can open from your normal terminal.",
-        "Node.js 20+ is available in that same terminal.",
-        "Python 3.11+ with the standard `venv` module is available there too.",
+    assert len(preflight) == 3
+    assert len(caveats) == 5
+    _assert_anchor(
+        "\n".join(preflight),
+        "beginner preflight requirements",
+        ("supported runtime", "normal terminal", "Node.js 20+", "Python 3.11+", "`venv`"),
     )
-    assert beginner_onboarding_caveats() == (
-        "GPD is not a standalone app.",
-        "GPD does not install your runtime for you.",
-        "GPD does not include model access, billing, or API credits.",
-        "This hub is the beginner path, not the full reference.",
-        "If evidence, references, or artifacts are missing, say so explicitly; GPD should not invent them.",
+    _assert_anchor(
+        "\n".join(caveats),
+        "beginner onboarding caveats",
+        (
+            "not a standalone app",
+            "does not install your runtime",
+            "model access",
+            "billing",
+            "API credits",
+            "beginner path",
+            "not the full reference",
+            "evidence",
+            "references",
+            "artifacts",
+            "not invent",
+        ),
     )
 
 
@@ -127,13 +156,11 @@ def test_beginner_startup_ladder_stays_separate_from_deeper_recovery_follow_ups(
     startup_ladder = beginner_startup_ladder_text()
 
     assert startup_ladder.endswith("resume-work`")
-    assert "suggest-next" not in startup_ladder
-    assert "pause-work" not in startup_ladder
-    assert "Node" not in startup_ladder
-    assert "Python" not in startup_ladder
-    assert "--local" not in startup_ladder
-    assert "standalone" not in startup_ladder
-    assert "billing" not in startup_ladder
+    _assert_absent(
+        startup_ladder,
+        "beginner startup ladder excludes deeper recovery and readiness details",
+        ("suggest-next", "pause-work", "Node", "Python", "--local", "standalone", "billing"),
+    )
 
 
 def test_public_surface_contract_rejects_recovery_ladder_command_drift(
@@ -608,9 +635,10 @@ def test_doc_surface_contract_helpers_read_runtime_normalized_contract(
     assert recovery_cross_workspace_command() == "resume --recent"
     assert public_surface_contract_module.local_cli_bridge_purpose_phrase() == "workspace diagnostics"
     bridge_note = local_cli_bridge_note()
-    assert (
-        bridge_note
-        == "Use `gpd --help` in your normal terminal for the broader local CLI surface: workspace diagnostics."
+    _assert_anchor(
+        bridge_note,
+        "local CLI bridge note composes dynamic command and purpose",
+        ("gpd --help", "normal terminal", "broader local CLI surface", "workspace diagnostics"),
     )
     assert public_surface_contract_module.local_cli_bridge_purpose_phrase() in bridge_note
     assert public_surface_contract_module.local_cli_plan_preflight_command() not in bridge_note
@@ -739,9 +767,26 @@ def test_onboarding_boundary_reference_stays_internal_to_start_and_tour() -> Non
     from pathlib import Path
 
     repo_root = Path(__file__).resolve().parents[2]
-    fragment = "scalpel, not an autopilot"
+    boundary_reference = "@{GPD_INSTALL_DIR}/references/shared/onboarding-command-boundaries.md"
+    boundary_concepts = (
+        "start",
+        "chooser/router",
+        "tour",
+        "read-only explainer",
+        "help",
+        "reference/index surface",
+        "settings",
+        "after first successful startup",
+        "not an autopilot",
+        "verify",
+        "redirect",
+    )
 
-    assert fragment in (repo_root / "README.md").read_text(encoding="utf-8")
+    _assert_anchor(
+        (repo_root / "README.md").read_text(encoding="utf-8"),
+        "README preserves supervised execution posture",
+        ("GPD", "not an autopilot", "verify", "redirect", "Supervised", "Balanced"),
+    )
 
     internal_workflows = (
         "src/gpd/specs/workflows/start.md",
@@ -750,8 +795,8 @@ def test_onboarding_boundary_reference_stays_internal_to_start_and_tour() -> Non
     for rel in internal_workflows:
         raw = (repo_root / rel).read_text(encoding="utf-8")
         expanded = expand_at_includes(raw, repo_root / "src/gpd", "/runtime/")
-        assert "@{GPD_INSTALL_DIR}/references/shared/onboarding-command-boundaries.md" in raw
-        assert fragment in expanded
+        assert boundary_reference in raw
+        _assert_anchor(expanded, f"{rel} expands shared onboarding boundary concepts", boundary_concepts)
         if rel.endswith("tour.md"):
             assert expanded.count("help -> start -> tour") == 1
 
@@ -762,10 +807,16 @@ def test_onboarding_boundary_reference_stays_internal_to_start_and_tour() -> Non
     for rel in public_workflows:
         raw = (repo_root / rel).read_text(encoding="utf-8")
         expanded = expand_at_includes(raw, repo_root / "src/gpd", "/runtime/")
-        assert "@{GPD_INSTALL_DIR}/references/shared/onboarding-command-boundaries.md" not in raw
-        assert "Keep the beginner boundaries stable" not in expanded
-        assert "`start` is the chooser/router" not in expanded
-        assert "`settings` belongs after first successful startup" not in expanded
+        assert boundary_reference not in raw
+        _assert_absent(
+            expanded,
+            f"{rel} excludes internal onboarding boundary reference prose",
+            (
+                "Keep the beginner boundaries stable",
+                "`start` is the chooser/router",
+                "`settings` belongs after first successful startup",
+            ),
+        )
 
 
 def test_workflow_interactive_choice_fallback_is_single_sourced() -> None:
@@ -787,10 +838,24 @@ def test_workflow_interactive_choice_fallback_is_single_sourced() -> None:
         expanded = expand_at_includes(authority_text, repo_root / "src/gpd", "/runtime/")
         if staged_name is None:
             assert fallback_ref in raw
-        assert "Use `ask_user` for structured choices when the runtime supports it." in expanded
-        assert "Platform note" not in raw
-        assert "If `ask_user` is available" not in raw
-        assert "If `ask_user` is not available" not in raw
+        _assert_anchor(
+            expanded,
+            f"{rel} preserves interactive choice fallback meaning",
+            (
+                "ask_user",
+                "structured choices",
+                "wait for a structured reply",
+                "plain text",
+                "same option labels",
+                "freeform response",
+                "Do not duplicate the same question",
+            ),
+        )
+        _assert_absent(
+            raw,
+            f"{rel} avoids stale platform-specific fallback prose",
+            ("Platform note", "If `ask_user` is available", "If `ask_user` is not available"),
+        )
 
 
 def test_quick_workflow_uses_freeform_prompt_without_choice_fallback() -> None:
@@ -798,7 +863,10 @@ def test_quick_workflow_uses_freeform_prompt_without_choice_fallback() -> None:
     raw = (repo_root / "src/gpd/specs/workflows/quick.md").read_text(encoding="utf-8")
 
     assert "@{GPD_INSTALL_DIR}/references/shared/interactive-choice-fallback.md" not in raw
-    assert "Ask ONE question inline (freeform, NOT ask_user):" in raw
-    assert "there are no fixed option labels to preserve" in raw
+    _assert_anchor(
+        raw,
+        "quick workflow keeps inherently freeform prompt boundary",
+        ("Ask ONE question inline", "freeform", "NOT ask_user", "no fixed option labels to preserve"),
+    )
     assert "ask_user(" not in raw
-    assert "If `ask_user` is not available" not in raw
+    _assert_absent(raw, "quick workflow avoids structured-choice fallback branch", "If `ask_user` is not available")

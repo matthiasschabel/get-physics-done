@@ -1965,8 +1965,12 @@ class TestDiscovery:
         assert debugger_skill.name == "gpd-debugger"
         assert debugger_agent.surface == "public"
         assert debugger_agent.role_family == "worker"
-        assert (
-            "public writable production agent specialized for discrepancy investigation" in debugger_agent.system_prompt
+        assert_prompt_contracts(
+            debugger_agent.system_prompt,
+            *semantic_concept(
+                "debugger production investigation role",
+                required=("public", "writable", "production agent", "discrepancy", "investigation"),
+            ),
         )
         assert {"gpd-debug", "gpd-debugger"}.issubset(registry.list_skills())
 
@@ -2184,8 +2188,14 @@ class TestRegistryPromptIncludeInlining:
 
             assert "<!-- hidden command note -->" not in command.content
             assert "<!-- hidden agent note -->" not in agent.system_prompt
-            assert "Inline marker prose keeps <!-- AI-drafted --> visible." in command.content
-            assert "Inline marker prose keeps <!-- AI-drafted --> visible." in agent.system_prompt
+            for content in (command.content, agent.system_prompt):
+                assert_prompt_contracts(
+                    content,
+                    *semantic_concept(
+                        "inline marker prose remains visible",
+                        required=("Inline marker prose", "<!-- AI-drafted -->", "visible"),
+                    ),
+                )
             assert "```markdown\n<!-- AI-drafted -->\n```" in command.content
             assert "```markdown\n<!-- AI-drafted -->\n```" in agent.system_prompt
             assert "Visible tail." in command.content
@@ -2246,8 +2256,13 @@ class TestRegistryPromptIncludeInlining:
 
         assert skill.source_kind == "command"
         assert "Stage id: `session_router`." in skill.content
-        assert "Do not assume reference ledgers," in skill.content
-        assert "bundles, or report schemas" in skill.content
+        assert_prompt_contracts(
+            skill.content,
+            *semantic_concept(
+                "verify-work session router defers reference bundle assumptions",
+                required=("do not assume", "reference ledgers", "bundles", "report schemas"),
+            ),
+        )
         for fragment in durable_fragments:
             assert fragment not in skill.content
             assert fragment in inventory_stage
@@ -2280,7 +2295,14 @@ class TestRegistryPromptIncludeInlining:
 
         assert agent.source_kind == "agent"
         assert agent.path.endswith("gpd-project-researcher.md")
-        assert "Checkpoint after the initial survey with scope confirmation." in agent.content
+        assert_prompt_contracts(
+            agent.content,
+            *semantic_concept(
+                "project researcher checkpoint handoff",
+                required=("checkpoint", "initial survey", "scope confirmation"),
+                forbidden=("wait for confirmation", "pause here for approval", "ask the user then continue"),
+            ),
+        )
         assert "gpd_return:" in agent.content
         assert "status: completed" in agent.content
         assert "files_written:" in agent.content
@@ -2289,9 +2311,6 @@ class TestRegistryPromptIncludeInlining:
         assert "commit_authority: orchestrator" in agent.content
         assert "Authority: use the frontmatter-derived Agent Requirements block" not in agent.content
         assert "## Agent Requirements" in agent.content
-        assert "wait for confirmation" not in agent.content
-        assert "pause here for approval" not in agent.content
-        assert "ask the user then continue" not in agent.content
 
     def test_plan_checker_registry_surface_keeps_direct_plan_contract_schema_and_checkpoint_contract_visible(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -2323,11 +2342,14 @@ class TestRegistryPromptIncludeInlining:
         assert skill.source_kind == "agent"
         assert skill.path.endswith("gpd-plan-checker.md")
         assert "{GPD_INSTALL_DIR}/templates/plan-contract-schema.md" in skill.content
-        assert (
-            "Apply `{GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md` for one-shot handoff semantics."
-            in skill.content
+        assert "{GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md" in skill.content
+        assert_prompt_contracts(
+            skill.content,
+            *semantic_concept(
+                "plan checker continuation boundary handoff",
+                required=("one-shot handoff", "user input", "typed checkpoint", "stop"),
+            ),
         )
-        assert "If user input is needed, return the typed checkpoint and stop." in skill.content
         assert "approved_plans:" in skill.content
         assert '    - "04-01"' in skill.content
         assert "blocked_plans: []" in skill.content
@@ -2607,7 +2629,13 @@ class TestRegistryPromptIncludeInlining:
             ),
         )
         assert "Proof-redteam" in skill.content
-        assert "Manuscript review on demand only" in skill.content
+        assert_prompt_contracts(
+            skill.content,
+            *semantic_concept(
+                "check-proof manuscript review loading",
+                required=("manuscript review", "on demand"),
+            ),
+        )
 
     def test_paper_writer_registry_surface_preserves_lightweight_path_mentions(self) -> None:
         skill = registry.get_skill("gpd-paper-writer")

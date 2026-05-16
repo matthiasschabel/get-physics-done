@@ -2,7 +2,15 @@ from __future__ import annotations
 
 from gpd.core.public_surface_contract import (
     local_cli_bridge_commands,
-    local_cli_bridge_purpose_phrase,
+)
+from gpd.core.public_surface_contract import (
+    local_cli_bridge_note as public_local_cli_bridge_note,
+)
+from gpd.core.public_surface_contract import (
+    post_start_settings_note as public_post_start_settings_note,
+)
+from gpd.core.public_surface_contract import (
+    post_start_settings_recommendation as public_post_start_settings_recommendation,
 )
 from gpd.core.public_surface_contract import (
     recovery_ladder_note as public_recovery_ladder_note,
@@ -35,31 +43,90 @@ from gpd.core.surface_phrases import (
     workflow_preset_storage_note,
     workflow_preset_surface_note,
 )
+from tests.assertion_taxonomy_support import (
+    FragmentMode,
+    MatchMode,
+    assert_prompt_contracts,
+    machine_exact,
+    semantic_anchor,
+    semantic_concept,
+)
 from tests.doc_surface_contracts import assert_recovery_ladder_contract
 from tests.runtime_test_support import PRIMARY_RUNTIME, runtime_resume_work_command
 
 
+def _assert_machine_surface(
+    text: str,
+    label: str,
+    fragments: str | tuple[str, ...],
+    *,
+    mode: FragmentMode = FragmentMode.ALL,
+) -> None:
+    assert_prompt_contracts(text, machine_exact(label, fragments, mode=mode, context=label))
+
+
+def _assert_semantic_surface(
+    text: str,
+    label: str,
+    fragments: str | tuple[str, ...],
+    *,
+    mode: FragmentMode = FragmentMode.ALL,
+) -> None:
+    assert_prompt_contracts(
+        text,
+        semantic_anchor(label, fragments, mode=mode, match=MatchMode.CASEFOLD_NORMALIZED, context=label),
+    )
+
+
+def _assert_semantic_concept(
+    text: str,
+    label: str,
+    *,
+    required: tuple[str, ...],
+    forbidden: tuple[str, ...] = (),
+) -> None:
+    assert_prompt_contracts(text, *semantic_concept(label, required=required, forbidden=forbidden, context=label))
+
+
 def test_cost_surface_phrases_stay_conservative_and_advisory() -> None:
-    assert "gpd cost" in cost_inspect_action()
-    assert "local usage/cost summary" in cost_inspect_action()
-    assert "USD budget warnings" in cost_inspect_action()
-    assert "gpd cost" in cost_after_run_action()
-    assert "After a run" in cost_after_run_action()
-    assert "local usage/cost" in cost_after_run_action()
-    assert "USD budget warnings" in cost_after_run_action()
-    assert "gpd cost" in cost_after_runs_guidance()
-    assert "budget guardrails" in cost_after_runs_guidance()
-    assert "billing truth" in cost_after_runs_guidance()
-    assert "advisory only" in cost_summary_surface_note()
-    assert "budget guardrails" in cost_summary_surface_note()
-    assert "provider billing truth" in cost_summary_surface_note()
-    assert "partial or estimated rather than exact" in cost_summary_surface_note()
+    inspect_action = cost_inspect_action()
+    _assert_machine_surface(inspect_action, "cost inspect command", "`gpd cost`")
+    _assert_semantic_surface(
+        inspect_action, "cost inspect advisory scope", ("local usage/cost summary", "USD budget warnings")
+    )
+
+    after_run_action = cost_after_run_action()
+    _assert_machine_surface(after_run_action, "cost after-run command", "`gpd cost`")
+    _assert_semantic_surface(
+        after_run_action, "cost after-run advisory scope", ("after a run", "local usage/cost", "USD budget warnings")
+    )
+
+    after_runs_guidance = cost_after_runs_guidance()
+    _assert_machine_surface(after_runs_guidance, "cost after-runs command", "`gpd cost`")
+    _assert_semantic_surface(after_runs_guidance, "cost after-runs guardrails", ("budget guardrails", "billing truth"))
+
+    summary_note = cost_summary_surface_note()
+    _assert_semantic_surface(
+        summary_note,
+        "cost summary conservative scope",
+        ("advisory only", "budget guardrails", "provider billing truth", "partial or estimated rather than exact"),
+    )
 
 
 def test_recovery_surface_phrases_cover_current_and_cross_project_paths() -> None:
-    assert "gpd resume" in recovery_resume_action()
-    assert "gpd resume --recent" in recovery_recent_action()
-    assert (
+    resume_action = recovery_resume_action()
+    _assert_machine_surface(resume_action, "recovery current command", "`gpd resume`")
+    _assert_semantic_surface(
+        resume_action, "recovery current read-only snapshot", ("current-workspace", "read-only recovery snapshot")
+    )
+
+    recent_action = recovery_recent_action()
+    _assert_machine_surface(recent_action, "recovery recent command", "`gpd resume --recent`")
+    _assert_semantic_surface(
+        recent_action, "recovery recent cross-workspace lookup", ("find the workspace first", "different one")
+    )
+
+    _assert_semantic_surface(
         recovery_primary_reason(
             mode="current-workspace",
             execution_resumable=True,
@@ -68,10 +135,11 @@ def test_recovery_surface_phrases_cover_current_and_cross_project_paths() -> Non
             has_continuity_handoff=False,
             missing_continuity_handoff=False,
             machine_change_notice=None,
-        )
-        == "Current workspace has a bounded resumable execution segment."
+        ),
+        "recovery current resumable reason",
+        ("current workspace", "bounded resumable execution segment"),
     )
-    assert (
+    _assert_semantic_surface(
         recovery_primary_reason(
             mode="recent-projects",
             forced_recent=False,
@@ -81,10 +149,11 @@ def test_recovery_surface_phrases_cover_current_and_cross_project_paths() -> Non
             has_continuity_handoff=False,
             missing_continuity_handoff=False,
             machine_change_notice=None,
-        )
-        == "Use the machine-local recent-project index to find the workspace you want to reopen."
+        ),
+        "recovery recent find reason",
+        ("machine-local recent-project index", "find", "workspace", "reopen"),
     )
-    assert (
+    _assert_semantic_surface(
         recovery_primary_reason(
             mode="recent-projects",
             forced_recent=True,
@@ -94,27 +163,52 @@ def test_recovery_surface_phrases_cover_current_and_cross_project_paths() -> Non
             has_continuity_handoff=False,
             missing_continuity_handoff=False,
             machine_change_notice=None,
-        )
-        == "Use the machine-local recent-project index to choose the workspace you want to reopen."
+        ),
+        "recovery recent choose reason",
+        ("machine-local recent-project index", "choose", "workspace", "reopen"),
     )
-    assert (
-        recovery_continue_action(
-            mode="current-workspace",
-            continue_command=runtime_resume_work_command(PRIMARY_RUNTIME),
-        )
-        == f"`{runtime_resume_work_command(PRIMARY_RUNTIME)}` continues in-runtime from the selected project state."
+
+    continue_command = runtime_resume_work_command(PRIMARY_RUNTIME)
+    current_continue_action = recovery_continue_action(
+        mode="current-workspace",
+        continue_command=continue_command,
     )
-    assert recovery_continue_reason(mode="current-workspace") == "Continue paused work inside the current workspace."
-    assert recovery_continue_reason(mode="recent-projects") == "Continue paused work inside the selected workspace."
-    assert (
-        recovery_continue_action(mode="recent-projects", continue_command="runtime `resume-work`")
-        == "After selecting a workspace, use runtime `resume-work` there to continue from the selected project state."
+    _assert_machine_surface(current_continue_action, "recovery current continue command", f"`{continue_command}`")
+    _assert_semantic_surface(
+        current_continue_action,
+        "recovery current continue selected state",
+        ("continues in-runtime", "selected project state"),
     )
-    assert (
-        recovery_fast_next_action(fast_next_command="/gpd:suggest-next")
-        == "`/gpd:suggest-next` is the fastest post-resume next command when you only need the next action."
+
+    _assert_semantic_surface(
+        recovery_continue_reason(mode="current-workspace"),
+        "recovery current continue reason",
+        ("continue paused work", "current workspace"),
     )
-    assert recovery_fast_next_reason() == "Fastest post-resume next command when you only need the next action."
+    _assert_semantic_surface(
+        recovery_continue_reason(mode="recent-projects"),
+        "recovery recent continue reason",
+        ("continue paused work", "selected workspace"),
+    )
+
+    recent_continue_action = recovery_continue_action(mode="recent-projects", continue_command="runtime `resume-work`")
+    _assert_machine_surface(recent_continue_action, "recovery recent continue command", "runtime `resume-work`")
+    _assert_semantic_surface(
+        recent_continue_action,
+        "recovery recent continue selected state",
+        ("selecting a workspace", "continue", "selected project state"),
+    )
+
+    fast_next_action = recovery_fast_next_action(fast_next_command="/gpd:suggest-next")
+    _assert_machine_surface(fast_next_action, "recovery fast-next command", "`/gpd:suggest-next`")
+    _assert_semantic_surface(
+        fast_next_action, "recovery fast-next guidance", ("fastest post-resume next command", "next action")
+    )
+    _assert_semantic_surface(
+        recovery_fast_next_reason(),
+        "recovery fast-next reason",
+        ("fastest post-resume next command", "next action"),
+    )
 
     ladder_note = recovery_ladder_note(
         resume_work_phrase="`/gpd:resume-work`",
@@ -180,61 +274,132 @@ def test_recovery_action_lines_render_structured_actions_with_availability_filte
 
 
 def test_observe_surface_phrases_stay_read_only_and_route_follow_ups_explicitly() -> None:
-    assert command_follow_up_action(command="gpd observe show --last 20", reason="inspect the recent execution trail") == (
-        "Run `gpd observe show --last 20` to inspect the recent execution trail."
+    follow_up_action = command_follow_up_action(
+        command="gpd observe show --last 20",
+        reason="inspect the recent execution trail",
     )
-    assert observe_execution_action() == (
-        "Run `gpd observe execution` for read-only long-run visibility from your normal terminal."
+    _assert_machine_surface(follow_up_action, "observe show follow-up command", "`gpd observe show --last 20`")
+    _assert_semantic_surface(follow_up_action, "observe show follow-up reason", "inspect the recent execution trail")
+
+    execution_action = observe_execution_action()
+    _assert_machine_surface(execution_action, "observe execution command", "`gpd observe execution`")
+    _assert_semantic_surface(
+        execution_action, "observe execution read-only terminal", ("read-only long-run visibility", "normal terminal")
     )
-    assert observe_execution_surface_note() == (
-        "Read-only long-run visibility from your normal terminal; use this for progress / waiting state, "
-        "conservative `possibly stalled` wording, and the next read-only checks."
+
+    execution_note = observe_execution_surface_note()
+    _assert_semantic_surface(
+        execution_note,
+        "observe execution conservative note",
+        ("read-only long-run visibility", "progress / waiting state", "possibly stalled", "read-only checks"),
     )
-    assert (
-        observe_tangent_routing_note(
-            tangent_phrase="/gpd:tangent",
-            branch_phrase="/gpd:branch-hypothesis",
-        )
-        == "If `gpd observe execution` surfaces an alternative-path follow-up or `branch later` recommendation, route it through `/gpd:tangent` first; use `/gpd:branch-hypothesis` only after that explicit choice."
+
+    cli_tangent_note = observe_tangent_routing_note(
+        tangent_phrase="/gpd:tangent",
+        branch_phrase="/gpd:branch-hypothesis",
     )
-    assert (
-        observe_tangent_routing_note(
-            tangent_phrase="runtime `tangent`",
-            branch_phrase="runtime `branch-hypothesis`",
-        )
-        == "If `gpd observe execution` surfaces an alternative-path follow-up or `branch later` recommendation, route it through runtime `tangent` first; use runtime `branch-hypothesis` only after that explicit choice."
+    _assert_machine_surface(
+        cli_tangent_note,
+        "observe tangent CLI command order",
+        ("`gpd observe execution`", "`/gpd:tangent`", "`/gpd:branch-hypothesis`"),
+        mode=FragmentMode.ORDERED,
     )
-    assert tangent_chooser_action() == (
-        "Inside the runtime, use the `tangent` command to choose stay on the main path, "
-        "run a bounded quick check, capture and defer, or open a hypothesis branch."
+    _assert_semantic_surface(
+        cli_tangent_note,
+        "observe tangent CLI routing",
+        ("alternative-path follow-up", "branch later", "explicit choice"),
     )
-    assert tangent_branch_later_action() == (
-        "After the bounded stop, use the runtime `tangent` command to keep the chooser explicit for this alternative path; "
-        "use the runtime `branch-hypothesis` command only if you decide to open a git-backed alternative path."
-    )
-    assert tangent_branch_later_follow_up_lines() == [
-        "Use the runtime `tangent` command to keep the chooser explicit for this alternative path.",
-        "Use the runtime `branch-hypothesis` command only if you decide to open a git-backed alternative path after this bounded stop.",
-    ]
-    assert tangent_branch_later_follow_up_lines(
+
+    runtime_tangent_note = observe_tangent_routing_note(
         tangent_phrase="runtime `tangent`",
         branch_phrase="runtime `branch-hypothesis`",
-    ) == [
-        "Use runtime `tangent` command to keep the chooser explicit for this alternative path.",
-        "Use runtime `branch-hypothesis` command only if you decide to open a git-backed alternative path after this bounded stop.",
-    ]
-    assert tangent_branch_later_action(
+    )
+    _assert_machine_surface(
+        runtime_tangent_note,
+        "observe tangent runtime command order",
+        ("`gpd observe execution`", "runtime `tangent`", "runtime `branch-hypothesis`"),
+        mode=FragmentMode.ORDERED,
+    )
+    _assert_semantic_surface(
+        runtime_tangent_note,
+        "observe tangent runtime routing",
+        ("alternative-path follow-up", "branch later", "explicit choice"),
+    )
+
+    chooser_action = tangent_chooser_action()
+    _assert_machine_surface(chooser_action, "tangent chooser command", "`tangent`")
+    _assert_semantic_surface(
+        chooser_action,
+        "tangent chooser options",
+        ("main path", "bounded quick check", "capture and defer", "hypothesis branch"),
+    )
+
+    branch_later_action = tangent_branch_later_action()
+    _assert_machine_surface(
+        branch_later_action,
+        "tangent branch-later default command order",
+        ("runtime `tangent`", "runtime `branch-hypothesis`"),
+        mode=FragmentMode.ORDERED,
+    )
+    _assert_semantic_surface(
+        branch_later_action,
+        "tangent branch-later default routing",
+        ("bounded stop", "chooser explicit", "alternative path", "git-backed alternative path"),
+    )
+
+    follow_up_lines = tangent_branch_later_follow_up_lines()
+    assert len(follow_up_lines) == 2
+    _assert_machine_surface(follow_up_lines[0], "tangent follow-up default chooser command", "runtime `tangent`")
+    _assert_semantic_surface(
+        follow_up_lines[0], "tangent follow-up default chooser", ("chooser explicit", "alternative path")
+    )
+    _assert_machine_surface(
+        follow_up_lines[1], "tangent follow-up default branch command", "runtime `branch-hypothesis`"
+    )
+    _assert_semantic_surface(
+        follow_up_lines[1], "tangent follow-up default branch", ("git-backed alternative path", "bounded stop")
+    )
+
+    runtime_follow_up_lines = tangent_branch_later_follow_up_lines(
         tangent_phrase="runtime `tangent`",
         branch_phrase="runtime `branch-hypothesis`",
-    ) == (
-        "After the bounded stop, use runtime `tangent` command to keep the chooser explicit for this alternative path; "
-        "use runtime `branch-hypothesis` command only if you decide to open a git-backed alternative path."
+    )
+    assert len(runtime_follow_up_lines) == 2
+    _assert_machine_surface(
+        runtime_follow_up_lines[0], "tangent follow-up runtime chooser command", "runtime `tangent`"
+    )
+    _assert_semantic_surface(
+        runtime_follow_up_lines[0], "tangent follow-up runtime chooser", ("chooser explicit", "alternative path")
+    )
+    _assert_machine_surface(
+        runtime_follow_up_lines[1], "tangent follow-up runtime branch command", "runtime `branch-hypothesis`"
+    )
+    _assert_semantic_surface(
+        runtime_follow_up_lines[1], "tangent follow-up runtime branch", ("git-backed alternative path", "bounded stop")
+    )
+
+    runtime_branch_later_action = tangent_branch_later_action(
+        tangent_phrase="runtime `tangent`",
+        branch_phrase="runtime `branch-hypothesis`",
+    )
+    _assert_machine_surface(
+        runtime_branch_later_action,
+        "tangent branch-later runtime command order",
+        ("runtime `tangent`", "runtime `branch-hypothesis`"),
+        mode=FragmentMode.ORDERED,
+    )
+    _assert_semantic_surface(
+        runtime_branch_later_action,
+        "tangent branch-later runtime routing",
+        ("bounded stop", "chooser explicit", "alternative path", "git-backed alternative path"),
     )
 
 
 def test_preset_and_local_bridge_phrases_remain_command_oriented() -> None:
-    assert workflow_preset_storage_note() == (
-        "Workflow presets are bundles over the existing config keys only; they do not add a separate persisted preset block."
+    _assert_semantic_concept(
+        workflow_preset_storage_note(),
+        "workflow preset storage boundary",
+        required=("workflow presets", "existing config keys", "do not add", "separate persisted preset block"),
     )
     preset_note = workflow_preset_surface_note()
     for token in (
@@ -247,15 +412,24 @@ def test_preset_and_local_bridge_phrases_remain_command_oriented() -> None:
         "publication-manuscript",
         "full-research",
     ):
-        assert token in preset_note
+        _assert_machine_surface(preset_note, f"workflow preset token {token}", token)
 
     bridge_note = local_cli_bridge_note()
-    assert bridge_note == (
-        "Use `gpd --help` from your normal terminal for the broader local CLI surface: "
-        f"{local_cli_bridge_purpose_phrase()}."
+    assert bridge_note == public_local_cli_bridge_note()
+    _assert_machine_surface(bridge_note, "local CLI bridge help command", "`gpd --help`")
+    _assert_semantic_surface(bridge_note, "local CLI bridge scope", ("normal terminal", "broader local CLI surface"))
+    _assert_machine_surface(
+        bridge_note,
+        "local CLI bridge excludes plan preflight",
+        "gpd validate plan-preflight <PLAN.md>",
+        mode=FragmentMode.ABSENT,
     )
-    assert "gpd validate plan-preflight <PLAN.md>" not in bridge_note
-    assert "gpd permissions sync --runtime <runtime> --autonomy <mode>" not in bridge_note
+    _assert_machine_surface(
+        bridge_note,
+        "local CLI bridge excludes permission sync",
+        "gpd permissions sync --runtime <runtime> --autonomy <mode>",
+        mode=FragmentMode.ABSENT,
+    )
 
     bridge_inventory = local_cli_bridge_commands()
     for token in (
@@ -271,13 +445,29 @@ def test_preset_and_local_bridge_phrases_remain_command_oriented() -> None:
         "gpd presets list",
         "gpd integrations status wolfram",
     ):
-        assert token in bridge_inventory
-    assert (
-        post_start_settings_note()
-        == "After your first successful start or later, use the runtime `settings` command to review autonomy, workflow defaults, model-cost posture, runtime permission sync, and preset/tier overrides."
+        _assert_machine_surface(bridge_inventory, f"local CLI bridge inventory {token}", token)
+
+    settings_note = post_start_settings_note()
+    assert settings_note == public_post_start_settings_note()
+    _assert_machine_surface(settings_note, "post-start settings command", "runtime `settings`")
+    _assert_semantic_surface(
+        settings_note,
+        "post-start settings review scope",
+        (
+            "first successful start",
+            "autonomy",
+            "workflow defaults",
+            "model-cost posture",
+            "runtime permission sync",
+            "preset/tier overrides",
+        ),
     )
-    assert (
-        post_start_settings_recommendation()
-        == "The safest starting point is `review` plus runtime defaults. Favor scientific rigor and explicit "
-        "uncertainty over agreement-seeking, and keep missing evidence or artifacts explicit instead of inventing them."
+
+    settings_recommendation = post_start_settings_recommendation()
+    assert settings_recommendation == public_post_start_settings_recommendation()
+    _assert_machine_surface(settings_recommendation, "post-start settings default profile", "`review`")
+    _assert_semantic_surface(
+        settings_recommendation,
+        "post-start settings default posture",
+        ("runtime defaults", "scientific rigor", "explicit uncertainty", "missing evidence", "artifacts explicit"),
     )

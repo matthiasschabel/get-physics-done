@@ -467,6 +467,13 @@ def test_validate_workflow_stage_manifest_payload_loads_verify_work_manifest() -
     assert "workflows/verify-work/gap-repair.md" in manifest.stages[2].must_not_eager_load
     assert "protocol_bundle_verifier_extensions" in manifest.stages[2].required_init_fields
     assert "protocol_bundle_load_manifest" in manifest.stages[2].required_init_fields
+    assert "project_root" in manifest.stages[2].required_init_fields
+    assert "phase_dir_abs" in manifest.stages[2].required_init_fields
+    assert "phase_number" in manifest.stages[2].required_init_fields
+    assert "phase_proof_review_status" in manifest.stages[2].required_init_fields
+    assert "active_verification_sessions" not in manifest.stages[2].required_init_fields
+    assert "verification_report_status_payload" not in manifest.stages[2].required_init_fields
+    assert "verification_report_path" not in manifest.stages[2].required_init_fields
     assert "protocol_bundle_context" not in manifest.stages[2].required_init_fields
     assert "active_reference_context" not in manifest.stages[2].required_init_fields
     assert "active_references" in manifest.stages[2].required_init_fields

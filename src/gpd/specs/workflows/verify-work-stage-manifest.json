@@ -23,6 +23,13 @@
       "verification_report_status_payload",
       "phase_proof_review_status"
     ],
+    "inventory_phase_target_context": [
+      "project_root",
+      "phase_found",
+      "phase_dir_abs",
+      "phase_number",
+      "phase_proof_review_status"
+    ],
     "contract_gate_status": [
       "project_contract_load_info",
       "project_contract_validation",
@@ -180,7 +187,7 @@
         "workflows/verify-work/inventory-build.md"
       ],
       "required_init_field_groups": [
-        "phase_target_base",
+        "inventory_phase_target_context",
         "contract_gate_status",
         "reference_handle_context",
         "protocol_bundle_handles"

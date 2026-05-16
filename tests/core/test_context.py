@@ -3503,6 +3503,10 @@ class TestInitVerifyWork:
         assert "project_contract" not in ctx
         assert ctx["project_contract_gate"]["visible"] is True
         assert ctx["project_contract_load_info"]["status"] == "blocked_integrity"
+        assert "active_verification_sessions" not in ctx
+        assert "verification_report_status_payload" not in ctx
+        assert "verification_report_path" not in ctx
+        assert ctx["phase_dir_abs"].endswith("GPD/phases/01-setup")
         assert "active_reference_context" not in ctx
         assert "active_reference_count" not in ctx
         assert ctx["active_references"][0]["id"] == "ref-benchmark"

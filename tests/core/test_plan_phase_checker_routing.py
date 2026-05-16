@@ -14,10 +14,21 @@ from tests.lifecycle_contract_test_support import (
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PLAN_PHASE = REPO_ROOT / "src/gpd/specs/workflows/plan-phase.md"
 PLAN_PHASE_STAGE_DIR = REPO_ROOT / "src/gpd/specs/workflows/plan-phase"
+CHECKER_LANE_FILES = (
+    "checker-revision.md",
+    "checker-return-routing.md",
+    "blocked-plan-revision.md",
+    "revision-planner-handoff.md",
+    "planning-final-offer.md",
+)
 
 
 def _stage_text(name: str) -> str:
     return (PLAN_PHASE_STAGE_DIR / name).read_text(encoding="utf-8")
+
+
+def _checker_authority_text() -> str:
+    return "\n\n".join(_stage_text(name) for name in CHECKER_LANE_FILES)
 
 
 def _plan_phase_authority_text() -> str:
@@ -27,7 +38,7 @@ def _plan_phase_authority_text() -> str:
             _stage_text("phase-bootstrap.md"),
             _stage_text("research-routing.md"),
             _stage_text("planner-authoring.md"),
-            _stage_text("checker-revision.md"),
+            _checker_authority_text(),
         ]
     )
 
@@ -52,7 +63,7 @@ def test_plan_phase_separates_planner_checkpoint_handling_from_checker_revision(
 
 
 def test_plan_phase_routes_checker_statuses_through_structured_fields() -> None:
-    source = _stage_text("checker-revision.md")
+    source = _checker_authority_text()
 
     _assert_semantic(
         source,
@@ -74,7 +85,7 @@ def test_plan_phase_routes_checker_statuses_through_structured_fields() -> None:
 
 
 def test_plan_phase_checker_handoff_precedes_return_routing_and_late_events() -> None:
-    source = _stage_text("checker-revision.md")
+    source = _checker_authority_text()
 
     handoff = "## 10. Event: checker_handoff"
     routing = "## 11. Event: checker_return_routing"
@@ -88,7 +99,7 @@ def test_plan_phase_checker_handoff_precedes_return_routing_and_late_events() ->
         initial_checker_event,
         "plan-phase initial checker event excludes late machinery",
         "CHECKER_RETURN=$(\ntask(",
-        "child_gate:\n  id: \"plan_checker_review\"",
+        'child_gate:\n  id: "plan_checker_review"',
         "Stop this event after the checker call",
         "do not display revision planner prompts",
         "max-iteration choices",
@@ -104,12 +115,10 @@ def test_plan_phase_checker_handoff_precedes_return_routing_and_late_events() ->
 
 
 def test_plan_phase_checker_routing_is_after_runtime_return_and_keeps_child_validity() -> None:
-    source = _stage_text("checker-revision.md")
+    source = _checker_authority_text()
     routing = "## 11. Event: checker_return_routing"
     revision = "## 12. Event: blocked_plan_revision_branch"
-    routing_event = source[
-        source.index(routing) : source.index(revision)
-    ]
+    routing_event = source[source.index(routing) : source.index(revision)]
 
     _assert_semantic(
         routing_event,
@@ -128,16 +137,12 @@ def test_plan_phase_checker_routing_is_after_runtime_return_and_keeps_child_vali
 
 
 def test_plan_phase_revision_planner_is_branch_local_after_blocked_plan_choice() -> None:
-    source = _stage_text("checker-revision.md")
+    source = _checker_authority_text()
     revision = "## 12. Event: blocked_plan_revision_branch"
     revision_handoff_marker = "## 12a. Event: revision_planner_handoff"
     final_offer = "## 13. Event: planning_final_offer"
-    revision_branch = source[
-        source.index(revision) : source.index(revision_handoff_marker)
-    ]
-    revision_handoff = source[
-        source.index(revision_handoff_marker) : source.index(final_offer)
-    ]
+    revision_branch = source[source.index(revision) : source.index(revision_handoff_marker)]
+    revision_handoff = source[source.index(revision_handoff_marker) : source.index(final_offer)]
 
     assert revision_branch.index("If iteration_count >= 3") < revision_branch.index("Ask only now")
     _assert_semantic(
@@ -154,7 +159,7 @@ def test_plan_phase_revision_planner_is_branch_local_after_blocked_plan_choice()
         "plan-phase blocked-plan revision branch omits planner machinery before choice",
         "Revision prompt:",
         "PLANNER_RETURN=$(\ntask(",
-        "child_gate:\n  id: \"planner_revision\"",
+        'child_gate:\n  id: "planner_revision"',
     )
 
     _assert_semantic(
@@ -162,15 +167,15 @@ def test_plan_phase_revision_planner_is_branch_local_after_blocked_plan_choice()
         "plan-phase revision planner handoff owns planner machinery",
         "Revision prompt:",
         "PLANNER_RETURN=$(\ntask(",
-        "child_gate:\n  id: \"planner_revision\"",
+        'child_gate:\n  id: "planner_revision"',
         "Load the `revision_template_rendering` conditional authority pack first",
     )
 
 
 def test_plan_phase_final_offer_waits_for_green_override_or_skipped_status() -> None:
-    source = _stage_text("checker-revision.md")
+    source = _stage_text("planning-final-offer.md")
     final_offer = "## 13. Event: planning_final_offer"
-    final_event = source[source.index(final_offer) : source.index("</process>")]
+    final_event = source[source.index(final_offer) :]
 
     _assert_semantic(
         final_event,
@@ -186,7 +191,7 @@ def test_plan_phase_final_offer_waits_for_green_override_or_skipped_status() -> 
 
 
 def test_plan_phase_fails_closed_on_plan_id_mismatch_before_accepting_checker_success() -> None:
-    source = _stage_text("checker-revision.md")
+    source = _stage_text("checker-return-routing.md")
 
     assert "`approved_plans` names only readable `*-PLAN.md` artifacts in `FRESH_PLAN_FILES`" in source
     assert "`blocked_plans` is empty" in source
@@ -199,6 +204,37 @@ def test_plan_phase_fails_closed_on_plan_id_mismatch_before_accepting_checker_su
         "readable `*-PLAN.md` file",
         "FRESH_PLAN_FILES",
         "fail-closed mismatch",
+    )
+
+
+def test_plan_phase_checker_base_defers_late_lanes_and_stale_success_criteria() -> None:
+    base = _stage_text("checker-revision.md")
+    joined = _checker_authority_text()
+
+    _assert_semantic(
+        base,
+        "plan-phase checker base is initial handoff only",
+        "## 10. Event: checker_handoff",
+        "Load these only when their trigger is present",
+        "checker_return_routing",
+        "blocked_plan_revision",
+        "revision_planner_handoff",
+        "planning_final_offer",
+    )
+    _assert_absent(
+        base,
+        "plan-phase checker base omits late lane payloads",
+        "## 11. Event: checker_return_routing",
+        "## 12. Event: blocked_plan_revision_branch",
+        "Revision prompt:",
+        "Max iterations reached",
+        "PHASE PLANNED",
+    )
+    _assert_absent(
+        joined,
+        "plan-phase checker success criteria no longer claim stale all-agent context loading",
+        "CONTEXT.md loaded early",
+        "passed to ALL agents",
     )
 
 

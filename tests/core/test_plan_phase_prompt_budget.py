@@ -119,7 +119,15 @@ def test_plan_phase_workflow_defers_stage_authorities_until_the_manifest_stages_
         conditional.when: conditional.authorities for conditional in checker_revision.conditional_authorities
     }
     assert checker_conditionals["revision_template_rendering"] == ("templates/planner-subagent-prompt.md",)
+    assert checker_conditionals["checker_return_routing"] == ("workflows/plan-phase/checker-return-routing.md",)
+    assert checker_conditionals["blocked_plan_revision"] == ("workflows/plan-phase/blocked-plan-revision.md",)
+    assert checker_conditionals["revision_planner_handoff"] == ("workflows/plan-phase/revision-planner-handoff.md",)
+    assert checker_conditionals["planning_final_offer"] == ("workflows/plan-phase/planning-final-offer.md",)
     assert "templates/planner-subagent-prompt.md" in checker_revision.must_not_eager_load
+    assert "workflows/plan-phase/checker-return-routing.md" in checker_revision.must_not_eager_load
+    assert "workflows/plan-phase/blocked-plan-revision.md" in checker_revision.must_not_eager_load
+    assert "workflows/plan-phase/revision-planner-handoff.md" in checker_revision.must_not_eager_load
+    assert "workflows/plan-phase/planning-final-offer.md" in checker_revision.must_not_eager_load
     assert "checker_model" not in bootstrap.required_init_fields
     assert "plan_checker_enabled" not in bootstrap.required_init_fields
     assert "checker_model" not in research_routing.required_init_fields
@@ -159,7 +167,7 @@ def test_plan_phase_workflow_defers_stage_authorities_until_the_manifest_stages_
 
 
 def test_plan_phase_clean_non_autonomous_planning_reports_green_with_no_checkpoint() -> None:
-    workflow_text = (WORKFLOWS_DIR / "plan-phase" / "checker-revision.md").read_text(encoding="utf-8")
+    workflow_text = (WORKFLOWS_DIR / "plan-phase" / "planning-final-offer.md").read_text(encoding="utf-8")
 
     assert "Structured final status convention" in workflow_text
     assert "clean bounded non-autonomous planning" in workflow_text

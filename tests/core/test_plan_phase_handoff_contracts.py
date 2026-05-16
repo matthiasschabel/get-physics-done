@@ -30,12 +30,12 @@ def test_plan_phase_planner_and_checker_handoffs_carry_inline_spawn_contracts() 
     research_path = WORKFLOWS_DIR / "plan-phase" / "research-routing.md"
     planner_path = WORKFLOWS_DIR / "plan-phase" / "planner-authoring.md"
     checker_path = WORKFLOWS_DIR / "plan-phase" / "checker-revision.md"
+    revision_handoff_path = WORKFLOWS_DIR / "plan-phase" / "revision-planner-handoff.md"
     workflow = "\n\n".join(
-        path.read_text(encoding="utf-8")
-        for path in (research_path, planner_path, checker_path)
+        path.read_text(encoding="utf-8") for path in (research_path, planner_path, checker_path, revision_handoff_path)
     )
     planner_tasks = _task_blocks_by_agent(planner_path, "gpd-planner") + _task_blocks_by_agent(
-        checker_path,
+        revision_handoff_path,
         "gpd-planner",
     )
     assert len(planner_tasks) >= 2
@@ -50,9 +50,7 @@ def test_plan_phase_planner_and_checker_handoffs_carry_inline_spawn_contracts() 
     gates = _child_gates_by_id(workflow)
     researcher = gates["phase_researcher_context_refresh"]
     assert researcher.role == "gpd-phase-researcher"
-    assert [artifact.path for artifact in researcher.expected_artifacts] == [
-        "${PHASE_DIR}/${PHASE_NUMBER}-RESEARCH.md"
-    ]
+    assert [artifact.path for artifact in researcher.expected_artifacts] == ["${PHASE_DIR}/${PHASE_NUMBER}-RESEARCH.md"]
     assert researcher.allowed_roots == ("${PHASE_DIR}",)
     assert researcher.freshness is not None
     assert researcher.freshness.marker == "$RESEARCH_HANDOFF_STARTED_AT"

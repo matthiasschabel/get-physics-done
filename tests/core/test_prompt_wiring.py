@@ -2557,6 +2557,7 @@ def test_planning_prompts_keep_contract_gate_in_light_mode_and_all_modes() -> No
     planner_agent = (AGENTS_DIR / "gpd-planner.md").read_text(encoding="utf-8")
     checker_agent = (AGENTS_DIR / "gpd-plan-checker.md").read_text(encoding="utf-8")
     workflow_text = _workflow_authority_text("plan-phase")
+    checker_routing = (WORKFLOWS_DIR / "plan-phase" / "checker-return-routing.md").read_text(encoding="utf-8")
 
     assert "{GPD_INSTALL_DIR}/templates/plan-contract-schema.md" in planner_prompt
     assert (
@@ -2598,7 +2599,7 @@ def test_planning_prompts_keep_contract_gate_in_light_mode_and_all_modes() -> No
     )
     assert "gpd_return.status: completed" in workflow_text
     _sf(
-        workflow_text,
+        checker_routing,
         "Checker presentation headings",
         "non-authority",
         "`gpd_return.status`",

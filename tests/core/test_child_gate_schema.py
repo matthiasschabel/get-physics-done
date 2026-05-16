@@ -203,7 +203,7 @@ _EXPECTED_WORKFLOW_CHILD_GATE_SOURCES = {
     "phase_researcher_context_refresh": "plan-phase/research-routing.md",
     "plan_checker_review": "plan-phase/checker-revision.md",
     "planner_initial_plan": "plan-phase/planner-authoring.md",
-    "planner_revision": "plan-phase/checker-revision.md",
+    "planner_revision": "plan-phase/revision-planner-handoff.md",
     "post_execution_verifier": "execute-phase/verification-handoff.md",
     "project_roadmapper": "new-project/roadmap-authoring.md",
     "proof_critic_wave_audit": "execute-phase/proof-critic-dispatch.md",

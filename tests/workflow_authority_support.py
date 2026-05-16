@@ -83,16 +83,50 @@ def _manifest_declared_stage_authority_paths(workflows_dir: Path, workflow_name:
                     if not isinstance(values, list):
                         continue
                     for value in values:
-                        if not isinstance(value, str):
-                            continue
-                        if not value.startswith(f"workflows/{workflow_name}/") or not value.endswith(".md"):
-                            continue
-                        path = workflows_dir.parent / value
-                        if path.exists() and path not in seen:
-                            seen.add(path)
-                            ordered.append(path)
+                        _append_declared_workflow_authority(
+                            value,
+                            workflows_dir=workflows_dir,
+                            workflow_name=workflow_name,
+                            seen=seen,
+                            ordered=ordered,
+                        )
+                conditionals = stage.get("conditional_authorities", [])
+                if not isinstance(conditionals, list):
+                    continue
+                for conditional in conditionals:
+                    if not isinstance(conditional, dict):
+                        continue
+                    values = conditional.get("authorities", [])
+                    if not isinstance(values, list):
+                        continue
+                    for value in values:
+                        _append_declared_workflow_authority(
+                            value,
+                            workflows_dir=workflows_dir,
+                            workflow_name=workflow_name,
+                            seen=seen,
+                            ordered=ordered,
+                        )
 
     return tuple(ordered)
+
+
+def _append_declared_workflow_authority(
+    value: object,
+    *,
+    workflows_dir: Path,
+    workflow_name: str,
+    seen: set[Path],
+    ordered: list[Path],
+) -> None:
+    if not isinstance(value, str):
+        return
+    if not value.startswith(f"workflows/{workflow_name}/") or not value.endswith(".md"):
+        return
+    path = workflows_dir.parent / value
+    if path.exists() and path not in seen:
+        seen.add(path)
+        ordered.append(path)
 
 
 def expanded_workflow_authority_text(

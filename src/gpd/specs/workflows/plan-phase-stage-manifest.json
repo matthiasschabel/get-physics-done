@@ -101,8 +101,12 @@
         "templates/plan-contract-schema.md",
         "templates/planner-subagent-prompt.md",
         "workflows/plan-phase.md",
+        "workflows/plan-phase/blocked-plan-revision.md",
         "workflows/plan-phase/checker-revision.md",
+        "workflows/plan-phase/checker-return-routing.md",
+        "workflows/plan-phase/planning-final-offer.md",
         "workflows/plan-phase/planner-authoring.md",
+        "workflows/plan-phase/revision-planner-handoff.md",
         "workflows/plan-phase/research-routing.md"
       ],
       "produced_state": [
@@ -134,8 +138,12 @@
         "templates/plan-contract-schema.md",
         "templates/planner-subagent-prompt.md",
         "workflows/plan-phase.md",
+        "workflows/plan-phase/blocked-plan-revision.md",
         "workflows/plan-phase/checker-revision.md",
-        "workflows/plan-phase/planner-authoring.md"
+        "workflows/plan-phase/checker-return-routing.md",
+        "workflows/plan-phase/planning-final-offer.md",
+        "workflows/plan-phase/planner-authoring.md",
+        "workflows/plan-phase/revision-planner-handoff.md"
       ],
       "produced_state": [
         "research routing state",
@@ -181,8 +189,12 @@
         "references/ui/ui-brand.md",
         "templates/phase-prompt.md",
         "templates/plan-contract-schema.md",
+        "workflows/plan-phase/blocked-plan-revision.md",
         "workflows/plan-phase.md",
-        "workflows/plan-phase/checker-revision.md"
+        "workflows/plan-phase/checker-revision.md",
+        "workflows/plan-phase/checker-return-routing.md",
+        "workflows/plan-phase/planning-final-offer.md",
+        "workflows/plan-phase/revision-planner-handoff.md"
       ],
       "allowed_tools": [
         "file_read",
@@ -234,6 +246,30 @@
           "authorities": [
             "templates/planner-subagent-prompt.md"
           ]
+        },
+        {
+          "when": "checker_return_routing",
+          "authorities": [
+            "workflows/plan-phase/checker-return-routing.md"
+          ]
+        },
+        {
+          "when": "blocked_plan_revision",
+          "authorities": [
+            "workflows/plan-phase/blocked-plan-revision.md"
+          ]
+        },
+        {
+          "when": "revision_planner_handoff",
+          "authorities": [
+            "workflows/plan-phase/revision-planner-handoff.md"
+          ]
+        },
+        {
+          "when": "planning_final_offer",
+          "authorities": [
+            "workflows/plan-phase/planning-final-offer.md"
+          ]
         }
       ],
       "must_not_eager_load": [
@@ -241,7 +277,11 @@
         "templates/phase-prompt.md",
         "templates/plan-contract-schema.md",
         "templates/planner-subagent-prompt.md",
-        "workflows/plan-phase.md"
+        "workflows/plan-phase.md",
+        "workflows/plan-phase/blocked-plan-revision.md",
+        "workflows/plan-phase/checker-return-routing.md",
+        "workflows/plan-phase/planning-final-offer.md",
+        "workflows/plan-phase/revision-planner-handoff.md"
       ],
       "produced_state": [
         "checker findings",

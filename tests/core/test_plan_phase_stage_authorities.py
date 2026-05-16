@@ -36,6 +36,15 @@ def test_plan_phase_manifest_uses_stage_authorities_without_root_eager_loads() -
         assert "workflows/plan-phase.md" not in stage.loaded_authorities
         assert (WORKFLOWS_DIR / authority.removeprefix("workflows/")).is_file()
 
+    checker_conditionals = {
+        conditional.when: conditional.authorities
+        for conditional in manifest.stage("checker_revision").conditional_authorities
+    }
+    assert checker_conditionals["checker_return_routing"] == ("workflows/plan-phase/checker-return-routing.md",)
+    assert checker_conditionals["blocked_plan_revision"] == ("workflows/plan-phase/blocked-plan-revision.md",)
+    assert checker_conditionals["revision_planner_handoff"] == ("workflows/plan-phase/revision-planner-handoff.md",)
+    assert checker_conditionals["planning_final_offer"] == ("workflows/plan-phase/planning-final-offer.md",)
+
 
 def test_plan_phase_command_bootstraps_only_first_stage_authority() -> None:
     command = COMMAND_PATH.read_text(encoding="utf-8")
@@ -151,10 +160,19 @@ def test_plan_phase_late_authorities_live_in_owning_stages() -> None:
     research = _stage_text("research-routing.md")
     planner = _stage_text("planner-authoring.md")
     checker = _stage_text("checker-revision.md")
+    checker_return = _stage_text("checker-return-routing.md")
+    blocked_revision = _stage_text("blocked-plan-revision.md")
+    revision_handoff = _stage_text("revision-planner-handoff.md")
+    final_offer = _stage_text("planning-final-offer.md")
 
     assert "@{GPD_INSTALL_DIR}/references/orchestration/runtime-delegation-note.md" in research
     assert "Planner prompt:" in planner
     assert "## 9b. Handle Planner Checkpoint" in planner
     assert "Checker prompt:" in checker
-    assert "Revision prompt:" in checker
-    assert "Structured final status convention" in checker
+    assert "## 11. Event: checker_return_routing" not in checker
+    assert "Revision prompt:" not in checker
+    assert "Structured final status convention" not in checker
+    assert "## 11. Event: checker_return_routing" in checker_return
+    assert "## 12. Event: blocked_plan_revision_branch" in blocked_revision
+    assert "Revision prompt:" in revision_handoff
+    assert "Structured final status convention" in final_offer

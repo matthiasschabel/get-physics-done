@@ -596,6 +596,7 @@ def _score_proof_bearing_checker_audit_visibility() -> PlanningReplayOutcome:
     bootstrap = _read_stage("phase-bootstrap.md")
     planner = _read_stage("planner-authoring.md")
     checker = _read_stage("checker-revision.md")
+    checker_routing = _read_stage("checker-return-routing.md")
     planner_template = PLANNER_TEMPLATE.read_text(encoding="utf-8")
     checker_prompt = PLAN_CHECKER_PROMPT.read_text(encoding="utf-8")
 
@@ -615,7 +616,7 @@ def _score_proof_bearing_checker_audit_visibility() -> PlanningReplayOutcome:
     assert "Proof-obligation audit path" in checker
     assert "sibling `{plan_id}-PROOF-REDTEAM.md` review artifact" in checker_flat
     assert "Anti-bypass language" in checker
-    assert "If any plan is proof-bearing, do NOT waive this gate" in checker
+    assert "If any plan is proof-bearing, do NOT waive this gate" in checker_routing
     assert (
         "Proof-bearing plans keep proof artifacts and sibling `*-PROOF-REDTEAM.md` audits explicit" in planner_template
     )

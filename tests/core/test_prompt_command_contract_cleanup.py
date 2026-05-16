@@ -356,6 +356,28 @@ def test_write_paper_response_writer_handoff_stays_deferred_to_stage_authority()
     _assert_machine(workflow, "write-paper response writer path reference", literal_reference)
 
 
+def test_write_paper_root_workflow_index_stays_compact_stage_map() -> None:
+    workflow = (WORKFLOWS_DIR / "write-paper.md").read_text(encoding="utf-8")
+
+    _assert_machine(
+        workflow,
+        "write-paper root stage map",
+        "`paper_bootstrap` -> `workflows/write-paper/paper-bootstrap.md`",
+        "`outline_and_scaffold` -> `workflows/write-paper/outline-scaffold.md`",
+        "`figure_and_section_authoring` -> `workflows/write-paper/authoring.md`",
+        "`consistency_and_references` -> `workflows/write-paper/consistency-references.md`",
+        "`publication_review` -> `workflows/write-paper/publication-review-finalization.md`",
+    )
+    _assert_forbidden(
+        workflow,
+        "write-paper root no canonical reference inventory",
+        "<canonical_references>",
+        "references/publication/publication-bootstrap-preflight.md",
+        "{GPD_INSTALL_DIR}/references/publication/publication-bootstrap-preflight.md",
+        "{GPD_INSTALL_DIR}/templates/paper/paper-config-schema.md",
+    )
+
+
 def test_inline_install_dir_paths_do_not_use_at_include_form() -> None:
     roots = (COMMANDS_DIR, AGENTS_DIR, WORKFLOWS_DIR, TEMPLATES_DIR)
     offenders: list[str] = []

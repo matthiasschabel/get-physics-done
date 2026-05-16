@@ -1659,10 +1659,11 @@ def test_write_paper_review_contract_uses_round_suffixed_referee_outputs() -> No
     ]
     write_command = _read_command("write-paper")
     write_workflow = workflow_authority_text(WORKFLOWS_DIR, "write-paper")
+    author_response = (TEMPLATES_DIR / "paper" / "author-response.md").read_text(encoding="utf-8")
     assert "GPD/REFEREE-REPORT{round_suffix}.md" in write_command
     assert "GPD/REFEREE-REPORT{round_suffix}.tex" in write_command
     assert "templates/paper/author-response.md" in write_workflow
-    assert "needs-calculation" in write_workflow
+    assert "needs-calculation" in author_response
 
 
 def test_author_response_template_is_canonical_and_mentions_new_calculation_tracking() -> None:

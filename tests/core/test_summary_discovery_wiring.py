@@ -37,9 +37,12 @@ def test_verify_work_searches_canonical_phase_summary_artifacts() -> None:
 def test_verify_work_searches_canonical_phase_verification_artifacts() -> None:
     workflow_text = workflow_authority_text(WORKFLOWS_DIR, "verify-work")
 
-    assert "Read `active_verification_sessions` from `SESSION_ROUTER_INIT`." in workflow_text
-    assert "Never shell-loop over `GPD/phases` or call `gpd frontmatter get` here." in workflow_text
-    assert "Route on each entry's canonical `status` / `routing_status`" in workflow_text
+    _assert_contains_fragments(
+        workflow_text,
+        "Read `active_verification_sessions` from `SESSION_ROUTER_INIT`.",
+        "replaces shell loops over `GPD/phases`",
+        "Route on each entry's canonical `status` / `routing_status`",
+    )
 
 
 def test_execute_plan_searches_standalone_and_numbered_phase_artifacts() -> None:

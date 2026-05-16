@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from gpd import registry
 from tests.lifecycle_contract_test_support import (
     artifact_paths,
     child_gate_from_text,
@@ -112,7 +113,10 @@ def test_write_paper_workflow_runs_centralized_review_preflight() -> None:
     )
     assert "publication-bootstrap-preflight.md" in workflow
     assert PUBLICATION_RESPONSE_WRITER_HANDOFF_INCLUDE in workflow
-    assert PUBLICATION_ROUND_ARTIFACTS_INCLUDE in workflow
+    staging = registry.get_command("write-paper").staged_loading
+    assert staging is not None
+    round_artifacts_authority = PUBLICATION_ROUND_ARTIFACTS_INCLUDE.removeprefix("{GPD_INSTALL_DIR}/")
+    assert round_artifacts_authority in staging.stage("publication_review").loaded_authorities
     _assert_semantic(
         shared_preflight,
         "publication preflight rejects copied artifacts and wildcard scans",

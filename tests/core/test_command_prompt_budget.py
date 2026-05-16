@@ -96,7 +96,7 @@ COMMAND_BASELINES = {
     "update": (269, 7_655, 1),
     "validate-conventions": (269, 10_508, 1),
     "verify-work": (208, 7_483, 1),
-    "write-paper": (335, 14_777, 1),
+    "write-paper": (334, 14_316, 1),
 }
 WORST_COMMAND_HARD_CAPS = {
     "audit-milestone": (540, 21_000),
@@ -211,8 +211,8 @@ WORKFLOW_BASELINES = {
     "update": (244, 7_190, 0),
     "validate-conventions": (228, 9_317, 1),
     "verify-phase": (377, 20_313, 0),
-    "verify-work": (35, 1_724, 0),
-    "write-paper": (54, 2_396, 0),
+    "verify-work": (16, 755, 0),
+    "write-paper": (31, 1_661, 0),
 }
 WORST_WORKFLOW_HARD_CAPS = {
     "execute-plan": (380, 26_000),

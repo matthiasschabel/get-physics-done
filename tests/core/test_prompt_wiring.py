@@ -42,6 +42,15 @@ from tests.doc_surface_contracts import (
     assert_resume_authority_contract,
     assert_runtime_reset_rediscovery_contract,
 )
+from tests.stage_authority_test_support import (
+    assert_conditional_authorities as _assert_conditional_authorities,
+)
+from tests.stage_authority_test_support import (
+    assert_loaded_authorities as _assert_loaded_authorities,
+)
+from tests.stage_authority_test_support import (
+    assert_write_paper_publication_review_authorities as _assert_write_paper_publication_review_authorities,
+)
 from tests.workflow_authority_support import (
     STAGED_WORKFLOW_AUTHORITY_NAMES,
     expanded_workflow_authority_text,
@@ -277,15 +286,6 @@ def _s(text: str, context: str, *fragments: str) -> None:
 
 def _f(text: str, context: str, *fragments: str) -> None:
     _ff(text, *fragments, context=context)
-
-
-def _assert_loaded_authorities(command_name: str, stage_id: str, *authorities: str) -> None:
-    staged_loading = registry.get_command(command_name).staged_loading
-
-    assert staged_loading is not None
-    loaded = tuple(staged_loading.stage(stage_id).loaded_authorities)
-    missing = [authority for authority in authorities if authority not in loaded]
-    assert not missing, f"{command_name}:{stage_id} missing loaded authorities: {missing}"
 
 
 def _workflow_authority_text(name: str) -> str:
@@ -1691,7 +1691,7 @@ def test_review_workflows_keep_round_suffix_artifacts_visible_and_anchor_respons
     )
     _m(respond, "respond response output templates", "templates/paper/author-response.md", "needs-calculation")
 
-    _m(write_paper, "write-paper round-suffixed response outputs", PUBLICATION_ROUND_ARTIFACTS_INCLUDE)
+    _assert_write_paper_publication_review_authorities()
     _mf(
         write_paper_expanded,
         "REVIEW-LEDGER{round_suffix}.json",
@@ -1717,10 +1717,10 @@ def test_publication_commands_accept_documented_manuscript_layouts() -> None:
     )
     _sf(
         write_paper,
-        "Project-backed manuscripts",
-        "`GPD/publication/{subject_slug}/manuscript`",
-        "review/response auxiliaries",
-        "`GPD/`",
+        "GPD-authored outputs",
+        "GPD/publication/{subject_slug}",
+        "intake/provenance",
+        "Project-backed review/response/package outputs",
         context="write-paper documented manuscript layouts",
     )
     _m(
@@ -4859,7 +4859,6 @@ def test_publication_prompts_surface_strict_semantic_manuscript_gates() -> None:
     respond = (COMMANDS_DIR / "respond-to-referees.md").read_text(encoding="utf-8")
     peer_review_workflow = _workflow_authority_text("peer-review")
     peer_review_index = (WORKFLOWS_DIR / "peer-review.md").read_text(encoding="utf-8")
-    write_paper_workflow = _workflow_authority_text("write-paper")
     respond_workflow = _workflow_authority_text("respond-to-referees")
     arxiv_workflow = _workflow_authority_text("arxiv-submission")
     shared_preflight = (TEMPLATES_DIR / "paper" / "publication-manuscript-root-preflight.md").read_text(
@@ -4877,13 +4876,8 @@ def test_publication_prompts_surface_strict_semantic_manuscript_gates() -> None:
         "artifact_discovery",
         "references/publication/publication-review-round-artifacts.md",
     )
-    _mf(
-        write_paper_workflow,
-        "{GPD_INSTALL_DIR}/references/publication/publication-bootstrap-preflight.md",
-        PUBLICATION_RESPONSE_WRITER_HANDOFF_INCLUDE,
-        PUBLICATION_ROUND_ARTIFACTS_INCLUDE,
-        context="write-paper workflow publication authorities",
-    )
+    _assert_loaded_authorities("write-paper", "paper_bootstrap", "references/publication/publication-bootstrap-preflight.md")
+    _assert_write_paper_publication_review_authorities()
     for content in (respond, arxiv):
         _ff(
             content,
@@ -4977,7 +4971,6 @@ def test_publication_command_contexts_surface_schema_docs_before_generation() ->
     peer_review = (COMMANDS_DIR / "peer-review.md").read_text(encoding="utf-8")
     arxiv = (COMMANDS_DIR / "arxiv-submission.md").read_text(encoding="utf-8")
     respond = (COMMANDS_DIR / "respond-to-referees.md").read_text(encoding="utf-8")
-    write_paper_workflow = _workflow_authority_text("write-paper")
     peer_review_workflow = _workflow_authority_text("peer-review")
     peer_review_index = (WORKFLOWS_DIR / "peer-review.md").read_text(encoding="utf-8")
     respond_workflow = _workflow_authority_text("respond-to-referees")
@@ -4985,8 +4978,6 @@ def test_publication_command_contexts_surface_schema_docs_before_generation() ->
     peer_review_workflow_expanded = _expanded_workflow_authority_text("peer-review")
     shared_preflight_include = "@{GPD_INSTALL_DIR}/templates/paper/publication-manuscript-root-preflight.md"
     bootstrap_preflight_path = "{GPD_INSTALL_DIR}/references/publication/publication-bootstrap-preflight.md"
-    response_handoff_include = "{GPD_INSTALL_DIR}/references/publication/publication-response-writer-handoff.md"
-    round_artifacts_include = "{GPD_INSTALL_DIR}/references/publication/publication-review-round-artifacts.md"
 
     for content in (write_paper, peer_review, arxiv, respond):
         _ff(
@@ -4998,8 +4989,8 @@ def test_publication_command_contexts_surface_schema_docs_before_generation() ->
             PUBLICATION_REVIEW_RELIABILITY_INCLUDE,
             shared_preflight_include,
             PUBLICATION_BOOTSTRAP_PREFLIGHT_INCLUDE,
-            response_handoff_include,
-            round_artifacts_include,
+            PUBLICATION_RESPONSE_WRITER_HANDOFF_INCLUDE,
+            PUBLICATION_ROUND_ARTIFACTS_INCLUDE,
             context="thin publication command schema staging",
         )
     for content in (write_paper, peer_review):
@@ -5011,27 +5002,31 @@ def test_publication_command_contexts_surface_schema_docs_before_generation() ->
             "references/publication/peer-review-reliability.md",
             context="thin publication command review schema staging",
         )
-    _mf(
-        write_paper_workflow,
-        "templates/paper/paper-config-schema.md",
-        "templates/paper/artifact-manifest-schema.md",
-        "templates/paper/bibliography-audit-schema.md",
-        "templates/paper/reproducibility-manifest.md",
-        "{GPD_INSTALL_DIR}/references/publication/publication-bootstrap-preflight.md",
-        response_handoff_include,
-        round_artifacts_include,
-        context="write-paper workflow staged schema docs",
-    )
     _assert_loaded_authorities(
         "write-paper",
         "paper_bootstrap",
+        "references/publication/publication-bootstrap-preflight.md",
         "templates/paper/publication-manuscript-root-preflight.md",
     )
+    _assert_conditional_authorities(
+        "write-paper",
+        "outline_and_scaffold",
+        "paper_builder_config_or_artifact_manifest_write",
+        "templates/paper/paper-config-schema.md",
+        "templates/paper/artifact-manifest-schema.md",
+    )
+    _assert_loaded_authorities(
+        "write-paper",
+        "consistency_and_references",
+        "templates/paper/bibliography-audit-schema.md",
+        "templates/paper/reproducibility-manifest.md",
+    )
+    _assert_write_paper_publication_review_authorities()
     _ff(
         peer_review_index,
         PUBLICATION_SHARED_PREFLIGHT_INCLUDE,
         PUBLICATION_BOOTSTRAP_PREFLIGHT_INCLUDE,
-        response_handoff_include,
+        PUBLICATION_RESPONSE_WRITER_HANDOFF_INCLUDE,
         context="peer-review workflow staged schema docs",
     )
     _mf(
@@ -5065,7 +5060,7 @@ def test_publication_command_contexts_surface_schema_docs_before_generation() ->
         "templates/paper/author-response.md",
         "templates/paper/referee-response.md",
         bootstrap_preflight_path,
-        response_handoff_include,
+        PUBLICATION_RESPONSE_WRITER_HANDOFF_INCLUDE,
         PUBLICATION_REVIEW_RELIABILITY_INLINE,
         context="respond workflow staged schema docs",
     )
@@ -5074,11 +5069,11 @@ def test_publication_command_contexts_surface_schema_docs_before_generation() ->
         "bootstrap",
         "references/publication/publication-bootstrap-preflight.md",
     )
-    _m(arxiv_workflow, "arxiv workflow staged schema docs", bootstrap_preflight_path, round_artifacts_include)
+    _m(arxiv_workflow, "arxiv workflow staged schema docs", bootstrap_preflight_path, PUBLICATION_ROUND_ARTIFACTS_INCLUDE)
     _f(
         arxiv_workflow,
         "arxiv workflow staged schema docs",
-        response_handoff_include,
+        PUBLICATION_RESPONSE_WRITER_HANDOFF_INCLUDE,
         PUBLICATION_REVIEW_RELIABILITY_INCLUDE,
     )
     _s(arxiv_workflow, "arxiv workflow staged reliability note", "staged", "peer-review-reliability.md", "reference")
@@ -5097,8 +5092,8 @@ def test_publication_command_contexts_surface_schema_docs_before_generation() ->
             content,
             shared_preflight_include,
             PUBLICATION_BOOTSTRAP_PREFLIGHT_INCLUDE,
-            response_handoff_include,
-            round_artifacts_include,
+            PUBLICATION_RESPONSE_WRITER_HANDOFF_INCLUDE,
+            PUBLICATION_ROUND_ARTIFACTS_INCLUDE,
             PUBLICATION_REVIEW_RELIABILITY_INCLUDE,
             context="publication command wrapper staged include absence",
         )

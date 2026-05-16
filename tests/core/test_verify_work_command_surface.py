@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from gpd.core.frontmatter import extract_frontmatter
 from gpd.core.prompt_diagnostics import build_prompt_surface_report, report_to_dict
 from gpd.core.workflow_staging import load_workflow_stage_manifest
 from tests.assertion_taxonomy_support import MatchMode, assert_prompt_contracts, semantic_concept
@@ -15,6 +16,14 @@ COMMAND_PATH = REPO_ROOT / "src/gpd/commands/verify-work.md"
 WORKFLOW_PATH = REPO_ROOT / "src/gpd/specs/workflows/verify-work.md"
 WORKFLOW_STAGE_DIR = REPO_ROOT / "src/gpd/specs/workflows/verify-work"
 SESSION_ROUTER_AUTHORITY = "workflows/verify-work/session-router.md"
+
+
+def _command_body_lines(text: str) -> list[str]:
+    if text.startswith("---\n"):
+        _frontmatter, separator, body = text[4:].partition("\n---\n")
+        assert separator
+        return body.splitlines()
+    return text.splitlines()
 
 
 def _assert_semantic_contract(
@@ -105,9 +114,17 @@ def _row_reports_prior_stage_residue(row: dict[str, object]) -> bool:
 
 def test_verify_work_command_wrapper_stays_thin_and_delegates_policy_to_workflow() -> None:
     text = COMMAND_PATH.read_text(encoding="utf-8")
+    metadata, _body = extract_frontmatter(text)
+    body_include_lines = [line.strip() for line in _command_body_lines(text) if line.strip().startswith("@")]
 
-    assert "@{GPD_INSTALL_DIR}/workflows/verify-work/session-router.md" in text
+    first_stage_include = "@{GPD_INSTALL_DIR}/workflows/verify-work/session-router.md"
+    assert body_include_lines.count(first_stage_include) == 1
     assert "@{GPD_INSTALL_DIR}/workflows/verify-work.md" not in text
+    requires = metadata.get("requires")
+    assert isinstance(requires, dict)
+    assert requires.get("files") == ["GPD/ROADMAP.md"]
+    assert "@GPD/STATE.md" not in body_include_lines
+    assert "@GPD/ROADMAP.md" not in body_include_lines
     _assert_semantic_contract(
         text,
         "verify-work command wrapper stays thin",
@@ -119,6 +136,31 @@ def test_verify_work_command_wrapper_stays_thin_and_delegates_policy_to_workflow
     )
     assert "Severity Classification" not in text
     assert "For deeper focused analysis" not in text
+
+
+def test_verify_work_session_router_owns_state_and_roadmap_routing() -> None:
+    command = COMMAND_PATH.read_text(encoding="utf-8")
+    body_include_lines = [line.strip() for line in _command_body_lines(command) if line.strip().startswith("@")]
+    session_router = (WORKFLOW_STAGE_DIR / "session-router.md").read_text(encoding="utf-8")
+
+    assert "@GPD/STATE.md" not in body_include_lines
+    assert "@GPD/ROADMAP.md" not in body_include_lines
+    _assert_semantic_contract(
+        session_router,
+        "session router owns state and roadmap routing",
+        required=(
+            "SESSION_ROUTER_INIT",
+            "gpd --raw init verify-work",
+            "stage session_router",
+            "active_verification_sessions",
+            "canonical verification-status reader",
+            "status` / `routing_status",
+            "centralized review preflight",
+            "lifecycle authority gate",
+            "artifact discovery helpers",
+            "fail-closed",
+        ),
+    )
 
 
 def test_verify_work_workflow_loads_staged_init_payloads_on_demand() -> None:
@@ -164,15 +206,29 @@ def test_verify_work_workflow_loads_staged_init_payloads_on_demand() -> None:
 
 def test_verify_work_root_is_stage_index_not_active_authority() -> None:
     text = WORKFLOW_PATH.read_text(encoding="utf-8")
+    manifest = load_workflow_stage_manifest("verify-work")
 
     _assert_semantic_contract(
         text,
         "verify-work root is only a staged index",
-        required=("compatibility index", "staged", "verify-work", "workflow"),
+        required=("compatibility index", "staged", "verify-work", "workflow", "index only"),
     )
-    assert "workflows/verify-work/session-router.md" in text
-    assert "workflows/verify-work/gap-repair.md" in text
+    assert "<boundary_summary>" not in text
+    for stage in manifest.stages:
+        assert f"`{stage.id}`" in text
+        assert stage.mode_paths[0] in text
     assert "@{GPD_INSTALL_DIR}/references/verification/core/proof-redteam-workflow-gate.md" not in text
+    _assert_semantic_contract(
+        text,
+        "verify-work root excludes session-router procedure",
+        forbidden=(
+            "gpd --raw init verify-work",
+            "active_verification_sessions",
+            "status` / `routing_status",
+            "artifact discovery helpers",
+            "shell-loop over `GPD/phases`",
+        ),
+    )
     assert "verification_report_skeleton_bridge" not in text
     assert "verify_work_gap_planner" not in text
 

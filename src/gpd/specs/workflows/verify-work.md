@@ -3,8 +3,10 @@ Compatibility index for the staged `verify-work` workflow.
 </purpose>
 
 <stage_authority_index>
-Do not use this index as active stage authority. The command wrapper and staged
-manifest `verify-work-stage-manifest.json` load the stage-specific files below:
+This file is an index only. Do not load this index as a stage authority; load
+only the stage map here, then enter `session_router`. Stage ownership, status
+vocabulary, produced state, allowed tools, writes, and routing are
+manifest/stage-owned by `verify-work-stage-manifest.json` and the files below:
 
 - `session_router`: `workflows/verify-work/session-router.md`
 - `phase_bootstrap`: `workflows/verify-work/phase-bootstrap.md`
@@ -12,26 +14,3 @@ manifest `verify-work-stage-manifest.json` load the stage-specific files below:
 - `interactive_validation`: `workflows/verify-work/interactive-validation.md`
 - `gap_repair`: `workflows/verify-work/gap-repair.md`
 </stage_authority_index>
-
-<boundary_summary>
-`session_router` owns argument parsing, active-session discovery from
-`active_verification_sessions`, centralized review preflight, project-contract
-visibility, lifecycle gating, and `verification_report_status_payload` handling.
-Never shell-loop over `GPD/phases` or call `gpd frontmatter get` for active
-verification sessions there.
-Read `active_verification_sessions` from `SESSION_ROUTER_INIT`. Route on each
-entry's canonical `status` / `routing_status`. Use canonical artifact discovery
-helpers during bootstrap.
-Never shell-loop over `GPD/phases` or call `gpd frontmatter get` here.
-Use canonical artifact discovery helpers during bootstrap.
-Route on each entry's canonical `status` / `routing_status`.
-
-Later stage loading is manifest-owned; use the active stage authority before
-that stage's behavior is used. Proof-redteam classification and repair begin at
-`phase_bootstrap`; verifier handoff and verification-report bridges begin at
-`inventory_build`; researcher response capture begins at `interactive_validation`;
-planner/checker gap repair and closeout live in `gap_repair`.
-
-Stage ids, produced-state labels, allowed-tool boundaries, writes, and routing
-remain manifest-owned for compatibility.
-</boundary_summary>

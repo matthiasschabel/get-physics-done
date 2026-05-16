@@ -118,7 +118,7 @@ def test_non_publication_staged_roots_are_indexes_not_authority_catalogs() -> No
         "new-project": {"@{GPD_INSTALL_DIR}/references/shared/interactive-choice-fallback.md"},
     }
 
-    for workflow_id in ("autonomous", "plan-phase", "quick", "new-project"):
+    for workflow_id in ("autonomous", "plan-phase", "quick", "new-project", "verify-work"):
         root = (WORKFLOWS_DIR / f"{workflow_id}.md").read_text(encoding="utf-8")
         manifest = load_workflow_stage_manifest(workflow_id)
 

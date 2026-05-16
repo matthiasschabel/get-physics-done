@@ -63,8 +63,6 @@ Phase: $ARGUMENTS (optional)
 - If provided: Verify specific phase (e.g., "4")
 - If not provided: Check for active sessions or prompt for phase
 
-@GPD/STATE.md
-@GPD/ROADMAP.md
 </context>
 
 <process>

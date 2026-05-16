@@ -136,14 +136,13 @@ Keep the wrapper thin and let the workflow own the full pipeline.
 <context>
 Project manuscript context or intake: $ARGUMENTS
 
-Two lanes only: project-backed authoring, or bounded external authoring from
-`--intake path/to/write-paper-authoring-input.json`. Validate before writing.
-External authoring is fail-closed: no workspace mining, positional-folder
-discovery, or `PAPER-CONFIG.json` as intake. Boundary reference:
-`{GPD_INSTALL_DIR}/references/publication/publication-pipeline-modes.md`.
-Project-backed manuscripts may use `GPD/publication/{subject_slug}/manuscript`;
-review/response auxiliaries stay under `GPD/`. Durable external-authoring state
-uses `GPD/publication/{subject_slug}/...`; `.../intake/` is provenance only.
+Use only the two frontmatter-authorized lanes: project-backed authoring, or the
+explicit `--intake path/to/write-paper-authoring-input.json` external-authoring
+manifest. External authoring is fail-closed: no workspace mining,
+positional-folder discovery, or `PAPER-CONFIG.json` as intake. Boundary
+reference: `{GPD_INSTALL_DIR}/references/publication/publication-pipeline-modes.md`.
+Stage 1 owns validation, manuscript-root binding, and durable
+`GPD/publication/{subject_slug}/...` routing; `.../intake/` is provenance only.
 </context>
 
 <process>
@@ -152,9 +151,8 @@ manifest-owned. The root workflow index is only a staged-file map.
 </process>
 
 <success_criteria>
-- [ ] Workflow ran end to end
-- [ ] Final manuscript artifacts exist on disk
-- [ ] Project-backed lane: final review artifacts exist on disk when embedded staged review runs
-- [ ] External-authoring lane: manuscript-root artifacts were produced and the workflow routed to standalone `gpd:peer-review`
+- [ ] Workflow completed or returned a typed Stage 1 blocker
+- [ ] Review-contract outputs and evidence are satisfied for the active scope
+- [ ] External-authoring runs produced manuscript-root artifacts and routed review to standalone `gpd:peer-review`
 - [ ] Theorem-bearing manuscripts retain the proof-redteam gate
 </success_criteria>

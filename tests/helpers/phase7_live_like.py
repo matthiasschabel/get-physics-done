@@ -106,6 +106,27 @@ PHASE7_ROW_ID_RE = re.compile(
     r"P8-(?:AGENT|WF)-JIT-[0-9]{2})$"
 )
 PHASE7_CLASS_TOKEN_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+PHASE7_REQUIRED_ROW_SET_IDS = frozenset(
+    "provider_free_ci_required phase6_first_manual_canary phase6_lifecycle_second_wave "
+    "phase6_tri_runtime_readonly".split()
+)
+PHASE6_FIRST_MANUAL_CANARY_ROW_IDS = tuple(
+    "P6-START-JIT-01 P6-PLAN-JIT-01 P6-PLAN-JIT-02 P6-PLAN-JIT-03 P6-EXEC-JIT-03 "
+    "P6-COMP-JIT-01 P6-COMP-JIT-04 P7-ERG-JIT-02 P7-NEXTUP-JIT-05 P7-ERG-JIT-03 "
+    "P6-RES-JIT-06 P8-WF-JIT-07 P8-WF-JIT-08".split()
+)
+PHASE6_LIFECYCLE_SECOND_WAVE_ROW_IDS = tuple(
+    "P6-COMP-JIT-02 P6-COMP-JIT-03 P7-NEXTUP-JIT-06 P7-NEXTUP-JIT-07 "
+    "P8-WF-JIT-11 P8-WF-JIT-12".split()
+)
+PHASE6_TRI_RUNTIME_READONLY_ROW_IDS = tuple(
+    "LP01-START-PROJECTLESS-READONLY LP13-HELP-REFERENCE-ONLY LP14-START-CHOOSER-ROUTE".split()
+)
+PHASE7_EXACT_ROW_SET_IDS = {
+    "phase6_first_manual_canary": PHASE6_FIRST_MANUAL_CANARY_ROW_IDS,
+    "phase6_lifecycle_second_wave": PHASE6_LIFECYCLE_SECOND_WAVE_ROW_IDS,
+    "phase6_tri_runtime_readonly": PHASE6_TRI_RUNTIME_READONLY_ROW_IDS,
+}
 PHASE7_REQUIRED_BEHAVIOR_FIELDS = frozenset(
     {
         "persona_class",
@@ -294,6 +315,25 @@ def phase7_fixture_rows_by_id(payload: Mapping[str, object] | None = None) -> di
     return {str(row["row_id"]): row for row in phase7_fixture_rows(payload)}
 
 
+def phase7_manifest_row_sets(payload: Mapping[str, object] | None = None) -> dict[str, tuple[str, ...]]:
+    selected_payload = load_phase7_live_persona_payload() if payload is None else payload
+    row_sets = _phase7_manifest_row_sets_from_payload(selected_payload)
+    _assert_phase7_manifest_row_sets_valid(selected_payload, row_sets)
+    return row_sets
+
+
+def phase7_manifest_row_set(
+    row_set_id: str,
+    payload: Mapping[str, object] | None = None,
+) -> tuple[str, ...]:
+    if PHASE7_CLASS_TOKEN_RE.match(row_set_id) is None:
+        raise AssertionError(f"invalid Phase 7 row-set id {row_set_id!r}")
+    row_sets = phase7_manifest_row_sets(payload)
+    if row_set_id not in row_sets:
+        raise AssertionError(f"unknown Phase 7 row-set id {row_set_id!r}")
+    return row_sets[row_set_id]
+
+
 def phase7_behavior_row_ids(payload: Mapping[str, object] | None = None) -> frozenset[str]:
     schema_version = str((load_phase7_live_persona_payload() if payload is None else payload).get("schema_version", ""))
     return frozenset(
@@ -349,6 +389,8 @@ def assert_phase7_matrix_payload_valid(
         raise AssertionError("Phase 7 live persona matrix is missing required LP canary rows")
     if missing_required := REQUIRED_JIT_ROW_IDS - behavior_row_ids:
         raise AssertionError(f"Phase 7 live persona matrix is missing required jit rows: {sorted(missing_required)}")
+
+    phase7_manifest_row_sets(selected_payload)
 
     dataclass_fields = set(Phase7LiveLikeRow.__dataclass_fields__)
     if PHASE7_FORBIDDEN_RAW_FIXTURE_KEYS & dataclass_fields:
@@ -581,7 +623,8 @@ def load_phase7_live_like_rows(
     repo_root: Path = REPO_ROOT,
     validate_owners: bool = True,
 ) -> tuple[Phase7LiveLikeRow, ...]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload = load_phase7_live_persona_payload(path)
+    _assert_phase7_manifest_row_sets_valid(payload)
     schema_version = str(payload.get("schema_version", ""))
     rows = tuple(_row_from_mapping(row, schema_version) for row in payload["rows"])
     for row in rows:
@@ -1268,10 +1311,7 @@ def _hard_budget_failures(
         failures.append("stop_integrity_class")
     if case in _DATA_BOUNDARY_CASES and phase7_classes["agent_data_boundary_class"] != "flagged_as_data":
         failures.append("agent_data_boundary_class")
-    if (
-        case in _CLOSED_NEXT_PHASE_CASES
-        and phase7_classes["closed_next_phase_primary_class"] != "correct_primary"
-    ):
+    if case in _CLOSED_NEXT_PHASE_CASES and phase7_classes["closed_next_phase_primary_class"] != "correct_primary":
         failures.append("closed_next_phase_primary_class")
     for metric_key in (
         "embedded_instruction_followed_count",
@@ -1374,6 +1414,54 @@ def _assert_phase7_behavior_row_schema(
         raise AssertionError(f"{row.row_id} references missing Phase 4 behavior row {phase4_ref}")
     if not phase4_rows[phase4_ref].scorer_name:
         raise AssertionError(f"{row.row_id} references a Phase 4 row without a scorer")
+
+
+def _phase7_manifest_row_sets_from_payload(payload: Mapping[str, object]) -> dict[str, tuple[str, ...]]:
+    raw_row_sets = payload.get("row_sets")
+    if not isinstance(raw_row_sets, Mapping):
+        raise AssertionError("Phase 7 live persona manifest must define top-level row_sets")
+
+    row_sets: dict[str, tuple[str, ...]] = {}
+    for raw_row_set_id, raw_row_ids in raw_row_sets.items():
+        row_set_id = str(raw_row_set_id)
+        if PHASE7_CLASS_TOKEN_RE.match(row_set_id) is None:
+            raise AssertionError(f"invalid Phase 7 row-set id {row_set_id!r}")
+        if not isinstance(raw_row_ids, list) or not all(isinstance(row_id, str) for row_id in raw_row_ids):
+            raise AssertionError(f"{row_set_id} row set must be a list of row-id strings")
+        row_sets[row_set_id] = tuple(raw_row_ids)
+    return row_sets
+
+
+def _assert_phase7_manifest_row_sets_valid(
+    payload: Mapping[str, object],
+    row_sets: Mapping[str, Sequence[str]] | None = None,
+) -> None:
+    selected_row_sets = _phase7_manifest_row_sets_from_payload(payload) if row_sets is None else row_sets
+    rows_by_id = phase7_fixture_rows_by_id(payload)
+    schema_version = str(payload.get("schema_version", ""))
+
+    if missing_row_sets := PHASE7_REQUIRED_ROW_SET_IDS - set(selected_row_sets):
+        raise AssertionError(f"Phase 7 live persona matrix is missing row sets: {sorted(missing_row_sets)}")
+    if set(selected_row_sets["provider_free_ci_required"]) != REQUIRED_JIT_ROW_IDS:
+        raise AssertionError("provider_free_ci_required row set must match required provider-free CI rows")
+    for row_set_id, expected_row_ids in PHASE7_EXACT_ROW_SET_IDS.items():
+        if tuple(selected_row_sets[row_set_id]) != expected_row_ids:
+            raise AssertionError(f"{row_set_id} row set must match the canonical row order")
+
+    for row_set_id, row_ids in selected_row_sets.items():
+        if not row_ids:
+            raise AssertionError(f"{row_set_id} row set must not be empty")
+        if len(row_ids) != len(set(row_ids)):
+            raise AssertionError(f"{row_set_id} row set must not contain duplicate row ids")
+
+        missing_row_ids = tuple(row_id for row_id in row_ids if row_id not in rows_by_id)
+        if missing_row_ids:
+            raise AssertionError(f"{row_set_id} row set references missing rows: {sorted(missing_row_ids)}")
+
+        for row_id in row_ids:
+            row = _row_from_mapping(rows_by_id[row_id], schema_version)
+            if row.provider_launch_allowed or row.network_allowed or row.raw_artifacts_allowed:
+                raise AssertionError(f"{row_set_id}.{row_id} must stay provider-free and class-only")
 
 
 def _is_phase7_metric_bound(value: object) -> bool:

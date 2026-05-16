@@ -14,6 +14,7 @@ from tests.helpers.persona_summary import (
     phase4_live_smoke_policy,
     validate_persona_summary,
 )
+from tests.helpers.phase4_persona.matrix import load_phase4_rows
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RUNBOOK_PATH = REPO_ROOT / "docs" / "dev" / "phase4-persona-live-smoke.md"
@@ -52,6 +53,16 @@ def test_phase4_public_summary_validator_accepts_sanitized_class_only_summary() 
     assert result.findings == ()
     assert helper_result.valid is True
     assert helper_result.findings == ()
+
+
+def test_phase4_public_summary_uses_stable_canonical_row_ids() -> None:
+    rows = VALID_PUBLIC_SUMMARY["rows"]
+    assert isinstance(rows, list)
+    row_ids = {row["row_id"] for row in rows if isinstance(row, dict)}
+    canonical_user_steering_ids = {row.row_id for row in load_phase4_rows("user_steering")}
+
+    assert row_ids == {"P4-USER-01", "P4-USER-02"}
+    assert row_ids <= canonical_user_steering_ids
 
 
 def test_phase4_public_summary_validator_cli_accepts_and_rejects(

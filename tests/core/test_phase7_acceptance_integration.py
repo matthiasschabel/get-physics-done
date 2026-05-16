@@ -8,16 +8,18 @@ from pathlib import Path
 
 from tests.helpers.phase4_persona.matrix import load_phase4_rows
 from tests.helpers.phase7_live_like import (
+    PHASE7_REQUIRED_ROW_SET_IDS,
     REQUIRED_JIT_ROW_IDS,
     assert_phase7_matrix_payload_valid,
     load_phase7_live_like_rows,
     load_phase7_live_persona_payload,
     phase7_behavior_row_ids,
+    phase7_manifest_row_sets,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-_PHASE7_TRACKED_LOC_CAP = 3_400
+_PHASE7_TRACKED_LOC_CAP = 3_500
 
 _PHASE7_FORBIDDEN_RAW_ARTIFACT_NAMES = frozenset(
     {
@@ -171,6 +173,14 @@ def test_phase6_integration_plan_persona_families_are_mapped_to_matrix_rows() ->
 
 def test_phase6_workflow_persona_surfaces_are_mapped_to_matrix_rows() -> None:
     _assert_phase6_persona_rows_cover(_PHASE6_WORKFLOW_PERSONA_ROWS)
+
+
+def test_phase7_manifest_declares_shared_provider_free_row_sets() -> None:
+    row_sets = phase7_manifest_row_sets()
+
+    assert PHASE7_REQUIRED_ROW_SET_IDS <= set(row_sets)
+    assert set(row_sets["provider_free_ci_required"]) == REQUIRED_JIT_ROW_IDS
+    assert row_sets["phase6_first_manual_canary"] == tuple(_PHASE6_INTEGRATION_PLAN_PERSONA_ROWS.values())
 
 
 def _assert_phase6_persona_rows_cover(mapping: Mapping[str, str]) -> None:

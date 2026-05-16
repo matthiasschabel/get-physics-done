@@ -35,6 +35,7 @@ from tests.helpers.phase7_live_like import (
     Phase7LiveLikeRow,
     assert_phase7_live_like_score_contract,
     load_phase7_live_like_rows,
+    phase7_manifest_row_set,
     score_phase7_live_like_row,
     score_phase7_live_like_rows,
 )
@@ -82,6 +83,17 @@ def test_phase6_minimal_persona_rows_score_provider_free_classes() -> None:
     assert scores["P6-RES-JIT-06"].phase7_metric_counts["project_lost_claim_count"] == 0
     assert scores["P8-WF-JIT-07"].phase7_metric_classes["artifact_handle_first_class"] == "handle_first"
     assert scores["P8-WF-JIT-08"].phase7_metric_classes["artifact_handle_first_class"] == "handle_first"
+
+
+def test_phase6_first_manual_canary_row_set_scores_provider_free_classes() -> None:
+    row_ids = phase7_manifest_row_set("phase6_first_manual_canary")
+    scores = score_phase7_live_like_rows(tuple(_row_by_id(row_id) for row_id in row_ids))
+
+    assert tuple(score.row.row_id for score in scores) == row_ids
+    assert len(scores) == 13
+
+    for score in scores:
+        assert_phase7_live_like_score_contract(score)
 
 
 def test_lp_jit_04_matrix_targets_real_literature_review_stage_pair() -> None:

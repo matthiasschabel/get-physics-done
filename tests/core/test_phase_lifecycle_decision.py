@@ -219,6 +219,48 @@ def test_lifecycle_decision_missing_verification_routes_to_runtime_verify_work(t
     assert route.rendered_markdown == "## > Next Up\nPrimary: `gpd:verify-work 02`"
 
 
+def test_lifecycle_decision_non_passing_verification_routes_to_runtime_verify_work(tmp_path: Path) -> None:
+    _write_phase_project(tmp_path, verification_status="gaps_found", state_status="Blocked")
+    before_roadmap = (tmp_path / "GPD" / "ROADMAP.md").read_text(encoding="utf-8")
+    before_state = (tmp_path / "GPD" / "state.json").read_text(encoding="utf-8")
+    before_report = (tmp_path / "GPD" / "phases" / "02-analysis" / "02-VERIFICATION.md").read_text(
+        encoding="utf-8"
+    )
+
+    decision = phase_lifecycle_decision(tmp_path, "02")
+
+    assert decision.decision == "needs_verification"
+    assert decision.verification_status == "gaps_found"
+    assert decision.verification_routing_status == "gaps_found"
+    assert decision.closeout_ready is False
+    assert decision.primary_action == "verify-work"
+    assert decision.primary_command == "gpd:verify-work 02"
+    assert decision.primary_owner == "runtime"
+    assert decision.lifecycle_class == "needs_verification"
+    assert decision.closeout_readiness.mutation_allowed is False
+    assert decision.closeout_readiness.closeout_command is None
+    assert any("must have top-level frontmatter status 'passed'" in blocker for blocker in decision.closeout_blockers)
+    route = decision.lifecycle_next_up
+    assert route is not None
+    _assert_route(
+        route,
+        status_class="needs_verification",
+        transition_owner="runtime",
+        current_blocking_gate="verification_not_passed",
+        primary_runtime_command="gpd:verify-work 02",
+        local_transition_command=None,
+        after_local_runtime_command=None,
+    )
+    assert route.primary.action == "verify-work"
+    assert route.stage_stop_next_runtime_command == _command_text(route.primary_runtime_command)
+    assert route.rendered_markdown == "## > Next Up\nPrimary: `gpd:verify-work 02`"
+    assert (tmp_path / "GPD" / "ROADMAP.md").read_text(encoding="utf-8") == before_roadmap
+    assert (tmp_path / "GPD" / "state.json").read_text(encoding="utf-8") == before_state
+    assert (tmp_path / "GPD" / "phases" / "02-analysis" / "02-VERIFICATION.md").read_text(
+        encoding="utf-8"
+    ) == before_report
+
+
 def test_lifecycle_decision_proof_redteam_blocker_uses_runtime_verify_work(tmp_path: Path) -> None:
     _write_phase_project(tmp_path, proof_bearing=True)
 

@@ -527,7 +527,7 @@ _PHASE7_LIVE_CANARY_SUMMARY: dict[str, object] = {
     },
     "rows": [
         {
-            "row_id": "LP-RO-RUNTIME",
+            "row_id": "LP01-START-PROJECTLESS-READONLY",
             "runtime_class": "runtime_catalog_member",
             "persona_class": "zero_coder_recovery",
             "workflow_class": "read_only_setup_recovery",

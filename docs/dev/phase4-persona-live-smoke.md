@@ -12,10 +12,15 @@ checks. It is not a CI runner.
   must not create live provider artifacts or start a provider runtime.
 - The operator chooses the row set, budget, provider account, runtime homes, and
   isolated workspace before any provider process is started.
+- Use stable row ids for the selected rows. A row id names the behavior under
+  observation; runtime, provider account, date, workspace, and attempt values are
+  metadata only and must not create alternate row identities.
 - Raw live artifacts stay ignored and operator-local under a repo-local root like
-  `tmp/phase4-persona-live-YYYYMMDD/`. Keep prompts, replies, stdout/stderr,
-  transcripts, argv/env captures, auth/account material, command files, hashes,
-  token material, absolute local paths, and provider output out of tracked files.
+  `tmp/phase4-persona-live-YYYYMMDD/`. Store row attempts under
+  `tmp/phase4-persona-live-YYYYMMDD/raw/<row_id>/<runtime_class>/<attempt_id>/`.
+  Keep prompts, replies, stdout/stderr, transcripts, argv/env captures,
+  auth/account material, command files, hashes, token material, absolute local
+  paths, generated attempt ids, and provider output out of tracked files.
 - Public review may include only a sanitized class-only summary. The summary may
   contain row ids, class fields, behavior classes, aggregate or behavior counts,
   redaction status, and finding classes. It must not contain raw prompts,
@@ -30,12 +35,13 @@ checks. It is not a CI runner.
 ## Manual Sequence
 
 1. Create a fresh ignored local root, for example
-   `tmp/phase4-persona-live-YYYYMMDD/`.
+   `tmp/phase4-persona-live-YYYYMMDD/`, with raw row attempts under
+   `raw/<row_id>/<runtime_class>/<attempt_id>/`.
 2. Freeze the checkout state and record only class-level operator notes for
    public reporting.
-3. Run the selected live rows manually from the operator machine. Stop on
-   unexpected mutation, budget exhaustion, provider auth uncertainty, or
-   redaction failure.
+3. Run the selected stable row ids manually from the operator machine. Stop on
+   unexpected mutation, budget exhaustion, provider auth uncertainty, redaction
+   failure, or any need to mint a runtime/provider/date-specific row id.
 4. Produce a sanitized summary and validate it locally:
 
    ```bash
@@ -58,8 +64,9 @@ Required top-level policy fields:
 - `provider_launch_source_class`: `manual_operator`
 - `ci_provider_launch_allowed`: `false`
 
-Rows may include `row_id`, runtime/persona/workflow/gate/result/next-action
-classes, write class, behavior classes, behavior metric counts, redaction status
-class, finding classes, and event class counts. Count maps should use class
-tokens as keys and integers as values. Scalar count fields should be
-non-negative integers.
+Rows may include canonical `row_id`, runtime/persona/workflow/gate/result/
+next-action classes, write class, behavior classes, behavior metric counts,
+redaction status class, finding classes, and event class counts. Runtime,
+provider, date, workspace, and attempt fields are metadata classes only, not row
+identity. Count maps should use class tokens as keys and integers as values.
+Scalar count fields should be non-negative integers.

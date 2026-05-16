@@ -9,6 +9,7 @@ from tests.helpers.persona_summary import (
     make_phase7_live_canary_summary,
     phase7_live_canary_policy,
 )
+from tests.helpers.phase7_live_like import phase7_fixture_rows_by_id
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RUNBOOK_PATH = REPO_ROOT / "docs" / "dev" / "phase7-live-persona-canary.md"
@@ -65,6 +66,8 @@ def test_phase7_raw_live_artifacts_remain_operator_local_under_ignored_tmp() -> 
 def test_phase7_manual_summary_fixture_marks_shadow_live_observations_class_only() -> None:
     row = _first_row(VALID_PUBLIC_SUMMARY)
 
+    assert row["row_id"] == "LP01-START-PROJECTLESS-READONLY"
+    assert row["row_id"] in phase7_fixture_rows_by_id()
     assert row["observation_mode_class"] == "shadow_live_persona"
     assert row["capture_policy_class"] == "classes_and_counts_only"
     assert VALID_PUBLIC_SUMMARY["ci_provider_launch_allowed"] is False

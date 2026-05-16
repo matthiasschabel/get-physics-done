@@ -13,6 +13,7 @@ from tests.helpers.persona_summary import (
     provider_launch_command_in_text,
     validate_persona_summary,
 )
+from tests.helpers.phase7_live_like import phase7_fixture_rows_by_id
 
 
 def _first_row(summary: dict[str, object]) -> dict[str, object]:
@@ -39,6 +40,23 @@ def test_persona_summary_policy_accepts_generated_public_summaries(summary: obje
 
     assert result.valid is True
     assert result.findings == ()
+
+
+def test_phase7_public_summary_seed_row_uses_canonical_manifest_id() -> None:
+    row = _first_row(make_phase7_live_canary_summary())
+
+    assert row["row_id"] == "LP01-START-PROJECTLESS-READONLY"
+    assert row["row_id"] in phase7_fixture_rows_by_id()
+
+
+def test_phase7_summary_policy_rejects_raw_material_on_canonical_seed_row() -> None:
+    summary = make_phase7_live_canary_summary()
+    _first_row(summary)["provider_reply"] = "redacted"
+
+    result = validate_persona_summary(summary, phase7_live_canary_policy())
+
+    assert result.valid is False
+    assert "forbidden_key:rows.0.provider_reply" in result.findings
 
 
 @pytest.mark.parametrize("raw_key", ["raw_prompt_class", "stdout_count", "env_counts"])

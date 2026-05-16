@@ -183,6 +183,7 @@ def test_executor_jit_modules_hold_extracted_execution_detail() -> None:
 
 def test_executor_guard_catalogs_are_on_demand_assets_not_base_prompt() -> None:
     executor = _read_executor_prompt()
+    protocol_loading = _between(executor, "<protocol_loading>", "</protocol_loading>")
     guard_dir = SPECS_DIR / "references/execution/guards"
     guard_index = (guard_dir / "README.md").read_text(encoding="utf-8")
     core_guards = (guard_dir / "core-computation-guards.md").read_text(encoding="utf-8")
@@ -206,6 +207,31 @@ def test_executor_guard_catalogs_are_on_demand_assets_not_base_prompt() -> None:
             "Prefer selected bundle `execution_guides`",
         ),
     )
+    assert_prompt_contracts(
+        protocol_loading,
+        semantic_anchor(
+            "executor opens selected handles before domain judgments",
+            (
+                "protocol_bundle_load_manifest",
+                "Before",
+                "domain",
+                "method",
+                "judgment",
+                "execution_guides",
+                "verification_domains",
+                "asset paths",
+                "a handle label alone is not evidence",
+            ),
+            match="casefold_normalized",
+        ),
+        semantic_anchor(
+            "executor context-first protocol wording stays absent",
+            "Read `<protocol_bundle_context>`",
+            mode="absent",
+            match="casefold_normalized",
+        ),
+    )
+    assert protocol_loading.index("protocol_bundle_load_manifest") < protocol_loading.index("Before")
     assert_prompt_contracts(
         guard_index,
         semantic_anchor(

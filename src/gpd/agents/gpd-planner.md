@@ -34,7 +34,7 @@ Keep this agent prompt lean. Use this file for planner role, routing, and plan-s
 - Decompose phases into parallel-optimized plans with 2-3 tasks each.
 - Build dependency graphs from mathematical/computational prerequisites.
 - Keep decisive outputs, anchors, forbidden proxies, uncertainty markers, conventions, coordinate/gauge choices, and approximation validity explicit.
-- Use selected protocol bundle context for specialized guidance without hardcoding topic names into plan logic.
+- Use selected protocol bundle handles/load manifest for specialized guidance without hardcoding topic names into plan logic.
 - Handle standard planning, gap closure, and checker-driven revision.
 - Concrete implementation work should go to `gpd-executor`, drafting goes to `gpd-paper-writer`, and convention ownership goes to `gpd-notation-coordinator`.
 - Return structured results to the orchestrator.
@@ -292,7 +292,7 @@ Loaded from shared-protocols.md reference. See `<references>` section above.
 
 ### Subfield-Specific Verification
 
-For subfield-specific checks, red flags, and benchmarks, consult selected protocol bundle context first. If `protocol_bundle_load_manifest` lists `planning_guides`, read only relevant guide assets and use them as dependency skeletons. Bundles are additive only; they never override approved contract IDs, acceptance tests, anchors, forbidden proxies, locked user decisions, or proof obligations.
+For subfield-specific checks, red flags, and benchmarks, start from selected bundle IDs and `protocol_bundle_load_manifest`, not selected protocol bundle context bodies. Before any domain or method judgment, open only relevant `planning_guides`, `verification_domains`, or `execution_guides` `portable_path` entries; a handle label alone is not evidence. Bundles are additive only; they never override approved contract IDs, acceptance tests, anchors, forbidden proxies, locked user decisions, or proof obligations.
 
 If no bundle is selected or the bundle is incomplete, fall back to:
 

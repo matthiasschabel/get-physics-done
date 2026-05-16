@@ -269,7 +269,9 @@ def _build_project_bundle_signals(project_text: str | None, contract: ResearchCo
 
         for observable in contract.observables:
             tags.add(f"observable-kind:{observable.kind}")
-            text_parts.extend(filter(None, [observable.name, observable.definition, observable.regime, observable.units]))
+            text_parts.extend(
+                filter(None, [observable.name, observable.definition, observable.regime, observable.units])
+            )
         for claim in contract.claims:
             text_parts.append(claim.statement)
         for deliverable in contract.deliverables:
@@ -284,7 +286,9 @@ def _build_project_bundle_signals(project_text: str | None, contract: ResearchCo
             )
         for reference in contract.references:
             tags.add(f"reference-role:{reference.role}")
-            text_parts.extend([reference.locator, reference.why_it_matters, *reference.required_actions, *reference.applies_to])
+            text_parts.extend(
+                [reference.locator, reference.why_it_matters, *reference.required_actions, *reference.applies_to]
+            )
         for proxy in contract.forbidden_proxies:
             text_parts.extend([proxy.proxy, proxy.reason])
         text_parts.extend(contract.uncertainty_markers.weakest_anchors)
@@ -440,14 +444,12 @@ def _manifest_asset_payload(asset: BundleAsset) -> dict[str, object]:
         "portable_path": f"@{{GPD_INSTALL_DIR}}/{asset.path}",
         "required": asset.required,
         "note": asset.note,
+        "body_loaded": False,
     }
 
 
 def _manifest_assets_payload(assets: BundleAssets) -> dict[str, list[dict[str, object]]]:
-    return {
-        role: [_manifest_asset_payload(asset) for asset in getattr(assets, role)]
-        for role in BUNDLE_ASSET_ROLES
-    }
+    return {role: [_manifest_asset_payload(asset) for asset in getattr(assets, role)] for role in BUNDLE_ASSET_ROLES}
 
 
 def build_protocol_bundle_load_manifest(
@@ -480,9 +482,7 @@ def build_protocol_bundle_load_manifest(
                 "reference_prompts": list(bundle.reference_prompts),
                 "estimator_policies": list(bundle.estimator_policies),
                 "decisive_artifact_guidance": list(bundle.decisive_artifact_guidance),
-                "verifier_extensions": [
-                    extension.model_dump(mode="json") for extension in bundle.verifier_extensions
-                ],
+                "verifier_extensions": [extension.model_dump(mode="json") for extension in bundle.verifier_extensions],
             }
             for bundle in selected
         ],

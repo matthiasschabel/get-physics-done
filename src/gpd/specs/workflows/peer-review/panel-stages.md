@@ -21,6 +21,12 @@ Reader-visible claims, surfaced evidence, `${MANUSCRIPT_ROOT}/FIGURE_TRACKER.md`
 `GPD/comparisons/*-COMPARISON.md`, and review-support artifacts are first-class.
 Read reference files by handle only when targeted evidence is needed; do not
 hydrate broad rendered reference or protocol bodies into panel init.
+
+Handle-first review invariant: before a Stage 4-5 domain or method judgment,
+bind the claim or venue issue, choose the relevant selected asset from
+`protocol_bundle_load_manifest` (`verification_domains`, `execution_guides`, or
+fallback domain/protocol handle), and read that file. Acknowledging a handle or
+bundle id is not evidence.
 </stage_boundary>
 
 <announce_panel>
@@ -161,6 +167,8 @@ Stage 4 checks physical soundness after math. It reads manuscript, reader, math,
 literature, proof-redteam artifact if active, summaries, verifications,
 comparisons, and figure tracker. It writes
 `${REVIEW_ROOT}/STAGE-physics{round_suffix}.json`.
+For condensed-matter or other method-specific claims, open the relevant selected
+handle before judging support, regime validity, or interpretation.
 
 ```bash
 gpd validate review-stage-report ${REVIEW_ROOT}/STAGE-physics{round_suffix}.json

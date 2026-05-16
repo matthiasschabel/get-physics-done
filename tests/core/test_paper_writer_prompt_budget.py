@@ -39,7 +39,9 @@ def test_gpd_paper_writer_prompt_stays_within_expected_budget_and_keeps_contract
     assert "{GPD_INSTALL_DIR}/references/publication/figure-generation-templates.md" in source
     assert "{GPD_INSTALL_DIR}/references/publication/publication-pipeline-modes.md" in source
     assert "paper_writer.handoff_audit" in source
-    assert "Response-pair handoff" in source
+    assert "protocol_bundle_load_manifest" in source
+    for token in ("before", "domain", "method", "judgment", "tensor-network", "caveats"):
+        assert token in source
     assert "Research-To-Paper Handoff Detail" in cookbook
     assert "Confidence-To-Language Mapping" in cookbook
     assert "Response Pair Detail" in handoff
@@ -52,3 +54,4 @@ def test_gpd_paper_writer_prompt_stays_within_expected_budget_and_keeps_contract
     assert "# Notation Glossary Template" not in expanded
     assert "# LaTeX Preamble Template" not in expanded
     assert "# Author Response Template" not in expanded
+    assert "# Tensor Networks" not in expanded

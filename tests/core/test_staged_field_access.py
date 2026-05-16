@@ -47,6 +47,12 @@ FIELD_ACCESS_HANDLE_FIRST_POLICY = "use handles/status/load manifests first"
 FIELD_ACCESS_HANDLE_ONLY_POLICY = "selected handle/status fields are handles only"
 FIELD_ACCESS_NO_BODY_POLICY = "no staged body fields are selected"
 FIELD_ACCESS_RENDERED_CONTEXT_POLICY = "do not make unselected body fields available"
+FIELD_ACCESS_PROTOCOL_HANDLE_FIELDS = {"selected_protocol_bundle_ids", "protocol_bundle_load_manifest"}
+FIELD_ACCESS_PROTOCOL_HANDLE_POLICY = "Protocol bundles: selected IDs/load manifests are handles until needed"
+FIELD_ACCESS_PROTOCOL_DOMAIN_POLICY = (
+    "open only relevant verification_domains/execution_guides portable_path entries from protocol_bundle_load_manifest"
+)
+FIELD_ACCESS_PROTOCOL_UNSELECTED_POLICY = "keep unselected assets absent"
 GPD_JSON_GET_TOKEN = "gpd json get"
 PAYLOAD_WORKFLOWS = (
     "plan-phase",
@@ -332,6 +338,26 @@ def test_rendered_context_fields_do_not_unlock_unselected_body_fields() -> None:
             for rendered_field in rendered_selected:
                 assert rendered_field in instruction_text
             assert FIELD_ACCESS_RENDERED_CONTEXT_POLICY in instruction_text
+
+    assert checked_stages
+
+
+def test_protocol_bundle_handle_stages_include_domain_opening_invariant() -> None:
+    checked_stages: list[tuple[str, str]] = []
+
+    for workflow_id in FIELD_ACCESS_WORKFLOWS:
+        manifest = load_workflow_stage_manifest(workflow_id)
+        for stage_id in manifest.stage_ids():
+            payload = build_staged_field_access(workflow_id, stage_id=stage_id).to_payload()
+            selected_fields = set(payload["selected_fields"])
+            if not selected_fields & FIELD_ACCESS_PROTOCOL_HANDLE_FIELDS:
+                continue
+            instruction_text = "\n".join(payload["instructions"])
+
+            checked_stages.append((workflow_id, stage_id))
+            assert FIELD_ACCESS_PROTOCOL_HANDLE_POLICY in instruction_text
+            assert FIELD_ACCESS_PROTOCOL_DOMAIN_POLICY in instruction_text
+            assert FIELD_ACCESS_PROTOCOL_UNSELECTED_POLICY in instruction_text
 
     assert checked_stages
 

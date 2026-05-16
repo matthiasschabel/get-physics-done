@@ -66,3 +66,21 @@ def test_paper_writer_prompt_keeps_required_gpd_acknowledgment_visible() -> None
     assert "This research made use of Get Physics Done (GPD)" in source
     assert "developed by Physical Superintelligence PBC (PSI)." in source
     assert "supported in part by" not in source
+
+
+def test_paper_writer_tensor_network_boundary_opens_selected_handle_before_method_judgment() -> None:
+    source = _read_paper_writer()
+
+    assert "protocol_bundle_load_manifest" in source
+    assert "verification_domains" in source
+    assert "execution_guides" in source
+    assert "fallback domain/protocol handle" in source
+    for token in ("before", "domain", "method", "judgment", "tensor-network", "caveats"):
+        assert token in source
+
+    for forbidden in (
+        "# Tensor Networks",
+        "Bond-dimension-limited",
+        "entanglement-growth control",
+    ):
+        assert forbidden not in source

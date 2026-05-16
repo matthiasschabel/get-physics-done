@@ -31,6 +31,12 @@ reference artifact content. It still does not need rendered
 `protocol_bundle_context` or rendered `active_reference_context`; use bundle
 IDs/load manifests, reference handles, and specific files for any quoted or
 section-local evidence.
+
+Handle-first authoring invariant: before a section-local domain or method
+judgment, bind the section claim, choose the relevant selected asset from
+`protocol_bundle_load_manifest` (`verification_domains`, `execution_guides`, or
+fallback domain/protocol handle), and read that file. Bundle-id acknowledgment is
+not enough.
 </init>
 
 <writing_principle>
@@ -137,6 +143,9 @@ evidence paths, active decisive-comparison artifacts, relevant
 `${PAPER_DIR}/FIGURE_TRACKER.md` entries, passed proof-redteam artifacts for
 theorem-style claims, and selected protocol-bundle handles as additive guidance
 only.
+If a tensor-network or other method-specific section needs a caveat, benchmark,
+normalization, or scope judgment, the writer opens the relevant selected handle
+first and drafts only from that bounded source.
 
 Writer agents must not strengthen, generalize, or rhetorically smooth
 theorem-style claims beyond passed proof-redteam scope. If a brief implies a

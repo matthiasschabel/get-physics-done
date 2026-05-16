@@ -757,3 +757,36 @@ def test_verify_work_template_keeps_session_overlay_after_verifier_output() -> N
         ),
     )
     assert "research_mode=balanced" not in verify_work
+
+
+def test_verifier_protocol_bundle_guidance_is_manifest_first_for_domain_status() -> None:
+    verifier = _read_verifier_prompt()
+    protocol_guidance = _between_markers(verifier, "**Protocol bundle guidance", "**Fallback")
+
+    assert_prompt_contracts(
+        protocol_guidance,
+        *semantic_concept(
+            "verifier domain status opens selected verification domain handles",
+            required=(
+                "protocol_bundle_verifier_extensions",
+                "protocol_bundle_load_manifest",
+                "do not use `protocol_bundle_context` from init JSON as the first judgment source",
+                "Before",
+                "assigning",
+                "domain-specific",
+                "physics status",
+                "verification_domains",
+                "portable_path",
+                "get_bundle_checklist(selected_protocol_bundle_ids)",
+                "fallback/check",
+            ),
+            forbidden=(
+                "prefer `protocol_bundle_verifier_extensions` and `protocol_bundle_context`",
+                "call `get_bundle_checklist(selected_protocol_bundle_ids)` before assigning",
+            ),
+        ),
+    )
+    assert protocol_guidance.index("protocol_bundle_load_manifest") < protocol_guidance.index("Before")
+    assert protocol_guidance.index("Before") < protocol_guidance.index(
+        "get_bundle_checklist(selected_protocol_bundle_ids)"
+    )

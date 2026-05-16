@@ -224,6 +224,41 @@ def test_domain_blueprint_catalog_is_on_demand_not_in_base_prompt() -> None:
         assert removed_heading not in planner
 
 
+def test_planner_protocol_bundle_guidance_is_manifest_and_handle_first() -> None:
+    planner = _read_planner_prompt()
+    physics_verification = _between(planner, "<physics_verification>", "</physics_verification>")
+
+    assert_prompt_contracts(
+        physics_verification,
+        semantic_anchor(
+            "planner opens selected protocol handles before domain judgments",
+            (
+                "protocol_bundle_load_manifest",
+                "Before any domain or method judgment",
+                "open only relevant",
+                "planning_guides",
+                "verification_domains",
+                "execution_guides",
+                "portable_path",
+                "a handle label alone is not evidence",
+            ),
+            match="casefold_normalized",
+        ),
+        semantic_anchor(
+            "planner context-first protocol wording stays absent",
+            "consult selected protocol bundle context first",
+            mode="absent",
+            match="casefold_normalized",
+        ),
+    )
+    assert physics_verification.index("protocol_bundle_load_manifest") < physics_verification.index(
+        "Before any domain or method judgment"
+    )
+    assert physics_verification.index("Before any domain or method judgment") < physics_verification.index(
+        "portable_path"
+    )
+
+
 def test_planner_policy_detail_lives_in_jit_modules_not_base_prompt() -> None:
     planner = _read_planner_prompt()
 

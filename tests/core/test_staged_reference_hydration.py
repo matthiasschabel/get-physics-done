@@ -12,24 +12,47 @@ from gpd.core import context as context_module
 from gpd.core.context import (
     init_execute_phase,
     init_literature_review,
+    init_map_research,
     init_peer_review,
+    init_plan_phase,
+    init_research_phase,
     init_respond_to_referees,
     init_verify_work,
     init_write_paper,
 )
+from gpd.core.protocol_bundles import get_protocol_bundle
 from gpd.core.state import default_state_dict
 from gpd.core.workflow_staging import load_workflow_stage_manifest
 from tests import context_stage_test_support as stage_ctx
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SPECS_DIR = REPO_ROOT / "src" / "gpd" / "specs"
 FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "stage0"
 REFERENCE_BODY_SENTINEL = "SENTINEL_REFERENCE_BODY_SHOULD_NOT_APPEAR"
+STAT_MECH_PROJECT_TEXT = """# Test Project
+
+## Theoretical Framework
+Statistical mechanics
+
+## Core Research Question
+Monte Carlo finite-size scaling of Binder cumulants with autocorrelation and thermalization checks.
+"""
+PROTOCOL_ASSET_BODY_KEYS = {"body", "content", "markdown", "text"}
+STAT_MECH_ASSET_BODY_SENTINELS = (
+    "Wrong approach (common LLM error)",
+    "Compressibility sum rule:",
+    "Statistical Mechanics Simulation Execution Guard",
+)
 
 
-def _setup_project(project_root: Path) -> None:
+def _setup_project(project_root: Path, *, project_text: str | None = None) -> None:
     gpd_dir = project_root / "GPD"
     gpd_dir.mkdir(parents=True, exist_ok=True)
     (gpd_dir / "phases").mkdir(exist_ok=True)
-    (gpd_dir / "PROJECT.md").write_text("# Test Project\n\nReference hydration checks.\n", encoding="utf-8")
+    (gpd_dir / "PROJECT.md").write_text(
+        project_text or "# Test Project\n\nReference hydration checks.\n",
+        encoding="utf-8",
+    )
     (gpd_dir / "ROADMAP.md").write_text("# Roadmap\n\n## Phase 2: Analysis\n", encoding="utf-8")
     (gpd_dir / "REQUIREMENTS.md").write_text("# Requirements\n\n- Preserve reference handles.\n", encoding="utf-8")
     (gpd_dir / "STATE.md").write_text("# State\n\nCurrent phase: 02\n", encoding="utf-8")
@@ -61,6 +84,10 @@ def _setup_project(project_root: Path) -> None:
         }
     ]
     (gpd_dir / "state.json").write_text(json.dumps(state), encoding="utf-8")
+
+
+def _setup_stat_mech_project(project_root: Path) -> None:
+    _setup_project(project_root, project_text=STAT_MECH_PROJECT_TEXT)
 
 
 def _create_phase(project_root: Path) -> None:
@@ -139,6 +166,49 @@ def _install_hydration_guards(
     )
 
 
+def _stat_mech_asset_body_paths() -> set[Path]:
+    bundle = get_protocol_bundle("stat-mech-simulation")
+    assert bundle is not None
+    return {(SPECS_DIR / asset.path).resolve(strict=False) for _, asset in bundle.assets.iter_assets()}
+
+
+def _install_protocol_asset_body_read_guard(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    forbidden_body_paths: set[Path],
+) -> None:
+    original_read_text = Path.read_text
+
+    def fail_on_protocol_asset_body_read(path: Path, *args: object, **kwargs: object) -> str:
+        resolved_path = Path(path).resolve(strict=False)
+        if resolved_path in forbidden_body_paths:
+            pytest.fail(f"protocol asset body should not be read for handle-only staged init: {path}")
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", fail_on_protocol_asset_body_read)
+    monkeypatch.setattr(
+        context_module,
+        "render_protocol_bundle_context",
+        stage_ctx.fail_if_context_builder_runs("render_protocol_bundle_context"),
+    )
+
+
+def _manifest_asset_payloads(protocol_manifest: dict[str, object]) -> list[dict[str, object]]:
+    bundles = protocol_manifest["bundles"]
+    assert isinstance(bundles, list)
+    asset_payloads: list[dict[str, object]] = []
+    for bundle_payload in bundles:
+        assert isinstance(bundle_payload, dict)
+        assets = bundle_payload["assets"]
+        assert isinstance(assets, dict)
+        for role_assets in assets.values():
+            assert isinstance(role_assets, list)
+            for asset_payload in role_assets:
+                assert isinstance(asset_payload, dict)
+                asset_payloads.append(asset_payload)
+    return asset_payloads
+
+
 def _assert_handle_only_payload(
     payload: dict[str, object],
     *,
@@ -153,6 +223,39 @@ def _assert_handle_only_payload(
     assert "active_reference_context" not in payload
     assert "protocol_bundle_context" not in payload
     assert REFERENCE_BODY_SENTINEL not in json.dumps(payload, sort_keys=True, default=str)
+
+
+def _assert_selected_stat_mech_handle_payload(
+    payload: dict[str, object],
+    *,
+    workflow_id: str,
+    stage_id: str,
+) -> None:
+    manifest = load_workflow_stage_manifest(workflow_id)
+    stage_ctx.assert_context_stage(payload, manifest, workflow_id, stage_id)
+    assert payload["selected_protocol_bundle_ids"] == ["stat-mech-simulation"]
+    assert "protocol_bundle_context" not in payload
+
+    protocol_manifest = payload["protocol_bundle_load_manifest"]
+    assert isinstance(protocol_manifest, dict)
+    assert protocol_manifest["selected_bundle_ids"] == ["stat-mech-simulation"]
+    assert protocol_manifest["bundle_count"] == 1
+
+    asset_payloads = _manifest_asset_payloads(protocol_manifest)
+    portable_paths = {asset_payload["portable_path"] for asset_payload in asset_payloads}
+    assert "@{GPD_INSTALL_DIR}/references/protocols/monte-carlo.md" in portable_paths
+    assert "@{GPD_INSTALL_DIR}/references/verification/domains/verification-domain-statmech.md" in portable_paths
+    assert "@{GPD_INSTALL_DIR}/references/execution/guards/stat-mech-simulation.md" in portable_paths
+
+    for asset_payload in asset_payloads:
+        assert PROTOCOL_ASSET_BODY_KEYS.isdisjoint(asset_payload)
+        assert str(asset_payload["portable_path"]).startswith("@{GPD_INSTALL_DIR}/")
+        if "body_loaded" in asset_payload:
+            assert asset_payload["body_loaded"] is False
+
+    serialized = json.dumps(payload, sort_keys=True, default=str)
+    for sentinel in STAT_MECH_ASSET_BODY_SENTINELS:
+        assert sentinel not in serialized
 
 
 @pytest.mark.parametrize(
@@ -235,3 +338,66 @@ def test_handle_only_reference_staged_payloads_do_not_hydrate_bodies_or_rendered
 
     _assert_handle_only_payload(payload, workflow_id=workflow_id, stage_id=stage_id)
     assert reference_payload_calls == [False]
+
+
+@pytest.mark.parametrize(
+    ("workflow_id", "stage_id", "prepare", "build_payload"),
+    (
+        (
+            "execute-phase",
+            "verification_handoff",
+            lambda project_root: _create_phase(project_root),
+            lambda project_root: init_execute_phase(project_root, "2", stage="verification_handoff"),
+        ),
+        (
+            "plan-phase",
+            "checker_revision",
+            lambda project_root: _create_phase(project_root),
+            lambda project_root: init_plan_phase(project_root, "2", stage="checker_revision"),
+        ),
+        (
+            "research-phase",
+            "research_handoff",
+            lambda project_root: _create_phase(project_root),
+            lambda project_root: init_research_phase(project_root, "2", stage="research_handoff"),
+        ),
+        (
+            "map-research",
+            "mapper_authoring",
+            lambda project_root: None,
+            lambda project_root: init_map_research(
+                project_root,
+                focus="statistical mechanics Monte Carlo finite-size scaling",
+                stage="mapper_authoring",
+            ),
+        ),
+        (
+            "verify-work",
+            "inventory_build",
+            lambda project_root: _create_phase(project_root),
+            lambda project_root: init_verify_work(project_root, "2", stage="inventory_build"),
+        ),
+        (
+            "write-paper",
+            "figure_and_section_authoring",
+            lambda project_root: None,
+            lambda project_root: init_write_paper(project_root, stage="figure_and_section_authoring"),
+        ),
+    ),
+)
+def test_selected_protocol_bundle_assets_stay_handle_only_during_staged_init(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    workflow_id: str,
+    stage_id: str,
+    prepare: Callable[[Path], object],
+    build_payload: Callable[[Path], dict[str, object]],
+) -> None:
+    _setup_stat_mech_project(tmp_path)
+    prepare(tmp_path)
+    forbidden_body_paths = _stat_mech_asset_body_paths()
+    _install_protocol_asset_body_read_guard(monkeypatch, forbidden_body_paths=forbidden_body_paths)
+
+    payload = build_payload(tmp_path)
+
+    _assert_selected_stat_mech_handle_payload(payload, workflow_id=workflow_id, stage_id=stage_id)

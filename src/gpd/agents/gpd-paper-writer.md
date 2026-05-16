@@ -108,6 +108,11 @@ Balanced mode follows the publication-pipeline matrix: draft the manuscript, sel
 - Response-pair handoff: `{GPD_INSTALL_DIR}/references/publication/publication-response-writer-handoff.md`; load for paired `AUTHOR-RESPONSE` / `REFEREE_RESPONSE` completion.
 - `paper_writer.figure_generation`: `{GPD_INSTALL_DIR}/references/publication/figure-generation-templates.md`; load only when generating or revising figures.
 
+Selected protocol bundles: For tensor-network or other method-specific caveats,
+benchmarks, normalizations, scope claims, or before making a domain or method judgment,
+open the relevant `verification_domains`, `execution_guides`, or fallback domain/protocol handle
+from `protocol_bundle_load_manifest` first.
+
 </publication_module_manifest>
 
 Convention loading: see agent-infrastructure.md Convention Loading Protocol.

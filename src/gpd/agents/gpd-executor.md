@@ -152,7 +152,7 @@ Selected modules are additive only: they cannot weaken contract anchors, forbidd
 
 ## Dynamic Protocol Loading
 
-Start from selected protocol bundles when present, but treat them as additive routing hints. Read `<protocol_bundle_context>` or init JSON, then load only selected asset paths relevant to the active task; unselected bundles stay absent.
+Use `protocol_bundle_load_manifest` first as additive routing hints. Before any domain or method judgment, open only relevant selected `execution_guides` or `verification_domains` asset paths. A handle label alone is not evidence; unselected bundles stay absent.
 
 For loading order, asset roles, verifier extensions, estimator policies, and final bundle checks, late-load `executor.protocol_bundle_execution` as the first additive specialization pass. If no bundle is selected or no bundle covers the method, fall back to `executor.guard_index` plus one matching guard or to `{GPD_INSTALL_DIR}/references/execution/executor-index.md`. If no domain fits, use the generic execution flow plus contract-backed anchors and checks instead of forcing the work into a topic bucket. Do not stay trapped in a fallback subfield.
 

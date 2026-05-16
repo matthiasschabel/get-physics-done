@@ -201,7 +201,15 @@ def test_write_paper_authoring_defers_reference_and_planning_bodies_until_target
     } <= set(figure_authoring.required_init_fields)
     assert "protocol_bundle_context" not in figure_authoring.required_init_fields
     assert "active_reference_context" not in figure_authoring.required_init_fields
-    assert "# Runtime Delegation Note" not in _expanded_stage_surface(figure_authoring)
+    figure_authoring_surface = _expanded_stage_surface(figure_authoring)
+    assert "# Runtime Delegation Note" not in figure_authoring_surface
+    assert "Handle-first authoring invariant" in figure_authoring_surface
+    assert "protocol_bundle_load_manifest" in figure_authoring_surface
+    assert "verification_domains" in figure_authoring_surface
+    assert "execution_guides" in figure_authoring_surface
+    assert "If a tensor-network or other method-specific section" in figure_authoring_surface
+    assert "# Tensor Networks" not in figure_authoring_surface
+    assert "Bond-dimension-limited" not in figure_authoring_surface
     assert "# Runtime Delegation Note" in _expanded_stage_surface(
         figure_authoring,
         selected_conditions=("writer_spawn_needed",),

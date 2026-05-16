@@ -714,6 +714,7 @@ _HANDLE_STATUS_SUFFIXES = (
     "_summary",
     "_warnings",
 )
+_PROTOCOL_BUNDLE_HANDLE_FIELDS = frozenset({"selected_protocol_bundle_ids", "protocol_bundle_load_manifest"})
 
 
 def render_staged_field_access_instruction(
@@ -757,6 +758,12 @@ def render_staged_field_access_instruction(
         parts.append(
             "Rendered context fields selected for this stage "
             f"({', '.join(rendered_context_fields)}) do not make unselected body fields available."
+        )
+    if _PROTOCOL_BUNDLE_HANDLE_FIELDS.intersection(stage.required_init_fields):
+        parts.append(
+            "Protocol bundles: selected IDs/load manifests are handles until needed; for domain judgments, "
+            "open only relevant verification_domains/execution_guides portable_path entries from "
+            "protocol_bundle_load_manifest; keep unselected assets absent."
         )
     return " ".join(parts)
 

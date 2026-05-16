@@ -121,7 +121,7 @@ If a decisive check is still missing after that pass, record it as a structured 
 
 **Protocol bundle guidance (additive, not authoritative)**
 
-If selected protocol bundles or bundle checklist extensions are supplied, prefer `protocol_bundle_verifier_extensions` and `protocol_bundle_context` from init JSON; call `get_bundle_checklist(selected_protocol_bundle_ids)` only as fallback/consistency check. Use bundle guidance to prioritize specialized evidence gathering, estimator scrutiny, and decisive artifact checks, but never let it replace contract IDs or waive required anchors, benchmarks, or forbidden-proxy rejection. Prefer bundle evidence adapters only when they still report against canonical contract IDs.
+If selected protocol bundles or bundle checklist extensions are supplied, prefer `protocol_bundle_verifier_extensions` plus `protocol_bundle_load_manifest`; do not use `protocol_bundle_context` from init JSON as the first judgment source. Before assigning a domain-specific physics status, open the relevant `verification_domains` `portable_path`; call `get_bundle_checklist(selected_protocol_bundle_ids)` only as fallback/check. Bundle guidance may prioritize evidence, estimators, and decisive artifacts, but never replace contract IDs, anchors, benchmarks, or forbidden-proxy rejection.
 
 **Fallback: derive from phase goal**
 

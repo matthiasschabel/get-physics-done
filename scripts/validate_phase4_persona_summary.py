@@ -114,6 +114,79 @@ RAW_VALUE_PATTERNS = {
 }
 SHELL_SEGMENT_SPLIT_RE = re.compile(r"(?:&&|\|\||[;|()])")
 SHELL_ASSIGNMENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=.*")
+SHELL_COMMAND_PREFIXES = frozenset({"builtin", "command", "exec", "sudo", "time"})
+WRAPPER_TERMINATING_OPTIONS = frozenset({"--help", "--version", "-h", "-V"})
+ENV_OPTION_VALUE_NAMES = frozenset(
+    {
+        "--block-signal",
+        "--chdir",
+        "--default-signal",
+        "--ignore-signal",
+        "--split-string",
+        "--unset",
+        "-C",
+        "-S",
+        "-u",
+    }
+)
+UV_RUN_OPTION_VALUE_NAMES = frozenset(
+    {
+        "--build-constraint",
+        "--config-file",
+        "--default-index",
+        "--directory",
+        "--env-file",
+        "--exclude-newer",
+        "--extra",
+        "--extra-index-url",
+        "--find-links",
+        "--fork-strategy",
+        "--group",
+        "--index",
+        "--index-strategy",
+        "--index-url",
+        "--keyring-provider",
+        "--link-mode",
+        "--module",
+        "--no-group",
+        "--only-group",
+        "--prerelease",
+        "--project",
+        "--python",
+        "--python-platform",
+        "--refresh-package",
+        "--resolution",
+        "--with",
+        "--with-editable",
+        "--with-requirements",
+        "-C",
+        "-m",
+        "-p",
+    }
+)
+UVX_OPTION_VALUE_NAMES = UV_RUN_OPTION_VALUE_NAMES | frozenset({"--from"})
+PYTHON_RUNNER_OPTION_VALUE_NAMES = frozenset(
+    {
+        "--index-url",
+        "--pip-args",
+        "--python",
+        "--spec",
+        "--suffix",
+    }
+)
+NODE_RUNNER_OPTION_VALUE_NAMES = frozenset(
+    {
+        "--cache",
+        "--call",
+        "--package",
+        "--prefix",
+        "--registry",
+        "--script-shell",
+        "--userconfig",
+        "-c",
+        "-p",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -156,27 +229,80 @@ def _shell_tokens(segment: str) -> list[str]:
         return []
 
 
-def _provider_launch_command_in_tokens(tokens: Sequence[str]) -> str | None:
+def _token_name(token: str) -> str:
+    return Path(token).name
+
+
+def _strip_assignments(tokens: Sequence[str]) -> list[str]:
     remaining = list(tokens)
     while remaining and SHELL_ASSIGNMENT_RE.fullmatch(remaining[0]):
         remaining.pop(0)
-    while remaining and remaining[0] in {"builtin", "command", "exec", "sudo", "time"}:
+    return remaining
+
+
+def _strip_wrapper_options(tokens: Sequence[str], value_option_names: frozenset[str]) -> list[str]:
+    remaining = list(tokens)
+    while remaining:
+        token = remaining[0]
+        if token == "--":
+            return remaining[1:]
+        option_name = token.split("=", 1)[0]
+        if option_name in WRAPPER_TERMINATING_OPTIONS:
+            return []
+        if not token.startswith("-") or token == "-":
+            return remaining
         remaining.pop(0)
-    if remaining and remaining[0] == "env":
-        remaining.pop(0)
-        while remaining and (remaining[0].startswith("-") or SHELL_ASSIGNMENT_RE.fullmatch(remaining[0])):
+        if option_name in value_option_names and "=" not in token and remaining:
             remaining.pop(0)
-    if len(remaining) >= 3 and remaining[:2] in (["uv", "run"], ["poetry", "run"], ["pipx", "run"]):
-        remaining = remaining[2:]
-    if remaining and remaining[0] in {"npx", "pnpm", "yarn"}:
-        remaining.pop(0)
-        while remaining and remaining[0].startswith("-"):
+    return remaining
+
+
+def _strip_env_options_and_assignments(tokens: Sequence[str]) -> list[str]:
+    remaining = list(tokens)
+    while remaining:
+        token = remaining[0]
+        if SHELL_ASSIGNMENT_RE.fullmatch(token):
             remaining.pop(0)
-    if len(remaining) >= 2 and remaining[:2] == ["npm", "exec"]:
+            continue
+        if token == "--":
+            return remaining[1:]
+        option_name = token.split("=", 1)[0]
+        if option_name in WRAPPER_TERMINATING_OPTIONS:
+            return []
+        if token.startswith("-") and token != "-":
+            remaining.pop(0)
+            if option_name in ENV_OPTION_VALUE_NAMES and "=" not in token and remaining:
+                remaining.pop(0)
+            continue
+        return remaining
+    return remaining
+
+
+def _provider_launch_command_in_tokens(tokens: Sequence[str]) -> str | None:
+    remaining = _strip_assignments(tokens)
+    while remaining and _token_name(remaining[0]) in SHELL_COMMAND_PREFIXES:
+        remaining.pop(0)
+        remaining = _strip_assignments(remaining)
+    if remaining and _token_name(remaining[0]) == "env":
+        remaining.pop(0)
+        remaining = _strip_env_options_and_assignments(remaining)
+    if len(remaining) >= 2 and [_token_name(remaining[0]), remaining[1]] == ["uv", "run"]:
+        remaining = _strip_wrapper_options(remaining[2:], UV_RUN_OPTION_VALUE_NAMES)
+    elif remaining and _token_name(remaining[0]) == "uvx":
+        remaining = _strip_wrapper_options(remaining[1:], UVX_OPTION_VALUE_NAMES)
+    elif len(remaining) >= 2 and [_token_name(remaining[0]), remaining[1]] == ["poetry", "run"]:
+        remaining = _strip_wrapper_options(remaining[2:], frozenset())
+    elif len(remaining) >= 2 and [_token_name(remaining[0]), remaining[1]] == ["pipx", "run"]:
+        remaining = _strip_wrapper_options(remaining[2:], PYTHON_RUNNER_OPTION_VALUE_NAMES)
+    if remaining and _token_name(remaining[0]) in {"npx", "pnpm", "yarn"}:
+        remaining.pop(0)
+        remaining = _strip_wrapper_options(remaining, NODE_RUNNER_OPTION_VALUE_NAMES)
+    if len(remaining) >= 2 and [_token_name(remaining[0]), remaining[1]] == ["npm", "exec"]:
         remaining = remaining[2:]
+        remaining = _strip_wrapper_options(remaining, NODE_RUNNER_OPTION_VALUE_NAMES)
     if not remaining:
         return None
-    command = Path(remaining[0]).name
+    command = _token_name(remaining[0])
     return command if command in PROVIDER_LAUNCH_COMMANDS else None
 
 

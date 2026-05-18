@@ -527,7 +527,8 @@
       "required_init_field_groups": [
         "review_target_context",
         "preflight_contract_gate_context",
-        "publication_lane_context"
+        "publication_lane_context",
+        "latest_review_response_context"
       ],
       "loaded_authorities": [
         "workflows/peer-review/finalize.md",

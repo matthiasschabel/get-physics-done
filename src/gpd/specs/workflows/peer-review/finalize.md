@@ -34,9 +34,20 @@ REVIEW_TARGET=$(echo "$INIT" | gpd json get .review_target_input --default "")
 PUBLICATION_ROOT=$(echo "$INIT" | gpd json get .selected_publication_root --default GPD)
 REVIEW_ROOT=$(echo "$INIT" | gpd json get .selected_review_root --default "")
 REVIEW_ROOT="${REVIEW_ROOT:-${PUBLICATION_ROOT}/review}"
+ROUND_SUFFIX=$(echo "$INIT" | gpd json get .latest_review_round_suffix --default "")
+REPORT_PATH=$(echo "$INIT" | gpd json get .latest_referee_report_md --default "")
+REPORT_PATH="${REPORT_PATH:-${PUBLICATION_ROOT}/REFEREE-REPORT${ROUND_SUFFIX}.md}"
+REPORT_TEX_PATH=$(echo "$INIT" | gpd json get .latest_referee_report_tex --default "")
+REPORT_TEX_PATH="${REPORT_TEX_PATH:-${PUBLICATION_ROOT}/REFEREE-REPORT${ROUND_SUFFIX}.tex}"
+LATEST_RESPONSE_SUFFIX=$(echo "$INIT" | gpd json get .latest_response_round_suffix --default "")
+LATEST_AUTHOR_RESPONSE=$(echo "$INIT" | gpd json get .latest_author_response --default "")
+LATEST_REFEREE_RESPONSE=$(echo "$INIT" | gpd json get .latest_referee_response --default "")
 ```
 
-Read the target-bound referee report for the active round:
+Read the target-bound referee report for the active round from `${REPORT_PATH}`
+and, when present, `${REPORT_TEX_PATH}`. Treat `latest_referee_report_md` and
+`latest_referee_report_tex` from the finalize payload as authoritative before
+deriving selected-root fallback paths such as:
 
 - `${PUBLICATION_ROOT}/REFEREE-REPORT.md`
 - `${PUBLICATION_ROOT}/REFEREE-REPORT-R2.md`
@@ -69,8 +80,8 @@ finds overclaiming, classify the manuscript claim state as overclaim-blocked rat
 
 Response packages are atomic pairs:
 
-- `${selected_publication_root}/AUTHOR-RESPONSE{round_suffix}.md`
-- `${selected_review_root}/REFEREE_RESPONSE{round_suffix}.md`
+- `latest_author_response` when set, otherwise `${PUBLICATION_ROOT}/AUTHOR-RESPONSE${LATEST_RESPONSE_SUFFIX}.md`
+- `latest_referee_response` when set, otherwise `${REVIEW_ROOT}/REFEREE_RESPONSE${LATEST_RESPONSE_SUFFIX}.md`
 
 Same-round or newer response artifacts require a newer staged peer review before
 submission packaging.

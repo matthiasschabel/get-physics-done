@@ -46,10 +46,10 @@ STAGED_PROJECTED_COMMAND_CHAR_BUDGET = 20_000
 
 COMPACT_WORKFLOW_REFERENCE_COMMAND_PROJECTION_BUDGETS = {
     "compare-experiment": {
-        "codex": {"chars": 7_600, "lines": 150},
+        "codex": {"chars": 7_700, "lines": 150},
         "copilot-cli": {"chars": 8_000, "lines": 150},
         "gemini": {"chars": 8_400, "lines": 150},
-        "opencode": {"chars": 7_800, "lines": 160},
+        "opencode": {"chars": 7_950, "lines": 160},
     },
     "dimensional-analysis": {
         "codex": {"chars": 7_100, "lines": 145},

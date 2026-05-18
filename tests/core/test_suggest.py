@@ -1177,6 +1177,25 @@ def test_complete_unverified_phase_blocks_next_phase_suggestions(tmp_path: Path)
     assert verify.next_command.owner == "runtime"
 
 
+def test_closed_earlier_phase_surfaces_unverified_complete_middle_before_later_planned_phase(
+    tmp_path: Path,
+) -> None:
+    root = _setup_project(tmp_path)
+    _create_roadmap_with_phases(root, [("1", "Setup"), ("2", "Core"), ("3", "Synthesis")], completed={"1"})
+    _create_phase(root, "01-setup", plans=1, summaries=1, verification=True)
+    _create_phase(root, "02-core", plans=1, summaries=1)
+    _create_phase(root, "03-synthesis", plans=1, summaries=0)
+
+    result = suggest_next(root)
+
+    verify = next(s for s in result.suggestions if s.action == "verify-work")
+    assert verify.phase == "02"
+    assert verify.command == "gpd:verify-work 02"
+    assert verify.next_command is not None
+    assert verify.next_command.owner == "runtime"
+    assert all(s.phase != "03" for s in result.suggestions if s.action in {"execute-phase", "plan-phase", "discuss-phase"})
+
+
 def test_passed_verification_not_closed_suggests_local_phase_transition(tmp_path: Path) -> None:
     """Passed verification must close locally before discussing the next phase."""
     root = _setup_project(tmp_path)
@@ -1235,6 +1254,31 @@ def test_after_phase_closeout_planned_next_phase_suggests_execute_not_plan(tmp_p
     actions = [s.action for s in result.suggestions]
     assert "execute-phase" in actions
     assert "plan-phase" not in actions
+
+
+def test_later_active_state_suppresses_stale_phase_complete_suggestion(tmp_path: Path) -> None:
+    root = _setup_project(tmp_path)
+    _create_roadmap_with_phases(root, [("1", "Setup"), ("2", "Core")])
+    _create_phase(root, "01-setup", plans=1, summaries=1, verification=True)
+    _create_phase(root, "02-core", plans=1, summaries=0)
+    _create_state(
+        root,
+        {
+            "position": {
+                "current_phase": "02",
+                "status": "Ready to execute",
+                "progress_percent": 50,
+            }
+        },
+    )
+
+    result = suggest_next(root)
+
+    actions = [s.action for s in result.suggestions]
+    assert "phase-complete" not in actions
+    assert result.top_action is not None
+    assert result.top_action.action == "execute-phase"
+    assert result.top_action.phase == "02"
 
 
 def test_unknown_verification_status_blocks_audit_and_paper_suggestions(tmp_path: Path) -> None:

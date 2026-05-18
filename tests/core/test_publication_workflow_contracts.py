@@ -154,6 +154,24 @@ def test_peer_review_stage_six_requires_report_artifacts_and_threads_mode_contex
     )
 
 
+def test_peer_review_finalize_uses_latest_payload_artifacts_before_path_fallbacks() -> None:
+    workflow = workflow_authority_text(WORKFLOWS_DIR, "peer-review")
+
+    _assert_all_present(
+        workflow,
+        (
+            'REPORT_PATH=$(echo "$INIT" | gpd json get .latest_referee_report_md --default "")',
+            'REPORT_TEX_PATH=$(echo "$INIT" | gpd json get .latest_referee_report_tex --default "")',
+            'LATEST_RESPONSE_SUFFIX=$(echo "$INIT" | gpd json get .latest_response_round_suffix --default "")',
+            'LATEST_AUTHOR_RESPONSE=$(echo "$INIT" | gpd json get .latest_author_response --default "")',
+            'LATEST_REFEREE_RESPONSE=$(echo "$INIT" | gpd json get .latest_referee_response --default "")',
+            "Treat `latest_referee_report_md` and\n`latest_referee_report_tex`",
+            "latest_author_response` when set",
+            "latest_referee_response` when set",
+        ),
+    )
+
+
 def test_peer_review_panel_child_gates_are_tuple_shaped_and_stage_owned() -> None:
     workflow = workflow_authority_text(WORKFLOWS_DIR, "peer-review")
 

@@ -16,6 +16,7 @@ from gpd.adapters.install_utils import (
     _markdown_fence_marker,
     render_markdown_frontmatter,
     rewrite_gpd_cli_invocations_to_runtime_bridge,
+    rewrite_gpd_shell_line_to_runtime_bridge,
     split_markdown_frontmatter,
 )
 from gpd.adapters.shell_fence_projection import (
@@ -61,8 +62,9 @@ def render_projected_command_shell_fences(
     control-flow snippets, variable captures, heredocs/stdin transports,
     pseudocode, and empty shell fences become text fences so non-native runtimes
     do not need prompt-local shell parsing to decide whether the block is safe
-    to run.  The bridge rewrite is applied after the downgrade pass so it can
-    only affect remaining runnable shell fences.
+    to run.  Variable-capture blocks are still rewritten to the runtime bridge
+    before downgrading, so text-rendered GPD CLI captures do not surface a bare
+    local ``gpd`` executable.
     """
     direct_prefixes = (
         tuple(direct_command_prefixes) if direct_command_prefixes is not None else ("gpd ", f"{bridge_command} ")
@@ -104,6 +106,8 @@ def render_projected_command_shell_fences(
                     rendered.append(opening_line)
                 else:
                     rendered.append(_replace_markdown_fence_language(opening_line, active_marker, "text"))
+                    if _contains_command_substitution(classification):
+                        body = _rewrite_shell_body_lines(body, bridge_command)
             else:
                 rendered.append(opening_line)
             rendered.append(body)
@@ -139,6 +143,14 @@ def _is_direct_template_command(
 
 def _starts_with_projection_prefix(command: str, prefixes: Sequence[str]) -> bool:
     return any(command.startswith(prefix) for prefix in prefixes)
+
+
+def _contains_command_substitution(classification: ShellFenceProjection) -> bool:
+    return "command-substitution" in classification.reasons
+
+
+def _rewrite_shell_body_lines(body: str, bridge_command: str) -> str:
+    return "".join(rewrite_gpd_shell_line_to_runtime_bridge(line, bridge_command) for line in body.splitlines(True))
 
 
 def _replace_markdown_fence_language(line: str, marker: str, language: str) -> str:

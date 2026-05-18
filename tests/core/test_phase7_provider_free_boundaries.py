@@ -14,11 +14,15 @@ from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 
 from gpd.adapters.runtime_catalog import iter_runtime_descriptors
+from scripts.validate_phase4_persona_summary import (
+    _provider_launch_command_in_text as _phase4_provider_launch_command_in_text,
+)
 from tests.helpers.github_actions import (
     github_actions_workflow_paths,
     iter_workflow_steps,
     load_github_actions_workflow,
 )
+from tests.helpers.persona_summary import provider_launch_command_in_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -41,6 +45,79 @@ _PROVIDER_LAUNCH_COMMANDS = tuple(" ".join(tokens) for tokens in _PROVIDER_LAUNC
 _PROVIDER_LAUNCH_COMMAND_SET = frozenset(_PROVIDER_LAUNCH_COMMANDS)
 _SHELL_SEGMENT_SPLIT_RE = re.compile(r"(?:&&|\|\||[;|()])")
 _SHELL_ASSIGNMENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=.*")
+_SHELL_COMMAND_PREFIXES = frozenset({"builtin", "command", "exec", "sudo", "time"})
+_WRAPPER_TERMINATING_OPTIONS = frozenset({"--help", "--version", "-h", "-V"})
+_ENV_OPTION_VALUE_NAMES = frozenset(
+    {
+        "--block-signal",
+        "--chdir",
+        "--default-signal",
+        "--ignore-signal",
+        "--split-string",
+        "--unset",
+        "-C",
+        "-S",
+        "-u",
+    }
+)
+_UV_RUN_OPTION_VALUE_NAMES = frozenset(
+    {
+        "--build-constraint",
+        "--config-file",
+        "--default-index",
+        "--directory",
+        "--env-file",
+        "--exclude-newer",
+        "--extra",
+        "--extra-index-url",
+        "--find-links",
+        "--fork-strategy",
+        "--group",
+        "--index",
+        "--index-strategy",
+        "--index-url",
+        "--keyring-provider",
+        "--link-mode",
+        "--module",
+        "--no-group",
+        "--only-group",
+        "--prerelease",
+        "--project",
+        "--python",
+        "--python-platform",
+        "--refresh-package",
+        "--resolution",
+        "--with",
+        "--with-editable",
+        "--with-requirements",
+        "-C",
+        "-m",
+        "-p",
+    }
+)
+_UVX_OPTION_VALUE_NAMES = _UV_RUN_OPTION_VALUE_NAMES | frozenset({"--from"})
+_PYTHON_RUNNER_OPTION_VALUE_NAMES = frozenset(
+    {
+        "--index-url",
+        "--pip-args",
+        "--python",
+        "--spec",
+        "--suffix",
+    }
+)
+_NODE_RUNNER_OPTION_VALUE_NAMES = frozenset(
+    {
+        "--cache",
+        "--call",
+        "--package",
+        "--prefix",
+        "--registry",
+        "--script-shell",
+        "--userconfig",
+        "-c",
+        "-p",
+    }
+)
 _PROVIDER_SECRET_ENV_RE = re.compile(
     r"(?<![A-Z0-9_])"
     r"(?:OPENAI|ANTHROPIC|CLAUDE|GEMINI|GOOGLE|CODEX|OPENCODE)_"
@@ -97,38 +174,87 @@ def _shell_tokens(segment: str) -> list[str]:
         return []
 
 
-def _provider_command_in_tokens(tokens: Sequence[str]) -> str | None:
+def _token_name(token: str) -> str:
+    return Path(token).name
+
+
+def _strip_assignments(tokens: Sequence[str]) -> list[str]:
     remaining = list(tokens)
     while remaining and _SHELL_ASSIGNMENT_RE.fullmatch(remaining[0]):
         remaining.pop(0)
+    return remaining
 
-    while remaining and remaining[0] in {"builtin", "command", "exec", "sudo", "time"}:
+
+def _strip_wrapper_options(tokens: Sequence[str], value_option_names: frozenset[str]) -> list[str]:
+    remaining = list(tokens)
+    while remaining:
+        token = remaining[0]
+        if token == "--":
+            return remaining[1:]
+        option_name = token.split("=", 1)[0]
+        if option_name in _WRAPPER_TERMINATING_OPTIONS:
+            return []
+        if not token.startswith("-") or token == "-":
+            return remaining
         remaining.pop(0)
-        while remaining and _SHELL_ASSIGNMENT_RE.fullmatch(remaining[0]):
+        if option_name in value_option_names and "=" not in token and remaining:
             remaining.pop(0)
+    return remaining
 
-    if remaining and remaining[0] == "env":
+
+def _strip_env_options_and_assignments(tokens: Sequence[str]) -> list[str]:
+    remaining = list(tokens)
+    while remaining:
+        token = remaining[0]
+        if _SHELL_ASSIGNMENT_RE.fullmatch(token):
+            remaining.pop(0)
+            continue
+        if token == "--":
+            return remaining[1:]
+        option_name = token.split("=", 1)[0]
+        if option_name in _WRAPPER_TERMINATING_OPTIONS:
+            return []
+        if token.startswith("-") and token != "-":
+            remaining.pop(0)
+            if option_name in _ENV_OPTION_VALUE_NAMES and "=" not in token and remaining:
+                remaining.pop(0)
+            continue
+        return remaining
+    return remaining
+
+
+def _provider_command_in_tokens(tokens: Sequence[str]) -> str | None:
+    remaining = _strip_assignments(tokens)
+
+    while remaining and _token_name(remaining[0]) in _SHELL_COMMAND_PREFIXES:
         remaining.pop(0)
-        while remaining and (remaining[0].startswith("-") or _SHELL_ASSIGNMENT_RE.fullmatch(remaining[0])):
-            remaining.pop(0)
+        remaining = _strip_assignments(remaining)
 
-    if len(remaining) >= 3 and remaining[:2] in (["uv", "run"], ["poetry", "run"], ["pipx", "run"]):
+    if remaining and _token_name(remaining[0]) == "env":
+        remaining.pop(0)
+        remaining = _strip_env_options_and_assignments(remaining)
+
+    if len(remaining) >= 2 and [_token_name(remaining[0]), remaining[1]] == ["uv", "run"]:
+        remaining = _strip_wrapper_options(remaining[2:], _UV_RUN_OPTION_VALUE_NAMES)
+    elif remaining and _token_name(remaining[0]) == "uvx":
+        remaining = _strip_wrapper_options(remaining[1:], _UVX_OPTION_VALUE_NAMES)
+    elif len(remaining) >= 2 and [_token_name(remaining[0]), remaining[1]] == ["poetry", "run"]:
+        remaining = _strip_wrapper_options(remaining[2:], frozenset())
+    elif len(remaining) >= 2 and [_token_name(remaining[0]), remaining[1]] == ["pipx", "run"]:
+        remaining = _strip_wrapper_options(remaining[2:], _PYTHON_RUNNER_OPTION_VALUE_NAMES)
+
+    if remaining and _token_name(remaining[0]) in {"npx", "pnpm", "yarn"}:
+        remaining.pop(0)
+        remaining = _strip_wrapper_options(remaining, _NODE_RUNNER_OPTION_VALUE_NAMES)
+
+    if len(remaining) >= 2 and [_token_name(remaining[0]), remaining[1]] == ["npm", "exec"]:
         remaining = remaining[2:]
-
-    if remaining and remaining[0] in {"npx", "pnpm", "yarn"}:
-        remaining.pop(0)
-        while remaining and remaining[0].startswith("-"):
-            remaining.pop(0)
-
-    if len(remaining) >= 2 and remaining[:2] == ["npm", "exec"]:
-        remaining = remaining[2:]
-        while remaining and remaining[0].startswith("-"):
-            remaining.pop(0)
+        remaining = _strip_wrapper_options(remaining, _NODE_RUNNER_OPTION_VALUE_NAMES)
 
     if not remaining:
         return None
     if remaining:
-        remaining[0] = Path(remaining[0]).name
+        remaining[0] = _token_name(remaining[0])
     for launch_tokens in _PROVIDER_LAUNCH_COMMAND_TOKENS:
         if tuple(remaining[: len(launch_tokens)]) == launch_tokens:
             return " ".join(launch_tokens)
@@ -277,6 +403,51 @@ def test_provider_command_boundary_detects_synthetic_command_detail_examples() -
         "npx opencode run",
     ):
         assert _provider_command_in_shell_string(command_line) in _PROVIDER_LAUNCH_COMMAND_SET
+
+
+def test_provider_command_boundary_detects_common_wrapper_options_and_uvx() -> None:
+    provider_commands = (
+        "uv run --with anthropic claude --print hello",
+        "uv run --with=anthropic claude --print hello",
+        "uv run --isolated --with anthropic claude --print hello",
+        "uv run --python 3.12 --with anthropic codex exec -",
+        "uv run --directory /tmp/workspace --with anthropic gemini --prompt hello",
+        "uvx claude --print hello",
+        "uvx --from anthropic claude --print hello",
+        "npx --package opencode-ai opencode run",
+        "npm exec --package @google/gemini-cli gemini -- --prompt hello",
+    )
+    detectors = (
+        _provider_command_in_shell_string,
+        provider_launch_command_in_text,
+        _phase4_provider_launch_command_in_text,
+    )
+
+    for command_line in provider_commands:
+        for detector in detectors:
+            assert detector(command_line) is not None, (detector.__name__, command_line)
+
+
+def test_provider_command_boundary_preserves_common_non_provider_wrapper_invocations() -> None:
+    non_provider_commands = (
+        "uv run --with anthropic pytest tests -q",
+        "uv run --with claude pytest tests -q",
+        "uv run --with anthropic python -c 'print(\"claude --print hello\")'",
+        "uv run --help claude",
+        "uvx --help claude",
+        "uvx --with anthropic python -m pytest",
+        "npx --package opencode-ai eslint .",
+        "npm exec --package @google/gemini-cli -- eslint .",
+    )
+    detectors = (
+        _provider_command_in_shell_string,
+        provider_launch_command_in_text,
+        _phase4_provider_launch_command_in_text,
+    )
+
+    for command_line in non_provider_commands:
+        for detector in detectors:
+            assert detector(command_line) is None, (detector.__name__, command_line)
 
 
 def test_shadow_live_persona_policy_surfaces_do_not_define_provider_runners() -> None:

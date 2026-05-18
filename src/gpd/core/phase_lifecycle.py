@@ -782,10 +782,47 @@ def _state_text(value: object) -> str | None:
     return text
 
 
-def _roadmap_phase_is_already_closed_or_complete(roadmap_phase: object) -> bool:
+_STATE_ADVANCED_PAST_PHASE_CLASSES = frozenset(
+    {
+        "ready_to_plan",
+        "ready_to_execute",
+        "executing",
+        "phase_ready_for_verification",
+        "verifying",
+        "verified",
+        "complete",
+        "milestone_complete",
+    }
+)
+
+
+def _state_has_advanced_past_phase(
+    *,
+    normalized_state_phase: str | None,
+    normalized_phase: str,
+    status_class: str,
+) -> bool:
+    return (
+        normalized_state_phase is not None
+        and compare_phase_numbers(normalized_state_phase, normalized_phase) > 0
+        and status_class in _STATE_ADVANCED_PAST_PHASE_CLASSES
+    )
+
+
+def _roadmap_phase_is_already_closed(
+    roadmap_phase: object,
+    *,
+    normalized_state_phase: str | None,
+    status_class: str,
+) -> bool:
     if bool(getattr(roadmap_phase, "roadmap_complete", False)):
         return True
-    return str(getattr(roadmap_phase, "disk_status", "") or "").strip().lower() == "complete"
+    roadmap_number = phase_normalize(str(getattr(roadmap_phase, "number", "") or "").strip())
+    return _state_has_advanced_past_phase(
+        normalized_state_phase=normalized_state_phase,
+        normalized_phase=roadmap_number,
+        status_class=status_class,
+    )
 
 
 def _phase_closure(
@@ -793,6 +830,9 @@ def _phase_closure(
     phase: str,
 ) -> tuple[bool, bool, str | None, str | None, str | None]:
     normalized_phase = phase_normalize(phase)
+    state_current_phase, state_status = _state_position(project_root)
+    normalized_state_phase = phase_normalize(state_current_phase) if state_current_phase else None
+    status_class = state_status_class(state_status)
     roadmap_complete = False
     next_phase: str | None = None
     for roadmap_phase in roadmap_analyze(project_root).phases:
@@ -803,17 +843,18 @@ def _phase_closure(
         if (
             compare_phase_numbers(roadmap_number, normalized_phase) > 0
             and next_phase is None
-            and not _roadmap_phase_is_already_closed_or_complete(roadmap_phase)
+            and not _roadmap_phase_is_already_closed(
+                roadmap_phase,
+                normalized_state_phase=normalized_state_phase,
+                status_class=status_class,
+            )
         ):
             next_phase = roadmap_number
 
-    state_current_phase, state_status = _state_position(project_root)
-    normalized_state_phase = phase_normalize(state_current_phase) if state_current_phase else None
-    status_class = state_status_class(state_status)
-    state_advanced = (
-        normalized_state_phase is not None
-        and compare_phase_numbers(normalized_state_phase, normalized_phase) > 0
-        and status_class in {"ready_to_plan", "complete", "milestone_complete"}
+    state_advanced = _state_has_advanced_past_phase(
+        normalized_state_phase=normalized_state_phase,
+        normalized_phase=normalized_phase,
+        status_class=status_class,
     )
     state_milestone_closed = normalized_state_phase is None and status_class == "milestone_complete"
     return (

@@ -1694,6 +1694,17 @@ def suggest_next(cwd: Path, *, limit: int = 5) -> SuggestResult:
             lifecycle_suggestion = pending_lifecycle
             lifecycle_blocks_downstream = True
             break
+    if lifecycle_blocks_downstream and lifecycle_suggestion is not None:
+        blocking_phase = _phase_normalize(lifecycle_suggestion.phase)
+        suggestions = [
+            suggestion
+            for suggestion in suggestions
+            if not (
+                suggestion.action in _PHASE_RUNTIME_ACTIONS
+                and suggestion.phase is not None
+                and _compare_phase_numbers(_phase_normalize(suggestion.phase), blocking_phase) > 0
+            )
+        ]
     if lifecycle_suggestion is not None:
         suggestions.append(
             _MutableRecommendation(

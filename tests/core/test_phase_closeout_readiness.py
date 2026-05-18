@@ -9,7 +9,7 @@ import pytest
 from typer.testing import CliRunner
 
 from gpd.cli import app
-from gpd.core.phase_closeout import phase_closeout_readiness
+from gpd.core.phase_closeout import phase_closeout_readiness, phase_closeout_readiness_payload
 from gpd.core.proof_redteam import build_proof_redteam_skeleton
 from gpd.core.state import default_state_dict
 from tests.assertion_taxonomy_support import assert_prompt_contracts, machine_exact, semantic_concept
@@ -116,6 +116,16 @@ def _write_state(root: Path, *, bounded_segment: bool = False) -> None:
     (root / "GPD" / "state.json").write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
 
 
+def _write_closed_milestone_state(root: Path) -> None:
+    state = default_state_dict()
+    state["position"]["current_phase"] = None
+    state["position"]["current_phase_name"] = None
+    state["position"]["current_plan"] = None
+    state["position"]["total_plans_in_phase"] = None
+    state["position"]["status"] = "milestone complete"
+    (root / "GPD" / "state.json").write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+
+
 def test_closeout_readiness_all_summaries_and_passed_verification_is_ready(tmp_path: Path) -> None:
     _write_phase_project(tmp_path)
     _write_state(tmp_path)
@@ -163,6 +173,33 @@ def test_closeout_readiness_all_summaries_and_passed_verification_is_ready(tmp_p
     assert result.cleanup_command_hint["owner"] == "local_helper"
     assert (tmp_path / "GPD" / "ROADMAP.md").read_text(encoding="utf-8") == before_roadmap
     assert (tmp_path / "GPD" / "state.json").read_text(encoding="utf-8") == before_state
+
+
+def test_phase_closeout_readiness_payload_milestone_archive_does_not_project_version_as_next_phase(
+    tmp_path: Path,
+) -> None:
+    _write_phase_project(tmp_path)
+    _write_closed_milestone_state(tmp_path)
+    (tmp_path / "GPD" / "v1.0-MILESTONE-AUDIT.md").write_text(
+        "---\nstatus: passed\n---\n\n# Audit\n",
+        encoding="utf-8",
+    )
+
+    readiness = phase_closeout_readiness(tmp_path, "02", require_verification=True)
+    payload = phase_closeout_readiness_payload(readiness)
+
+    assert payload["ready"] is False
+    assert payload["lifecycle_next_up"]["primary"]["command"] == "gpd:complete-milestone v1.0"
+    assert payload["next_up"]["primary_command"]["command"] == "gpd:complete-milestone v1.0"
+    route = payload["lifecycle_route"]
+    assert route["status"] == "closed"
+    assert route["status_class"] == "closed_ready_for_milestone_archive"
+    assert route["transition_owner"] == "runtime"
+    assert route["next_phase"] is None
+    assert route["next_phase_context_class"] == "not_applicable"
+    assert route["primary_runtime_command"]["command"] == "gpd:complete-milestone v1.0"
+    assert route["primary_runtime_command_text"] == "gpd:complete-milestone v1.0"
+    assert route["stage_stop_next_runtime_command"] == "gpd:complete-milestone v1.0"
 
 
 def test_closeout_readiness_missing_summary_blocks_closeout(tmp_path: Path) -> None:

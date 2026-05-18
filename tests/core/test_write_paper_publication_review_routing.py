@@ -72,6 +72,12 @@ def test_publication_review_stage_is_a_compact_router_not_a_panel_owner() -> Non
     assert "reference_artifacts_content" not in stage.required_init_fields
     assert "active_reference_context" not in stage.required_init_fields
     assert "protocol_bundle_context" not in stage.required_init_fields
+    assert {
+        "GPD/publication/{subject_slug}/AUTHOR-RESPONSE{round_suffix}.md",
+        "GPD/publication/{subject_slug}/review/REFEREE_RESPONSE{round_suffix}.md",
+        "GPD/publication/{subject_slug}/REFEREE-REPORT{round_suffix}.md",
+        "GPD/publication/{subject_slug}/REFEREE-REPORT{round_suffix}.tex",
+    } <= set(stage.writes_allowed)
 
     eager_surface = _publication_review_surface()
     assert len(eager_surface) < PUBLICATION_REVIEW_EAGER_CHAR_BUDGET

@@ -437,6 +437,7 @@
         "response_publication_roots",
         "response_manuscript_resolution",
         "response_manuscript_package_paths",
+        "response_review_round_artifacts",
         "response_artifact_pair_context"
       ],
       "must_not_eager_load_groups": [

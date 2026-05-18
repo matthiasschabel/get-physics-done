@@ -1381,8 +1381,8 @@ def test_codex_projected_command_surface_matches_install_runtime_rewrites(tmp_pa
     assert f"{bridge} --raw init progress --include state,config" in projected
 
 
-@pytest.mark.parametrize("runtime", ("codex", "opencode"))
-def test_codex_and_opencode_projected_commands_downgrade_non_runnable_shell_fences(
+@pytest.mark.parametrize("runtime", ("codex", "opencode", "copilot-cli"))
+def test_codex_opencode_and_copilot_projected_commands_downgrade_non_runnable_shell_fences(
     runtime: str,
     tmp_path: Path,
 ) -> None:
@@ -1405,8 +1405,8 @@ def test_codex_and_opencode_projected_commands_downgrade_non_runnable_shell_fenc
         "```\n"
         "\n"
         "```bash\n"
-        "INIT=$(gpd --raw init progress --include state,config)\n"
-        'echo "$INIT"\n'
+        "CONTEXT=$(gpd --raw init progress --include state,config)\n"
+        'echo "$CONTEXT"\n'
         "```\n"
     )
 
@@ -1415,8 +1415,9 @@ def test_codex_and_opencode_projected_commands_downgrade_non_runnable_shell_fenc
     assert f"```bash\n{bridge} status\n```" in projected
     assert "```bash\ngit status --porcelain\n```" not in projected
     assert "```text\ngit status --porcelain\n```" in projected
-    assert "```bash\nINIT=$(gpd --raw init progress --include state,config)" not in projected
-    assert "```text\nINIT=$(gpd --raw init progress --include state,config)" in projected
+    assert "```bash\nCONTEXT=$(gpd --raw init progress --include state,config)" not in projected
+    assert f"```text\nCONTEXT=$({bridge} --raw init progress --include state,config)" in projected
+    assert "CONTEXT=$(gpd --raw init progress --include state,config)" not in projected
     assert "Gemini shell compatibility" not in projected
 
 

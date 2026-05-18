@@ -1331,6 +1331,10 @@ def test_validate_workflow_stage_manifest_payload_loads_write_paper_manifest() -
     assert publication_review.writes_allowed == (
         WRITE_PAPER_MANAGED_MANUSCRIPT_ROOT,
         "GPD/review",
+        "GPD/publication/{subject_slug}/AUTHOR-RESPONSE{round_suffix}.md",
+        "GPD/publication/{subject_slug}/review/REFEREE_RESPONSE{round_suffix}.md",
+        "GPD/publication/{subject_slug}/REFEREE-REPORT{round_suffix}.md",
+        "GPD/publication/{subject_slug}/REFEREE-REPORT{round_suffix}.tex",
         "GPD/AUTHOR-RESPONSE.md",
         "GPD/AUTHOR-RESPONSE-R2.md",
         "GPD/AUTHOR-RESPONSE-R3.md",

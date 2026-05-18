@@ -77,9 +77,25 @@ def test_shared_command_shell_renderer_downgrades_variable_and_stdin_shell_shape
     rendered = render_projected_command_shell_fences(source, bridge_command=BRIDGE)
 
     assert "```bash\n" not in rendered
-    assert "```text\nINIT=$(gpd --raw init progress --include state,config)" in rendered
+    assert f"```text\nINIT=$({BRIDGE} --raw init progress --include state,config)" in rendered
+    assert "INIT=$(gpd --raw init progress --include state,config)" not in rendered
     assert "```text\nprintf '%s\\n' \"$PROJECT_CONTRACT_JSON\" | gpd --raw validate project-contract" in rendered
-    assert BRIDGE not in rendered
+    assert rendered.count(BRIDGE) == 1
+
+
+def test_shared_command_shell_renderer_bridges_context_capture_before_text_downgrade() -> None:
+    source = (
+        "```bash\n"
+        "CONTEXT=$(gpd --raw init progress --include state,config 2>&1)\n"
+        "printf '%s\\n' \"$CONTEXT\"\n"
+        "```\n"
+    )
+
+    rendered = render_projected_command_shell_fences(source, bridge_command=BRIDGE)
+
+    assert "```bash\n" not in rendered
+    assert f"```text\nCONTEXT=$({BRIDGE} --raw init progress --include state,config 2>&1)" in rendered
+    assert "CONTEXT=$(gpd --raw init progress --include state,config 2>&1)" not in rendered
 
 
 def test_shared_command_shell_renderer_is_idempotent() -> None:

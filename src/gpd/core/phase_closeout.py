@@ -23,6 +23,14 @@ from gpd.core.phase_lifecycle import (
 from gpd.core.phases import roadmap_analyze
 from gpd.core.utils import phase_normalize
 
+_NON_PHASE_ROUTE_ACTIONS = frozenset(
+    {
+        "audit-milestone",
+        "complete-milestone",
+        "new-milestone",
+    }
+)
+
 
 def phase_closeout_readiness(
     cwd: Path,
@@ -160,6 +168,9 @@ def _command_text(command: dict[str, object] | None) -> str | None:
 
 def _command_phase(command: dict[str, object] | None) -> str | None:
     if command is None:
+        return None
+    action = command.get("action")
+    if action is not None and str(action) in _NON_PHASE_ROUTE_ACTIONS:
         return None
     phase = command.get("phase")
     if phase is not None:

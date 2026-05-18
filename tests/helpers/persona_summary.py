@@ -52,6 +52,79 @@ SAFE_PHASE7_NIGHTLY_TRIGGERS = frozenset({"workflow_dispatch", "schedule"})
 
 _SHELL_SEGMENT_SPLIT_RE = re.compile(r"(?:&&|\|\||[;|()])")
 _SHELL_ASSIGNMENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=.*")
+_SHELL_COMMAND_PREFIXES = frozenset({"builtin", "command", "exec", "sudo", "time"})
+_WRAPPER_TERMINATING_OPTIONS = frozenset({"--help", "--version", "-h", "-V"})
+_ENV_OPTION_VALUE_NAMES = frozenset(
+    {
+        "--block-signal",
+        "--chdir",
+        "--default-signal",
+        "--ignore-signal",
+        "--split-string",
+        "--unset",
+        "-C",
+        "-S",
+        "-u",
+    }
+)
+_UV_RUN_OPTION_VALUE_NAMES = frozenset(
+    {
+        "--build-constraint",
+        "--config-file",
+        "--default-index",
+        "--directory",
+        "--env-file",
+        "--exclude-newer",
+        "--extra",
+        "--extra-index-url",
+        "--find-links",
+        "--fork-strategy",
+        "--group",
+        "--index",
+        "--index-strategy",
+        "--index-url",
+        "--keyring-provider",
+        "--link-mode",
+        "--module",
+        "--no-group",
+        "--only-group",
+        "--prerelease",
+        "--project",
+        "--python",
+        "--python-platform",
+        "--refresh-package",
+        "--resolution",
+        "--with",
+        "--with-editable",
+        "--with-requirements",
+        "-C",
+        "-m",
+        "-p",
+    }
+)
+_UVX_OPTION_VALUE_NAMES = _UV_RUN_OPTION_VALUE_NAMES | frozenset({"--from"})
+_PYTHON_RUNNER_OPTION_VALUE_NAMES = frozenset(
+    {
+        "--index-url",
+        "--pip-args",
+        "--python",
+        "--spec",
+        "--suffix",
+    }
+)
+_NODE_RUNNER_OPTION_VALUE_NAMES = frozenset(
+    {
+        "--cache",
+        "--call",
+        "--package",
+        "--prefix",
+        "--registry",
+        "--script-shell",
+        "--userconfig",
+        "-c",
+        "-p",
+    }
+)
 
 
 def _runtime_launch_command_names() -> frozenset[str]:
@@ -274,27 +347,80 @@ def _shell_tokens(segment: str) -> list[str]:
         return []
 
 
-def _provider_launch_command_in_tokens(tokens: Sequence[str]) -> str | None:
+def _token_name(token: str) -> str:
+    return Path(token).name
+
+
+def _strip_assignments(tokens: Sequence[str]) -> list[str]:
     remaining = list(tokens)
     while remaining and _SHELL_ASSIGNMENT_RE.fullmatch(remaining[0]):
         remaining.pop(0)
-    while remaining and remaining[0] in {"builtin", "command", "exec", "sudo", "time"}:
+    return remaining
+
+
+def _strip_wrapper_options(tokens: Sequence[str], value_option_names: frozenset[str]) -> list[str]:
+    remaining = list(tokens)
+    while remaining:
+        token = remaining[0]
+        if token == "--":
+            return remaining[1:]
+        option_name = token.split("=", 1)[0]
+        if option_name in _WRAPPER_TERMINATING_OPTIONS:
+            return []
+        if not token.startswith("-") or token == "-":
+            return remaining
         remaining.pop(0)
-    if remaining and remaining[0] == "env":
-        remaining.pop(0)
-        while remaining and (remaining[0].startswith("-") or _SHELL_ASSIGNMENT_RE.fullmatch(remaining[0])):
+        if option_name in value_option_names and "=" not in token and remaining:
             remaining.pop(0)
-    if len(remaining) >= 3 and remaining[:2] in (["uv", "run"], ["poetry", "run"], ["pipx", "run"]):
-        remaining = remaining[2:]
-    if remaining and remaining[0] in {"npx", "pnpm", "yarn"}:
-        remaining.pop(0)
-        while remaining and remaining[0].startswith("-"):
+    return remaining
+
+
+def _strip_env_options_and_assignments(tokens: Sequence[str]) -> list[str]:
+    remaining = list(tokens)
+    while remaining:
+        token = remaining[0]
+        if _SHELL_ASSIGNMENT_RE.fullmatch(token):
             remaining.pop(0)
-    if len(remaining) >= 2 and remaining[:2] == ["npm", "exec"]:
+            continue
+        if token == "--":
+            return remaining[1:]
+        option_name = token.split("=", 1)[0]
+        if option_name in _WRAPPER_TERMINATING_OPTIONS:
+            return []
+        if token.startswith("-") and token != "-":
+            remaining.pop(0)
+            if option_name in _ENV_OPTION_VALUE_NAMES and "=" not in token and remaining:
+                remaining.pop(0)
+            continue
+        return remaining
+    return remaining
+
+
+def _provider_launch_command_in_tokens(tokens: Sequence[str]) -> str | None:
+    remaining = _strip_assignments(tokens)
+    while remaining and _token_name(remaining[0]) in _SHELL_COMMAND_PREFIXES:
+        remaining.pop(0)
+        remaining = _strip_assignments(remaining)
+    if remaining and _token_name(remaining[0]) == "env":
+        remaining.pop(0)
+        remaining = _strip_env_options_and_assignments(remaining)
+    if len(remaining) >= 2 and [_token_name(remaining[0]), remaining[1]] == ["uv", "run"]:
+        remaining = _strip_wrapper_options(remaining[2:], _UV_RUN_OPTION_VALUE_NAMES)
+    elif remaining and _token_name(remaining[0]) == "uvx":
+        remaining = _strip_wrapper_options(remaining[1:], _UVX_OPTION_VALUE_NAMES)
+    elif len(remaining) >= 2 and [_token_name(remaining[0]), remaining[1]] == ["poetry", "run"]:
+        remaining = _strip_wrapper_options(remaining[2:], frozenset())
+    elif len(remaining) >= 2 and [_token_name(remaining[0]), remaining[1]] == ["pipx", "run"]:
+        remaining = _strip_wrapper_options(remaining[2:], _PYTHON_RUNNER_OPTION_VALUE_NAMES)
+    if remaining and _token_name(remaining[0]) in {"npx", "pnpm", "yarn"}:
+        remaining.pop(0)
+        remaining = _strip_wrapper_options(remaining, _NODE_RUNNER_OPTION_VALUE_NAMES)
+    if len(remaining) >= 2 and [_token_name(remaining[0]), remaining[1]] == ["npm", "exec"]:
         remaining = remaining[2:]
+        remaining = _strip_wrapper_options(remaining, _NODE_RUNNER_OPTION_VALUE_NAMES)
     if not remaining:
         return None
-    command = Path(remaining[0]).name
+    command = _token_name(remaining[0])
     return command if command in PROVIDER_LAUNCH_COMMANDS else None
 
 
@@ -650,9 +776,7 @@ def _phase7_live_canary_oracle_summary() -> dict[str, object]:
     oracle_rows = [_phase7_oracle_summary_row(score) for score in scores]
     rows = [*deepcopy(_PHASE7_LIVE_CANARY_SUMMARY["rows"]), *oracle_rows]
     raw_findings = phase7_matrix_raw_value_findings()
-    hard_zero_metric_counts = {
-        key: sum(int(row[key]) for row in oracle_rows) for key in _PHASE7_ORACLE_HARD_ZERO_KEYS
-    }
+    hard_zero_metric_counts = {key: sum(int(row[key]) for row in oracle_rows) for key in _PHASE7_ORACLE_HARD_ZERO_KEYS}
 
     summary = deepcopy(_PHASE7_LIVE_CANARY_SUMMARY)
     summary.update(
@@ -664,9 +788,7 @@ def _phase7_live_canary_oracle_summary() -> dict[str, object]:
                 [row.get("oracle_result_class", row.get("result_class")) for row in rows]
             ),
             "row_tier_class_counts": _class_counts([row.get("row_tier_class") for row in oracle_rows]),
-            "ergonomic_score_class_counts": _class_counts(
-                [row.get("ergonomic_score_class") for row in oracle_rows]
-            ),
+            "ergonomic_score_class_counts": _class_counts([row.get("ergonomic_score_class") for row in oracle_rows]),
             "smoothness_class_counts": _class_counts([row.get("smoothness_class") for row in oracle_rows]),
             "hard_zero_metric_counts": hard_zero_metric_counts,
             "redaction_scan": {

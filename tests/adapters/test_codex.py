@@ -208,7 +208,7 @@ def test_codex_command_projection_downgrades_non_runnable_shell_examples(tmp_pat
     assert "```bash\ngit status --porcelain\n```" not in projected
     assert "```text\ngit status --porcelain\n```" in projected
     assert "```bash\nINIT=$(gpd --raw init progress --include state,config)" not in projected
-    assert "```text\nINIT=$(gpd --raw init progress --include state,config)" in projected
+    assert f"```text\nINIT=$({bridge} --raw init progress --include state,config)" in projected
     assert "Gemini shell compatibility" not in projected
 
 

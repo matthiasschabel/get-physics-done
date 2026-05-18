@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from gpd.core.workflow_staging import load_workflow_stage_manifest
 from tests.lifecycle_contract_test_support import assert_semantic_contract as _assert_semantic
 from tests.workflow_authority_support import workflow_authority_text
 
@@ -315,6 +316,14 @@ def test_paper_writer_and_referee_load_the_canonical_publication_response_contra
         "gpd_return.files_written",
     )
     assert "gpd validate handoff-artifacts for revised section plus both response artifacts" in respond
+
+
+def test_respond_finalize_declares_review_suffix_fallback_field() -> None:
+    finalize = load_workflow_stage_manifest("respond-to-referees").stage("finalize")
+    source = (WORKFLOWS_DIR / "respond-to-referees" / "finalize.md").read_text(encoding="utf-8")
+
+    assert 'gpd json get .latest_review_round_suffix --default ""' in source
+    assert "latest_review_round_suffix" in finalize.required_init_fields
 
 
 def test_peer_review_stage_six_requires_fresh_referee_return_and_artifacts() -> None:

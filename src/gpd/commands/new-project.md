@@ -63,7 +63,9 @@ Start from the included `scope_intake` authority. It owns read-only setup,
 recovery routing, existing-work routing, and the first narrow scope/anchor
 question.
 Start with physics questioning and do not surface a preset choice before
-workflow preferences or before the first project-artifact commit.
+workflow preferences. In full/auto mode, `workflow_preferences` may ask for the
+preset before the first project-artifact commit because `project_artifacts`
+requires `GPD/config.json`.
 
 Later stage loading is manifest/stage-owned. `scope_approval` owns `templates/project-contract-schema.md`, `templates/project-contract-grounding-linkage.md`, and canonical schema discipline. Never load `workflows/new-project.md` as authority; it is an index.
 

@@ -114,6 +114,26 @@ def test_new_project_scope_intake_stage_surface_cannot_see_post_scope_machinery(
         assert forbidden not in stage_surface
 
 
+def test_new_project_workflow_preset_gate_is_after_scope_and_before_project_artifacts() -> None:
+    command_text = (COMMANDS_DIR / "new-project.md").read_text(encoding="utf-8")
+    scope_surface = _expanded_stage_surface(_new_project_stage("scope_intake"))
+    prefs_stage = _new_project_stage("workflow_preferences")
+    project_stage = _new_project_stage("project_artifacts")
+    prefs_surface = _expanded_stage_surface(prefs_stage)
+    project_surface = _expanded_stage_surface(project_stage)
+
+    assert SETUP_QUESTION not in scope_surface
+    assert "Workflow Setup" not in scope_surface
+    assert SETUP_QUESTION in prefs_surface
+    assert "after scope approval and before\n`project_artifacts`" in prefs_surface
+    assert prefs_stage["writes_allowed"] == ["GPD/config.json"]
+    assert prefs_stage["next_stages"] == ["project_artifacts"]
+    assert "If `GPD/config.json` is missing" in project_surface
+    assert "gpd --raw init new-project --stage workflow_preferences" in project_surface
+    assert project_stage["next_stages"] == ["literature_survey"]
+    assert "before workflow preferences or before the first project-artifact commit" not in command_text
+
+
 def test_new_project_minimal_artifacts_stage_surface_excludes_deferred_full_machinery() -> None:
     stage = _new_project_stage("minimal_artifacts")
     stage_surface = _expanded_stage_surface(stage)

@@ -29,7 +29,8 @@ Follow `PROJECT_ARTIFACTS_INIT.staged_loading.field_access_instruction`; `<INIT>
 
 <config_gate>
 If `GPD/config.json` is missing, do not generate or commit `PROJECT.md` yet.
-Reload and complete workflow preferences first:
+Reload and complete workflow preferences first; that is the only pre-`PROJECT.md`
+setup detour for the full/auto path:
 
 ```bash
 gpd --raw init new-project --stage workflow_preferences

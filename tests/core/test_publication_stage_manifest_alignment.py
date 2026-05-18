@@ -432,6 +432,12 @@ def test_write_paper_stage_manifest_uses_canonical_publication_contracts() -> No
     assert "GPD/references-status.json" in consistency.writes_allowed
     assert "GPD/AUTHOR-RESPONSE.md" in publication_review.writes_allowed
     assert "GPD/REFEREE-REPORT.tex" in publication_review.writes_allowed
+    assert {
+        "GPD/publication/{subject_slug}/AUTHOR-RESPONSE{round_suffix}.md",
+        "GPD/publication/{subject_slug}/review/REFEREE_RESPONSE{round_suffix}.md",
+        "GPD/publication/{subject_slug}/REFEREE-REPORT{round_suffix}.md",
+        "GPD/publication/{subject_slug}/REFEREE-REPORT{round_suffix}.tex",
+    } <= set(publication_review.writes_allowed)
 
     assert {
         "references/publication/publication-review-round-artifacts.md",
@@ -480,6 +486,7 @@ def test_peer_review_stage_manifest_uses_canonical_publication_contracts() -> No
     artifact_discovery = manifest.stage("artifact_discovery")
     panel_stages = manifest.stage("panel_stages")
     final_adjudication = manifest.stage("final_adjudication")
+    finalize = manifest.stage("finalize")
 
     assert {
         "references/publication/publication-review-round-artifacts.md",
@@ -565,6 +572,14 @@ def test_peer_review_stage_manifest_uses_canonical_publication_contracts() -> No
     assert "GPD/review/REVIEW-LEDGER{round_suffix}.json" in final_adjudication.writes_allowed
     assert "GPD/publication/{subject_slug}/review/REVIEW-LEDGER{round_suffix}.json" in final_adjudication.writes_allowed
     assert "GPD/publication/{subject_slug}/REFEREE-REPORT{round_suffix}.md" in final_adjudication.writes_allowed
+    assert {
+        "latest_review_round_suffix",
+        "latest_referee_report_md",
+        "latest_referee_report_tex",
+        "latest_author_response",
+        "latest_referee_response",
+        "latest_response_round_suffix",
+    } <= set(finalize.required_init_fields)
 
 
 def test_arxiv_submission_stage_manifest_surfaces_publication_routing() -> None:
@@ -708,6 +723,7 @@ def test_respond_to_referees_stage_manifest_uses_publication_response_contracts(
     assert "GPD/review/REFEREE_RESPONSE{round_suffix}.md" in response_authoring.writes_allowed
     assert "GPD/publication/{subject_slug}/AUTHOR-RESPONSE{round_suffix}.md" in response_authoring.writes_allowed
     assert "GPD/publication/{subject_slug}/review/REFEREE_RESPONSE{round_suffix}.md" in finalize.writes_allowed
+    assert "latest_review_round_suffix" in finalize.required_init_fields
 
 
 def test_respond_to_referees_workflow_uses_staged_init_without_inline_field_list() -> None:

@@ -518,6 +518,10 @@
       "writes_allowed": [
         "GPD/publication/{subject_slug}/manuscript",
         "GPD/review",
+        "GPD/publication/{subject_slug}/AUTHOR-RESPONSE{round_suffix}.md",
+        "GPD/publication/{subject_slug}/review/REFEREE_RESPONSE{round_suffix}.md",
+        "GPD/publication/{subject_slug}/REFEREE-REPORT{round_suffix}.md",
+        "GPD/publication/{subject_slug}/REFEREE-REPORT{round_suffix}.tex",
         "GPD/AUTHOR-RESPONSE.md",
         "GPD/AUTHOR-RESPONSE-R2.md",
         "GPD/AUTHOR-RESPONSE-R3.md",

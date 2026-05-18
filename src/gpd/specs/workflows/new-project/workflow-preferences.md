@@ -65,9 +65,11 @@ USD budget keys, convention keys, or a `physics` section. Project conventions ar
 </allowed_config_keys>
 
 <preset_gate>
-First offer a preset choice. If a preset is selected, resolve it into the
-allowed keys above, preview the changed knobs, then ask whether to apply the
-bundle or customize.
+This preset gate is intentionally after scope approval and before
+`project_artifacts`, because `project_artifacts` cannot run without
+`GPD/config.json`. First offer a preset choice. If a preset is selected,
+resolve it into the allowed keys above, preview the changed knobs, then ask
+whether to apply the bundle or customize.
 
 Use ask_user:
 

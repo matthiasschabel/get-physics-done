@@ -436,7 +436,7 @@ async def test_arxiv_only_backend_skips_intercepts(monkeypatch: pytest.MonkeyPat
 async def test_search_papers_defaults_sort_by_relevance(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from gpd.mcp.servers import _arxiv_token_bucket
+    from gpd.mcp.servers import _arxiv_token_bucket, arxiv_translators
     from gpd.mcp.servers.arxiv_bridge import ArxivBridge, ArxivBridgeConfig
 
     _arxiv_token_bucket._reset_for_tests()
@@ -446,6 +446,11 @@ async def test_search_papers_defaults_sort_by_relevance(
         return None
 
     monkeypatch.setattr(_arxiv_token_bucket.asyncio, "sleep", no_sleep)
+    # Force the OpenAlex short-circuit to fall through so the upstream
+    # session-call assertions below stay meaningful.
+    monkeypatch.setattr(
+        arxiv_translators, "openalex_search", lambda _args: {"papers": [], "total_results": 0}
+    )
 
     fake, log = _make_fake_session()
     bridge = ArxivBridge(ArxivBridgeConfig(backend="hybrid"))
@@ -467,7 +472,7 @@ async def test_search_papers_defaults_sort_by_relevance(
 async def test_search_papers_preserves_caller_sort_by(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from gpd.mcp.servers import _arxiv_token_bucket
+    from gpd.mcp.servers import _arxiv_token_bucket, arxiv_translators
     from gpd.mcp.servers.arxiv_bridge import ArxivBridge, ArxivBridgeConfig
 
     _arxiv_token_bucket._reset_for_tests()
@@ -476,6 +481,9 @@ async def test_search_papers_preserves_caller_sort_by(
         return None
 
     monkeypatch.setattr(_arxiv_token_bucket.asyncio, "sleep", no_sleep)
+    monkeypatch.setattr(
+        arxiv_translators, "openalex_search", lambda _args: {"papers": [], "total_results": 0}
+    )
 
     fake, log = _make_fake_session()
     bridge = ArxivBridge(ArxivBridgeConfig(backend="hybrid"))
@@ -488,6 +496,106 @@ async def test_search_papers_preserves_caller_sort_by(
         bridge._session = None
 
     assert log[0][1]["sort_by"] == "submittedDate"
+
+
+@pytest.mark.asyncio
+async def test_search_papers_short_circuits_to_openalex(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When the OpenAlex translator returns a non-empty papers list, the
+    bridge must serve that response and skip the upstream session entirely —
+    that is the entire point of routing `export.arxiv.org` load away."""
+    from gpd.mcp.servers import _arxiv_token_bucket, arxiv_translators
+    from gpd.mcp.servers.arxiv_bridge import ArxivBridge, ArxivBridgeConfig
+
+    _arxiv_token_bucket._reset_for_tests()
+
+    async def no_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(_arxiv_token_bucket.asyncio, "sleep", no_sleep)
+
+    translator_called: list[dict] = []
+
+    def fake_search(args: dict) -> dict:
+        translator_called.append(args)
+        return {
+            "papers": [
+                {
+                    "id": "2401.12345",
+                    "title": "T",
+                    "authors": ["A"],
+                    "abstract": "[EXTERNAL CONTENT] x",
+                    "categories": [],
+                    "published": "2024-01-22",
+                    "url": "https://arxiv.org/abs/2401.12345",
+                    "resource_uri": "arxiv://2401.12345",
+                }
+            ],
+            "total_results": 1,
+        }
+
+    monkeypatch.setattr(arxiv_translators, "openalex_search", fake_search)
+
+    fake, log = _make_fake_session()
+    bridge = ArxivBridge(ArxivBridgeConfig(backend="hybrid"))
+    bridge._session = fake  # type: ignore[assignment]
+    try:
+        result = await bridge.call_tool("search_papers", {"query": "q"})
+    finally:
+        bridge._session = None
+
+    assert translator_called, "OpenAlex translator must be invoked"
+    assert log == [], "upstream session must not be called when OpenAlex returns results"
+    assert result.isError is None or result.isError is False
+    payload = result.content[0].text
+    assert "2401.12345" in payload
+
+
+@pytest.mark.asyncio
+async def test_get_abstract_short_circuits_to_openalex(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """OpenAlex-success path must serve the response without touching the
+    upstream session, and the response must still be cached so subsequent
+    calls do not hit either backend."""
+    from gpd.mcp.servers import _arxiv_cache, _arxiv_token_bucket, arxiv_translators
+    from gpd.mcp.servers.arxiv_bridge import ArxivBridge, ArxivBridgeConfig
+
+    _arxiv_token_bucket._reset_for_tests()
+    monkeypatch.setattr(_arxiv_cache, "_CACHE_DIR", tmp_path)
+    monkeypatch.setattr(_arxiv_cache, "_CACHE_DB", tmp_path / "cache.sqlite")
+
+    async def no_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(_arxiv_token_bucket.asyncio, "sleep", no_sleep)
+    monkeypatch.setattr(
+        arxiv_translators,
+        "openalex_abstract",
+        lambda _args: {
+            "status": "success",
+            "paper_id": "2401.12345",
+            "title": "T",
+            "authors": ["A"],
+            "abstract": "[EXTERNAL CONTENT] hello",
+            "categories": [],
+            "published": "2024-01-22",
+            "pdf_url": "https://arxiv.org/pdf/2401.12345",
+        },
+    )
+
+    fake, log = _make_fake_session()
+    bridge = ArxivBridge(ArxivBridgeConfig(storage_path=tmp_path, backend="hybrid"))
+    bridge._session = fake  # type: ignore[assignment]
+    try:
+        first = await bridge.call_tool("get_abstract", {"paper_id": "2401.12345"})
+        second = await bridge.call_tool("get_abstract", {"paper_id": "2401.12345"})
+    finally:
+        bridge._session = None
+
+    assert log == [], "upstream session must not be called when OpenAlex succeeds"
+    assert first.content[0].text == second.content[0].text
 
 
 @pytest.mark.asyncio
@@ -602,7 +710,7 @@ async def test_download_paper_falls_through_to_upstream_on_total_miss(
 async def test_get_abstract_cache_round_trip(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
-    from gpd.mcp.servers import _arxiv_cache, _arxiv_token_bucket
+    from gpd.mcp.servers import _arxiv_cache, _arxiv_token_bucket, arxiv_translators
     from gpd.mcp.servers.arxiv_bridge import ArxivBridge, ArxivBridgeConfig
 
     _arxiv_token_bucket._reset_for_tests()
@@ -613,6 +721,13 @@ async def test_get_abstract_cache_round_trip(
         return None
 
     monkeypatch.setattr(_arxiv_token_bucket.asyncio, "sleep", no_sleep)
+    # Force the OpenAlex translator to miss so the cache-round-trip assertion
+    # exercises the upstream session path.
+    monkeypatch.setattr(
+        arxiv_translators,
+        "openalex_abstract",
+        lambda _args: {"status": "error", "message": "stubbed miss"},
+    )
 
     fake, log = _make_fake_session(
         call_outputs=[('{"status":"success","paper_id":"X","abstract":"hello"}', False)]
@@ -633,7 +748,7 @@ async def test_get_abstract_cache_round_trip(
 async def test_rate_limit_in_payload_surfaces_as_iserror(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
-    from gpd.mcp.servers import _arxiv_token_bucket
+    from gpd.mcp.servers import _arxiv_token_bucket, arxiv_translators
     from gpd.mcp.servers.arxiv_bridge import ArxivBridge, ArxivBridgeConfig
 
     _arxiv_token_bucket._reset_for_tests()
@@ -642,14 +757,17 @@ async def test_rate_limit_in_payload_surfaces_as_iserror(
         return None
 
     monkeypatch.setattr(_arxiv_token_bucket.asyncio, "sleep", no_sleep)
+    monkeypatch.setattr(
+        arxiv_translators,
+        "openalex_abstract",
+        lambda _args: {"status": "error", "message": "stubbed miss"},
+    )
 
     error_payload = (
         '{"status": "error", "message": '
         '"arXiv is rate limiting this IP (HTTP 429). Please wait 60 seconds before retrying."}'
     )
-    fake, log = _make_fake_session(
-        call_outputs=[(error_payload, False), (error_payload, False)]
-    )
+    fake, log = _make_fake_session(call_outputs=[(error_payload, False)])
     bridge = ArxivBridge(ArxivBridgeConfig(storage_path=tmp_path, backend="hybrid"))
     bridge._session = fake  # type: ignore[assignment]
     try:
@@ -657,15 +775,17 @@ async def test_rate_limit_in_payload_surfaces_as_iserror(
     finally:
         bridge._session = None
 
-    assert len(log) == 2, "retry must fire on isolated 429"
-    assert result.isError is True, "must surface as MCP isError after retry exhaustion"
+    assert len(log) == 1, "bridge must fail fast on rate-limit, no in-bridge retry"
+    assert result.isError is True, "rate-limit must surface as MCP isError"
 
 
 @pytest.mark.asyncio
-async def test_rate_limit_inside_burst_window_skips_retry(
+async def test_rate_limit_surfaces_as_iserror_when_failure_log_prepopulated(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
-    from gpd.mcp.servers import _arxiv_token_bucket
+    """Regression guard: a pre-populated failure log must not change the
+    rate-limit handling now that the in-bridge retry is gone."""
+    from gpd.mcp.servers import _arxiv_token_bucket, arxiv_translators
     from gpd.mcp.servers.arxiv_bridge import ArxivBridge, ArxivBridgeConfig
 
     _arxiv_token_bucket._reset_for_tests()
@@ -674,6 +794,11 @@ async def test_rate_limit_inside_burst_window_skips_retry(
         return None
 
     monkeypatch.setattr(_arxiv_token_bucket.asyncio, "sleep", no_sleep)
+    monkeypatch.setattr(
+        arxiv_translators,
+        "openalex_abstract",
+        lambda _args: {"status": "error", "message": "stubbed miss"},
+    )
 
     error_payload = (
         '{"status": "error", "message": "arXiv is rate limiting this IP (HTTP 429)."}'
@@ -691,7 +816,7 @@ async def test_rate_limit_inside_burst_window_skips_retry(
     finally:
         bridge._session = None
 
-    assert len(log) == 1, "bursty failure must not retry"
+    assert len(log) == 1
     assert result.isError is True
 
 

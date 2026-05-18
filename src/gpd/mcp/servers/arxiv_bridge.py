@@ -31,6 +31,7 @@ from gpd.mcp.servers import (
     _arxiv_gcs,
     _arxiv_retry,
     _arxiv_token_bucket,
+    arxiv_translators,
     mutating_tool_annotations,
 )
 from gpd.version import __version__ as GPD_VERSION
@@ -224,6 +225,9 @@ class ArxivBridge:
 
         if name == "search_papers":
             args = self._coerce_search_args(args)
+            openalex_result = await self._try_openalex_search(args)
+            if openalex_result is not None:
+                return openalex_result
             return await self._call_with_retry(name, args)
 
         if name == "get_abstract":
@@ -232,6 +236,12 @@ class ArxivBridge:
                 return types.CallToolResult(
                     content=[types.TextContent(type="text", text=cached_payload)],
                 )
+            openalex_result = await self._try_openalex_abstract(args)
+            if openalex_result is not None:
+                payload = _first_text_payload(openalex_result)
+                if payload is not None:
+                    await _arxiv_cache.set("get_abstract", args, payload, ttl_days=30)
+                return openalex_result
             result = await self._call_with_retry(name, args)
             if _is_success(result) and result.content:
                 payload = _first_text_payload(result)
@@ -244,30 +254,57 @@ class ArxivBridge:
     async def _call_with_retry(
         self, name: str, args: dict[str, object]
     ) -> types.CallToolResult:
+        # Token-bucket-gated upstream call with fail-fast rate-limit handling.
+        # The earlier in-bridge 60-second sleep+retry raced the MCP client's
+        # 60s default request timeout and surfaced as -32001 "Request timed
+        # out" on the caller, hiding the underlying 429. The retry also did
+        # not help in practice: arxiv's cooldown frequently exceeds 60s and
+        # the model can route around a clean rate-limit error in <1s via
+        # web_fetch or the OpenAlex translator. Failures are still recorded
+        # for telemetry via the per-bridge failure log.
         async with _arxiv_token_bucket.acquire():
             result = await self.session.call_tool(name, args)
 
         if not _is_rate_limit_or_timeout(result):
             return result
 
-        if not _arxiv_retry.is_likely_transient(self._state.failure_log):
-            logger.info(
-                "Rate-limit/timeout on %s inside burst window; not retrying", name
-            )
-            _arxiv_retry.record_failure(self._state.failure_log)
-            return _coerce_rate_limit_to_error(result)
-
-        logger.info("Rate-limit/timeout on %s; sleeping 60s then retrying once", name)
         _arxiv_retry.record_failure(self._state.failure_log)
-        await asyncio.sleep(60)
+        return _coerce_rate_limit_to_error(result)
 
-        async with _arxiv_token_bucket.acquire():
-            retry_result = await self.session.call_tool(name, args)
+    async def _try_openalex_search(
+        self, args: dict[str, object]
+    ) -> types.CallToolResult | None:
+        # Deflect `search_papers` to OpenAlex when possible so `export.arxiv.org`
+        # only sees the long tail. Returns ``None`` (fall-through to upstream)
+        # on any failure — missing query, OpenAlex error, empty result set,
+        # or unexpected exception.
+        try:
+            body = await asyncio.to_thread(arxiv_translators.openalex_search, args)
+        except Exception:
+            logger.exception("OpenAlex search translator failed; falling through to upstream")
+            return None
+        if not isinstance(body, dict):
+            return None
+        papers = body.get("papers")
+        if not isinstance(papers, list) or not papers:
+            return None
+        return types.CallToolResult(
+            content=[types.TextContent(type="text", text=json.dumps(body))],
+        )
 
-        if _is_rate_limit_or_timeout(retry_result):
-            _arxiv_retry.record_failure(self._state.failure_log)
-            return _coerce_rate_limit_to_error(retry_result)
-        return retry_result
+    async def _try_openalex_abstract(
+        self, args: dict[str, object]
+    ) -> types.CallToolResult | None:
+        try:
+            body = await asyncio.to_thread(arxiv_translators.openalex_abstract, args)
+        except Exception:
+            logger.exception("OpenAlex abstract translator failed; falling through to upstream")
+            return None
+        if not isinstance(body, dict) or body.get("status") != "success":
+            return None
+        return types.CallToolResult(
+            content=[types.TextContent(type="text", text=json.dumps(body))],
+        )
 
     async def _intercept_download(
         self, args: dict[str, object]

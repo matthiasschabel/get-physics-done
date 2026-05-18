@@ -127,6 +127,19 @@ None yet.
 
 None yet.
 """
+_TASK_OVERLAY_BODY_KEYS = frozenset(
+    {"body", "content", "markdown", "text", "overlay_body", "overlay_content", "overlay_markdown", "overlay_text"}
+)
+
+
+def _assert_body_free_task_overlay_metadata(payload: dict[str, object], *, role: str) -> None:
+    assert payload["role"] == role
+    assert payload["body_policy"] == "metadata_only"
+    for entry in payload["overlays"]:
+        assert _TASK_OVERLAY_BODY_KEYS.isdisjoint(entry)
+        assert entry["role"] == role
+        assert entry["body_loaded"] is False
+        assert entry["portable_path"] == "@{GPD_INSTALL_DIR}/references/orchestration/task-overlays.md"
 
 
 def _write_state_with_project_contract(
@@ -224,7 +237,11 @@ class TestStateServerIntegration:
     def test_get_state_surfaces_canonical_project_contract_metadata(self, tmp_path: Path) -> None:
         from gpd.mcp.servers.state_server import get_state
 
-        contract = json.loads((Path(__file__).resolve().parents[1] / "fixtures" / "stage0" / "project_contract.json").read_text(encoding="utf-8"))
+        contract = json.loads(
+            (Path(__file__).resolve().parents[1] / "fixtures" / "stage0" / "project_contract.json").read_text(
+                encoding="utf-8"
+            )
+        )
         project_root = _write_state_with_project_contract(tmp_path, contract)
 
         result = get_state(str(project_root))
@@ -514,14 +531,13 @@ class TestSkillsServerIntegration:
         assert isinstance(result, dict)
         assert "error" not in result
         assert result["name"] == "gpd-help"
-        assert "Display GPD help by delegating to the workflow-owned help surface." in result["content"]
+        assert "Display GPD help by delegating to the renderer-backed local CLI help bridge" in result["content"]
         assert "/gpd:" not in result["content"]
         assert "gpd-help" in result["content"]
         assert "## Command Requirements" in result["content"]
         assert "Quick Start Extract" in result["content"]
         assert "## Contextual Help" not in result["content"]
-        assert "subject-owned publication root at `GPD/publication/{subject_slug}`" in result["content"]
-        assert "resolved GPD-owned manuscript root" in result["content"]
+        assert "workflow-owned help surface as the marker fallback" in result["content"]
         assert result["file_count"] == 1
         assert result["allowed_tools_surface"] == "command.allowed-tools"
 
@@ -548,8 +564,7 @@ class TestSkillsServerIntegration:
         ]
         assert result["review_contract"]["conditional_requirements"][0]["when"] == "project-backed manuscript review"
         assert any(
-            variant["scope"] == "explicit_artifact"
-            for variant in result["review_contract"].get("scope_variants", [])
+            variant["scope"] == "explicit_artifact" for variant in result["review_contract"].get("scope_variants", [])
         )
         assert result["review_contract"]["conditional_requirements"] == [
             {
@@ -603,7 +618,7 @@ class TestSkillsServerIntegration:
                 "preflight_checks": [],
                 "blocking_preflight_checks": [],
                 "stage_artifacts": ["${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md"],
-            }
+            },
         ]
         assert result["context_mode"] == "project-aware"
         assert result["project_reentry_capable"] is False
@@ -657,7 +672,7 @@ class TestSkillsServerIntegration:
         assert result["staged_loading"]["workflow_id"] == "research-phase"
         assert result["staged_loading"]["stages"][0]["id"] == "phase_bootstrap"
         assert result["staged_loading"]["stages"][0]["loaded_authorities"] == [
-            "workflows/research-phase.md",
+            "workflows/research-phase/phase-bootstrap.md",
             "references/orchestration/model-profile-resolution.md",
         ]
         assert result["structured_metadata_authority"]["staged_loading"] == "mirrored"
@@ -681,9 +696,12 @@ class TestSkillsServerIntegration:
         assert "literature-review" in reviewer["content"]
 
     def test_get_skill_project_researcher_surfaces_one_shot_handoff_contract(self):
+        from gpd import registry
+        from gpd.core.agent_role_kits import role_kit_authority_paths
         from gpd.mcp.servers.skills_server import get_skill
 
         result = get_skill("gpd-project-researcher")
+        agent = registry.get_agent("gpd-project-researcher")
 
         assert "error" not in result
         assert result["name"] == "gpd-project-researcher"
@@ -693,12 +711,41 @@ class TestSkillsServerIntegration:
         assert result["structured_metadata_authority"]["content"] == "canonical"
         assert result["structured_metadata_authority"]["allowed_tools"] == "mirrored"
         assert result["structured_metadata_authority"]["agent_policy"] == "mirrored"
+        assert result["agent_policy"]["role_kits"] == list(agent.role_kits)
+        assert result["agent_policy"]["role_kit_authorities"] == list(role_kit_authority_paths(agent.role_kits))
         assert "Checkpoint after the initial survey with scope confirmation." in result["content"]
         assert "gpd_return:" in result["content"]
-        assert "status: completed | checkpoint | blocked | failed" in result["content"]
+        assert "status: completed" in result["content"]
+        assert "files_written:" in result["content"]
+        assert "issues: []" in result["content"]
+        assert "next_actions:" in result["content"]
         assert "wait for confirmation" not in result["content"]
         assert "pause here for approval" not in result["content"]
         assert "ask the user then continue" not in result["content"]
+
+    def test_get_skill_surfaces_body_free_overlay_compatibility_for_overlay_capable_agents(self):
+        from gpd.mcp.servers.skills_server import get_skill
+
+        planner = get_skill("gpd-planner")
+        plan_checker = get_skill("gpd-plan-checker")
+        paper_writer = get_skill("gpd-paper-writer")
+
+        assert planner["compatible_task_overlays"]["compatible_task_overlay_ids"] == ["planner.proof_bearing"]
+        assert plan_checker["compatible_task_overlays"]["compatible_task_overlay_ids"] == ["checker.proof_obligation"]
+        assert paper_writer["compatible_task_overlays"]["compatible_task_overlay_ids"] == [
+            "paper_writer.section_results",
+            "paper_writer.section_methods",
+            "paper_writer.section_intro_discussion",
+            "paper_writer.section_abstract_conclusion",
+            "paper_writer.figure_sensitive",
+            "paper_writer.response_pair",
+        ]
+        assert planner["structured_metadata_authority"]["compatible_task_overlays"] == "mirrored"
+        assert plan_checker["structured_metadata_authority"]["compatible_task_overlays"] == "mirrored"
+        assert paper_writer["structured_metadata_authority"]["compatible_task_overlays"] == "mirrored"
+        _assert_body_free_task_overlay_metadata(planner["compatible_task_overlays"], role="gpd-planner")
+        _assert_body_free_task_overlay_metadata(plan_checker["compatible_task_overlays"], role="gpd-plan-checker")
+        _assert_body_free_task_overlay_metadata(paper_writer["compatible_task_overlays"], role="gpd-paper-writer")
 
     def test_get_skill_research_synthesizer_and_literature_bootstrap_surfaces_remain_projected(self):
         from gpd import registry
@@ -723,12 +770,20 @@ class TestSkillsServerIntegration:
             "allowed_tools": "mirrored",
             "agent_policy": "mirrored",
         }
-        assert "This agent writes only `GPD/literature/SUMMARY.md`;" in synthesizer["content"]
-        assert "files_written` must list only files actually written in this run." in synthesizer["content"]
-        assert "Use only status names: `completed` | `checkpoint` | `blocked` | `failed`." in synthesizer["content"]
+        assert "`files-written-freshness`" in synthesizer["content"]
+        assert (
+            "Use the synthesizer profile (`gpd return skeleton --role synthesizer --status <status>`)"
+            in synthesizer["content"]
+        )
+        assert (
+            "record `GPD/literature/SUMMARY.md` as the sole written artifact when this run creates or updates it"
+            in synthesizer["content"]
+        )
         assert "gpd_return:" in synthesizer["content"]
 
-        expected_project_spawn_contracts = [dict(contract) for contract in registry.get_command("gpd:new-project").spawn_contracts]
+        expected_project_spawn_contracts = [
+            dict(contract) for contract in registry.get_command("gpd:new-project").spawn_contracts
+        ]
         expected_project_interactive_spawn_contracts = [
             dict(contract) for contract in registry.get_command("gpd:new-project").interactive_spawn_contracts
         ]

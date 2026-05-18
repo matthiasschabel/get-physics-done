@@ -9,12 +9,10 @@ when actually rendering a paper.
 from __future__ import annotations
 
 import shutil
-from unittest.mock import MagicMock
 
 import pytest
 
-from gpd.mcp.paper import markdown_support
-from gpd.mcp.paper import template_registry
+from gpd.mcp.paper import markdown_support, template_registry
 from gpd.mcp.paper.markdown_support import looks_like_latex, maybe_convert_to_latex
 from gpd.mcp.paper.models import Author, PaperConfig, Section
 from gpd.mcp.paper.template_registry import _clean_section, render_paper
@@ -282,12 +280,12 @@ def test_clean_section_markdown_invokes_fragment_converter(
 
 
 def _minimal_config(**overrides: object) -> PaperConfig:
-    defaults: dict[str, object] = dict(
-        title="A Title",
-        authors=[Author(name="A. N. Author")],
-        abstract="An abstract that is long enough.",
-        sections=[Section(title="Intro", content="Raw LaTeX prose.")],
-    )
+    defaults: dict[str, object] = {
+        "title": "A Title",
+        "authors": [Author(name="A. N. Author")],
+        "abstract": "An abstract that is long enough.",
+        "sections": [Section(title="Intro", content="Raw LaTeX prose.")],
+    }
     defaults.update(overrides)
     return PaperConfig(**defaults)
 
@@ -304,7 +302,7 @@ def test_render_paper_skips_pandoc_probe_when_all_sections_are_latex(
     monkeypatch.setattr(template_registry, "detect_pandoc", counting_detect)
     config = _minimal_config()
     rendered = render_paper(config)
-    assert "Raw LaTeX prose." in rendered
+    assert config.sections[0].content in rendered
     # Pure-LaTeX payload: pandoc must NOT be probed. Opt-in is strict.
     assert called["n"] == 0
 

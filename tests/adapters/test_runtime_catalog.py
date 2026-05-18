@@ -546,8 +546,10 @@ def test_managed_install_surface_policy_is_derived_from_runtime_metadata() -> No
     agent_glob_defaults = tuple(schema["managed_install_surface_defaults"]["managed_agent_globs"])
     claude_entry = _catalog_entry_by_runtime_name(catalog_payload, "claude-code")
     opencode_entry = _catalog_entry_by_runtime_name(catalog_payload, "opencode")
+    copilot_entry = _catalog_entry_by_runtime_name(catalog_payload, "copilot-cli")
     claude_policy = get_managed_install_surface_policy("claude-code")
     opencode_policy = get_managed_install_surface_policy("opencode")
+    copilot_policy = get_managed_install_surface_policy("copilot-cli")
     codex_policy = get_managed_install_surface_policy("codex")
     merged_policy = get_managed_install_surface_policy()
 
@@ -558,10 +560,13 @@ def test_managed_install_surface_policy_is_derived_from_runtime_metadata() -> No
 
     assert opencode_policy.nested_command_globs == ()
     assert opencode_policy.flat_command_globs == tuple(opencode_entry["managed_install_surface"]["flat_command_globs"])
+    assert copilot_policy.nested_command_globs == ()
+    assert copilot_policy.flat_command_globs == tuple(copilot_entry["managed_install_surface"]["flat_command_globs"])
     assert codex_policy.nested_command_globs == ()
     assert codex_policy.flat_command_globs == ()
     assert merged_policy.nested_command_globs == claude_policy.nested_command_globs
     assert merged_policy.flat_command_globs == opencode_policy.flat_command_globs
+    assert merged_policy.flat_command_globs == copilot_policy.flat_command_globs
 
 
 def test_manifest_metadata_list_policies_are_derived_from_runtime_metadata() -> None:
@@ -569,10 +574,12 @@ def test_manifest_metadata_list_policies_are_derived_from_runtime_metadata() -> 
     codex_entry = _catalog_entry_by_runtime_name(catalog_payload, "codex")
     gemini_entry = _catalog_entry_by_runtime_name(catalog_payload, "gemini")
     opencode_entry = _catalog_entry_by_runtime_name(catalog_payload, "opencode")
+    copilot_entry = _catalog_entry_by_runtime_name(catalog_payload, "copilot-cli")
 
     codex_policy = get_runtime_descriptor("codex").manifest_metadata_list_policies[0]
     gemini_policy = get_runtime_descriptor("gemini").manifest_metadata_list_policies[0]
     opencode_policy = get_runtime_descriptor("opencode").manifest_metadata_list_policies[0]
+    copilot_policy = get_runtime_descriptor("copilot-cli").manifest_metadata_list_policies[0]
 
     assert codex_policy.key == codex_entry["manifest_metadata_list_policies"][0]["key"]
     assert codex_policy.value_kind == "path_segment"
@@ -583,6 +590,10 @@ def test_manifest_metadata_list_policies_are_derived_from_runtime_metadata() -> 
     assert opencode_policy.key == opencode_entry["manifest_metadata_list_policies"][0]["key"]
     assert opencode_policy.item_prefix == "gpd-"
     assert opencode_policy.item_suffix == ".md"
+    assert copilot_policy.key == copilot_entry["manifest_metadata_list_policies"][0]["key"]
+    assert copilot_policy.value_kind == "path_segment"
+    assert copilot_policy.item_prefix == "gpd-"
+    assert copilot_policy.item_suffix == ".md"
 
 
 def test_manifest_metadata_list_policy_key_matches_runtime_descriptor_policy() -> None:
@@ -600,6 +611,15 @@ def test_manifest_metadata_list_policy_key_matches_runtime_descriptor_policy() -
             item_suffix=".md",
         )
         == get_runtime_descriptor("opencode").manifest_metadata_list_policies[0].key
+    )
+    assert (
+        get_manifest_metadata_list_policy_key(
+            "copilot-cli",
+            value_kind="path_segment",
+            item_prefix="gpd-",
+            item_suffix=".md",
+        )
+        == get_runtime_descriptor("copilot-cli").manifest_metadata_list_policies[0].key
     )
 
 

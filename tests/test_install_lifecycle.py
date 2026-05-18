@@ -204,6 +204,12 @@ def test_install_readiness_treats_same_runtime_incomplete_install_as_repairable(
     assert foreign.readiness_state == "blocked"
 
 
+def test_unsafe_manifest_metadata_cases_cover_copilot_generated_commands() -> None:
+    assert {"copilot_generated_command_files": ["gpd-../escape.md"]} in _unsafe_manifest_metadata_updates()
+    assert {"copilot_generated_command_files": ["unexpected-prefix.md"]} in _unsafe_manifest_metadata_updates()
+    assert {"copilot_generated_command_files": ["gpd-missing-suffix"]} in _unsafe_manifest_metadata_updates()
+
+
 @pytest.mark.parametrize(
     "manifest_update",
     [

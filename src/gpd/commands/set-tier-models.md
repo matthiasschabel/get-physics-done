@@ -7,6 +7,11 @@ allowed-tools:
   - file_write
   - shell
   - ask_user
+help:
+  group: Configuration and maintenance
+  order: 660
+  compact_description: Directly pin concrete tier model ids
+  display_signature: gpd:set-tier-models
 ---
 
 

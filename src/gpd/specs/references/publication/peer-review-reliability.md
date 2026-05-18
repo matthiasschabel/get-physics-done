@@ -14,7 +14,7 @@ context_cost: low
 
 Guidance for reliable execution of the staged peer-review pipeline, whether `gpd:peer-review` is reviewing the current GPD project manuscript or one explicit manuscript artifact. This covers when the workflow triggers, how stages recover from failure, how to distinguish internal from external review, and how review findings feed back into manuscript revisions.
 
-This is the canonical reliability reference for the peer-review skill surface. Use `references/publication/publication-review-round-artifacts.md` for the round-artifact family, suffix rule, and selected-root ownership boundary.
+This is the canonical reliability reference for the peer-review skill surface. Use `references/publication/publication-review-round-artifacts.md` for the round-artifact family, suffix rule, and selected-root ownership boundary. Use `references/publication/publication-final-adjudication-boundary.md` as the compact Stage 6 checklist, while keeping the local workflow/referee allowlist and validators visible at the callsite.
 
 `gpd:peer-review` is project-aware: it can review the active manuscript in the current GPD project or an explicit `.tex`, `.md`, `.txt`, `.pdf`, or manuscript-directory target. It writes review artifacts under the `selected_publication_root` and `selected_review_root` surfaced by centralized preflight. Project-backed subjects resolve those roots to `GPD/` and `GPD/review`; managed or explicit external publication subjects resolve them to `GPD/publication/{subject_slug}` and `GPD/publication/{subject_slug}/review`. Do not write a managed-subject review bundle to global `GPD/review` as a fallback or duplicate copy.
 That output policy does not relocate the manuscript draft or manuscript-root manifests; those stay rooted at the resolved manuscript directory and must not be copied into `GPD/` to satisfy strict gates.
@@ -68,14 +68,14 @@ Project-backed manuscript review:
 1. **Manuscript completeness.** All sections referenced in the paper structure are drafted. No placeholder or stub sections remain.
 2. **Artifact readiness.** In strict project-backed mode, `ARTIFACT-MANIFEST.json` and `BIBLIOGRAPHY-AUDIT.json` exist and pass validation. In that mode the bibliography audit must also clear `bibliography_audit_clean`, and the reproducibility manifest must clear `reproducibility_ready`. For explicit external artifact review, these manuscript-root publication artifacts are additive when present and only block when the strict intake mode actually requires them.
 3. **Verification coverage.** At least one verification report exists under `GPD/phases/` when reviewing the current GPD project manuscript. Explicit external artifact review should use supporting evidence when present, but missing project-local verification reports alone do not block that mode.
-4. **Preflight pass.** `gpd validate review-preflight peer-review "$REVIEW_TARGET" --strict` exits zero.
+4. **Preflight pass.** `gpd validate review-preflight peer-review --strict -- "$REVIEW_TARGET"` exits zero.
 
 Standalone explicit-artifact review:
 
 1. **Explicit target resolution.** One concrete manuscript or artifact path has been supplied and accepted by command-context preflight.
 2. **Text-surface readiness.** The explicit target is directly readable (`.tex`, `.md`, `.txt`, `.csv`, `.tsv`) or a valid extracted/companion text surface exists for `.pdf`, `.docx`, `.xlsx`, or `.xlsm`.
 3. **Additive artifact handling.** Nearby manuscript-root publication artifacts may be read when present, but they are not prerequisites by themselves.
-4. **Preflight pass.** `gpd validate review-preflight peer-review "$REVIEW_TARGET" --strict` exits zero.
+4. **Preflight pass.** `gpd validate review-preflight peer-review --strict -- "$REVIEW_TARGET"` exits zero.
 
 Verification coverage under `GPD/phases/` is required only for `project-backed manuscript review`.
 Artifact readiness requirements are strict project-backed gates, not `standalone explicit-artifact review` prerequisites.
@@ -114,16 +114,7 @@ Each of the six review stages can fail. The pipeline is **fail-closed**: a faile
 
 ### Runtime-Neutral Stage Cleanup
 
-Every spawned reviewer, proof critic, or referee run is a one-shot child handoff. When a child reaches `completed`, `checkpoint`, `blocked`, or `failed`, treat that outcome as terminal for that run: the child is closed/retired for the active review round and must not stay live across the next workflow step.
-
-After any terminal child outcome:
-
-- validate or classify the persisted artifact boundary in the orchestrator
-- close/retire the finished child before spawning any retry, continuation, or downstream stage
-- start retries and checkpoint continuations from persisted artifacts and declared carry-forward inputs only
-- do not reuse live child memory, pending tool state, or any other transient execution state across stage boundaries
-
-For the Stage 2 / Stage 3 / proof-review parallel wave, apply the same barrier to every child in the wave: wait for each outcome, validate the written artifacts, close/retire the completed children, then spawn Stage 4 only from the persisted handoff set. Sequential fallback must emulate the same cleanup boundary between stages.
+Apply `{GPD_INSTALL_DIR}/references/publication/stage-recovery-gate.md` for one-shot child lifecycle, checkpoint continuation, stale-output rejection, retry freshness, and parallel-wave cleanup. The stage-specific artifact paths, validators, retry prompts, and Stage 6 write boundary remain local to this reliability reference and the workflow callsites.
 
 ### Common Failure Modes
 
@@ -140,10 +131,7 @@ For the Stage 2 / Stage 3 / proof-review parallel wave, apply the same barrier t
 
 ### Recovery Protocol
 
-1. **Detect.** After each stage completes, validate that the expected output artifact exists and conforms to the `StageReviewReport` JSON schema.
-2. **Retry.** Each stage is allowed at most **one retry**. The retry is a fresh run. Do not resume the failed child in place; start again from the persisted artifacts and typed return data already captured for that stage, then pass the same inputs and explicit schema guidance.
-3. **Escalate.** If a stage fails after one retry, halt the pipeline and report the failure with the stage name, failure mode, and any partial output.
-4. **No silent skipping.** Never skip a failed stage and continue to the next. The staged design depends on each stage producing a valid handoff artifact.
+Apply the publication stage-recovery gate after every stage return. Each review stage gets at most one fresh retry when the local failure mode permits it; if that retry fails, halt with the stage name, failure mode, and any partial output. Never skip a failed stage and continue downstream.
 
 ### Stage Output Validation
 

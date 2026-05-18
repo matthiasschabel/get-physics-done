@@ -37,4 +37,26 @@ def test_gpd_review_reader_prompt_keeps_panel_contract_pointer_without_inlining_
     assert "references/orchestration/agent-infrastructure.md" in review_reader
     assert "Peer Review Panel Protocol" not in expanded
     assert "Stage 1 `CLAIMS{round_suffix}.json` must follow this compact `ClaimIndex` shape:" not in expanded
-    assert "StageReviewReport`, nested `ReviewFinding`, and nested `ProofAuditRecord` entries use a closed schema" not in expanded
+    assert (
+        "StageReviewReport`, nested `ReviewFinding`, and nested `ProofAuditRecord` entries use a closed schema"
+        not in expanded
+    )
+
+
+def test_gpd_review_physics_prompt_keeps_handle_rule_lightweight_without_schema_body() -> None:
+    path = AGENTS_DIR / "gpd-review-physics.md"
+    source = path.read_text(encoding="utf-8")
+    expanded = expanded_prompt_text(path, src_root=SOURCE_ROOT, path_prefix=PATH_PREFIX)
+    metrics = measure_prompt_surface(path, src_root=SOURCE_ROOT, path_prefix=PATH_PREFIX)
+
+    assert metrics.raw_include_count == 0
+    assert metrics.expanded_char_count < 110_000
+    assert "protocol_bundle_load_manifest" in source
+    assert "verification_domains" in source
+    assert "execution_guides" in source
+    assert "fallback domain/protocol handle" in source
+    assert "Peer Review Panel Protocol" not in expanded
+    assert (
+        "StageReviewReport`, nested `ReviewFinding`, and nested `ProofAuditRecord` entries use a closed schema"
+        not in expanded
+    )

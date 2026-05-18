@@ -36,6 +36,7 @@ _SECONDARY_RUNTIME_DESCRIPTOR = _RUNTIME_DESCRIPTORS[1]
 def _cache_candidate(path: Path) -> UpdateCacheCandidate:
     return UpdateCacheCandidate(path=path)
 
+
 # ─── _is_older_than ────────────────────────────────────────────────────────
 
 
@@ -270,14 +271,18 @@ class TestReadInstalledVersion:
             patch("gpd.hooks.check_update._self_config_dir", return_value=None),
             patch("gpd.hooks.runtime_detect.get_gpd_install_dirs", return_value=install_dirs) as mock_get_dirs,
             patch(
-                "gpd.hooks.check_update.config_dir_has_complete_install",
-                side_effect=lambda config_dir: config_dir.name == _SECONDARY_RUNTIME_DESCRIPTOR.config_dir_name,
-            ) as mock_complete,
+                "gpd.hooks.check_update.assess_install_target",
+                side_effect=lambda config_dir: SimpleNamespace(
+                    state="owned_complete"
+                    if config_dir.name == _SECONDARY_RUNTIME_DESCRIPTOR.config_dir_name
+                    else "clean"
+                ),
+            ) as mock_assess,
         ):
             version_files = _version_files()
 
         mock_get_dirs.assert_called_once_with(prefer_active=True)
-        assert mock_complete.call_count == 2
+        assert mock_assess.call_count == 2
         assert version_files == [Path(_SECONDARY_RUNTIME_DESCRIPTOR.config_dir_name) / GPD_INSTALL_DIR_NAME / "VERSION"]
 
 
@@ -568,7 +573,9 @@ class TestMainThrottle:
         with (
             patch(
                 "gpd.hooks.runtime_detect.get_update_cache_candidates",
-                return_value=[UpdateCacheCandidate(path=local_cache / "gpd-update-check.json", runtime="codex", scope="local")],
+                return_value=[
+                    UpdateCacheCandidate(path=local_cache / "gpd-update-check.json", runtime="codex", scope="local")
+                ],
             ),
             patch("gpd.hooks.runtime_detect.should_consider_update_cache_candidate", return_value=True),
             patch("gpd.hooks.runtime_detect.detect_active_runtime_with_gpd_install", return_value="unknown"),
@@ -603,8 +610,12 @@ class TestMainThrottle:
             patch(
                 "gpd.hooks.runtime_detect.get_update_cache_candidates",
                 return_value=[
-                    UpdateCacheCandidate(path=stale_codex_cache / "gpd-update-check.json", runtime="codex", scope="local"),
-                    UpdateCacheCandidate(path=fresh_claude_cache / "gpd-update-check.json", runtime="claude-code", scope="global"),
+                    UpdateCacheCandidate(
+                        path=stale_codex_cache / "gpd-update-check.json", runtime="codex", scope="local"
+                    ),
+                    UpdateCacheCandidate(
+                        path=fresh_claude_cache / "gpd-update-check.json", runtime="claude-code", scope="global"
+                    ),
                 ],
             ),
             patch("gpd.hooks.runtime_detect.should_consider_update_cache_candidate", return_value=True),
@@ -640,8 +651,12 @@ class TestMainThrottle:
             patch(
                 "gpd.hooks.runtime_detect.get_update_cache_candidates",
                 return_value=[
-                    UpdateCacheCandidate(path=fresh_codex_cache / "gpd-update-check.json", runtime="codex", scope="global"),
-                    UpdateCacheCandidate(path=stale_claude_cache / "gpd-update-check.json", runtime="claude-code", scope="global"),
+                    UpdateCacheCandidate(
+                        path=fresh_codex_cache / "gpd-update-check.json", runtime="codex", scope="global"
+                    ),
+                    UpdateCacheCandidate(
+                        path=stale_claude_cache / "gpd-update-check.json", runtime="claude-code", scope="global"
+                    ),
                 ],
             ),
             patch("gpd.hooks.runtime_detect.should_consider_update_cache_candidate", return_value=True),
@@ -840,7 +855,11 @@ class TestMainThrottle:
             ),
             patch(
                 "gpd.hooks.update_resolution.ordered_update_cache_candidates",
-                return_value=[UpdateCacheCandidate(path=fresh_workspace_cache / "gpd-update-check.json", runtime="codex", scope="local")],
+                return_value=[
+                    UpdateCacheCandidate(
+                        path=fresh_workspace_cache / "gpd-update-check.json", runtime="codex", scope="local"
+                    )
+                ],
             ),
             patch("subprocess.Popen") as mock_popen,
         ):
@@ -884,7 +903,11 @@ class TestMainThrottle:
             ),
             patch(
                 "gpd.hooks.update_resolution.ordered_update_cache_candidates",
-                return_value=[UpdateCacheCandidate(path=stale_workspace_cache / "gpd-update-check.json", runtime="codex", scope="local")],
+                return_value=[
+                    UpdateCacheCandidate(
+                        path=stale_workspace_cache / "gpd-update-check.json", runtime="codex", scope="local"
+                    )
+                ],
             ),
             patch("gpd.hooks.check_update._claim_inflight_marker", return_value=True),
             patch("subprocess.Popen") as mock_popen,

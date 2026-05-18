@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tests.assertion_taxonomy_support import assert_prompt_contracts, semantic_concept
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PLANNER_SUBAGENT_PROMPT = REPO_ROOT / "src" / "gpd" / "specs" / "templates" / "planner-subagent-prompt.md"
 
@@ -26,18 +28,21 @@ def test_planner_subagent_prompt_stays_thin_and_fail_closed() -> None:
 def test_planner_subagent_prompt_keeps_scope_selection_and_revision_glue_only() -> None:
     prompt = PLANNER_SUBAGENT_PROMPT.read_text(encoding="utf-8")
 
-    assert "Keep this prompt for scope selection, mode flags, and return conventions only." in prompt
+    assert_prompt_contracts(
+        prompt,
+        *semantic_concept(
+            "planner subagent prompt stays scoped to glue",
+            required=(
+                "Keep this prompt for scope selection, mode flags, and return conventions only.",
+                "Treat stable knowledge docs surfaced through `active_reference_context` and `reference_artifacts_content` as reviewed background syntheses.",
+                "Use explicit `knowledge_deps` when a plan materially depends on a reviewed knowledge doc and downstream gating should be enforced; keep implicit stable background advisory only.",
+                "do not invent a separate knowledge authority or ledger.",
+            ),
+        ),
+    )
     assert "Planner policy" not in prompt
     assert "## Standard Planning Template" in prompt
     assert "## Revision Template" in prompt
-    assert (
-        "Treat stable knowledge docs surfaced through `active_reference_context` and `reference_artifacts_content` as "
-        "reviewed background syntheses."
-    ) in prompt
-    assert (
-        "Use explicit `knowledge_deps` when a plan materially depends on a reviewed knowledge doc and downstream gating should be enforced; keep implicit stable background advisory only."
-    ) in prompt
-    assert "do not invent a separate knowledge authority or ledger." in prompt
     assert (
         "If `{project_contract}` is empty, stale, or too underspecified to identify the phase contract slice, return "
         "`gpd_return.status: checkpoint` rather than guessing."

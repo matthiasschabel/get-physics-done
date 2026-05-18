@@ -24,8 +24,8 @@ def test_wrapper_child_return_contract_is_typed_and_thin(
 ) -> None:
     text = (COMMANDS_DIR / command_name).read_text(encoding="utf-8")
 
-    assert "Follow the included literature-review workflow exactly." in text
-    assert "The workflow owns staged loading, scope fixing, artifact gating, and citation verification." in text
+    assert "Read the included literature-review bootstrap authority first." in text
+    assert "The staged workflow owns scope fixing, artifact gating, citation verification, and later authority loading" in text
     assert "workflow-owned child-return contract" not in text
     assert "gpd_return.status: completed" not in text
     assert "gpd_return.status: checkpoint" not in text

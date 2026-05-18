@@ -68,6 +68,15 @@ jobs:
       - name: Check repo graph generated artifacts
         run: uv run python scripts/sync_repo_graph_contract.py --check
 
+      - name: Check public surface generated artifacts
+        run: uv run python scripts/render_public_surface.py --check
+
+      - name: Check help surface generated artifacts
+        run: uv run python scripts/render_help_surface.py --check
+
+      - name: Check bootstrap installer metadata generated artifacts
+        run: uv run python scripts/render_bootstrap_installer_metadata.py --check
+
       - name: Run ruff check
         run: uv run ruff check .
 

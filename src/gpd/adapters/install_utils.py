@@ -13,7 +13,9 @@ import os
 import re
 import shlex
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Set as AbstractSet
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from gpd.adapters.runtime_catalog import (
@@ -26,6 +28,7 @@ from gpd.adapters.runtime_catalog import (
     resolve_global_config_dir,
 )
 from gpd.adapters.tool_names import CONTEXTUAL_TOOL_REFERENCE_NAMES
+from gpd.command_labels import command_slug_from_label
 from gpd.core.constants import HOME_DATA_DIR_NAME
 from gpd.core.model_visible_text import (
     SKEPTICAL_RIGOR_GUARDRAILS_HEADING,
@@ -36,6 +39,8 @@ from gpd.core.public_surface_contract import local_cli_bridge_commands
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
+
+logger = logging.getLogger(__name__)
 
 _SHARED_INSTALL_METADATA = get_shared_install_metadata()
 
@@ -63,6 +68,17 @@ _RESERVED_MANIFEST_METADATA_KEYS = frozenset(
         "files",
     }
 )
+
+
+@dataclass(frozen=True, slots=True)
+class SettingsCleanupResult:
+    """Summary of managed entries removed from a parsed settings object."""
+
+    modified: bool = False
+    removed_statusline: bool = False
+    removed_session_start_hooks: int = 0
+    removed_mcp_server_keys: tuple[str, ...] = ()
+
 
 # Subdirectories of specs/ that make up the installed get-physics-done/ content.
 # Shared by all adapters.
@@ -254,6 +270,44 @@ def build_runtime_install_repair_command(
     if explicit_target:
         command = f"{command} --target-dir {shlex.quote(str(target_dir))}"
     return command
+
+
+def build_runtime_managed_mcp_servers(
+    *,
+    cwd: Path | None = None,
+    env: Mapping[str, str] | None = None,
+    python_path: str | None = None,
+    include_builtin: bool = True,
+) -> dict[str, dict[str, object]]:
+    """Return neutral managed MCP server entries for runtime adapters."""
+    from gpd.mcp import managed_integrations as _managed_integrations
+    from gpd.mcp.builtin_servers import build_mcp_servers_dict
+
+    resolved_python_path = python_path or hook_python_interpreter()
+    servers: dict[str, dict[str, object]] = {}
+    if include_builtin:
+        servers.update(build_mcp_servers_dict(python_path=resolved_python_path))
+    servers.update(
+        _managed_integrations.projected_managed_optional_mcp_servers(
+            env,
+            cwd=cwd,
+            python_path=resolved_python_path,
+        )
+    )
+    return servers
+
+
+def runtime_managed_mcp_server_keys(*, include_builtin: bool = True) -> frozenset[str]:
+    """Return neutral managed MCP server keys owned by GPD runtime installs."""
+    from gpd.mcp import managed_integrations as _managed_integrations
+
+    optional_keys = set(_managed_integrations.managed_optional_mcp_server_keys())
+    if not include_builtin:
+        return frozenset(optional_keys)
+
+    from gpd.mcp.builtin_servers import GPD_MCP_SERVER_KEYS
+
+    return frozenset(set(GPD_MCP_SERVER_KEYS) | optional_keys)
 
 
 def projection_target_dir_from_path_prefix(path_prefix: str, *, config_dir_name: str) -> Path:
@@ -718,6 +772,496 @@ def render_markdown_frontmatter(preamble: str, frontmatter: str, separator: str,
     return rendered + body
 
 
+_TOP_LEVEL_FRONTMATTER_KEY_RE = re.compile(r"^(?P<key>[A-Za-z_][A-Za-z0-9_-]*)\s*:")
+
+
+def _strip_top_level_frontmatter_key(frontmatter: str, key: str) -> str:
+    """Return frontmatter with one top-level key and its nested block removed."""
+
+    stripped_lines: list[str] = []
+    skipping = False
+    for line in frontmatter.splitlines():
+        key_match = _TOP_LEVEL_FRONTMATTER_KEY_RE.match(line)
+        if key_match is not None:
+            if key_match.group("key") == key:
+                skipping = True
+                continue
+            skipping = False
+        if skipping:
+            continue
+        stripped_lines.append(line)
+    return "\n".join(stripped_lines).strip("\n")
+
+
+def strip_display_only_command_help_frontmatter(content: str) -> str:
+    """Remove command-owned help metadata from model/runtime-visible markdown.
+
+    The `help` frontmatter block is parsed by the registry for command discovery
+    and renderer projections. It is display metadata, not prompt authority, so
+    installed command prompts and prompt-surface diagnostics should not spend
+    model context on it.
+    """
+
+    preamble, frontmatter, separator, body = split_markdown_frontmatter(content)
+    if not frontmatter:
+        return content
+    if not re.search(r"(?m)^help\s*:", frontmatter):
+        return content
+    command_name_match = re.search(r"(?m)^name:\s*(?P<name>.+?)\s*$", frontmatter)
+    command_name = command_name_match.group("name").strip().strip("\"'") if command_name_match is not None else ""
+    if not command_name.startswith("gpd:"):
+        return content
+    stripped_frontmatter = _strip_top_level_frontmatter_key(frontmatter, "help")
+    return render_markdown_frontmatter(preamble, stripped_frontmatter, separator, body)
+
+
+COMPACT_STAGED_COMMAND_SHIM_SENTINEL = "<gpd_staged_bootstrap_shim"
+COMPACT_HELP_BRIDGE_SHIM_SENTINEL = "<gpd_help_bridge_shim"
+COMPACT_WORKFLOW_COMMAND_SHIM_SENTINEL = "<gpd_workflow_reference_shim"
+_COMPACT_STAGED_PAYLOAD_CONTRACT_VERSION = "1"
+_COMPACT_STAGED_COMMAND_NO_ARGUMENTS = frozenset(
+    {
+        "new-milestone",
+        "new-project",
+        "resume-work",
+        "sync-state",
+    }
+)
+_COMPACT_STAGED_COMMAND_ARGS_AFTER_STAGE = frozenset(
+    {
+        "arxiv-submission",
+        "map-research",
+        "respond-to-referees",
+        "write-paper",
+    }
+)
+_COMPACT_WORKFLOW_COMMAND_ALLOWLIST = frozenset(
+    {
+        "audit-milestone",
+        "autonomous",
+        "complete-milestone",
+        "compare-experiment",
+        "debug",
+        "derive-equation",
+        "dimensional-analysis",
+        "discover",
+        "discuss-phase",
+        "error-propagation",
+        "explain",
+        "export",
+        "limiting-cases",
+        "list-phase-assumptions",
+        "numerical-convergence",
+        "parameter-sweep",
+        "progress",
+        "review-knowledge",
+        "settings",
+        "sensitivity-analysis",
+        "start",
+    }
+)
+
+
+def compact_staged_command_markdown_for_runtime(
+    content: str,
+    *,
+    runtime: str,
+    command_name: str | None,
+    src_root: str | Path | None,
+) -> str:
+    """Replace staged workflow includes with a compact non-native bootstrap shim.
+
+    Native-include runtimes keep the source include. Non-native command
+    surfaces should not inline large staged workflows when the stage manifest
+    can delegate first-turn authority to ``gpd --raw init ... --stage``.
+    """
+    return (
+        compact_staged_command_shim_for_runtime(
+            content,
+            runtime=runtime,
+            command_name=command_name,
+            src_root=src_root,
+            path_prefix="",
+            bridge_command=None,
+        )
+        or content
+    )
+
+
+def compact_staged_command_shim_for_runtime(
+    content: str,
+    *,
+    runtime: str,
+    command_name: str | None,
+    src_root: str | Path | None,
+    path_prefix: str,
+    bridge_command: str | None,
+    surface_kind: str = "command",
+) -> str | None:
+    """Return a compact non-native staged/help command prompt, or ``None``.
+
+    The helper runs before include expansion. It preserves Claude native
+    includes, keeps command frontmatter/body context, and replaces only the
+    heavy workflow include with a compact staged or help bridge contract for
+    runtimes that cannot resolve native ``@`` includes.
+    """
+    del path_prefix
+    descriptor = get_runtime_descriptor(runtime)
+    if descriptor.native_include_support or surface_kind != "command" or not command_name or src_root is None:
+        return None
+
+    workflow_id = _normalize_compact_shim_command_name(command_name)
+    if not workflow_id:
+        return None
+
+    public_label = f"{descriptor.public_command_surface_prefix}{workflow_id}"
+    if workflow_id == "help":
+        return _render_compact_help_command_shim(
+            content,
+            public_label=public_label,
+            bridge_command=bridge_command or "gpd",
+        )
+
+    manifest_path = _stage_manifest_path_for_command(src_root, workflow_id)
+    if not manifest_path.is_file():
+        return _compact_workflow_reference_shim_for_runtime(
+            content,
+            workflow_id=workflow_id,
+            public_label=public_label,
+        )
+
+    try:
+        from gpd.core.workflow_staging import (
+            load_workflow_stage_manifest_from_path,
+            staged_loading_payload_contract_keys,
+        )
+
+        manifest = load_workflow_stage_manifest_from_path(manifest_path, expected_workflow_id=workflow_id)
+    except ValueError:
+        logger.exception("Failed to load workflow stage manifest for compact command shim: %s", manifest_path)
+        return None
+
+    if manifest.prompt_usage != "staged_init" or not manifest.stages:
+        return None
+
+    first_stage = manifest.stages[0]
+    required_keys, optional_keys = staged_loading_payload_contract_keys(manifest)
+    shim = _render_compact_staged_command_shim(
+        workflow_id=workflow_id,
+        public_label=public_label,
+        first_stage_id=first_stage.id,
+        stage_count=len(manifest.stages),
+        required_staged_loading_keys=required_keys,
+        optional_staged_loading_keys=optional_keys,
+        bridge_command=bridge_command or "gpd",
+        protocol_bundle_jit_hint=_compact_staged_protocol_bundle_jit_hint(manifest),
+    )
+    replaced = _replace_workflow_include_with_shim(
+        content,
+        workflow_id=workflow_id,
+        shim=shim,
+        include_paths=first_stage.mode_paths,
+    )
+    if replaced is None:
+        return None
+    return _rewrite_compact_shim_followup_guidance(replaced)
+
+
+def _normalize_compact_shim_command_name(command_name: str) -> str:
+    command_name = command_name.strip()
+    if command_name.endswith(".md"):
+        command_name = command_name[:-3]
+    return command_slug_from_label(command_name)
+
+
+def _stage_manifest_path_for_command(src_root: str | Path, command_name: str) -> Path:
+    """Return the stage-manifest path for a command under either source-root shape."""
+    return _specs_source_root(Path(src_root)) / "workflows" / f"{command_name}-stage-manifest.json"
+
+
+def _render_compact_staged_command_shim(
+    *,
+    workflow_id: str,
+    public_label: str,
+    first_stage_id: str,
+    stage_count: int,
+    required_staged_loading_keys: Sequence[str],
+    optional_staged_loading_keys: Sequence[str],
+    bridge_command: str,
+    protocol_bundle_jit_hint: str = "",
+) -> str:
+    init_command = _compact_staged_init_command(workflow_id, first_stage_id, bridge_command=bridge_command)
+    bundle_hint = f"\n\n{protocol_bundle_jit_hint}" if protocol_bundle_jit_hint else ""
+    required_keys = ", ".join(required_staged_loading_keys)
+    optional_keys = ", ".join(optional_staged_loading_keys)
+    return (
+        f'{COMPACT_STAGED_COMMAND_SHIM_SENTINEL} command="{public_label}" workflow="{workflow_id}" '
+        f'first_stage="{first_stage_id}" stage_count="{stage_count}" '
+        f'payload_contract_version="{_COMPACT_STAGED_PAYLOAD_CONTRACT_VERSION}">\n'
+        f"source: `workflows/{workflow_id}.md` is loaded by staged init, not inlined.\n"
+        f"{_runtime_label_rule_for_public_label(public_label, workflow_id)}\n\n"
+        "```yaml\n"
+        "stage_loader:\n"
+        f"  workflow_id: {workflow_id}\n"
+        f"  first_stage_id: {first_stage_id}\n"
+        f"  stage_count: {stage_count}\n"
+        f"  payload_contract_version: {_COMPACT_STAGED_PAYLOAD_CONTRACT_VERSION}\n"
+        "  payload_root: payload.staged_loading\n"
+        f"  required_staged_loading_keys: [{required_keys}]\n"
+        f"  optional_staged_loading_keys: [{optional_keys}]\n"
+        "  raw_stage_loader_command: local_helper_bash_fence_below\n"
+        "  fail_closed_on: [nonzero_init, missing_staged_loading, missing_required_keys, unknown_next_stage]\n"
+        "stage_rules:\n"
+        "  required_init_fields: parse only fields named by the active staged_loading payload\n"
+        "  authorities: read eager_authorities only; keep must_not_eager_load lazy\n"
+        "  routing: use next_stages only; reload with --stage before later-stage work\n"
+        "  constraints: honor allowed_tools, writes_allowed, produced_state, checkpoints\n"
+        "```\n\n"
+        "raw_stage_loader_command:\n\n"
+        "```bash\n"
+        f"{init_command}\n"
+        "```\n\n"
+        f"{_compact_staged_argument_note(workflow_id)} Treat the returned JSON as the only active-stage payload; "
+        "do not guess missing fields or invent workflow state."
+        f"{bundle_hint}\n"
+        "</gpd_staged_bootstrap_shim>"
+    )
+
+
+def _compact_staged_protocol_bundle_jit_hint(manifest: object) -> str:
+    """Return compact bundle-loading guidance for staged workflows that expose bundle fields."""
+    try:
+        from gpd.core.workflow_staging import (
+            staged_ids_requiring_init_fields,
+            staged_protocol_bundle_required_init_fields,
+        )
+
+        bundle_fields = staged_protocol_bundle_required_init_fields(manifest)  # type: ignore[arg-type]
+        stages_with_bundle_fields = staged_ids_requiring_init_fields(manifest, bundle_fields)  # type: ignore[arg-type]
+    except AttributeError:
+        return ""
+
+    if not bundle_fields or not stages_with_bundle_fields:
+        return ""
+
+    rendered_stages = ", ".join(f"`{stage_id}`" for stage_id in stages_with_bundle_fields if stage_id)
+    rendered_fields = ", ".join(f"`{field}`" for field in bundle_fields)
+    return (
+        "<protocol_bundle_jit>\n"
+        f"When an active stage names {rendered_fields} in `staged_loading.required_init_fields`, use those init "
+        "payload fields as the selected-bundle loading map. Keep bundle guidance JIT: follow only the handles, "
+        "load manifests, and rendered context fields named by the active payload, do not inline protocol bundle "
+        "catalogs during bootstrap, and keep unselected bundles absent.\n"
+        f"Bundle-aware stages: {rendered_stages}.\n"
+        "</protocol_bundle_jit>"
+    )
+
+
+def _compact_staged_init_command(command_name: str, stage_id: str, *, bridge_command: str) -> str:
+    if command_name in _COMPACT_STAGED_COMMAND_NO_ARGUMENTS:
+        return f"{bridge_command} --raw init {command_name} --stage {stage_id}"
+    if command_name in _COMPACT_STAGED_COMMAND_ARGS_AFTER_STAGE:
+        return f'{bridge_command} --raw init {command_name} --stage {stage_id} -- "$ARGUMENTS"'
+    return f'{bridge_command} --raw init {command_name} "$ARGUMENTS" --stage {stage_id}'
+
+
+def _compact_staged_argument_note(command_name: str) -> str:
+    if command_name in _COMPACT_STAGED_COMMAND_NO_ARGUMENTS:
+        return "Do not pass `$ARGUMENTS` to staged init; handle launch flags after bootstrap."
+    if command_name in _COMPACT_STAGED_COMMAND_ARGS_AFTER_STAGE:
+        return 'Pass non-empty launch arguments after `--`; omit the trailing `-- "$ARGUMENTS"` when empty.'
+    return 'Replace `"$ARGUMENTS"` with the normalized launch argument; omit it only when the init surface allows.'
+
+
+def _render_compact_help_command_shim(
+    content: str,
+    *,
+    public_label: str,
+    bridge_command: str,
+) -> str:
+    preamble, frontmatter, separator, _body = split_markdown_frontmatter(content)
+    body = (
+        "\n<objective>\n"
+        "Display GPD help by delegating to the CLI-owned compact help surface.\n"
+        "Return only the requested help text; do not add project-specific analysis, git status, or next-step commentary.\n"
+        "</objective>\n\n"
+        "<process>\n"
+        f'{COMPACT_HELP_BRIDGE_SHIM_SENTINEL} command="{public_label}">\n'
+        f"For `{public_label}`, do not inline `workflows/help.md`. Run the matching bridge command and return "
+        "its output verbatim.\n\n"
+        f"{_runtime_label_rule_for_public_label(public_label, 'help')}\n\n"
+        "Default help:\n\n"
+        "```bash\n"
+        f"{bridge_command} --raw help\n"
+        "```\n\n"
+        "Compact command index:\n\n"
+        "```bash\n"
+        f"{bridge_command} --raw help --all\n"
+        "```\n\n"
+        "Single command detail:\n\n"
+        "```bash\n"
+        f"{bridge_command} --raw help --command <name>\n"
+        "```\n\n"
+        "If `$ARGUMENTS` is present, pass through `--all` or `--command <name>` exactly once. If no supported "
+        "argument is present, use default help.\n"
+        "</gpd_help_bridge_shim>\n"
+        "</process>\n"
+    )
+    attribution_lines = _compact_shim_attribution_lines(content)
+    if attribution_lines:
+        body = body.rstrip() + "\n\n" + attribution_lines + "\n"
+    return render_markdown_frontmatter(preamble, frontmatter, separator, body)
+
+
+def _compact_workflow_reference_shim_for_runtime(
+    content: str,
+    *,
+    workflow_id: str,
+    public_label: str,
+) -> str | None:
+    """Return a compact non-staged workflow-reference shim for large command wrappers."""
+    if workflow_id not in _COMPACT_WORKFLOW_COMMAND_ALLOWLIST:
+        return None
+
+    include_paths = _gpd_install_include_paths(content)
+    if f"workflows/{workflow_id}.md" not in include_paths:
+        return None
+
+    shim = _render_compact_workflow_reference_shim(
+        workflow_id=workflow_id,
+        public_label=public_label,
+        include_paths=include_paths,
+    )
+    replaced = _replace_execution_context_with_shim(content, workflow_id=workflow_id, shim=shim)
+    if replaced is None:
+        return None
+    return _rewrite_compact_workflow_followup_guidance(replaced)
+
+
+def _gpd_install_include_paths(content: str) -> tuple[str, ...]:
+    paths = re.findall(r"@\{GPD_INSTALL_DIR\}/([A-Za-z0-9_./{}$-]+\.md)", content)
+    return tuple(dict.fromkeys(paths))
+
+
+def _render_compact_workflow_reference_shim(
+    *,
+    workflow_id: str,
+    public_label: str,
+    include_paths: Sequence[str],
+) -> str:
+    authorities = "\n".join(f"- `{{GPD_INSTALL_DIR}}/{path}`" for path in include_paths)
+    workflow_guardrails = _compact_workflow_reference_guardrails(workflow_id)
+    return (
+        f'{COMPACT_WORKFLOW_COMMAND_SHIM_SENTINEL} command="{public_label}" workflow="{workflow_id}">\n'
+        "This non-native runtime cannot resolve command workflow includes natively, so this command prompt names "
+        "the installed workflow authorities instead of inlining them.\n\n"
+        f"{_runtime_label_rule_for_public_label(public_label, workflow_id)}\n\n"
+        "Read these installed authority files before acting:\n\n"
+        f"{authorities}\n\n"
+        f"Treat `{{GPD_INSTALL_DIR}}/workflows/{workflow_id}.md` as the workflow source of truth. "
+        "Use the wrapper sections outside this block only for launch arguments, public command context, and "
+        "command-specific constraints. If an authority file is missing or unreadable, stop and report the broken "
+        "install instead of reconstructing the workflow from memory.\n"
+        f"{workflow_guardrails}"
+        "</gpd_workflow_reference_shim>"
+    )
+
+
+def _compact_workflow_reference_guardrails(workflow_id: str) -> str:
+    if workflow_id != "compare-experiment":
+        return ""
+    return (
+        "\nCompact compare-experiment guardrails: "
+        "`{GPD_INSTALL_DIR}/templates/paper/experimental-comparison.md`; "
+        "`{GPD_INSTALL_DIR}/references/results/result-lookup-policy.md`; "
+        "`GPD/comparisons/{slug}/`; "
+        "Do not run an unconditional standalone docs commit for this workflow.\n"
+    )
+
+
+def _runtime_label_rule_for_public_label(public_label: str, command_name: str) -> str:
+    public_prefix = public_label.removesuffix(command_name)
+    return f"Runtime label: Show `{public_prefix}` as native labels; keep local CLI `gpd ...` unchanged."
+
+
+def _compact_shim_attribution_lines(content: str) -> str:
+    """Preserve source attribution trailers when a compact shim replaces a body."""
+    return "\n".join(line for line in content.splitlines() if line.lower().startswith("co-authored-by:"))
+
+
+def _replace_execution_context_with_shim(content: str, *, workflow_id: str, shim: str) -> str | None:
+    include_line = f"@{{GPD_INSTALL_DIR}}/workflows/{workflow_id}.md"
+    replacement_block = f"<execution_context>\n{shim}\n</execution_context>"
+    block_re = re.compile(
+        rf"<execution_context>.*?{re.escape(include_line)}.*?</execution_context>",
+        re.DOTALL,
+    )
+    replaced, count = block_re.subn(replacement_block, content, count=1)
+    if count:
+        return replaced
+    if include_line not in content:
+        return None
+    return content.replace(include_line, shim, 1)
+
+
+def _replace_workflow_include_with_shim(
+    content: str,
+    *,
+    workflow_id: str,
+    shim: str,
+    include_paths: Sequence[str] = (),
+) -> str | None:
+    candidate_include_paths = tuple(dict.fromkeys((f"workflows/{workflow_id}.md", *include_paths)))
+    replacement_block = f"<execution_context>\n{shim}\n</execution_context>"
+    for include_path in candidate_include_paths:
+        include_line = f"@{{GPD_INSTALL_DIR}}/{include_path}"
+        block_re = re.compile(
+            rf"<execution_context>\s*{re.escape(include_line)}\s*</execution_context>",
+            re.DOTALL,
+        )
+        replaced, count = block_re.subn(replacement_block, content, count=1)
+        if count:
+            return replaced
+        if include_line in content:
+            return content.replace(include_line, shim, 1)
+    return None
+
+
+def _rewrite_compact_shim_followup_guidance(content: str) -> str:
+    replacement = (
+        "Follow the compact staged bootstrap contract above. Load workflow authorities only when the active "
+        "`staged_loading.eager_authorities` payload names them."
+    )
+    for phrase in (
+        "Read the included workflow first and follow it end-to-end.",
+        "Read the included workflow first and follow it exactly.",
+        "Follow the included workflow file exactly.",
+        "Follow the included workflow exactly. Do not duplicate the workflow logic here.",
+    ):
+        content = content.replace(phrase, replacement)
+    return content
+
+
+def _rewrite_compact_workflow_followup_guidance(content: str) -> str:
+    replacement = "Read the installed workflow authority file named in the compact workflow reference above."
+    for phrase in (
+        "Read the included workflow first and follow it end-to-end.",
+        "Read the included workflow first and follow it exactly.",
+        "Read the included settings workflow.",
+        "Follow the included complete-milestone workflow end-to-end after loading the execution-context files above.",
+        "Follow the included compare-experiment workflow.",
+        "Follow the included dimensional-analysis workflow.",
+        "Follow the included review-knowledge workflow exactly.",
+        "Execute the included derive-equation workflow end-to-end.",
+        "Execute the autonomous workflow end-to-end.",
+        "Execute the included export workflow end-to-end.",
+        "Follow the included explain workflow end-to-end.",
+        "Follow list-phase-assumptions.md workflow:",
+    ):
+        content = content.replace(phrase, replacement)
+    return content
+
+
 def _strip_top_level_markdown_section(body: str, *, heading: str) -> str:
     """Remove one top-level markdown section when present."""
 
@@ -781,7 +1325,7 @@ def _split_leading_model_visible_sections(body: str) -> tuple[str, str]:
 
     working = body.lstrip("\r\n")
     prefixes: list[str] = []
-    allowed_headings = ("Agent Requirements", "Command Requirements", "Review Contract")
+    allowed_headings = ("Agent Requirements", "Agent Role Kits", "Command Requirements", "Review Contract")
 
     while True:
         heading = next((candidate for candidate in allowed_headings if working.startswith(f"## {candidate}")), None)
@@ -838,6 +1382,7 @@ def _inject_command_visibility_sections_from_frontmatter(content: str) -> str:
             r"^artifact_write_authority:\s*(?:.*)$",
             r"^shared_state_authority:\s*(?:.*)$",
             r"^commit_authority:\s*(?:.*)$",
+            r"^role_kits:\s*(?:.*)$",
         )
     )
     has_command_only_frontmatter = any(
@@ -874,6 +1419,10 @@ def _inject_command_visibility_sections_from_frontmatter(content: str) -> str:
             heading="Command Requirements",
         )
     else:
+        body_without_constraints = _strip_top_level_markdown_section(
+            body_without_constraints,
+            heading="Agent Role Kits",
+        )
         body_without_constraints = _strip_top_level_markdown_section(
             body_without_constraints,
             heading="Agent Requirements",
@@ -1291,6 +1840,8 @@ def compile_markdown_for_runtime(
     Runtime-owned container conversions such as TOML command wrapping,
     SKILL frontmatter, or flat-command rendering stay in the adapter.
     """
+    content = strip_display_only_command_help_frontmatter(content)
+
     if src_root is not None and not get_runtime_descriptor(runtime).native_include_support:
         content = expand_at_includes(
             content,
@@ -1299,6 +1850,8 @@ def compile_markdown_for_runtime(
             runtime=runtime,
             install_scope=install_scope,
         )
+
+    content = _inject_command_visibility_sections_from_frontmatter(content)
 
     content = replace_placeholders(
         content,
@@ -1320,10 +1873,47 @@ def compile_markdown_for_runtime(
             explicit_target=explicit_target,
         )
 
-    content = _inject_command_visibility_sections_from_frontmatter(content)
     if inject_skeptical_rigor_guardrails:
         content = _inject_skeptical_rigor_guardrails_section(content)
     return content
+
+
+def compile_command_markdown_for_runtime(
+    content: str,
+    *,
+    runtime: str,
+    command_name: str,
+    path_prefix: str,
+    install_scope: str | None = None,
+    src_root: str | Path | None = None,
+    workflow_target_dir: Path | None = None,
+    explicit_target: bool = False,
+    bridge_command: str | None = None,
+    inject_skeptical_rigor_guardrails: bool = True,
+) -> str:
+    """Compile command markdown, using compact staged shims for non-native runtimes."""
+    staged = compact_staged_command_shim_for_runtime(
+        content,
+        runtime=runtime,
+        command_name=command_name,
+        src_root=src_root,
+        path_prefix=path_prefix,
+        bridge_command=bridge_command,
+        surface_kind="command",
+    )
+    if staged is not None:
+        content = staged
+
+    return compile_markdown_for_runtime(
+        content,
+        runtime=runtime,
+        path_prefix=path_prefix,
+        install_scope=install_scope,
+        src_root=src_root,
+        workflow_target_dir=workflow_target_dir,
+        explicit_target=explicit_target,
+        inject_skeptical_rigor_guardrails=inject_skeptical_rigor_guardrails,
+    )
 
 
 def project_markdown_for_runtime(
@@ -1347,18 +1937,6 @@ def project_markdown_for_runtime(
     infrastructure stays agnostic about per-runtime surface formats.
     """
 
-    compiled = compile_markdown_for_runtime(
-        content,
-        runtime=runtime,
-        path_prefix=path_prefix,
-        install_scope=install_scope,
-        src_root=src_root,
-        workflow_target_dir=workflow_target_dir,
-        explicit_target=explicit_target,
-        protect_agent_prompt_body=protect_agent_prompt_body,
-        inject_skeptical_rigor_guardrails=inject_skeptical_rigor_guardrails,
-    )
-
     if surface_kind not in {"agent", "command"}:
         raise ValueError("surface_kind must be 'agent' or 'command'")
 
@@ -1379,6 +1957,29 @@ def project_markdown_for_runtime(
             is_global=_normalize_install_scope_flag(install_scope) == "--global",
             explicit_target=explicit_target,
         )
+        staged = compact_staged_command_shim_for_runtime(
+            content,
+            runtime=runtime,
+            command_name=command_name,
+            src_root=src_root,
+            path_prefix=path_prefix,
+            bridge_command=bridge_command,
+            surface_kind=surface_kind,
+        )
+        if staged is not None:
+            content = staged
+
+    compiled = compile_markdown_for_runtime(
+        content,
+        runtime=runtime,
+        path_prefix=path_prefix,
+        install_scope=install_scope,
+        src_root=src_root,
+        workflow_target_dir=workflow_target_dir,
+        explicit_target=explicit_target,
+        protect_agent_prompt_body=protect_agent_prompt_body,
+        inject_skeptical_rigor_guardrails=inject_skeptical_rigor_guardrails,
+    )
 
     return adapter.project_markdown_surface(
         compiled,
@@ -1670,6 +2271,7 @@ def _copy_dir_contents(
             )
         elif entry.suffix == ".md":
             content = entry.read_text(encoding="utf-8")
+            content = _inject_command_visibility_sections_from_frontmatter(content)
             active_transform = markdown_transform or _default_markdown_transform(runtime)
             content = active_transform(content, path_prefix, install_scope=install_scope)
             if workflow_paths:
@@ -1680,7 +2282,6 @@ def _copy_dir_contents(
                     install_scope=install_scope,
                     explicit_target=explicit_target,
                 )
-            content = _inject_command_visibility_sections_from_frontmatter(content)
             if inject_skeptical_rigor_guardrails:
                 content = _inject_skeptical_rigor_guardrails_section(content)
             dest.write_text(content, encoding="utf-8")
@@ -2390,6 +2991,194 @@ def _is_hook_command_for_script(
         if path.name == hook_filename and path.parent.name == "hooks":
             return True
 
+    return False
+
+
+def remove_managed_statusline(
+    settings: dict[str, object],
+    *,
+    target_dir: Path,
+    config_dir_name: str | None,
+) -> bool:
+    """Remove a statusline command only when it points at the managed hook."""
+    status_line = settings.get("statusLine")
+    if not isinstance(status_line, dict):
+        return False
+    command = status_line.get("command", "")
+    if not _is_hook_command_for_script(
+        command,
+        HOOK_SCRIPTS["statusline"],
+        target_dir=target_dir,
+        config_dir_name=config_dir_name,
+    ):
+        return False
+    del settings["statusLine"]
+    return True
+
+
+def _is_managed_session_start_hook(
+    hook: object,
+    *,
+    managed_hook_filenames: tuple[str, ...],
+    target_dir: Path,
+    config_dir_name: str | None,
+) -> bool:
+    if not isinstance(hook, dict):
+        return False
+    command = hook.get("command")
+    return any(
+        _is_hook_command_for_script(
+            command,
+            hook_filename,
+            target_dir=target_dir,
+            config_dir_name=config_dir_name,
+        )
+        for hook_filename in managed_hook_filenames
+    )
+
+
+def remove_session_start_managed_hooks(
+    settings: dict[str, object],
+    *,
+    managed_hook_filenames: Iterable[str],
+    target_dir: Path,
+    config_dir_name: str | None,
+) -> tuple[int, bool]:
+    """Remove managed SessionStart hook items while preserving mixed entries.
+
+    Returns ``(removed_hook_count, modified)``. The helper also prunes an empty
+    ``SessionStart`` list and empty ``hooks`` object after managed hooks are
+    removed.
+    """
+    hook_filenames = tuple(managed_hook_filenames)
+    if not hook_filenames:
+        return 0, False
+
+    hooks = settings.get("hooks")
+    if not isinstance(hooks, dict):
+        return 0, False
+    session_start = hooks.get("SessionStart")
+    if not isinstance(session_start, list):
+        return 0, False
+
+    removed_count = 0
+    modified = False
+    normalized_session_start: list[object] = []
+
+    for entry in session_start:
+        if not isinstance(entry, dict):
+            normalized_session_start.append(entry)
+            continue
+        entry_hooks = entry.get("hooks")
+        if not isinstance(entry_hooks, list):
+            normalized_session_start.append(entry)
+            continue
+
+        normalized_hooks: list[object] = []
+        entry_removed_count = 0
+        for hook in entry_hooks:
+            if _is_managed_session_start_hook(
+                hook,
+                managed_hook_filenames=hook_filenames,
+                target_dir=target_dir,
+                config_dir_name=config_dir_name,
+            ):
+                removed_count += 1
+                entry_removed_count += 1
+                modified = True
+                continue
+            normalized_hooks.append(hook)
+
+        if not entry_removed_count:
+            normalized_session_start.append(entry)
+            continue
+        if not normalized_hooks:
+            continue
+        normalized_entry = dict(entry)
+        normalized_entry["hooks"] = normalized_hooks
+        normalized_session_start.append(normalized_entry)
+
+    if normalized_session_start:
+        if modified:
+            hooks["SessionStart"] = normalized_session_start
+    elif "SessionStart" in hooks:
+        del hooks["SessionStart"]
+        modified = True
+
+    if not hooks:
+        del settings["hooks"]
+        modified = True
+
+    return removed_count, modified
+
+
+def remove_managed_mcp_server_keys(
+    settings_or_config: dict[str, object],
+    *,
+    managed_keys: AbstractSet[str],
+) -> tuple[str, ...]:
+    """Remove exact managed ``mcpServers`` keys from a parsed JSON object."""
+    mcp_servers = settings_or_config.get("mcpServers")
+    if not isinstance(mcp_servers, dict):
+        return ()
+
+    removed_keys = tuple(key for key in list(mcp_servers) if isinstance(key, str) and key in managed_keys)
+    if not removed_keys:
+        return ()
+
+    for key in removed_keys:
+        del mcp_servers[key]
+    if not mcp_servers:
+        del settings_or_config["mcpServers"]
+    return removed_keys
+
+
+def cleanup_settings_json_managed_entries(
+    settings: dict[str, object],
+    *,
+    target_dir: Path,
+    config_dir_name: str | None,
+    session_start_hook_filenames: Iterable[str],
+    mcp_server_keys: AbstractSet[str],
+    remove_statusline: bool = True,
+) -> SettingsCleanupResult:
+    """Remove runtime-neutral managed settings entries from a parsed object."""
+    removed_statusline = False
+    if remove_statusline:
+        removed_statusline = remove_managed_statusline(
+            settings,
+            target_dir=target_dir,
+            config_dir_name=config_dir_name,
+        )
+
+    removed_session_start_hooks, session_start_modified = remove_session_start_managed_hooks(
+        settings,
+        managed_hook_filenames=session_start_hook_filenames,
+        target_dir=target_dir,
+        config_dir_name=config_dir_name,
+    )
+    removed_mcp_server_keys = remove_managed_mcp_server_keys(settings, managed_keys=mcp_server_keys)
+    return SettingsCleanupResult(
+        modified=removed_statusline or session_start_modified or bool(removed_mcp_server_keys),
+        removed_statusline=removed_statusline,
+        removed_session_start_hooks=removed_session_start_hooks,
+        removed_mcp_server_keys=removed_mcp_server_keys,
+    )
+
+
+def write_settings_if_modified_and_prune_empty(
+    settings_path: str | Path,
+    settings: dict[str, object],
+    *,
+    modified: bool,
+    prune_empty: bool,
+) -> bool:
+    """Write settings when modified, then optionally prune an empty JSON object."""
+    path = Path(settings_path)
+    if modified:
+        write_settings(path, settings)
+    if prune_empty:
+        return remove_empty_json_object_file(path)
     return False
 
 

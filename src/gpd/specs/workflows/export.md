@@ -21,7 +21,7 @@ file_read:
 ROADMAP=$(gpd --raw roadmap analyze)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd roadmap analyze failed: $ROADMAP"
-  # STOP — display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 ```
 
@@ -214,142 +214,29 @@ Structure:
 <step name="generate_latex">
 **If format is `latex` or `all`:**
 
-**Primary path (pandoc available).** Assemble the export as a single markdown
-document and convert it with pandoc. This avoids the syntax errors that arise
-when an agent writes raw LaTeX (unescaped `_`, brace mismatches, bad
-environments) and lets the journal template system produce the final scaffold.
+Prefer pandoc when available. Probe with
+`from gpd.utils.pandoc import detect_pandoc`; when `status.available and
+status.meets_minimum`, assemble `exports/results.md` with standard paper
+sections and math in `$...$` / `$$...$$`, then convert with
+`markdown_to_latex_fragment(markdown_text)`. The helper automatically uses
+`pandoc-crossref` when installed; pass `external_filters=[]` only when the user
+explicitly opts out.
 
-1. Probe pandoc availability:
+Write the fragment into the requested journal template through
+`gpd.mcp.paper.template_registry.render_paper()` when a target journal is known.
+Write the rendered template output to `exports/results.tex`.
+Otherwise create `exports/results.tex` as a minimal `article` document with
+`amsmath`, `amssymb`, `amsthm`, `physics`, `hyperref`, `booktabs`, `graphicx`,
+`natbib`, a `\tightlist` definition, the pandoc-produced fragment, and
+`\bibliographystyle{plainnat}` plus `\bibliography{results}`. This avoids
+raw-LaTeX authoring errors while keeping exported `.tex` compilable.
 
-   ```python
-   from gpd.utils.pandoc import detect_pandoc
-   status = detect_pandoc()
-   use_pandoc = status.available and status.meets_minimum
-   ```
-
-2. Assemble an intermediate markdown document at `exports/results.md` with
-   standard section headings (Introduction, Methods, Results, Discussion,
-   Conclusion). Use markdown for prose; keep math in `$...$` / `$$...$$`
-   blocks.
-
-3. Convert markdown to a LaTeX fragment:
-
-   ```python
-   from gpd.utils.pandoc import markdown_to_latex_fragment
-
-   fragment = markdown_to_latex_fragment(markdown_text)
-   ```
-
-   If `pandoc-crossref` is installed on the host (visible in
-   `status.installed_filters`), `markdown_to_latex_fragment` prepends it
-   to the filter chain automatically so `{#fig:foo}` / `@fig:foo` style
-   refs produce numbered LaTeX cross-references. Pass
-   `external_filters=[]` to opt out.
-
-4. Write the fragment into a journal template. When a target journal is
-   specified, use `gpd.mcp.paper.template_registry.render_paper()` with a
-   `PaperConfig` whose `Section.content` holds the LaTeX fragment. Otherwise
-   emit a standalone `article`-class document wrapping the fragment:
-
-   ```latex
-   \documentclass[12pt,a4paper]{article}
-   \usepackage{amsmath,amssymb,amsthm}
-   \usepackage{physics}
-   \usepackage{hyperref}
-   \usepackage{booktabs}
-   \usepackage{graphicx}
-   \usepackage{natbib}  % \citet / \citep from pandoc's --natbib citation output
-   % Pandoc emits \tightlist for compact bullet lists; define it so the
-   % fragment compiles under any document class.
-   \providecommand{\tightlist}{\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
-   \title{ {project_title} }
-   \author{[Author Name]}
-   \date{\today}
-   \begin{document}
-   \maketitle
-   % -- pandoc-produced fragment --
-   { fragment }
-   % --
-   % Use a natbib-compatible bibliography style. plain.bst does NOT know
-   % about natbib's \citet/\citep -- textual cites render as "(author?)"
-   % in the PDF. plainnat is the drop-in natbib-compatible replacement.
-   \bibliographystyle{plainnat}
-   \bibliography{results}
-   \begin{center}
-   {\footnotesize\textit{Generated with Get Physics Done (PSI)}}
-   \end{center}
-   \end{document}
-   ```
-
-   Write the result to `exports/results.tex`.
-
-**Fallback path (pandoc missing or below minimum version).** When
-`detect_pandoc()` reports unavailable, fall back to the legacy raw-LaTeX
-scaffold below. `gpd health` will have already warned the user; this keeps
-`gpd:export` functional either way.
-
-Write `exports/results.tex`:
-
-Structure:
-
-```latex
-\documentclass[12pt,a4paper]{article}
-\usepackage{amsmath,amssymb,amsthm}
-\usepackage{physics}
-\usepackage{hyperref}
-\usepackage{booktabs}
-\usepackage{graphicx}
-
-\title{{project_title}}
-\author{[Author Name]}
-\date{\today}
-
-\begin{document}
-\maketitle
-
-\begin{abstract}
-{Project description from PROJECT.md -- placeholder for user to refine}
-\end{abstract}
-
-\section{Introduction}
-% Generated scaffold -- fill in motivation and context
-
-\section{Methods}
-% Generated from phase descriptions and approaches
-
-{For each completed phase:}
-\subsection{Phase {N}: {Name}}
-{One-liner description}
-
-\subsubsection{Key Results}
-\begin{itemize}
-{key results as \item entries}
-\end{itemize}
-
-{Equations as \begin{equation} blocks}
-
-\section{Results}
-% Aggregate key findings across all phases
-
-\section{Discussion}
-% Placeholder for interpretation
-
-\section{Conclusion}
-% Placeholder for summary
-
-\appendix
-{For each phase with detailed derivations:}
-\section{Phase {N}: {Name} -- Derivation Details}
-{Detailed derivation content from SUMMARY.md}
-
-\begin{center}
-{\footnotesize\textit{Generated with Get Physics Done (PSI)}}
-\end{center}
-
-\end{document}
-```
-
-Also write `exports/results.bib` if any citations found in SUMMARY files.
+Fallback when pandoc is unavailable or below minimum: create the legacy
+article-class scaffold directly in `exports/results.tex` with abstract,
+Introduction, Methods, per-phase subsections, Results, Discussion, Conclusion,
+appendix derivation sections, and the standard GPD footer. Also write
+`exports/results.bib` if citations are found in SUMMARY files.
+Exact LaTeX footer text: `{\footnotesize\textit{Generated with Get Physics Done (PSI)}}`.
 </step>
 
 <step name="generate_zip">

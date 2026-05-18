@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 VERIFICATION_SERVER_DESCRIPTION_INTRO = (
-    "GPD physics verification checks. Tools for running contract-aware checks, "
-    "dimensional analysis, domain and bundle-specific checklists, limiting case checks, "
-    "symmetry verification, and coverage gap analysis."
+    "GPD physics verification support tools. They expose check metadata, static triage, "
+    "contract-aware check execution, dimensional-analysis helpers, domain and bundle-specific "
+    "checklists, limiting-case prompts, symmetry-check prompts, and coverage gap analysis; "
+    "MCP results do not by themselves grant final scientific verification status."
 )
 VERIFICATION_CONTRACT_SURFACE_SUMMARY_TEXT = (
     "Contract-aware requests are closed and schema-driven; full rules live on the `contract` input schema. "

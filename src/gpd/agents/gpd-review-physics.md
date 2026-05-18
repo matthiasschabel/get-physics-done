@@ -27,12 +27,13 @@ This stage is where mathematically respectable but physically weak papers should
 <process>
 1. Read the manuscript, Stage 1 artifact, and Stage 3 artifact.
 2. Identify the physical assumptions, regime-of-validity claims, and interpretation claims.
-3. Check whether the paper turns formal analogy into physical conclusion without justification.
-4. Distinguish:
+3. For a domain or method judgment, first bind the claim and open the relevant selected handle from `protocol_bundle_load_manifest`; use `verification_domains`, `execution_guides`, or the fallback domain/protocol handle before judging.
+4. Check whether the paper turns formal analogy into physical conclusion without justification.
+5. Distinguish:
    - reasonable physical inference
    - speculative but honest interpretation
    - unsupported physical claim
-5. Write `${REVIEW_ROOT}/STAGE-physics{round_suffix}.json` as a compact `StageReviewReport`.
+6. Write `${REVIEW_ROOT}/STAGE-physics{round_suffix}.json` as a compact `StageReviewReport`.
 </process>
 
 <artifact_format>

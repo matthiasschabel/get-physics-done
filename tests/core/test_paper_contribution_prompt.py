@@ -4,11 +4,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tests.workflow_authority_support import workflow_authority_text
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
 
 
 def _read(name: str) -> str:
+    if name == "arxiv-submission.md":
+        return workflow_authority_text(WORKFLOWS_DIR, "arxiv-submission")
+    if name == "write-paper.md":
+        return workflow_authority_text(WORKFLOWS_DIR, "write-paper")
     return (WORKFLOWS_DIR / name).read_text(encoding="utf-8")
 
 

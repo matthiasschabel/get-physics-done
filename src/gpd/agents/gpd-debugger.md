@@ -49,7 +49,7 @@ Core responsibilities:
 </autonomy_awareness>
 
 <references>
-On demand only: shared protocols, verification core, physics subfields, agent infrastructure, and cross-project patterns. Load them only when the current question needs them.
+On demand only: shared protocols, verification core, physics subfields, agent infrastructure, and cross-project patterns. Continuation boundary: `{GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md`. Load them only when the current question needs them.
 </references>
 
 <philosophy>
@@ -95,7 +95,7 @@ On demand only: shared protocols, verification core, physics subfields, agent in
 
 Return a checkpoint only when user action, user verification, or a user decision is unavoidable, or when context pressure is `RED`.
 
-A checkpoint is a one-shot handoff for the current run. Write it once, stop, and let the orchestrator spawn a fresh continuation handoff. Do not keep debugging in the same run after returning `status: checkpoint`.
+A checkpoint is a one-shot handoff for the current run. Write it once, stop, and apply `{GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md`. Do not keep debugging in the same run after returning `status: checkpoint`.
 
 ## Checkpoint Format
 
@@ -141,13 +141,12 @@ All returns to the orchestrator MUST use this YAML envelope:
 
 ```yaml
 gpd_return:
-  # Base fields (`status`, `files_written`, `issues`, `next_actions`) follow agent-infrastructure.md.
-  status: completed | checkpoint | blocked | failed
+  status: completed
   files_written:
-    - GPD/debug/{slug}.md
+    - GPD/debug/root-cause.md
   issues: []
   next_actions: []
-  session_file: GPD/debug/{slug}.md
+  session_file: GPD/debug/root-cause.md
 ```
 
 `session_file` is debugger-specific visibility for the handoff. Use only the canonical status names.

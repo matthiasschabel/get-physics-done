@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from gpd import registry
+from tests.assertion_taxonomy_support import assert_prompt_contracts, machine_exact, semantic_concept
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COMMAND_DOC = REPO_ROOT / "src/gpd/commands/derive-equation.md"
@@ -41,8 +42,24 @@ def test_derive_equation_docs_keep_current_workspace_outputs_honest() -> None:
     command_text = COMMAND_DOC.read_text(encoding="utf-8")
     workflow_text = WORKFLOW_DOC.read_text(encoding="utf-8")
 
-    assert "Outside a project, an explicit derivation target is required and empty standalone launches stay blocked." in command_text
-    assert "Keep standalone/current-workspace durable derivation artifacts under `GPD/analysis/` rooted at the invoking workspace." in command_text
-    assert "Only runs with authoritative phase context may additionally write sibling phase artifacts and persist project registry state." in command_text
-    assert "Do not synthesize a phase-local output path from an ancestor project root or an unverified phase guess." in workflow_text
-    assert "Current-workspace fallback (standalone or no authoritative phase context)" in workflow_text
+    assert_prompt_contracts(
+        command_text,
+        machine_exact("derive-equation managed output path", "GPD/analysis/"),
+        *semantic_concept(
+            "derive-equation current workspace command policy",
+            required=(
+                "Outside a project, an explicit derivation target is required and empty standalone launches stay blocked.",
+                "Only runs with authoritative phase context may additionally write sibling phase artifacts and persist project registry state.",
+            ),
+        ),
+    )
+    assert_prompt_contracts(
+        workflow_text,
+        *semantic_concept(
+            "derive-equation current workspace fallback",
+            required=(
+                "Do not synthesize a phase-local output path from an ancestor project root or an unverified phase guess.",
+                "Current-workspace fallback (standalone or no authoritative phase context)",
+            ),
+        ),
+    )

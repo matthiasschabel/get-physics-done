@@ -18,8 +18,6 @@ import re
 from pathlib import Path
 
 from gpd.utils.pandoc import (
-    PandocExecutionError,
-    PandocNotAvailable,
     PandocStatus,
     detect_pandoc,
     markdown_to_latex_fragment,

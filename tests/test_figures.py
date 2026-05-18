@@ -18,6 +18,7 @@ from gpd.mcp.paper.figures import (
     prepare_figures,
 )
 from gpd.mcp.paper.models import FigureRef
+from tests.assertion_taxonomy_support import assert_prompt_contracts, machine_exact
 
 # ---- Format detection ----
 
@@ -161,8 +162,16 @@ class TestNormalization:
             normalize_figure(src, out)
 
         message = str(exc_info.value)
-        assert "SVG conversion failed after CairoSVG raised ValueError: invalid SVG content" in message
-        assert "Inkscape fallback failed: inkscape not found" in message
+        assert_prompt_contracts(
+            message,
+            machine_exact(
+                "svg conversion failure preserves primary and fallback causes",
+                (
+                    "SVG conversion failed after CairoSVG raised ValueError: invalid SVG content",
+                    "Inkscape fallback failed: inkscape not found",
+                ),
+            ),
+        )
         assert exc_info.value.__cause__ is cairo_error
 
     def test_normalize_svg_reports_inkscape_stderr_and_cleans_partial_output(self, tmp_path, monkeypatch):
@@ -233,8 +242,16 @@ class TestNormalization:
             normalize_figure(src, out)
 
         message = str(exc_info.value)
-        assert "SVG conversion failed after CairoSVG raised ImportError: missing libcairo runtime" in message
-        assert "Inkscape fallback failed: inkscape not found" in message
+        assert_prompt_contracts(
+            message,
+            machine_exact(
+                "svg import failure preserves primary and fallback causes",
+                (
+                    "SVG conversion failed after CairoSVG raised ImportError: missing libcairo runtime",
+                    "Inkscape fallback failed: inkscape not found",
+                ),
+            ),
+        )
         assert exc_info.value.__cause__ is cairo_error
 
 

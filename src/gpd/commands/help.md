@@ -3,31 +3,38 @@ name: gpd:help
 description: Show available GPD commands and usage guide
 argument-hint: "[--all | --command <name>]"
 context_mode: global
+help:
+  group: Starter commands
+  order: 10
+  compact_description: Show the quick start or command index
+  display_signature: gpd:help
 ---
 
 
 <objective>
-Display GPD help by delegating to the workflow-owned help surface.
+Display GPD help by delegating to the renderer-backed local CLI help bridge, with the workflow-owned help surface and generated detail reference as marker fallbacks.
 
-Return only reference content. Do not add project-specific analysis, git status,
-next-step suggestions, or commentary beyond the requested reference extract.
+Return only reference content. Do not add project analysis, git status, next steps, or commentary.
 </objective>
 
-Shared wrapper rule for every extract below: the loaded workflow help file is the authority. Return the requested section without rewriting, summarizing, or inventing alternate wording.
+Shared wrapper rule: use the bridge first; fallback extracts preserve workflow marker text without rewriting or invented wording.
+Use the workflow-owned help surface as the marker fallback when the bridge is unavailable.
 
-Use the workflow-owned stable markers as the extraction boundaries:
+Bridge command rule: run local CLI raw help for the requested mode, parse JSON, and return renderer-backed markdown/fields.
 
+- `@{GPD_INSTALL_DIR}/workflows/help.md` - Fallback marker source path; do not inline it here.
+- `@{GPD_INSTALL_DIR}/references/help/detailed-command-reference.md` - Fallback full detail source path for `--command <name>`; do not inline it here.
+
+Use the workflow-owned stable markers as the extraction boundaries for fallback mode:
+
+- `<!-- gpd-help:default:start -->` / `<!-- gpd-help:default:end -->`
 - `<!-- gpd-help:quick-start:start -->` / `<!-- gpd-help:quick-start:end -->`
 - `<!-- gpd-help:command-index:start -->` / `<!-- gpd-help:command-index:end -->`
 - `<!-- gpd-help:detailed-command-reference:start -->` / `<!-- gpd-help:detailed-command-reference:end -->`
 
 Return marker contents only; never print the HTML marker comments themselves. Visible headings inside marker ranges are output labels only.
 
-Runtime command-surface note: `<current-help-command>` below means the concrete command spelling that invoked this help wrapper. Replace it before output; never print the placeholder or adapter-specific examples.
-
-<execution_context>
-@{GPD_INSTALL_DIR}/workflows/help.md
-</execution_context>
+Runtime command-surface note: refer to the command that invoked this wrapper as "this help command"; do not print adapter-specific examples.
 
 <process>
 
@@ -41,31 +48,71 @@ Check whether the user passed `--command <name>` or `--all`.
 
 ## Step 2: Quick Start Extract (Default Output)
 
-Output ONLY this extract from the workflow-owned reference and then STOP:
+Preferred bridge path:
 
-- Extract from `<!-- gpd-help:quick-start:start -->` through `<!-- gpd-help:quick-start:end -->`.
+```bash
+gpd --raw help
+```
+
+- Parse JSON field `quick_start.markdown`.
+- Output ONLY that markdown.
+- Append this one wrapper-owned line: `Run this help command with --all for the compact command index.`
+
+Workflow-owned reference fallback:
+
+- Extract from `<!-- gpd-help:default:start -->` through `<!-- gpd-help:default:end -->`.
 - Exclude the marker comment lines themselves.
-- Do not output adapter-specific examples; replace `<current-help-command>` before output.
-- Append this one wrapper-owned line: `Run <current-help-command> --all for the compact command index.`
+- Do not output adapter-specific examples.
+- Append this one wrapper-owned line: `Run this help command with --all for the compact command index.`
+
+Then STOP.
 
 ## Step 3: Compact Command Index (--all)
 
-Output ONLY this extract from the workflow-owned reference and then STOP:
+Preferred bridge path:
+
+```bash
+gpd --raw help --all
+```
+
+- Parse JSON fields `quick_start.markdown`, `command_index_markdown`, and `detailed_help_follow_up`.
+- Output the quick-start markdown, then the command-index markdown.
+- Replace the generic detailed-help follow-up with this one wrapper-owned line: `Run this help command with --command <name> for detailed help on one command.`
+
+Workflow-owned reference fallback:
 
 - Extract from `<!-- gpd-help:quick-start:start -->` through `<!-- gpd-help:command-index:end -->`.
 - Exclude the marker comment lines themselves.
-- Do not output adapter-specific examples; replace `<current-help-command>` before output.
-- Append this one wrapper-owned line: `Run <current-help-command> --command <name> for detailed help on one command.`
+- Do not output adapter-specific examples.
+- Append this one wrapper-owned line: `Run this help command with --command <name> for detailed help on one command.`
+
+Then STOP.
 
 ## Step 4: Single Command Detail Extract (--command <name>)
 
-- Parse the command name from `$ARGUMENTS` after `--command`.
-- Accept either a bare command name such as `plan-phase`, a canonical runtime command such as `gpd:plan-phase`, or the current runtime's native command label.
-- If the lookup includes inline flags or arguments such as `gpd:new-project --minimal` or `new-project --minimal`, parse the inline arguments separately and normalize the lookup to the base command block that documents those flags or arguments.
-- Normalize the lookup to the matching canonical runtime command inside the workflow-owned detailed-command marker range (`<!-- gpd-help:detailed-command-reference:start -->` / `<!-- gpd-help:detailed-command-reference:end -->`), whose visible heading is `## Detailed Command Reference`.
+- Parse the command name after `--command`.
+- Accept bare names, canonical runtime commands, and the current runtime's native command label.
+- If lookup includes inline flags or arguments such as `gpd:new-project --minimal`, split them and normalize to the base command block.
+
+Preferred bridge path:
+
+```bash
+gpd --raw help --command <name>
+```
+
+- Pass through the normalized command name after `--command`.
+- If the bridge returns `ok: false` with `error: "unknown_command"`, output this one line and STOP: `Unknown command. Run this help command with --all for the compact command index.`
+- If the bridge returns `detail_markdown`, output that renderer-owned markdown without rewriting it.
+- Otherwise render a compact detail block from `canonical_command`, `description`, `argument_hint`, `context_mode`, `project_reentry_capable`, `requires`, and `allowed_tools`.
+- Include command-context preflight fields when present, including the read-only runtime-owned permission snapshot / runtime-owned permission alignment metadata projected from canonical command policy.
+
+Workflow-owned reference fallback:
+
+- Prefer the generated detail reference file. Normalize to the matching canonical command inside its detailed-command marker range (`<!-- gpd-help:detailed-command-reference:start -->` / `<!-- gpd-help:detailed-command-reference:end -->`), whose visible heading is `## Detailed Command Reference`.
+- If the generated detail reference file is unavailable, use the root workflow help marker with the same detailed-command marker range as a compact fallback slice.
 - Output ONLY the smallest matching detailed command block.
 - Include the nearest containing section heading (for example `### Phase Planning`) plus the matching command block.
 - Include matching `Flags:`, `Usage:`, and `Result:` lines that belong to that command when present.
 - Stop before the next command block begins.
-- If no command matches after normalization, output this one line and STOP after replacing `<current-help-command>`: `Unknown command. Run <current-help-command> --all for the compact command index.`
+- If no command matches after normalization, output this one line and STOP: `Unknown command. Run this help command with --all for the compact command index.`
 </process>

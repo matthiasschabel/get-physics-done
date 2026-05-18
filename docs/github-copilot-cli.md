@@ -33,27 +33,17 @@ If `gh copilot` is missing, install the GitHub CLI first with:
 gh extension install github/gh-copilot
 ```
 
-## 2) Install GPD for GitHub Copilot CLI
+## 2) Install, start, and use GPD
 
-Use this exact command for a local install:
+<!-- gpd-public-surface:runtime-quickstart-copilot-cli:start -->
+From your normal terminal:
 
 ```bash
 npx -y get-physics-done --copilot --local
-```
-
-## 3) Start GitHub Copilot CLI
-
-From the same project folder:
-
-```bash
 gh copilot
 ```
 
-If you are not signed in yet, follow the GitHub authentication prompts.
-
-## 4) First launch / help / start / tour
-
-Type these inside GitHub Copilot CLI, not in your normal terminal:
+Inside GitHub Copilot CLI:
 
 ```text
 /gpd-help
@@ -64,30 +54,16 @@ Type these inside GitHub Copilot CLI, not in your normal terminal:
 /gpd-resume-work
 ```
 
-If you are not sure what this folder is yet, start with `/gpd-start`.
-If you want a read-only walkthrough first, use `/gpd-tour`.
+Suggested order for beginners: `/gpd-help`, `/gpd-start`, `/gpd-tour`, then either `/gpd-new-project --minimal`, `/gpd-map-research`, or `/gpd-resume-work`.
 
-Suggested order for beginners: `/gpd-help`, `/gpd-start`, `/gpd-tour`, then
-either `/gpd-new-project --minimal`, `/gpd-map-research`, or
-`/gpd-resume-work`.
+Return to work from your normal terminal with `gpd resume` or `gpd resume --recent`, then reopen `gh copilot` in the right folder and run `/gpd-resume-work`.
 
-## Return to work
+After your first successful start or later, use `/gpd-settings` to review autonomy, workflow defaults, model-cost posture, runtime permission sync, and preset/tier overrides. The safest starting point is `review` plus runtime defaults. Favor scientific rigor and explicit uncertainty over agreement-seeking, and keep missing evidence or artifacts explicit instead of inventing them.
+<!-- gpd-public-surface:runtime-quickstart-copilot-cli:end -->
 
-- Use `/gpd-resume-work` when this folder already has GPD state and you want to
-  continue.
-- If you are not sure whether this folder already has GPD state, use
-  `/gpd-start` first.
-- If you need to reopen the project from your normal terminal first, use
-  `gpd resume` or `gpd resume --recent`, then open the right folder and run
-  `/gpd-resume-work`.
+If you are not signed in yet, follow the GitHub authentication prompts.
 
-## Settings
-
-After your first successful start or later, use `/gpd-settings` to review
-autonomy, workflow defaults, and model-cost posture. Use `/gpd-set-tier-models`
-when you only want to pin concrete `tier-1`, `tier-2`, and `tier-3` model ids.
-
-## 5) What success looks like
+## What success looks like
 
 - `gh copilot --help` works.
 - GPD installation finishes without errors.
@@ -96,7 +72,7 @@ when you only want to pin concrete `tier-1`, `tier-2`, and `tier-3` model ids.
 - `/gpd-tour` gives a read-only walkthrough of the main commands.
 - `/gpd-new-project --minimal`, `/gpd-map-research`, or `/gpd-resume-work` starts the right GPD flow for new work, an existing research folder, or an existing project.
 
-## 6) Quick troubleshooting
+## Quick troubleshooting
 
 - Missing `gh copilot`: install the GitHub CLI and the Copilot extension first, then reopen your terminal.
 - Missing `/gpd-...` commands: rerun the install command above, then restart GitHub Copilot CLI.

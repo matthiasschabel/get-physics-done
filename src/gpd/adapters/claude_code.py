@@ -7,31 +7,32 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from gpd.adapters.base import RuntimeAdapter
+from gpd.adapters.command_projection import rewrite_projection_shell_bridge
 from gpd.adapters.install_utils import (
-    DEFAULT_RUNTIME_BRIDGE_SHELL_FENCE_LANGUAGES,
     HOOK_SCRIPTS,
     MANIFEST_NAME,
-    _is_hook_command_for_script,
     build_hook_command,
+    build_runtime_managed_mcp_servers,
+    cleanup_settings_json_managed_entries,
     compile_markdown_for_runtime,
     convert_tool_references_in_body,
     copy_with_path_replacement,
     ensure_update_hook,
-    hook_python_interpreter,
     parse_jsonc,
     prune_empty_ancestors,
     read_settings,
     remove_empty_json_object_file,
+    remove_managed_mcp_server_keys,
     remove_stale_agents,
-    rewrite_gpd_cli_invocations_to_runtime_bridge,
+    runtime_managed_mcp_server_keys,
     translate_frontmatter_tool_names,
     verify_installed,
     write_settings,
+    write_settings_if_modified_and_prune_empty,
 )
 from gpd.adapters.install_utils import (
     finish_install as _finish_install,
 )
-from gpd.mcp import managed_integrations as _managed_integrations
 
 logger = logging.getLogger(__name__)
 
@@ -257,8 +258,8 @@ class ClaudeCodeAdapter(RuntimeAdapter):
             raise RuntimeError("Claude Code settings.json is malformed; refusing to overwrite it during install.")
         self._preflight_project_integrations_config(target_dir, is_global)
 
-        project_cwd = None if is_global or getattr(self, "_install_explicit_target", False) else target_dir.parent
-        mcp_servers = _build_managed_mcp_servers(cwd=project_cwd)
+        project_cwd = self._project_cwd_for_runtime_config(target_dir, is_global)
+        mcp_servers = build_runtime_managed_mcp_servers(cwd=project_cwd)
         if not mcp_servers:
             return
 
@@ -323,8 +324,8 @@ class ClaudeCodeAdapter(RuntimeAdapter):
 
         from gpd.mcp.builtin_servers import merge_managed_mcp_servers
 
-        project_cwd = None if is_global or getattr(self, "_install_explicit_target", False) else target_dir.parent
-        mcp_servers = _build_managed_mcp_servers(cwd=project_cwd)
+        project_cwd = self._project_cwd_for_runtime_config(target_dir, is_global)
+        mcp_servers = build_runtime_managed_mcp_servers(cwd=project_cwd)
         mcp_count = 0
         if mcp_servers:
             mcp_config_path = _mcp_config_path(target_dir, is_global=is_global)
@@ -601,57 +602,37 @@ class ClaudeCodeAdapter(RuntimeAdapter):
                     settings.pop("permissions", None)
                 modified = True
 
-            status_line = settings.get("statusLine")
-            if isinstance(status_line, dict):
-                cmd = status_line.get("command", "")
-                if _is_hook_command_for_script(
-                    cmd,
-                    HOOK_SCRIPTS["statusline"],
-                    target_dir=target_dir,
-                    config_dir_name=self.config_dir_name,
-                ):
-                    del settings["statusLine"]
-                    modified = True
+            cleanup = cleanup_settings_json_managed_entries(
+                settings,
+                target_dir=target_dir,
+                config_dir_name=self.config_dir_name,
+                session_start_hook_filenames=(HOOK_SCRIPTS["check_update"], HOOK_SCRIPTS["statusline"]),
+                mcp_server_keys=runtime_managed_mcp_server_keys(),
+            )
+            modified = modified or cleanup.modified
 
-            hooks = settings.get("hooks")
-            if isinstance(hooks, dict):
-                session_start = hooks.get("SessionStart")
-                if isinstance(session_start, list):
-                    before = len(session_start)
-                    session_start[:] = [
-                        entry
-                        for entry in session_start
-                        if not _entry_has_gpd_hook(entry, target_dir=target_dir, config_dir_name=self.config_dir_name)
-                    ]
-                    if len(session_start) < before:
-                        modified = True
-                    if not session_start:
-                        del hooks["SessionStart"]
-                    if not hooks:
-                        del settings["hooks"]
-
-            if modified:
-                write_settings(settings_path, settings)
-            if has_authoritative_manifest and remove_empty_json_object_file(settings_path):
+            if write_settings_if_modified_and_prune_empty(
+                settings_path,
+                settings,
+                modified=modified,
+                prune_empty=has_authoritative_manifest,
+            ):
                 result["removed"].append(settings_path.name)
 
         if not is_global_target:
-            import json as _json
-
             mcp_config_path = target_dir.parent / ".mcp.json"
             if mcp_config_path.exists():
                 try:
                     mcp_config = parse_jsonc(mcp_config_path.read_text(encoding="utf-8"))
                 except (ValueError, OSError):
                     mcp_config = None
-                if isinstance(mcp_config, dict) and isinstance(mcp_config.get("mcpServers"), dict):
-                    removed_keys = [key for key in list(mcp_config["mcpServers"]) if key in _managed_mcp_server_keys()]
+                if isinstance(mcp_config, dict):
+                    removed_keys = remove_managed_mcp_server_keys(
+                        mcp_config,
+                        managed_keys=runtime_managed_mcp_server_keys(),
+                    )
                     if removed_keys:
-                        for key in removed_keys:
-                            del mcp_config["mcpServers"][key]
-                        if not mcp_config["mcpServers"]:
-                            del mcp_config["mcpServers"]
-                        mcp_config_path.write_text(_json.dumps(mcp_config, indent=2) + "\n", encoding="utf-8")
+                        write_settings(mcp_config_path, mcp_config)
                         result["removed"].append(f"MCP servers from {mcp_config_path.name}")
                 if has_authoritative_manifest and remove_empty_json_object_file(mcp_config_path):
                     result["removed"].append(mcp_config_path.name)
@@ -677,14 +658,15 @@ class ClaudeCodeAdapter(RuntimeAdapter):
                 prune_empty_ancestors(path, stop_at=target_dir.parent)
             return result
 
-        import json as _json
-
         mcp_config = read_settings(mcp_config_path)
         mcp_servers = mcp_config.get("mcpServers")
         if not isinstance(mcp_servers, dict):
             return result
 
-        removed_keys = [key for key in list(mcp_servers) if key in _managed_mcp_server_keys()]
+        removed_keys = remove_managed_mcp_server_keys(
+            mcp_config,
+            managed_keys=runtime_managed_mcp_server_keys(),
+        )
         if not removed_keys:
             for path in (
                 target_dir / "commands",
@@ -696,12 +678,7 @@ class ClaudeCodeAdapter(RuntimeAdapter):
                 prune_empty_ancestors(path, stop_at=target_dir.parent)
             return result
 
-        for key in removed_keys:
-            del mcp_servers[key]
-        if not mcp_servers:
-            del mcp_config["mcpServers"]
-
-        mcp_config_path.write_text(_json.dumps(mcp_config, indent=2) + "\n", encoding="utf-8")
+        write_settings(mcp_config_path, mcp_config)
         result["removed"].append("MCP servers from .claude.json")
         if remove_empty_json_object_file(mcp_config_path):
             result["removed"].append(mcp_config_path.name)
@@ -774,11 +751,7 @@ def _rewrite_gpd_cli_invocations(content: str, command: str) -> str:
     in a command position. This keeps model-visible prose and inline code spans
     canonical while still pinning runnable shell steps to the runtime bridge.
     """
-    return rewrite_gpd_cli_invocations_to_runtime_bridge(
-        content,
-        command,
-        shell_fence_languages=DEFAULT_RUNTIME_BRIDGE_SHELL_FENCE_LANGUAGES,
-    )
+    return rewrite_projection_shell_bridge(content, command)
 
 
 def _render_claude_command_markdown(content: str, *, bridge_command: str) -> str:
@@ -793,71 +766,6 @@ def _mcp_config_path(target_dir: Path, *, is_global: bool) -> Path:
     of always reaching out to the caller's real home directory.
     """
     return target_dir.parent / (".claude.json" if is_global else ".mcp.json")
-
-
-def _entry_has_gpd_hook(
-    entry: object,
-    *,
-    target_dir: Path | None,
-    config_dir_name: str | None,
-) -> bool:
-    """Check if a settings.json hook entry points at GPD-managed hooks."""
-    if not isinstance(entry, dict):
-        return False
-    entry_hooks = entry.get("hooks")
-    if not isinstance(entry_hooks, list):
-        return False
-    return any(
-        isinstance(hook, dict)
-        and isinstance(hook.get("command"), str)
-        and (
-            _is_hook_command_for_script(
-                hook["command"],
-                HOOK_SCRIPTS["check_update"],
-                target_dir=target_dir,
-                config_dir_name=config_dir_name,
-            )
-            or _is_hook_command_for_script(
-                hook["command"],
-                HOOK_SCRIPTS["statusline"],
-                target_dir=target_dir,
-                config_dir_name=config_dir_name,
-            )
-        )
-        for hook in entry_hooks
-    )
-
-
-def _build_managed_mcp_servers(
-    *,
-    cwd: Path | None = None,
-    env: Mapping[str, str] | None = None,
-) -> dict[str, dict[str, object]]:
-    """Return shared MCP servers plus configured optional integrations."""
-    from gpd.mcp.builtin_servers import build_mcp_servers_dict
-
-    python_path = hook_python_interpreter()
-    servers = build_mcp_servers_dict(python_path=python_path)
-    servers.update(_build_managed_optional_mcp_servers(cwd=cwd, env=env, python_path=python_path))
-    return servers
-
-
-def _build_managed_optional_mcp_servers(
-    *,
-    cwd: Path | None = None,
-    env: Mapping[str, str] | None = None,
-    python_path: str | None = None,
-) -> dict[str, dict[str, object]]:
-    """Return optional managed MCP servers that are currently configured."""
-    python_path = python_path or hook_python_interpreter()
-    return _managed_integrations.projected_managed_optional_mcp_servers(env, cwd=cwd, python_path=python_path)
-
-
-def _managed_mcp_server_keys() -> frozenset[str]:
-    """Return MCP server keys owned by GPD or managed optional integrations."""
-    from gpd.mcp.builtin_servers import GPD_MCP_SERVER_KEYS
-
-    return frozenset(set(GPD_MCP_SERVER_KEYS) | set(_managed_integrations.managed_optional_mcp_server_keys()))
 
 
 __all__ = ["ClaudeCodeAdapter"]

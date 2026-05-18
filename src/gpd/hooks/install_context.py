@@ -8,11 +8,7 @@ from pathlib import Path
 from gpd.adapters.install_utils import CACHE_DIR_NAME, UPDATE_CACHE_FILENAME
 from gpd.core.constants import TODOS_DIR_NAME
 from gpd.core.root_resolution import resolve_project_root
-from gpd.hooks.install_metadata import (
-    assess_install_target,
-    install_scope_from_manifest,
-    installed_runtime,
-)
+from gpd.hooks.install_metadata import assess_install_target
 from gpd.hooks.runtime_lookup import normalize_runtime_hint, resolve_runtime_lookup_dir
 
 
@@ -23,6 +19,7 @@ class SelfOwnedInstallContext:
     config_dir: Path
     runtime: str | None
     install_scope: str | None
+    explicit_target: bool | None = None
 
     @property
     def cache_file(self) -> Path:
@@ -77,8 +74,9 @@ def detect_self_owned_install(hook_file: str | Path) -> SelfOwnedInstallContext 
         return None
     return SelfOwnedInstallContext(
         config_dir=candidate,
-        runtime=installed_runtime(candidate),
-        install_scope=install_scope_from_manifest(candidate),
+        runtime=assessment.manifest_runtime,
+        install_scope=assessment.manifest_scope,
+        explicit_target=assessment.manifest_explicit_target,
     )
 
 
@@ -94,11 +92,7 @@ def should_prefer_self_owned_install(
         return False
     if active_install_target is not None and self_install.config_dir == active_install_target.config_dir:
         return True
-    if (
-        self_install.runtime is not None
-        and active_runtime is not None
-        and self_install.runtime != active_runtime
-    ):
+    if self_install.runtime is not None and active_runtime is not None and self_install.runtime != active_runtime:
         return False
     if active_install_target is None:
         return True
@@ -162,7 +156,11 @@ def resolve_hook_lookup_context(
         runtime_hint=runtime_hint,
     )
     active_runtime = normalize_runtime_hint(detect_active_runtime_with_gpd_install(cwd=lookup_cwd, home=resolved_home))
-    if active_runtime is None and active_runtime_hint is not None and (active_installed_runtime is not None or detected_runtime_hint is not None):
+    if (
+        active_runtime is None
+        and active_runtime_hint is not None
+        and (active_installed_runtime is not None or detected_runtime_hint is not None)
+    ):
         install_target = detect_runtime_install_target(active_runtime_hint, cwd=lookup_cwd, home=resolved_home)
         if install_target is not None:
             active_runtime = active_runtime_hint

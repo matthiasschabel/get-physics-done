@@ -8,7 +8,7 @@ from __future__ import annotations
 import copy
 import json
 import subprocess
-from collections.abc import Callable
+from dataclasses import dataclass
 from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
@@ -305,8 +305,7 @@ def _validate_model_profile_matrix() -> None:
 
 # Profile-independent view for public callers; resolution itself uses the full matrix.
 AGENT_DEFAULT_TIERS: dict[str, ModelTier] = {
-    agent_name: profile_map[ModelProfile.REVIEW.value]
-    for agent_name, profile_map in MODEL_PROFILES.items()
+    agent_name: profile_map[ModelProfile.REVIEW.value] for agent_name, profile_map in MODEL_PROFILES.items()
 }
 
 # ─── Config Model ───────────────────────────────────────────────────────────────
@@ -386,8 +385,7 @@ class GPDProjectConfig(BaseModel):
             normalized_runtime_name = normalize_runtime_name(runtime)
             if normalized_runtime_name not in valid_runtime_names:
                 raise ValueError(
-                    f"model_overrides contains unknown runtime {runtime!r}; "
-                    f"expected one of: {supported_runtimes}"
+                    f"model_overrides contains unknown runtime {runtime!r}; expected one of: {supported_runtimes}"
                 )
             if not isinstance(tier_map, dict):
                 raise TypeError(f"model_overrides[{runtime!r}] must be an object mapping tiers to model ids")
@@ -400,9 +398,7 @@ class GPDProjectConfig(BaseModel):
                         f"expected one of: {supported_tiers}"
                     )
                 if not isinstance(model, str) or not model.strip():
-                    raise ValueError(
-                        f"model_overrides[{runtime!r}][{tier!r}] must be a non-empty string"
-                    )
+                    raise ValueError(f"model_overrides[{runtime!r}][{tier!r}] must be a non-empty string")
                 normalized_runtime[tier] = model.strip()
 
             if normalized_runtime:
@@ -419,10 +415,7 @@ class GPDProjectConfig(BaseModel):
 
     @model_validator(mode="after")
     def _enforce_dense_requires_first_result_gate(self) -> GPDProjectConfig:
-        if (
-            self.review_cadence is ReviewCadence.DENSE
-            and self.checkpoint_after_first_load_bearing_result is False
-        ):
+        if self.review_cadence is ReviewCadence.DENSE and self.checkpoint_after_first_load_bearing_result is False:
             raise ValueError(
                 "review_cadence=dense requires checkpoint_after_first_load_bearing_result=true; "
                 "remove the override or set review_cadence to adaptive or sparse."
@@ -435,6 +428,15 @@ class GPDProjectConfig(BaseModel):
 _CONFIG_DEFAULTS = GPDProjectConfig()
 
 
+@dataclass(frozen=True, slots=True)
+class _ConfigKeyDescriptor:
+    canonical: str
+    model_path: tuple[str, ...]
+    section: str | None = None
+    storage_path: tuple[str, ...] | None = None
+    copy_value: bool = False
+
+
 def _normalize_config_key(key: str) -> str:
     """Normalize a user-facing config key path."""
     return key.strip()
@@ -445,151 +447,146 @@ def _enum_value(value: object) -> object:
     return value.value if isinstance(value, StrEnum) else value
 
 
-_EFFECTIVE_CONFIG_LEAVES: dict[str, Callable[[GPDProjectConfig], object]] = {
-    "autonomy": lambda config: _enum_value(config.autonomy),
-    "branching_strategy": lambda config: _enum_value(config.branching_strategy),
-    "checkpoint_after_first_load_bearing_result": (
-        lambda config: config.checkpoint_after_first_load_bearing_result
+_CONFIG_KEY_DESCRIPTORS: tuple[_ConfigKeyDescriptor, ...] = (
+    _ConfigKeyDescriptor("model_profile", ("model_profile",)),
+    _ConfigKeyDescriptor("autonomy", ("autonomy",)),
+    _ConfigKeyDescriptor(
+        "review_cadence",
+        ("review_cadence",),
+        section="execution",
+        storage_path=("execution", "review_cadence"),
     ),
-    "checkpoint_after_n_tasks": lambda config: config.checkpoint_after_n_tasks,
-    "checkpoint_before_downstream_dependent_tasks": (
-        lambda config: config.checkpoint_before_downstream_dependent_tasks
+    _ConfigKeyDescriptor("research_mode", ("research_mode",)),
+    _ConfigKeyDescriptor("commit_docs", ("commit_docs",), section="planning"),
+    _ConfigKeyDescriptor("branching_strategy", ("branching_strategy",), section="git"),
+    _ConfigKeyDescriptor("phase_branch_template", ("phase_branch_template",), section="git"),
+    _ConfigKeyDescriptor("milestone_branch_template", ("milestone_branch_template",), section="git"),
+    _ConfigKeyDescriptor("research", ("research",), section="workflow"),
+    _ConfigKeyDescriptor("plan_checker", ("plan_checker",), section="workflow"),
+    _ConfigKeyDescriptor("verifier", ("verifier",), section="workflow"),
+    _ConfigKeyDescriptor("parallelization", ("parallelization",)),
+    _ConfigKeyDescriptor(
+        "max_unattended_minutes_per_plan",
+        ("max_unattended_minutes_per_plan",),
+        section="execution",
+        storage_path=("execution", "max_unattended_minutes_per_plan"),
     ),
-    "commit_docs": lambda config: config.commit_docs,
-    "max_unattended_minutes_per_plan": lambda config: config.max_unattended_minutes_per_plan,
-    "max_unattended_minutes_per_wave": lambda config: config.max_unattended_minutes_per_wave,
-    "milestone_branch_template": lambda config: config.milestone_branch_template,
-    "model_overrides": lambda config: copy.deepcopy(config.model_overrides),
-    "model_profile": lambda config: _enum_value(config.model_profile),
-    "parallelization": lambda config: config.parallelization,
-    "phase_branch_template": lambda config: config.phase_branch_template,
-    "plan_checker": lambda config: config.plan_checker,
-    "project_usd_budget": lambda config: config.project_usd_budget,
-    "research": lambda config: config.research,
-    "review_cadence": lambda config: _enum_value(config.review_cadence),
-    "research_mode": lambda config: _enum_value(config.research_mode),
-    "session_usd_budget": lambda config: config.session_usd_budget,
-    "verifier": lambda config: config.verifier,
-    "strict_wait": lambda config: config.execution_preferences.strict_wait,
-    "never_interrupt_running_workers": (
-        lambda config: config.execution_preferences.never_interrupt_running_workers
+    _ConfigKeyDescriptor(
+        "max_unattended_minutes_per_wave",
+        ("max_unattended_minutes_per_wave",),
+        section="execution",
+        storage_path=("execution", "max_unattended_minutes_per_wave"),
     ),
-    "never_auto_close_child_agents": (
-        lambda config: config.execution_preferences.never_auto_close_child_agents
+    _ConfigKeyDescriptor(
+        "checkpoint_after_n_tasks",
+        ("checkpoint_after_n_tasks",),
+        section="execution",
+        storage_path=("execution", "checkpoint_after_n_tasks"),
     ),
-}
+    _ConfigKeyDescriptor(
+        "checkpoint_after_first_load_bearing_result",
+        ("checkpoint_after_first_load_bearing_result",),
+        section="execution",
+        storage_path=("execution", "checkpoint_after_first_load_bearing_result"),
+    ),
+    _ConfigKeyDescriptor(
+        "checkpoint_before_downstream_dependent_tasks",
+        ("checkpoint_before_downstream_dependent_tasks",),
+        section="execution",
+        storage_path=("execution", "checkpoint_before_downstream_dependent_tasks"),
+    ),
+    _ConfigKeyDescriptor(
+        "project_usd_budget",
+        ("project_usd_budget",),
+        section="execution",
+        storage_path=("execution", "project_usd_budget"),
+    ),
+    _ConfigKeyDescriptor(
+        "session_usd_budget",
+        ("session_usd_budget",),
+        section="execution",
+        storage_path=("execution", "session_usd_budget"),
+    ),
+    _ConfigKeyDescriptor("model_overrides", ("model_overrides",), copy_value=True),
+    _ConfigKeyDescriptor(
+        "strict_wait",
+        ("execution_preferences", "strict_wait"),
+        section="execution_preferences",
+        storage_path=("execution_preferences", "strict_wait"),
+    ),
+    _ConfigKeyDescriptor(
+        "never_interrupt_running_workers",
+        ("execution_preferences", "never_interrupt_running_workers"),
+        section="execution_preferences",
+        storage_path=("execution_preferences", "never_interrupt_running_workers"),
+    ),
+    _ConfigKeyDescriptor(
+        "never_auto_close_child_agents",
+        ("execution_preferences", "never_auto_close_child_agents"),
+        section="execution_preferences",
+        storage_path=("execution_preferences", "never_auto_close_child_agents"),
+    ),
+)
 
-_EFFECTIVE_CONFIG_SECTIONS: dict[str, Callable[[GPDProjectConfig], dict[str, object]]] = {
-    "git": lambda config: {
-        "branching_strategy": _enum_value(config.branching_strategy),
-        "phase_branch_template": config.phase_branch_template,
-        "milestone_branch_template": config.milestone_branch_template,
-    },
-    "planning": lambda config: {"commit_docs": config.commit_docs},
-    "execution": lambda config: {
-        "review_cadence": _enum_value(config.review_cadence),
-        "max_unattended_minutes_per_plan": config.max_unattended_minutes_per_plan,
-        "max_unattended_minutes_per_wave": config.max_unattended_minutes_per_wave,
-        "checkpoint_after_n_tasks": config.checkpoint_after_n_tasks,
-        "checkpoint_after_first_load_bearing_result": config.checkpoint_after_first_load_bearing_result,
-        "checkpoint_before_downstream_dependent_tasks": config.checkpoint_before_downstream_dependent_tasks,
-        "project_usd_budget": config.project_usd_budget,
-        "session_usd_budget": config.session_usd_budget,
-    },
-    "workflow": lambda config: {
-        "research": config.research,
-        "plan_checker": config.plan_checker,
-        "verifier": config.verifier,
-    },
-    "execution_preferences": lambda config: {
-        "strict_wait": config.execution_preferences.strict_wait,
-        "never_interrupt_running_workers": config.execution_preferences.never_interrupt_running_workers,
-        "never_auto_close_child_agents": config.execution_preferences.never_auto_close_child_agents,
-    },
-}
+_CONFIG_SECTION_ORDER = ("git", "planning", "execution", "workflow", "execution_preferences")
+
+_CONFIG_DESCRIPTORS_BY_CANONICAL_KEY = {descriptor.canonical: descriptor for descriptor in _CONFIG_KEY_DESCRIPTORS}
+
+
+def _descriptor_aliases(descriptor: _ConfigKeyDescriptor) -> tuple[str, ...]:
+    aliases = [descriptor.canonical]
+    if descriptor.section is not None:
+        aliases.append(f"{descriptor.section}.{descriptor.canonical}")
+    return tuple(aliases)
+
 
 _CONFIG_KEY_ALIASES: dict[str, str] = {
-    "autonomy": "autonomy",
-    "branching_strategy": "branching_strategy",
-    "checkpoint_after_first_load_bearing_result": "checkpoint_after_first_load_bearing_result",
-    "checkpoint_after_n_tasks": "checkpoint_after_n_tasks",
-    "checkpoint_before_downstream_dependent_tasks": "checkpoint_before_downstream_dependent_tasks",
-    "commit_docs": "commit_docs",
-    "execution.checkpoint_after_first_load_bearing_result": "checkpoint_after_first_load_bearing_result",
-    "execution.checkpoint_after_n_tasks": "checkpoint_after_n_tasks",
-    "execution.checkpoint_before_downstream_dependent_tasks": "checkpoint_before_downstream_dependent_tasks",
-    "execution.max_unattended_minutes_per_plan": "max_unattended_minutes_per_plan",
-    "execution.max_unattended_minutes_per_wave": "max_unattended_minutes_per_wave",
-    "execution.review_cadence": "review_cadence",
-    "git.branching_strategy": "branching_strategy",
-    "git.milestone_branch_template": "milestone_branch_template",
-    "git.phase_branch_template": "phase_branch_template",
-    "max_unattended_minutes_per_plan": "max_unattended_minutes_per_plan",
-    "max_unattended_minutes_per_wave": "max_unattended_minutes_per_wave",
-    "milestone_branch_template": "milestone_branch_template",
-    "model_overrides": "model_overrides",
-    "model_profile": "model_profile",
-    "parallelization": "parallelization",
-    "phase_branch_template": "phase_branch_template",
-    "plan_checker": "plan_checker",
-    "planning.commit_docs": "commit_docs",
-    "project_usd_budget": "project_usd_budget",
-    "research": "research",
-    "review_cadence": "review_cadence",
-    "research_mode": "research_mode",
-    "session_usd_budget": "session_usd_budget",
-    "verifier": "verifier",
-    "execution.project_usd_budget": "project_usd_budget",
-    "execution.session_usd_budget": "session_usd_budget",
-    "workflow.plan_checker": "plan_checker",
-    "workflow.research": "research",
-    "workflow.verifier": "verifier",
-    "strict_wait": "strict_wait",
-    "never_interrupt_running_workers": "never_interrupt_running_workers",
-    "never_auto_close_child_agents": "never_auto_close_child_agents",
-    "execution_preferences.strict_wait": "strict_wait",
-    "execution_preferences.never_interrupt_running_workers": "never_interrupt_running_workers",
-    "execution_preferences.never_auto_close_child_agents": "never_auto_close_child_agents",
+    alias: descriptor.canonical for descriptor in _CONFIG_KEY_DESCRIPTORS for alias in _descriptor_aliases(descriptor)
 }
 
 _CANONICAL_CONFIG_STORAGE_PATHS: dict[str, tuple[str, ...]] = {
-    canonical_key: (canonical_key,) for canonical_key in _EFFECTIVE_CONFIG_LEAVES
+    descriptor.canonical: descriptor.storage_path or (descriptor.canonical,) for descriptor in _CONFIG_KEY_DESCRIPTORS
 }
-_CANONICAL_CONFIG_STORAGE_PATHS.update(
-    {
-        "review_cadence": ("execution", "review_cadence"),
-        "max_unattended_minutes_per_plan": ("execution", "max_unattended_minutes_per_plan"),
-        "max_unattended_minutes_per_wave": ("execution", "max_unattended_minutes_per_wave"),
-        "checkpoint_after_n_tasks": ("execution", "checkpoint_after_n_tasks"),
-        "checkpoint_after_first_load_bearing_result": (
-            "execution",
-            "checkpoint_after_first_load_bearing_result",
-        ),
-        "checkpoint_before_downstream_dependent_tasks": (
-            "execution",
-            "checkpoint_before_downstream_dependent_tasks",
-        ),
-        "project_usd_budget": ("execution", "project_usd_budget"),
-        "session_usd_budget": ("execution", "session_usd_budget"),
-        "strict_wait": ("execution_preferences", "strict_wait"),
-        "never_interrupt_running_workers": (
-            "execution_preferences",
-            "never_interrupt_running_workers",
-        ),
-        "never_auto_close_child_agents": (
-            "execution_preferences",
-            "never_auto_close_child_agents",
-        ),
-    }
-)
 
 _ALIASES_BY_CANONICAL_KEY: dict[str, tuple[str, ...]] = {}
 for _alias, _canonical_key in _CONFIG_KEY_ALIASES.items():
     _ALIASES_BY_CANONICAL_KEY.setdefault(_canonical_key, []).append(_alias)
 _ALIASES_BY_CANONICAL_KEY = {
-    canonical_key: tuple(sorted(set(aliases)))
-    for canonical_key, aliases in _ALIASES_BY_CANONICAL_KEY.items()
+    canonical_key: tuple(sorted(set(aliases))) for canonical_key, aliases in _ALIASES_BY_CANONICAL_KEY.items()
 }
+
+_SECTION_CONFIG_DESCRIPTORS: dict[str, tuple[_ConfigKeyDescriptor, ...]] = {
+    section: tuple(descriptor for descriptor in _CONFIG_KEY_DESCRIPTORS if descriptor.section == section)
+    for section in _CONFIG_SECTION_ORDER
+}
+
+_ALLOWED_CONFIG_ROOT_KEYS = frozenset(_CONFIG_KEY_ALIASES.values()) | frozenset(_SECTION_CONFIG_DESCRIPTORS)
+
+_ALLOWED_CONFIG_SECTION_KEYS = {
+    section: frozenset(descriptor.canonical for descriptor in descriptors)
+    for section, descriptors in _SECTION_CONFIG_DESCRIPTORS.items()
+}
+
+
+def _read_model_path(source: object, path: tuple[str, ...]) -> object:
+    current = source
+    for segment in path:
+        current = getattr(current, segment)
+    return current
+
+
+def _effective_descriptor_value(config: GPDProjectConfig, descriptor: _ConfigKeyDescriptor) -> object:
+    value = _enum_value(_read_model_path(config, descriptor.model_path))
+    if descriptor.copy_value:
+        return copy.deepcopy(value)
+    return value
+
+
+def _effective_section_value(config: GPDProjectConfig, section: str) -> dict[str, object]:
+    return {
+        descriptor.canonical: _effective_descriptor_value(config, descriptor)
+        for descriptor in _SECTION_CONFIG_DESCRIPTORS[section]
+    }
 
 
 def supported_config_keys() -> tuple[str, ...]:
@@ -605,13 +602,14 @@ def canonical_config_key(key: str) -> str | None:
 def effective_config_value(config: GPDProjectConfig, key: str) -> tuple[bool, object]:
     """Return a CLI-facing effective config value for a supported key."""
     normalized_key = _normalize_config_key(key)
-    if normalized_key in _EFFECTIVE_CONFIG_SECTIONS:
-        return True, _EFFECTIVE_CONFIG_SECTIONS[normalized_key](config)
+    if normalized_key in _SECTION_CONFIG_DESCRIPTORS:
+        return True, _effective_section_value(config, normalized_key)
 
     canonical_key = canonical_config_key(normalized_key)
     if canonical_key is None:
         return False, None
-    return True, _EFFECTIVE_CONFIG_LEAVES[canonical_key](config)
+    descriptor = _CONFIG_DESCRIPTORS_BY_CANONICAL_KEY[canonical_key]
+    return True, _effective_descriptor_value(config, descriptor)
 
 
 def effective_raw_config_value(raw: dict[str, object], key: str) -> tuple[bool, object]:
@@ -708,81 +706,10 @@ def validate_agent_name(agent_name: str) -> None:
         raise ConfigError(f"Unknown agent {agent_name!r}")
 
 
-def _get_nested(parsed: dict, key: str, section: str | None = None, field: str | None = None) -> object:
-    """Get a config value with optional nested section fallback."""
-    if key in parsed:
-        return parsed[key]
-    if section and field and section in parsed and isinstance(parsed[section], dict):
-        if field in parsed[section]:
-            return parsed[section][field]
-    return None
-
-
-_ALLOWED_CONFIG_ROOT_KEYS = frozenset(
-    {
-        "autonomy",
-        "branching_strategy",
-        "checkpoint_after_first_load_bearing_result",
-        "checkpoint_after_n_tasks",
-        "checkpoint_before_downstream_dependent_tasks",
-        "project_usd_budget",
-        "session_usd_budget",
-        "commit_docs",
-        "execution",
-        "execution_preferences",
-        "git",
-        "max_unattended_minutes_per_plan",
-        "max_unattended_minutes_per_wave",
-        "milestone_branch_template",
-        "model_overrides",
-        "model_profile",
-        "never_auto_close_child_agents",
-        "never_interrupt_running_workers",
-        "parallelization",
-        "phase_branch_template",
-        "plan_checker",
-        "planning",
-        "research",
-        "review_cadence",
-        "research_mode",
-        "strict_wait",
-        "verifier",
-        "workflow",
-    }
-)
-
-_ALLOWED_CONFIG_SECTION_KEYS = {
-    "git": frozenset({"branching_strategy", "milestone_branch_template", "phase_branch_template"}),
-    "execution": frozenset(
-        {
-            "review_cadence",
-            "max_unattended_minutes_per_plan",
-            "max_unattended_minutes_per_wave",
-            "checkpoint_after_n_tasks",
-            "checkpoint_after_first_load_bearing_result",
-            "checkpoint_before_downstream_dependent_tasks",
-            "project_usd_budget",
-            "session_usd_budget",
-        }
-    ),
-    "execution_preferences": frozenset(
-        {
-            "strict_wait",
-            "never_interrupt_running_workers",
-            "never_auto_close_child_agents",
-        }
-    ),
-    "planning": frozenset({"commit_docs"}),
-    "workflow": frozenset({"plan_checker", "research", "verifier"}),
-}
-
-
 def _invalid_config_section_types(parsed: dict[str, object]) -> list[str]:
     """Return known nested config sections that are present but not objects."""
     return sorted(
-        key
-        for key, value in parsed.items()
-        if key in _ALLOWED_CONFIG_SECTION_KEYS and not isinstance(value, dict)
+        key for key, value in parsed.items() if key in _ALLOWED_CONFIG_SECTION_KEYS and not isinstance(value, dict)
     )
 
 
@@ -806,11 +733,7 @@ def _unsupported_config_keys(parsed: dict[str, object]) -> list[str]:
         if allowed_nested is None or not isinstance(value, dict):
             continue
 
-        unsupported.extend(
-            f"{key}.{nested_key}"
-            for nested_key in value
-            if nested_key not in allowed_nested
-        )
+        unsupported.extend(f"{key}.{nested_key}" for nested_key in value if nested_key not in allowed_nested)
 
     return sorted(unsupported)
 
@@ -847,6 +770,43 @@ def _conflicting_duplicate_config_aliases(parsed: dict[str, object]) -> list[str
     return conflicts
 
 
+def _lookup_descriptor_parsed_value(
+    parsed: dict[str, object],
+    descriptor: _ConfigKeyDescriptor,
+) -> object:
+    if descriptor.canonical in parsed:
+        return parsed[descriptor.canonical]
+    if descriptor.section is None:
+        return None
+
+    section_value = parsed.get(descriptor.section)
+    if isinstance(section_value, dict) and descriptor.canonical in section_value:
+        return section_value[descriptor.canonical]
+    return None
+
+
+def _descriptor_default_value(descriptor: _ConfigKeyDescriptor) -> object:
+    return _read_model_path(_CONFIG_DEFAULTS, descriptor.model_path)
+
+
+def _model_kwargs_from_parsed_config(parsed: dict[str, object]) -> dict[str, object]:
+    kwargs: dict[str, object] = {}
+    execution_preferences_kwargs: dict[str, object] = {}
+
+    for descriptor in _CONFIG_KEY_DESCRIPTORS:
+        value = _coalesce(
+            _lookup_descriptor_parsed_value(parsed, descriptor),
+            _descriptor_default_value(descriptor),
+        )
+        if len(descriptor.model_path) == 1:
+            kwargs[descriptor.model_path[0]] = value
+        elif descriptor.model_path[0] == "execution_preferences":
+            execution_preferences_kwargs[descriptor.model_path[1]] = value
+
+    kwargs["execution_preferences"] = ExecutionPreferences(**execution_preferences_kwargs)
+    return kwargs
+
+
 def _model_from_parsed_config(parsed: dict[str, object]) -> GPDProjectConfig:
     """Build the canonical config model from a parsed config payload."""
     if not isinstance(parsed, dict):
@@ -854,9 +814,7 @@ def _model_from_parsed_config(parsed: dict[str, object]) -> GPDProjectConfig:
 
     invalid_section_types = _invalid_config_section_types(parsed)
     if invalid_section_types:
-        section_messages = ", ".join(
-            f"`{section}` must be a JSON object" for section in invalid_section_types
-        )
+        section_messages = ", ".join(f"`{section}` must be a JSON object" for section in invalid_section_types)
         raise ConfigError(
             "Invalid config.json section types: "
             + section_messages
@@ -880,146 +838,9 @@ def _model_from_parsed_config(parsed: dict[str, object]) -> GPDProjectConfig:
         )
 
     try:
-        return GPDProjectConfig(
-            model_profile=_coalesce(
-                _get_nested(parsed, "model_profile"),
-                _CONFIG_DEFAULTS.model_profile,
-            ),
-            autonomy=_coalesce(
-                _get_nested(parsed, "autonomy"),
-                _CONFIG_DEFAULTS.autonomy,
-            ),
-            review_cadence=_coalesce(
-                _get_nested(parsed, "review_cadence", section="execution", field="review_cadence"),
-                _CONFIG_DEFAULTS.review_cadence,
-            ),
-            research_mode=_coalesce(
-                _get_nested(parsed, "research_mode"),
-                _CONFIG_DEFAULTS.research_mode,
-            ),
-            commit_docs=_coalesce(
-                _get_nested(parsed, "commit_docs", section="planning", field="commit_docs"),
-                _CONFIG_DEFAULTS.commit_docs,
-            ),
-            branching_strategy=_coalesce(
-                _get_nested(parsed, "branching_strategy", section="git", field="branching_strategy"),
-                _CONFIG_DEFAULTS.branching_strategy,
-            ),
-            phase_branch_template=_coalesce(
-                _get_nested(parsed, "phase_branch_template", section="git", field="phase_branch_template"),
-                _CONFIG_DEFAULTS.phase_branch_template,
-            ),
-            milestone_branch_template=_coalesce(
-                _get_nested(parsed, "milestone_branch_template", section="git", field="milestone_branch_template"),
-                _CONFIG_DEFAULTS.milestone_branch_template,
-            ),
-            research=_coalesce(
-                _get_nested(parsed, "research", section="workflow", field="research"),
-                _CONFIG_DEFAULTS.research,
-            ),
-            plan_checker=_coalesce(
-                _get_nested(parsed, "plan_checker", section="workflow", field="plan_checker"),
-                _CONFIG_DEFAULTS.plan_checker,
-            ),
-            verifier=_coalesce(
-                _get_nested(parsed, "verifier", section="workflow", field="verifier"),
-                _CONFIG_DEFAULTS.verifier,
-            ),
-            parallelization=_coalesce(
-                _get_nested(parsed, "parallelization"),
-                _CONFIG_DEFAULTS.parallelization,
-            ),
-            max_unattended_minutes_per_plan=_coalesce(
-                _get_nested(
-                    parsed,
-                    "max_unattended_minutes_per_plan",
-                    section="execution",
-                    field="max_unattended_minutes_per_plan",
-                ),
-                _CONFIG_DEFAULTS.max_unattended_minutes_per_plan,
-            ),
-            max_unattended_minutes_per_wave=_coalesce(
-                _get_nested(
-                    parsed,
-                    "max_unattended_minutes_per_wave",
-                    section="execution",
-                    field="max_unattended_minutes_per_wave",
-                ),
-                _CONFIG_DEFAULTS.max_unattended_minutes_per_wave,
-            ),
-            checkpoint_after_n_tasks=_coalesce(
-                _get_nested(
-                    parsed,
-                    "checkpoint_after_n_tasks",
-                    section="execution",
-                    field="checkpoint_after_n_tasks",
-                ),
-                _CONFIG_DEFAULTS.checkpoint_after_n_tasks,
-            ),
-            checkpoint_after_first_load_bearing_result=_coalesce(
-                _get_nested(
-                    parsed,
-                    "checkpoint_after_first_load_bearing_result",
-                    section="execution",
-                    field="checkpoint_after_first_load_bearing_result",
-                ),
-                _CONFIG_DEFAULTS.checkpoint_after_first_load_bearing_result,
-            ),
-            checkpoint_before_downstream_dependent_tasks=_coalesce(
-                _get_nested(
-                    parsed,
-                    "checkpoint_before_downstream_dependent_tasks",
-                    section="execution",
-                    field="checkpoint_before_downstream_dependent_tasks",
-                ),
-                _CONFIG_DEFAULTS.checkpoint_before_downstream_dependent_tasks,
-            ),
-            project_usd_budget=_coalesce(
-                _get_nested(parsed, "project_usd_budget", section="execution", field="project_usd_budget"),
-                _CONFIG_DEFAULTS.project_usd_budget,
-            ),
-            session_usd_budget=_coalesce(
-                _get_nested(parsed, "session_usd_budget", section="execution", field="session_usd_budget"),
-                _CONFIG_DEFAULTS.session_usd_budget,
-            ),
-            model_overrides=_coalesce(
-                _get_nested(parsed, "model_overrides"),
-                None,
-            ),
-            execution_preferences=ExecutionPreferences(
-                strict_wait=_coalesce(
-                    _get_nested(
-                        parsed,
-                        "strict_wait",
-                        section="execution_preferences",
-                        field="strict_wait",
-                    ),
-                    _CONFIG_DEFAULTS.execution_preferences.strict_wait,
-                ),
-                never_interrupt_running_workers=_coalesce(
-                    _get_nested(
-                        parsed,
-                        "never_interrupt_running_workers",
-                        section="execution_preferences",
-                        field="never_interrupt_running_workers",
-                    ),
-                    _CONFIG_DEFAULTS.execution_preferences.never_interrupt_running_workers,
-                ),
-                never_auto_close_child_agents=_coalesce(
-                    _get_nested(
-                        parsed,
-                        "never_auto_close_child_agents",
-                        section="execution_preferences",
-                        field="never_auto_close_child_agents",
-                    ),
-                    _CONFIG_DEFAULTS.execution_preferences.never_auto_close_child_agents,
-                ),
-            ),
-        )
+        return GPDProjectConfig(**_model_kwargs_from_parsed_config(parsed))
     except (ValueError, TypeError) as e:
-        raise ConfigError(
-            f"Invalid config.json values: {e}. Fix or delete {PLANNING_DIR_NAME}/config.json"
-        ) from e
+        raise ConfigError(f"Invalid config.json values: {e}. Fix or delete {PLANNING_DIR_NAME}/config.json") from e
 
 
 @instrument_gpd_function("config.load")

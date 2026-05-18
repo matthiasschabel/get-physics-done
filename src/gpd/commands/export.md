@@ -9,6 +9,16 @@ allowed-tools:
   - shell
   - search_files
   - find_files
+help:
+  group: Tangents, memory, and exports
+  order: 580
+  compact_description: Export project artifacts; generated text exports are committed only with explicit `--commit`
+  display_signature: gpd:export [--format html|latex|zip|all] [--commit]
+  examples:
+    - gpd:export --format latex --commit
+  notes:
+    - For generated text exports, outputs are committed only with explicit `--commit`.
+    - gpd observe execution, gpd observe sessions, gpd observe show, and gpd trace show inspect only; gpd observe event, gpd observe export, and gpd trace start|log|stop write observability.
 ---
 
 

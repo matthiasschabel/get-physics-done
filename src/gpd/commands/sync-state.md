@@ -14,6 +14,11 @@ allowed-tools:
   - shell
   - find_files
   - search_files
+help:
+  group: Configuration and maintenance
+  order: 690
+  compact_description: Repair diverged `STATE.md` and `state.json`
+  display_signature: gpd:sync-state
 ---
 
 
@@ -22,11 +27,11 @@ Reconcile `STATE.md` and `state.json` when they diverge.
 </objective>
 
 <execution_context>
-@{GPD_INSTALL_DIR}/workflows/sync-state.md
+@{GPD_INSTALL_DIR}/workflows/sync-state/sync-bootstrap.md
 </execution_context>
 
 <process>
-Follow the included workflow file exactly.
+Read the included sync-state bootstrap authority first. Later recovery, conflict-analysis, and reconcile stages are manifest-owned.
 </process>
 
 <success_criteria>

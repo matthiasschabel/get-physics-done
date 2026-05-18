@@ -32,7 +32,7 @@ Load phase operation context:
 INIT=$(gpd --raw init phase-op "${target}")
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd initialization failed: $INIT"
-  # STOP — display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 ```
 

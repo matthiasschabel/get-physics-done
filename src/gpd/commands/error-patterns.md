@@ -8,6 +8,15 @@ allowed-tools:
   - shell
   - search_files
   - find_files
+help:
+  group: Tangents, memory, and exports
+  order: 600
+  compact_description: Review common project-specific errors
+  display_signature: gpd:error-patterns [category]
+  examples:
+    - gpd:error-patterns sign-error
+  notes:
+    - Pattern-library categories include sign-error, factor-error, convention-pitfall, convergence-issue, approximation-failure, numerical-instability, conceptual-error, and dimensional-error.
 ---
 
 

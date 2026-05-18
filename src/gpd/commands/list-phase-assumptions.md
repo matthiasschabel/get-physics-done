@@ -16,6 +16,11 @@ allowed-tools:
   - shell
   - search_files
   - find_files
+help:
+  group: Planning and execution
+  order: 140
+  compact_description: Preview the planned phase approach
+  display_signature: gpd:list-phase-assumptions <number>
 ---
 
 

@@ -1,5 +1,5 @@
 <purpose>
-Check research progress, summarize recent work and what lies ahead, then intelligently route to the next action — either executing an existing plan or creating the next one. Provides situational awareness before continuing research.
+Check research progress, summarize recent work and what lies ahead, then show the code-owned suggested next action. Provides situational awareness before continuing research.
 </purpose>
 
 <required_reading>
@@ -77,7 +77,7 @@ Confirmation contract: before any command that writes reconciled state, ask for 
 INIT=$(gpd --raw init progress --include state,roadmap,project,config,references)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd initialization failed: $INIT"
-  # STOP — display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 ```
 
@@ -91,7 +91,8 @@ If missing STATE.md: suggest `gpd:new-project`.
 
 **If ROADMAP.md missing but PROJECT.md exists:**
 
-This means a milestone was completed and archived. Go to **Route F** (between milestones).
+This means a milestone was completed and archived. Report that state, then let
+the `route` step use `gpd --raw suggest` for the next command.
 
 If missing both ROADMAP.md and PROJECT.md: suggest `gpd:new-project`.
 </step>
@@ -151,6 +152,18 @@ Use this instead of manually reading/parsing ROADMAP.md.
 **Gather recent work context:**
 
 - Find the 2-3 most recent summary artifacts (`SUMMARY.md` and `*-SUMMARY.md`)
+- Count standalone and numbered phase artifacts with these canonical forms:
+  `GPD/phases/[current-phase-dir]/PLAN.md`,
+  `GPD/phases/[current-phase-dir]/*-PLAN.md`,
+  `GPD/phases/[current-phase-dir]/SUMMARY.md`, and
+  `GPD/phases/[current-phase-dir]/*-SUMMARY.md`.
+- Pair standalone `PLAN.md` with standalone `SUMMARY.md`, and numbered
+  `*-PLAN.md` with matching `*-SUMMARY.md`:
+  ```bash
+  for plan in GPD/phases/[current-phase-dir]/PLAN.md GPD/phases/[current-phase-dir]/*-PLAN.md; do
+    SUMMARY="$(dirname "$plan")/SUMMARY.md"
+  done
+  ```
 - Use `summary-extract` for efficient parsing:
   ```bash
   gpd --raw summary-extract <path> --field one_liner | gpd json get .one_liner --default ""
@@ -166,6 +179,12 @@ Use this instead of manually reading/parsing ROADMAP.md.
 - Note `paused_at` if work was paused (from init context)
 - Count pending items: use `gpd --raw init todos`
 - Check for active debug sessions: `ls GPD/debug/*.md 2>/dev/null | grep -v resolved | wc -l`
+- Surface validation/diagnostic state with this scan:
+  `grep -l -E "^(status: (gaps_found|human_needed|expert_needed)|session_status: diagnosed)$"`
+- Treat `` `session_status: diagnosed` `` as a diagnostic artifact state; if
+  `HEALTH.summary.warn > 0` or `HEALTH.summary.fail > 0`, report the failing
+  checks without mutating project state. Verification artifacts include
+  `GPD/phases/[current-phase-dir]/*-VERIFICATION.md`.
 - Check state compaction health; capture non-fatally because `gpd --raw health` can exit 1 while still printing parseable JSON:
   ```bash
   HEALTH_JSON=$(gpd --raw health 2>/dev/null || true)
@@ -270,296 +289,38 @@ If `HEALTH.summary.warn > 0` or `HEALTH.summary.fail > 0`, append a summary:
 </step>
 
 <step name="route">
-**Determine next action based on verified counts.**
+**Determine next action from the code-owned suggestion route.**
 
-**Step 1: Count plans, summaries, and validation issues in current phase**
-
-List files in the current phase directory:
-
-```bash
-ls -1 GPD/phases/[current-phase-dir]/PLAN.md GPD/phases/[current-phase-dir]/*-PLAN.md 2>/dev/null | wc -l
-ls -1 GPD/phases/[current-phase-dir]/SUMMARY.md GPD/phases/[current-phase-dir]/*-SUMMARY.md 2>/dev/null | wc -l
-ls -1 GPD/phases/[current-phase-dir]/*-VERIFICATION.md 2>/dev/null | wc -l
-```
-
-State: "This phase has {X} plans, {Y} summaries."
-
-**Step 1.5: Check for unaddressed validation gaps**
-
-Check for `*-VERIFICATION.md` files with gaps or review requirements. This includes canonical verification `status: gaps_found|human_needed|expert_needed`, plus researcher-session files where `session_status: diagnosed` records rooted gap analysis without changing the final verification vocabulary.
+Keep the report above as situational awareness. Do not rescan plans,
+summaries, verification files, context files, milestone status, or roadmap
+phase counts to choose the next command; those route branches are owned by
+lifecycle/suggest code.
 
 ```bash
-# Check for validation with gaps or review requirements
-grep -l -E "^(status: (gaps_found|human_needed|expert_needed)|session_status: diagnosed)$" GPD/phases/[current-phase-dir]/*-VERIFICATION.md 2>/dev/null
+SUGGEST=$(gpd --raw suggest)
 ```
 
-Track:
-
-- `validation_with_gaps`: `*-VERIFICATION.md` files with `status: gaps_found|human_needed|expert_needed` or `session_status: diagnosed`
-
-**Step 1.75: Check for existing gap-closure plans**
-
-If `validation_with_gaps > 0`, check whether gap-closure plans already exist but are unexecuted:
-
-```bash
-# Check for gap_closure plans without matching SUMMARYs
-GAP_PLANS_UNEXECUTED=0
-for plan in GPD/phases/[current-phase-dir]/PLAN.md GPD/phases/[current-phase-dir]/*-PLAN.md; do
-  [ -f "$plan" ] || continue
-  if grep -q "gap_closure: true" "$plan" 2>/dev/null; then
-    if [ "$(basename "$plan")" = "PLAN.md" ]; then
-      SUMMARY="$(dirname "$plan")/SUMMARY.md"
-    else
-      SUMMARY="${plan%-PLAN.md}-SUMMARY.md"
-    fi
-    if [ ! -f "$SUMMARY" ]; then
-      GAP_PLANS_UNEXECUTED=$((GAP_PLANS_UNEXECUTED + 1))
-    fi
-  fi
-done
-```
-
-**Step 2: Route based on counts**
-
-| Condition                                              | Meaning                             | Action             |
-| ------------------------------------------------------ | ----------------------------------- | ------------------ |
-| validation_with_gaps > 0 AND GAP_PLANS_UNEXECUTED > 0 | Gap-closure plans exist, unexecuted | Go to **Route E2** |
-| validation_with_gaps > 0                               | Validation gaps need fix plans      | Go to **Route E**  |
-| summaries < plans                                      | Unexecuted plans exist              | Go to **Route A**  |
-| summaries = plans AND plans > 0                        | Phase complete                      | Go to Step 3       |
-| plans = 0                                              | Phase not yet planned               | Go to **Route B**  |
-
----
-
-**Route A: Unexecuted plan exists**
-
-Find the first PLAN.md without matching SUMMARY.md.
-Read its `<objective>` section.
-
-```
----
-
-## > Next Up
-
-**{phase}-{plan}: [Plan Name]** — [objective summary from PLAN.md]
-
-`gpd:execute-phase {phase}`
-
-<sub>Start a fresh context window, then run `gpd:execute-phase {phase}`</sub>
-
----
-```
-
----
-
-**Route B: Phase needs planning**
-
-Check if `{phase}-CONTEXT.md` exists in phase directory.
-
-**If CONTEXT.md exists:**
-
-```
----
-
-## > Next Up
-
-**Phase {N}: {Name}** — {Goal from ROADMAP.md}
-<sub>Context gathered, ready to plan</sub>
-
-`gpd:plan-phase {phase-number}`
-
-<sub>Start a fresh context window, then run `gpd:plan-phase {phase-number}`</sub>
-
----
-```
-
-**If CONTEXT.md does NOT exist:**
-
-```
----
-
-## > Next Up
-
-**Phase {N}: {Name}** — {Goal from ROADMAP.md}
-
-`gpd:discuss-phase {phase}` — gather context and clarify approach
-
-<sub>Start a fresh context window, then run `gpd:discuss-phase {phase}`</sub>
-
----
-
-**Also available:**
-- `gpd:plan-phase {phase}` — skip discussion, plan directly
-- `gpd:list-phase-assumptions {phase}` — see what the agent assumes about the approach
-
----
-```
-
----
-
-**Route E: Validation gaps need fix plans**
-
-VERIFICATION.md exists with gaps (diagnosed issues like failing limiting cases or inconsistent dimensions). User needs to plan fixes.
-
-```
----
-
-## Validation Gaps Found
-
-**{phase}-VERIFICATION.md** has {N} gaps requiring fixes.
-
-Examples: [e.g., "Dimension mismatch in eq. 14", "Wrong sign in g -> 0 limit"]
-
-`gpd:plan-phase {phase} --gaps`
-
-<sub>Start a fresh context window, then run `gpd:plan-phase {phase} --gaps`</sub>
-
----
-
-**Also available:**
-- `gpd:execute-phase {phase}` — execute phase plans
-- `gpd:verify-work {phase}` — run more validation checks
-
----
-```
-
----
-
-**Route E2: Gap-closure plans exist but are unexecuted**
-
-Gap-closure plans were created by `gpd:plan-phase --gaps` but have not been executed yet. Suggest executing them instead of re-planning.
-
-```
----
-
-## Gap-Closure Plans Ready
-
-**{GAP_PLANS_UNEXECUTED} gap-closure plan(s)** exist but have not been executed.
-
-`gpd:execute-phase {phase} --gaps-only`
-
-<sub>Start a fresh context window, then run `gpd:execute-phase {phase} --gaps-only`</sub>
-
----
-
-**Also available:**
-- `gpd:plan-phase {phase} --gaps` — re-plan gap fixes (if current plans are stale)
-- `gpd:verify-work {phase}` — re-run validation checks
-
----
-```
-
----
-
-**Step 3: Check milestone status (only when phase complete)**
-
-Read ROADMAP.md and identify:
-
-1. Current phase number
-2. All phase numbers in the current milestone section
-
-Count total phases and identify the highest phase number.
-
-State: "Current phase is {X}. Milestone has {N} phases (highest: {Y})."
-
-**Route based on milestone status:**
-
-| Condition                     | Meaning            | Action            |
-| ----------------------------- | ------------------ | ----------------- |
-| current phase < highest phase | More phases remain | Go to **Route C** |
-| current phase = highest phase | Milestone complete | Go to **Route D** |
-
----
-
-**Route C: Phase complete, more phases remain**
-
-Read ROADMAP.md to get the next phase's name and goal.
-
-```
----
-
-## Phase {Z} Complete
-
-## > Next Up
-
-**Phase {Z+1}: {Name}** — {Goal from ROADMAP.md}
-
-`gpd:discuss-phase {Z+1}` — gather context and clarify approach
-
-<sub>Start a fresh context window, then run `gpd:discuss-phase {Z+1}`</sub>
-
----
-
-**Also available:**
-- `gpd:plan-phase {Z+1}` — skip discussion, plan directly
-- `gpd:verify-work {Z}` — validate results before continuing
-
----
-```
-
----
-
-**Route D: Milestone complete**
-
-```
----
-
-## Milestone Complete
-
-All {N} phases finished!
-
-## > Next Up
-
-**Complete Milestone** — archive results and prepare for next
-
-`gpd:complete-milestone {milestone_version}`
-
-<sub>Start a fresh context window, then run `gpd:complete-milestone {milestone_version}`</sub>
-
----
-
-**Also available:**
-- `gpd:verify-work` — validate all results before completing milestone
-
----
-```
-
----
-
-**Route F: Between milestones (ROADMAP.md missing, PROJECT.md exists)**
-
-A milestone was completed and archived. Ready to start the next milestone cycle.
-
-Read MILESTONES.md to find the last completed milestone version.
-
-```
----
-
-## Milestone v{X.Y} Complete
-
-Ready to plan the next research direction.
-
-## > Next Up
-
-**Start Next Milestone** — questioning -> literature survey -> objectives -> roadmap
-
-`gpd:new-milestone`
-
-<sub>Start a fresh context window, then run `gpd:new-milestone`</sub>
-
----
-```
+Use the first suggestion's typed `next_command` / lifecycle route payload when
+present. If the payload includes rendered next-up markdown, emit that exact
+`## > Next Up` block and its matching stage-stop projection. Otherwise render a
+single primary from the typed public runtime command and include only typed
+runtime secondaries. Do not show raw helper commands as public next-up commands.
+
+If `gpd --raw suggest` returns no actionable route, end with the situational
+report and a conservative `gpd:suggest-next` next-up block. Do not choose
+`gpd:discuss-phase` versus `gpd:plan-phase`, gap planning versus gap execution,
+phase closeout, milestone completion, or new-milestone routing in this prompt.
 
 </step>
 
 <step name="edge_cases">
 **Handle edge cases:**
 
-- Phase complete but next phase not planned -> offer `gpd:plan-phase [next]`
-- All work complete -> offer milestone completion
-- Blockers present -> highlight before offering to continue
-- Handoff file exists -> mention it, offer `gpd:resume-work`
-- Derivation session active -> mention it, offer `gpd:debug` to continue
+- Phase complete but next phase not planned -> highlight it; let `gpd --raw suggest` choose the route
+- All work complete -> highlight it; let lifecycle/suggest choose milestone routing
+- Blockers present -> highlight before showing the code-owned next route
+- Handoff file exists -> mention it; let lifecycle/suggest choose resume routing
+- Derivation session active -> mention it; let lifecycle/suggest choose debug or resume routing
   </step>
 
 </process>
@@ -569,7 +330,7 @@ Ready to plan the next research direction.
 - [ ] Rich context provided (recent work, key results, decisions, issues)
 - [ ] Current position clear with visual progress
 - [ ] What's next clearly explained
-- [ ] Smart routing: gpd:execute-phase if plans exist, gpd:plan-phase if not
+- [ ] Smart routing delegated to the code-owned suggestion/lifecycle payload
 - [ ] User confirms before any action
 - [ ] Seamless handoff to appropriate gpd command
 

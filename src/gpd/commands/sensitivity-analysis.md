@@ -30,11 +30,21 @@ allowed-tools:
   - search_files
   - task
   - ask_user
+help:
+  group: Validation and analysis
+  order: 400
+  compact_description: Rank which inputs matter most from project context or explicit current-workspace flags
+  display_signature: gpd:sensitivity-analysis
+  examples:
+    - gpd:sensitivity-analysis --target observable --params alpha,beta --method sobol
+  notes:
+    - Part of the project-aware technical-analysis lane for ranking influential inputs from project context or explicit current-workspace flags.
+  root_detail_order: 200
 ---
 
 
 <objective>
-Determine which input parameters most strongly affect an output quantity or uncertainty budget.
+Route a sensitivity-analysis request into the workflow-owned implementation.
 
 Keep any standalone/current-workspace durable artifacts under `GPD/analysis/` rooted at the invoking workspace. Only authoritative phase-backed project runs may persist phase-local reports or update project state; standalone/current-workspace runs stop after writing the analysis artifact and presenting the findings.
 </objective>
@@ -52,8 +62,7 @@ Interpretation:
 - Use `--params` to name the parameters included in the analysis
 - If `--method` is omitted, let the workflow choose analytical, numerical, or combined
 - In standalone/current-workspace mode, centralized preflight requires explicit `--target` and `--params`
-- `GPD/STATE.md`, `GPD/ROADMAP.md`, and `GPD/analysis/PARAMETERS.md` are optional current-workspace background context when they exist
-- Validated command-context owns optional current-workspace supporting context; the workflow re-loads needed background through its workspace-locked init step instead of this wrapper attaching raw project-file includes
+- Validated command-context owns optional current-workspace supporting context; the workflow re-loads needed background through its workspace-locked init step
 </context>
 
 <process>
@@ -68,9 +77,8 @@ fi
 ```
 
 Execute the included sensitivity-analysis workflow end-to-end.
-
-If authoritative phase-backed project context exists, the workflow may write `${phase_dir}/SENSITIVITY-REPORT.md` and update uncertainty state through the CLI.
-If no authoritative phase-backed context exists, the durable output must stay under `GPD/analysis/sensitivity-{slug}.md` in the invoking workspace, with no `STATE.md` or `state.json` mutation and no standalone commit step.
+The workflow owns canonical lookup, parameter ranking, report content, and the
+phase-backed vs standalone/current-workspace persistence split.
 </process>
 
 <success_criteria>

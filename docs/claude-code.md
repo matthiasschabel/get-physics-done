@@ -36,27 +36,17 @@ If it prints a version number, Claude Code is installed and available on your `P
 
 If it does not, use Anthropic's getting-started guide linked below, then come back here.
 
-## 2) Install GPD for Claude Code
+## 2) Install, start, and use GPD
 
-Run this from your normal terminal:
+<!-- gpd-public-surface:runtime-quickstart-claude-code:start -->
+From your normal terminal:
 
 ```bash
 npx -y get-physics-done --claude --local
-```
-
-## 3) Start Claude Code
-
-Open Claude Code from the terminal in the folder where you want to work:
-
-```bash
 claude
 ```
 
-Claude Code requires a Pro, Max, Teams, Enterprise, or Console account. The free Claude.ai plan does not include Claude Code access.
-
-## 4) First launch / help / start / tour
-
-Type these inside Claude Code, not in your normal terminal:
+Inside Claude Code:
 
 ```text
 /gpd:help
@@ -67,30 +57,14 @@ Type these inside Claude Code, not in your normal terminal:
 /gpd:resume-work
 ```
 
-If you are not sure what this folder is yet, start with `/gpd:start`.
-If you want a read-only walkthrough first, use `/gpd:tour`.
+Suggested order for beginners: `/gpd:help`, `/gpd:start`, `/gpd:tour`, then either `/gpd:new-project --minimal`, `/gpd:map-research`, or `/gpd:resume-work`.
 
-Suggested order for beginners: `/gpd:help`, `/gpd:start`, `/gpd:tour`, then
-either `/gpd:new-project --minimal`, `/gpd:map-research`, or
-`/gpd:resume-work`.
+Return to work from your normal terminal with `gpd resume` or `gpd resume --recent`, then reopen `claude` in the right folder and run `/gpd:resume-work`.
 
-GPD is designed to favor scientific rigor and critical thinking. Treat preferred answers as hypotheses to test, and if a citation, artifact, or run result is missing, keep that gap explicit instead of inventing it.
+After your first successful start or later, use `/gpd:settings` to review autonomy, workflow defaults, model-cost posture, runtime permission sync, and preset/tier overrides. The safest starting point is `review` plus runtime defaults. Favor scientific rigor and explicit uncertainty over agreement-seeking, and keep missing evidence or artifacts explicit instead of inventing them.
+<!-- gpd-public-surface:runtime-quickstart-claude-code:end -->
 
-## Return to work
-
-- Use `/gpd:resume-work` when this folder already has GPD state and you want to
-  continue.
-- If you are not sure whether this folder already has GPD state, use
-  `/gpd:start` first.
-- If you need to reopen the project from your normal terminal first, use
-  `gpd resume` or `gpd resume --recent`, then open the right folder and run
-  `/gpd:resume-work`.
-
-## Settings
-
-After your first successful start or later, use `/gpd:settings` to review
-autonomy, workflow defaults, and model-cost posture. Use `/gpd:set-tier-models`
-when you only want to pin concrete `tier-1`, `tier-2`, and `tier-3` model ids.
+Claude Code requires a Pro, Max, Teams, Enterprise, or Console account. The free Claude.ai plan does not include Claude Code access.
 
 ## Readiness before unattended runs
 

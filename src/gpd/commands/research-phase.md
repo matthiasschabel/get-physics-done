@@ -16,6 +16,11 @@ allowed-tools:
   - file_read
   - shell
   - task
+help:
+  group: Planning and execution
+  order: 130
+  compact_description: Run a focused phase literature survey
+  display_signature: gpd:research-phase <number>
 ---
 <objective>
 Research how to tackle a phase. Use this command when you want phase-specific investigation before planning or when you need to re-research after planning is complete.
@@ -26,7 +31,7 @@ Orchestrator role: validate the phase input, then hand off to the workflow-owned
 </objective>
 
 <execution_context>
-@{GPD_INSTALL_DIR}/workflows/research-phase.md
+@{GPD_INSTALL_DIR}/workflows/research-phase/phase-bootstrap.md
 </execution_context>
 
 <context>
@@ -36,7 +41,7 @@ Normalize phase input before any directory lookups.
 </context>
 
 <process>
-Follow the included research-phase workflow.
+Follow the included research-phase bootstrap authority. Research handoff loading is manifest-owned by the active workflow stage.
 Do not duplicate init, spawn, or return routing here.
 Research depth follows the workflow-owned `research_mode`.
 </process>

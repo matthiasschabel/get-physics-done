@@ -12,6 +12,11 @@ allowed-tools:
   - shell
   - task
   - file_write
+help:
+  group: Tangents, memory, and exports
+  order: 630
+  compact_description: Audit milestone completion against goals
+  display_signature: gpd:audit-milestone [version]
 ---
 
 

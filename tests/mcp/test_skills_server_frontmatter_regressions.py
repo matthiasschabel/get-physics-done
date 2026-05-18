@@ -308,3 +308,53 @@ def test_get_skill_default_payload_budget_excludes_transitive_reference_bodies(t
     assert "transitive schema body that should not ship by default" not in default_payload
     assert "transitive schema body that should not ship by default" in opt_in_doc["body"]
     assert len(opt_in_payload) > len(default_payload) + 100_000
+
+
+def test_metadata_only_transitive_then_direct_reference_scans_direct_body(tmp_path: Path) -> None:
+    from gpd.mcp.servers import skills_server
+
+    workflow_path = tmp_path / "wrapper.md"
+    workflow_path.write_text(
+        "See @{GPD_INSTALL_DIR}/templates/nested-schema.md for nested metadata.\n",
+        encoding="utf-8",
+    )
+    nested_schema_path = tmp_path / "nested-schema.md"
+    nested_schema_path.write_text(
+        "---\ntype: schema\n---\n# Nested Schema\n"
+        "Direct body scan should discover @{GPD_INSTALL_DIR}/templates/deeper-schema.md.\n",
+        encoding="utf-8",
+    )
+    deeper_schema_path = tmp_path / "deeper-schema.md"
+    deeper_schema_path.write_text("---\ntype: schema\n---\n# Deeper Schema\n", encoding="utf-8")
+
+    portable_paths = {
+        "@{GPD_INSTALL_DIR}/workflows/wrapper.md": workflow_path,
+        "@{GPD_INSTALL_DIR}/templates/nested-schema.md": nested_schema_path,
+        "@{GPD_INSTALL_DIR}/templates/deeper-schema.md": deeper_schema_path,
+    }
+    original_portable_reference_path = skills_server._portable_reference_path
+
+    def _patched_portable_reference_path(raw_path: str, *, base_path: Path | None = None):
+        if raw_path in portable_paths:
+            return raw_path, portable_paths[raw_path]
+        return original_portable_reference_path(raw_path, base_path=base_path)
+
+    with patch(
+        "gpd.mcp.servers.skills_server._portable_reference_path",
+        side_effect=_patched_portable_reference_path,
+    ):
+        direct_references, transitive_references = skills_server._extract_referenced_files(
+            "Read @{GPD_INSTALL_DIR}/workflows/wrapper.md first.\n"
+            "Then read @{GPD_INSTALL_DIR}/templates/nested-schema.md directly.\n",
+            read_transitive_reference_bodies=False,
+        )
+
+    direct_paths = [entry["path"] for entry in direct_references]
+    transitive_paths = [entry["path"] for entry in transitive_references]
+
+    assert direct_paths == [
+        "@{GPD_INSTALL_DIR}/workflows/wrapper.md",
+        "@{GPD_INSTALL_DIR}/templates/nested-schema.md",
+    ]
+    assert "@{GPD_INSTALL_DIR}/templates/nested-schema.md" in transitive_paths
+    assert "@{GPD_INSTALL_DIR}/templates/deeper-schema.md" in transitive_paths

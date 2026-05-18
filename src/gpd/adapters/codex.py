@@ -28,15 +28,20 @@ from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
 
 from gpd.adapters.base import RuntimeAdapter
+from gpd.adapters.command_projection import (
+    prepend_projection_note,
+    render_projected_command_shell_fences,
+    rewrite_projection_shell_bridge,
+)
 from gpd.adapters.install_utils import (
     CACHE_DIR_NAME,
     COMMANDS_DIR_NAME,
-    DEFAULT_RUNTIME_BRIDGE_SHELL_FENCE_LANGUAGES,
     GPD_INSTALL_DIR_NAME,
     HOOK_SCRIPTS,
     MANIFEST_NAME,
     PATCHES_DIR_NAME,
     UPDATE_CACHE_FILENAME,
+    compile_command_markdown_for_runtime,
     compile_markdown_for_runtime,
     convert_tool_references_in_body,
     expand_tilde,
@@ -48,7 +53,6 @@ from gpd.adapters.install_utils import (
     prune_empty_ancestors,
     remove_empty_text_file,
     render_markdown_frontmatter,
-    rewrite_gpd_cli_invocations_to_runtime_bridge,
     split_markdown_frontmatter,
     verify_installed,
     write_manifest,
@@ -141,14 +145,11 @@ _TOOL_REFERENCE_MAP = reference_translation_map(
     auto_discovered_tools=_AUTO_DISCOVERED_TOOLS,
 )
 _CODEX_MCP_STARTUP_TIMEOUT_SEC = 30
-_CODEX_COMMAND_RUNTIME_NOTE = (
+_CODEX_RUNTIME_SNIPPET_RELATIVE_PATH = f"{GPD_INSTALL_DIR_NAME}/references/tooling/runtime-command-snippets.md"
+_CODEX_COMMAND_RUNTIME_NOTE_TEMPLATE = (
     "<codex_runtime_notes>\n"
-    "Codex shell compatibility:\n"
-    "- Keep user-facing command names canonical in prose: `gpd ...` for your normal terminal and `{public_prefix}...` for Codex commands.\n"
-    "- When shell steps call the GPD CLI, put the runtime bridge directly in command position: {launcher}.\n"
-    "- The bridge is a command with arguments, not one executable path. Do not store it in a scalar variable and then expand that variable as the command.\n"
-    '- If you need reuse inside one shell block, define a function: `gpd_cli() {{ {launcher} "$@"; }}` and call `gpd_cli --raw ...`.\n'
-    "- In zsh examples, use `cmd_status=$?`; `status` is a reserved read-only parameter.\n"
+    "Ref: `{snippet_path}#runtime-shell-bridge`; bridge `{launcher}`; "
+    "labels `gpd ...`/`{public_prefix}...`.\n"
     "</codex_runtime_notes>\n\n"
 )
 _CODEX_COMMAND_RUNTIME_NOTE_BLOCK_RE = re.compile(
@@ -164,10 +165,12 @@ _CODEX_QUESTION_MARKERS = (
 )
 _CODEX_QUESTION_RUNTIME_NOTE = (
     "<codex_questioning>\n"
-    "- Ask each user-facing question exactly once.\n"
-    "- Present options once.\n"
-    "- Do not restate the prompt or add meta narration.\n"
+    "Ref: `{snippet_path}#runtime-questioning`; ask once with one compact prompt/options block.\n"
     "</codex_questioning>\n\n"
+)
+_CODEX_QUESTION_RUNTIME_NOTE_BLOCK_RE = re.compile(
+    r"<codex_questioning>\n.*?</codex_questioning>\n*",
+    re.DOTALL,
 )
 _CODEX_ASK_USER_PLATFORM_NOTE_RE = re.compile(
     r"^\s*>\s+\*\*Platform note:\*\* If `ask_user` is not available,[^\n]*\n(?:\s*\n)?",
@@ -760,36 +763,55 @@ def _toml_value(value: object) -> str:
     raise TypeError(f"Unsupported TOML scalar value: {value!r}")
 
 
-def _inject_codex_command_runtime_note(content: str, launcher: str) -> str:
-    """Prepend Codex-specific shell guidance to installed command skills."""
+def _codex_runtime_snippet_path(path_prefix: str = "") -> str:
+    """Return the runtime command snippet path visible from installed prompts."""
+    return f"{path_prefix}{_CODEX_RUNTIME_SNIPPET_RELATIVE_PATH}"
+
+
+def _codex_command_runtime_note(*, launcher: str, snippet_path: str) -> str:
     public_prefix = validated_public_command_prefix(get_runtime_descriptor("codex"))
-    note = _CODEX_COMMAND_RUNTIME_NOTE.format(launcher=launcher, public_prefix=public_prefix)
-    preamble, frontmatter, separator, body = split_markdown_frontmatter(content)
-    if not frontmatter:
-        return note + _CODEX_COMMAND_RUNTIME_NOTE_BLOCK_RE.sub("", content)
-    body = _CODEX_COMMAND_RUNTIME_NOTE_BLOCK_RE.sub("", body)
-    return render_markdown_frontmatter(preamble, frontmatter, separator, note + body)
+    return _CODEX_COMMAND_RUNTIME_NOTE_TEMPLATE.format(
+        launcher=launcher,
+        public_prefix=public_prefix,
+        snippet_path=snippet_path,
+    )
 
 
-def _render_codex_command_skill(content: str, *, skill_name: str, launcher: str) -> str:
+def _codex_question_runtime_note(*, snippet_path: str) -> str:
+    return _CODEX_QUESTION_RUNTIME_NOTE.format(snippet_path=snippet_path)
+
+
+def _inject_codex_command_runtime_note(content: str, launcher: str, *, snippet_path: str | None = None) -> str:
+    """Prepend Codex-specific shell guidance to installed command skills."""
+    note = _codex_command_runtime_note(
+        launcher=launcher,
+        snippet_path=snippet_path or _codex_runtime_snippet_path(),
+    )
+    return prepend_projection_note(content, note, strip_patterns=(_CODEX_COMMAND_RUNTIME_NOTE_BLOCK_RE,))
+
+
+def _render_codex_command_skill(
+    content: str,
+    *,
+    skill_name: str,
+    launcher: str,
+    path_prefix: str = "",
+) -> str:
     """Render one canonical command markdown source into Codex SKILL.md content."""
+    snippet_path = _codex_runtime_snippet_path(path_prefix)
     content = _convert_to_codex_skill(content, skill_name)
     content = convert_tool_references_in_body(content, _TOOL_REFERENCE_MAP)
-    content = _rewrite_codex_gpd_cli_invocations(content, launcher)
-    content = _normalize_codex_questioning(content)
-    return _inject_codex_command_runtime_note(content, launcher)
+    content = render_projected_command_shell_fences(content, bridge_command=launcher)
+    content = _normalize_codex_questioning(content, snippet_path=snippet_path)
+    return _inject_codex_command_runtime_note(content, launcher, snippet_path=snippet_path)
 
 
 def _rewrite_codex_gpd_cli_invocations(content: str, launcher: str) -> str:
     """Rewrite shell-executable ``gpd`` calls to the shared runtime CLI bridge."""
-    return rewrite_gpd_cli_invocations_to_runtime_bridge(
-        content,
-        launcher,
-        shell_fence_languages=DEFAULT_RUNTIME_BRIDGE_SHELL_FENCE_LANGUAGES,
-    )
+    return rewrite_projection_shell_bridge(content, launcher)
 
 
-def _normalize_codex_questioning(content: str) -> str:
+def _normalize_codex_questioning(content: str, *, snippet_path: str | None = None) -> str:
     """Rewrite mixed ask_user/freeform guidance into a single Codex style."""
     lowered = content.casefold()
     if not any(marker.casefold() in lowered for marker in _CODEX_QUESTION_MARKERS):
@@ -831,20 +853,25 @@ def _normalize_codex_questioning(content: str) -> str:
         r"\1When you could write a clear scoping contract, ask the user inline:",
         rewritten,
     )
+    rewritten = re.sub(
+        r"(?im)^(\s*)for each category, use ask_user:\s*$",
+        r"\1For each category, ask inline with one compact plain-text option block:",
+        rewritten,
+    )
 
     if "use ask_user with current values pre-selected:" in lowered:
         rewritten = re.sub(r"(?im)^(\s*)ask_user\(", r"\1plain_text_prompt(", rewritten)
 
+    note = _codex_question_runtime_note(snippet_path=snippet_path or _codex_runtime_snippet_path())
     preamble, frontmatter, separator, body = split_markdown_frontmatter(rewritten)
-    if _CODEX_QUESTION_RUNTIME_NOTE in body:
-        return rewritten
     if not frontmatter:
-        return _CODEX_QUESTION_RUNTIME_NOTE + rewritten
+        return note + _CODEX_QUESTION_RUNTIME_NOTE_BLOCK_RE.sub("", rewritten)
+    body = _CODEX_QUESTION_RUNTIME_NOTE_BLOCK_RE.sub("", body)
     return render_markdown_frontmatter(
         preamble,
         frontmatter,
         separator,
-        _CODEX_QUESTION_RUNTIME_NOTE + body,
+        note + body,
     )
 
 
@@ -879,7 +906,6 @@ class CodexAdapter(RuntimeAdapter):
         command_name: str | None = None,
         bridge_command: str | None = None,
     ) -> str:
-        del path_prefix
         if surface_kind != "command":
             return super().project_markdown_surface(
                 content,
@@ -892,7 +918,12 @@ class CodexAdapter(RuntimeAdapter):
             raise ValueError("command_name is required for projected command surfaces")
         if bridge_command is None:
             raise ValueError("bridge_command is required for projected Codex command surfaces")
-        return _render_codex_command_skill(content, skill_name=f"gpd-{command_name}", launcher=bridge_command)
+        return _render_codex_command_skill(
+            content,
+            skill_name=f"gpd-{command_name}",
+            launcher=bridge_command,
+            path_prefix=path_prefix,
+        )
 
     def translate_shared_command_references(self, content: str) -> str:
         return _rewrite_codex_command_references(content)
@@ -996,7 +1027,10 @@ class CodexAdapter(RuntimeAdapter):
                 install_scope=install_scope,
             )
             translated = _rewrite_codex_gpd_cli_invocations(translated, launcher)
-            return _normalize_codex_questioning(translated)
+            return _normalize_codex_questioning(
+                translated,
+                snippet_path=_codex_runtime_snippet_path(prefix),
+            )
 
         from gpd.adapters.install_utils import install_gpd_content
 
@@ -1698,16 +1732,23 @@ def _render_commands_as_skills(
             skill_dir.mkdir(parents=True, exist_ok=True)
             generated_skill_dirs.add(skill_name)
 
-            content = compile_markdown_for_runtime(
+            content = compile_command_markdown_for_runtime(
                 entry.read_text(encoding="utf-8"),
                 runtime="codex",
+                command_name=base_name,
                 path_prefix=path_prefix,
                 install_scope=install_scope,
                 src_root=gpd_src_root,
                 workflow_target_dir=workflow_target_dir,
                 explicit_target=explicit_target,
+                bridge_command=launcher,
             )
-            content = _render_codex_command_skill(content, skill_name=skill_name, launcher=launcher)
+            content = _render_codex_command_skill(
+                content,
+                skill_name=skill_name,
+                launcher=launcher,
+                path_prefix=path_prefix,
+            )
 
             (skill_dir / "SKILL.md").write_text(content, encoding="utf-8")
     return generated_skill_dirs
@@ -1752,7 +1793,10 @@ def _copy_agents_as_agent_files(
         )
         content = convert_tool_references_in_body(content, _TOOL_REFERENCE_MAP)
         content = _rewrite_codex_gpd_cli_invocations(content, launcher)
-        content = _normalize_codex_questioning(content)
+        content = _normalize_codex_questioning(
+            content,
+            snippet_path=_codex_runtime_snippet_path(path_prefix),
+        )
         content = _inject_codex_agent_file_marker(content)
 
         (agents_dest / entry.name).write_text(content, encoding="utf-8")

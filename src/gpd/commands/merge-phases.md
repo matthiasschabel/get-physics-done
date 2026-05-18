@@ -10,6 +10,11 @@ allowed-tools:
   - shell
   - search_files
   - find_files
+help:
+  group: Roadmap and milestones
+  order: 260
+  compact_description: Fold one phase's results into another
+  display_signature: gpd:merge-phases <source> <target>
 ---
 
 

@@ -46,6 +46,56 @@ def _documented_paper_quality_example() -> dict[str, object]:
     return json.loads(match.group(1))
 
 
+def _high_quality_submission_candidate(*, verification_report_passed: bool) -> PaperQualityInput:
+    return PaperQualityInput(
+        title="High Quality Candidate",
+        journal="generic",
+        equations=EquationsQualityInput(
+            labeled=_full_metric(10),
+            symbols_defined=_full_metric(10),
+            dimensionally_verified=_full_metric(8),
+            limiting_cases_verified=_full_metric(8),
+        ),
+        figures=FiguresQualityInput(
+            axes_labeled_with_units=_full_metric(4),
+            error_bars_present=_full_metric(4),
+            referenced_in_text=_full_metric(4),
+            captions_self_contained=_full_metric(4),
+            colorblind_safe=_full_metric(4),
+        ),
+        citations=CitationsQualityInput(
+            citation_keys_resolve=_full_metric(12),
+            missing_placeholders=BinaryCheck(passed=True),
+            key_prior_work_cited=BinaryCheck(passed=True),
+            hallucination_free=BinaryCheck(passed=True),
+        ),
+        conventions=ConventionsQualityInput(
+            convention_lock_complete=BinaryCheck(passed=True),
+            assert_convention_coverage=_full_metric(6),
+            notation_consistent=BinaryCheck(passed=True),
+        ),
+        verification=VerificationQualityInput(
+            report_passed=BinaryCheck(passed=verification_report_passed),
+            contract_targets_verified=_full_metric(5),
+            key_result_confidences=[
+                VerificationConfidence.independently_confirmed,
+                VerificationConfidence.independently_confirmed,
+            ],
+        ),
+        completeness=CompletenessQualityInput(
+            abstract_written_last=BinaryCheck(passed=True),
+            required_sections_present=_full_metric(7),
+            placeholders_cleared=BinaryCheck(passed=True),
+            supplemental_cross_referenced=BinaryCheck(passed=True),
+        ),
+        results=ResultsQualityInput(
+            uncertainties_present=_full_metric(6),
+            comparison_with_prior_work_present=BinaryCheck(passed=True),
+            physical_interpretation_present=BinaryCheck(passed=True),
+        ),
+    )
+
+
 def test_score_paper_quality_full_prd_ready():
     report = score_paper_quality(
         PaperQualityInput(
@@ -103,6 +153,19 @@ def test_score_paper_quality_full_prd_ready():
     assert report.ready_for_submission is True
     assert report.minimum_submission_score == 75.0
     assert report.blocking_issues == []
+
+
+def test_score_paper_quality_blocks_high_score_when_verification_report_is_not_passed() -> None:
+    report = score_paper_quality(_high_quality_submission_candidate(verification_report_passed=False))
+
+    assert report.status == "publication_ready"
+    assert report.adjusted_score >= report.minimum_submission_score
+    assert report.ready_for_submission is False
+    verification_blocker = next(
+        issue for issue in report.blocking_issues if issue.category == "verification" and issue.check == "report_passed"
+    )
+    assert verification_blocker.blocking is True
+    assert verification_blocker.summary == "Verification status is not passed."
 
 
 def test_score_paper_quality_flags_blockers():

@@ -23,9 +23,9 @@ from gpd.adapters.codex import CodexAdapter
 from gpd.adapters.copilot_cli import CopilotCliAdapter
 from gpd.adapters.gemini import GeminiAdapter
 from gpd.adapters.install_utils import (
-    build_runtime_cli_bridge_command,
     convert_tool_references_in_body,
     expand_at_includes,
+    rewrite_gpd_shell_line_to_runtime_bridge,
     translate_frontmatter_tool_names,
 )
 from gpd.adapters.opencode import OpenCodeAdapter
@@ -38,29 +38,117 @@ from gpd.adapters.runtime_catalog import (
 )
 from gpd.adapters.tool_names import build_canonical_alias_map
 from gpd.core.public_surface_contract import local_cli_bridge_commands
-from gpd.registry import load_agents_from_dir
+from gpd.registry import list_commands, load_agents_from_dir
+from tests.adapters.projection_test_utils import (
+    RUNTIME_NOTE_TAGS,
+    StagedCommandProjectionCase,
+    assert_compact_staged_command_shim,
+    assert_no_unresolved_include_markers,
+    assert_protocol_bundle_jit_shape,
+    assert_runtime_bridge_targets_active_runtime,
+    first_runnable_shell_command,
+    has_compact_non_native_shim,
+    has_help_bridge_shim_sentinel,
+    has_staged_shim_sentinel,
+    has_workflow_reference_shim_sentinel,
+    iter_staged_command_projection_cases,
+    raw_include_count,
+    runnable_shell_lines,
+    runtime_bridge_command,
+    shell_fences,
+    single_runtime_note_block,
+    staged_command_protocol_bundle_fields,
+    tag_count,
+)
+from tests.assertion_taxonomy_support import assert_prompt_contracts, semantic_anchor
 from tests.doc_surface_contracts import assert_publication_lane_boundary_contract
+from tests.prompt_metrics_support import MarkdownFence
 
 REPO_GPD_ROOT = Path(__file__).resolve().parents[2] / "src" / "gpd"
+COMMANDS_DIR = REPO_GPD_ROOT / "commands"
+WORKFLOWS_DIR = REPO_GPD_ROOT / "specs" / "workflows"
 RUNTIME_ALIAS_MAP = build_canonical_alias_map(adapter.tool_name_map for adapter in iter_adapters())
 FULL_RUNTIME_MATRIX = tuple(descriptor.runtime_name for descriptor in iter_runtime_descriptors())
+FLAT_COMMAND_RUNTIME_MATRIX = tuple(
+    descriptor.runtime_name
+    for descriptor in iter_runtime_descriptors()
+    if descriptor.managed_install_surface.flat_command_globs
+)
 _SHARED_INSTALL = get_shared_install_metadata()
 _INSTALL_CACHE: dict[tuple[str, tuple[str, ...]], Path] = {}
+STAGED_COMMAND_PROJECTION_CASES = iter_staged_command_projection_cases(
+    commands_dir=COMMANDS_DIR,
+    workflows_dir=WORKFLOWS_DIR,
+)
+STAGED_CASE_BY_COMMAND = {case.command_name: case for case in STAGED_COMMAND_PROJECTION_CASES}
+INSTALLED_PROJECTION_SMOKE_COMMANDS = (
+    "help",
+    "execute-phase",
+    "new-project",
+    "write-paper",
+    "peer-review",
+    "verify-work",
+)
+INSTALLED_STAGED_SMOKE_COMMANDS = ("execute-phase", "new-project", "write-paper", "verify-work")
+INSTALLED_SHELL_SMOKE_COMMANDS = ("health",)
+INSTALLED_PROTOCOL_BUNDLE_SMOKE_COMMANDS = ("execute-phase",)
 VERIFIER_SCHEMA_INCLUDE_SUFFIXES = (
     "templates/verification-report.md",
     "templates/contract-results-schema.md",
     "references/shared/canonical-schema-discipline.md",
 )
+STAGED_HELPER_TARGET_WORKFLOWS = ("plan-phase", "execute-phase", "new-project", "write-paper")
+INTERNAL_HELPER_LABEL_STEMS = (
+    "stage",
+    "phase",
+    "validate",
+    "return",
+    "child-handoff",
+    "apply-return-updates",
+)
+LOCAL_HELPER_TERM_RE = re.compile(
+    r"\b(?:stage\s+field-access|phase\s+(?:checkpoint|closeout-readiness)|"
+    r"validate\s+child-handoff|return\s+skeleton|apply-return-updates)\b"
+)
+GEMINI_RUNTIME_NOTE_BLOCK_RE = re.compile(
+    r"<gemini_runtime_notes>\n.*?</gemini_runtime_notes>\n*",
+    re.DOTALL,
+)
+GEMINI_SHELL_RUNTIME_NOTE_BLOCK_RE = re.compile(
+    r"<gemini_shell_runtime_notes>\n.*?</gemini_shell_runtime_notes>\n*",
+    re.DOTALL,
+)
+UNRESOLVED_INSTALL_SHAPE_MARKERS = (
+    "{GPD_INSTALL_DIR}",
+    "{GPD_CONFIG_DIR}",
+    "{GPD_RUNTIME_FLAG}",
+)
+GEMINI_FORBIDDEN_INSTALLED_SHELL_FRAGMENTS = (
+    "PROJECT_CONTRACT_JSON",
+    "printf '%s\\n'",
+    "mktemp",
+    "<<",
+    "if [ $? -ne 0 ]",
+)
+LEADING_SHELL_ASSIGNMENT_RE = re.compile(r"^[A-Z][A-Z0-9_]*=")
+RAW_GPD_COMMAND_SUBSTITUTION_RE = re.compile(r"\$\([^)]*\bgpd(?:\s|$)")
 
 
-def expected_opencode_bridge(target: Path, *, is_global: bool = False, explicit_target: bool = False) -> str:
-    return build_runtime_cli_bridge_command(
-        "opencode",
-        target_dir=target,
-        config_dir_name=".opencode",
-        is_global=is_global,
-        explicit_target=explicit_target,
-    )
+@cache
+def _opencode_rewritten_command_stems() -> tuple[str, ...]:
+    return tuple(sorted(list_commands(), key=lambda stem: (-len(stem), stem)))
+
+
+@cache
+def _opencode_hyphenated_public_command_re() -> re.Pattern[str]:
+    stems = "|".join(re.escape(stem) for stem in _opencode_rewritten_command_stems())
+    return re.compile(rf"(?<![A-Za-z0-9_./:$-])gpd-(?P<stem>{stems})(?![A-Za-z0-9_-])")
+
+
+@cache
+def _opencode_canonical_public_command_re() -> re.Pattern[str]:
+    stems = "|".join(re.escape(stem) for stem in _opencode_rewritten_command_stems())
+    return re.compile(rf"(?<![A-Za-z0-9_./$-])/?gpd:(?P<stem>{stems})(?![A-Za-z0-9_-])")
 
 
 def _make_checkout_stub(tmp_path: Path) -> tuple[Path, Path]:
@@ -97,12 +185,87 @@ def _collect_textual_artifacts(root: Path) -> str:
     return "\n".join(chunks)
 
 
-def _raw_include_count(text: str, include_suffix: str) -> int:
-    return sum(
-        1
-        for line in text.splitlines()
-        if line.strip().startswith("@") and line.strip().endswith(include_suffix)
-    )
+def _staged_projection_case(command_name: str) -> StagedCommandProjectionCase:
+    case = STAGED_CASE_BY_COMMAND.get(command_name)
+    assert case is not None, f"{command_name} has no staged projection case"
+    return case
+
+
+def _first_stage_authority_suffix(command_name: str) -> str:
+    native_include_paths = _staged_projection_case(command_name).native_include_paths
+    assert native_include_paths, f"{command_name} staged projection case has no native include paths"
+    return native_include_paths[0]
+
+
+def _has_native_staged_command_include(text: str, command_name: str) -> bool:
+    return raw_include_count(text, _first_stage_authority_suffix(command_name)) == 1
+
+
+def _assert_native_staged_command_include(text: str, *, command_name: str) -> None:
+    assert _has_native_staged_command_include(text, command_name)
+    root_suffix = f"workflows/{command_name}.md"
+    if _first_stage_authority_suffix(command_name) != root_suffix:
+        assert raw_include_count(text, root_suffix) == 0
+
+
+def _assert_runtime_command_label_visible(text: str, *, runtime: str, command_name: str) -> None:
+    expected_label = get_adapter(runtime).format_command(command_name)
+    assert expected_label in text, f"{runtime} {command_name} surface is missing {expected_label!r}"
+
+
+def _runtime_public_helper_labels(runtime: str) -> tuple[str, ...]:
+    return tuple(get_adapter(runtime).format_command(stem) for stem in INTERNAL_HELPER_LABEL_STEMS)
+
+
+def _strip_gemini_runtime_note_blocks(prompt: str) -> str:
+    prompt = GEMINI_RUNTIME_NOTE_BLOCK_RE.sub("", prompt)
+    return GEMINI_SHELL_RUNTIME_NOTE_BLOCK_RE.sub("", prompt)
+
+
+def _gemini_prompt_needs_generic_runtime_note(prompt: str, *, bridge_command: str) -> bool:
+    note_free_prompt = _strip_gemini_runtime_note_blocks(prompt)
+    return bridge_command in note_free_prompt or LOCAL_HELPER_TERM_RE.search(note_free_prompt) is not None
+
+
+def _installed_workflow_text(target: Path, workflow_name: str) -> str:
+    workflow_root = target / "get-physics-done" / "workflows"
+    path = workflow_root / f"{workflow_name}.md"
+    assert path.exists(), f"missing installed workflow authority: {path}"
+    texts = [path.read_text(encoding="utf-8")]
+
+    manifest_path = workflow_root / f"{workflow_name}-stage-manifest.json"
+    if manifest_path.exists():
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        seen: set[Path] = set()
+        for stage in payload.get("stages", []):
+            if not isinstance(stage, dict):
+                continue
+            for key in ("mode_paths", "loaded_authorities"):
+                values = stage.get(key, [])
+                if not isinstance(values, list):
+                    continue
+                for value in values:
+                    if not isinstance(value, str):
+                        continue
+                    prefix = f"workflows/{workflow_name}/"
+                    if not value.startswith(prefix) or not value.endswith(".md"):
+                        continue
+                    stage_path = target / "get-physics-done" / value
+                    if stage_path.exists() and stage_path not in seen:
+                        seen.add(stage_path)
+                        texts.append(stage_path.read_text(encoding="utf-8"))
+
+    return "\n\n".join(texts)
+
+
+def _command_or_workflow_authority_text(target: Path, command_prompt: str, runtime: str, workflow_name: str) -> str:
+    if has_compact_non_native_shim(command_prompt) or (
+        workflow_name == "help" and "renderer-backed local CLI help bridge" in command_prompt
+    ):
+        command_text = _canonicalize_runtime_markdown(command_prompt, runtime=runtime)
+        workflow_text = _canonicalize_runtime_markdown(_installed_workflow_text(target, workflow_name), runtime=runtime)
+        return command_text + "\n" + workflow_text
+    return _canonicalize_runtime_markdown(command_prompt, runtime=runtime)
 
 
 def _install_real_repo_for_runtime(tmp_path: Path, runtime: str, source_root: Path = REPO_GPD_ROOT) -> Path:
@@ -185,14 +348,7 @@ def real_installed_repo_factory(tmp_path_factory: pytest.TempPathFactory):
 
 
 def _expected_local_bridge_for_runtime(runtime: str, target: Path) -> str:
-    adapter = get_adapter(runtime)
-    return build_runtime_cli_bridge_command(
-        runtime,
-        target_dir=target,
-        config_dir_name=adapter.config_dir_name,
-        is_global=False,
-        explicit_target=False,
-    )
+    return runtime_bridge_command(runtime, target)
 
 
 def _canonicalize_runtime_markdown(content: str, *, runtime: str) -> str:
@@ -226,42 +382,17 @@ def _canonicalize_runtime_markdown(content: str, *, runtime: str) -> str:
     content = content.replace("$gpd-", "gpd:")
     content = content.replace("/gpd:", "gpd:")
     content = content.replace("/gpd-", "gpd:")
-    if runtime == "opencode":
-        # The opencode adapter rewrites bare `gpd:X` command references in
-        # markdown body text to `gpd-X` during install (see
-        # `_GPD_BARE_COMMAND_RE` in gpd.adapters.opencode). Reverse that here
-        # for contract-assertion purposes so tests can use the canonical
-        # `gpd:X` form regardless of runtime. This list enumerates the
-        # command stems we know to rewrite, to avoid accidentally touching
-        # CLI tool or agent names like `gpd-check-proof` that legitimately
-        # use the hyphenated form.
-        _OPENCODE_REWRITTEN_STEMS = (
-            "add-phase", "add-todo", "arxiv-submission", "audit-milestone",
-            "autonomous", "branch-hypothesis", "check-todos", "compact-state",
-            "compare-branches", "compare-experiment", "compare-results",
-            "complete-milestone", "debug", "decisions", "derive-equation",
-            "digest-knowledge", "dimensional-analysis", "discover",
-            "discuss-phase", "error-patterns", "error-propagation",
-            "execute-phase", "explain", "export-logs", "export", "graph",
-            "health", "help", "insert-phase", "limiting-cases",
-            "list-phase-assumptions", "literature-review", "map-research",
-            "merge-phases", "new-milestone", "new-project",
-            "numerical-convergence", "parameter-sweep", "pause-work",
-            "peer-review", "plan-milestone-gaps", "plan-phase", "progress",
-            "quick", "reapply-patches", "record-insight", "regression-check",
-            "remove-phase", "research-phase", "respond-to-referees",
-            "resume-work", "review-knowledge", "revise-phase",
-            "sensitivity-analysis", "set-profile", "set-tier-models",
-            "settings", "show-phase", "slides", "start", "suggest-next",
-            "sync-state", "tangent", "tour", "undo", "update",
-            "validate-conventions", "verify-work", "write-paper",
+    if runtime in {"copilot-cli", "opencode"}:
+        # Flat command runtimes rewrite public command references to hyphenated
+        # names during install. Reverse that here for contract-assertion
+        # purposes so tests can use the canonical `gpd:X` form regardless of
+        # runtime. Stems come from the live command registry so new commands are
+        # covered automatically while CLI tools or agent names like
+        # `gpd-check-proof` stay hyphenated.
+        content = _opencode_hyphenated_public_command_re().sub(
+            lambda match: f"gpd:{match.group('stem')}",
+            content,
         )
-        for stem in _OPENCODE_REWRITTEN_STEMS:
-            content = re.sub(
-                rf"(?<![A-Za-z0-9_./:$-])gpd-{re.escape(stem)}\b",
-                f"gpd:{stem}",
-                content,
-            )
     return content
 
 
@@ -303,6 +434,68 @@ def _read_runtime_command_prompt(tmp_path: Path, target: Path, runtime: str, com
     raise AssertionError(f"Unsupported runtime {runtime}")
 
 
+def _flat_generated_command_manifest_policy(runtime: str):
+    descriptor = get_runtime_descriptor(runtime)
+    policies = tuple(
+        policy
+        for policy in descriptor.manifest_metadata_list_policies
+        if policy.item_prefix == "gpd-" and policy.item_suffix == ".md"
+    )
+
+    assert len(policies) == 1, f"{runtime} should catalog exactly one flat generated-command manifest policy"
+    return policies[0]
+
+
+@cache
+def _installed_command_names() -> tuple[str, ...]:
+    return tuple(sorted(path.stem for path in (REPO_GPD_ROOT / "commands").glob("*.md")))
+
+
+def _installed_command_kind(runtime: str) -> str:
+    if runtime == "claude-code":
+        return "native_md"
+    if runtime == "codex":
+        return "codex_skill"
+    if runtime == "gemini":
+        return "gemini_toml_prompt"
+    if runtime == "copilot-cli":
+        return "copilot_flat_md"
+    if runtime == "opencode":
+        return "opencode_flat_md"
+    raise AssertionError(f"Unsupported runtime {runtime}")
+
+
+def _iter_installed_command_prompts(
+    target: Path,
+    runtime: str,
+) -> tuple[tuple[str, str, str], ...]:
+    kind = _installed_command_kind(runtime)
+    return tuple(
+        (
+            command_name,
+            _read_runtime_command_prompt(target.parent, target, runtime, command_name),
+            kind,
+        )
+        for command_name in _installed_command_names()
+    )
+
+
+def _classify_installed_gemini_shell_fence(
+    fence: MarkdownFence,
+    *,
+    bridge_command: str,
+    policy_prefixes: tuple[str, ...],
+) -> str:
+    command = first_runnable_shell_command(fence)
+    if command is None:
+        return "non-runnable"
+    if command.startswith(bridge_command):
+        return "runnable-bridge"
+    if command.startswith(tuple(prefix for prefix in policy_prefixes if prefix != bridge_command)):
+        return "policy-static"
+    return "unsupported"
+
+
 def _read_runtime_update_surface(tmp_path: Path, target: Path, runtime: str) -> str:
     if runtime == "claude-code":
         return (target / "commands" / "gpd" / "update.md").read_text(encoding="utf-8")
@@ -328,87 +521,6 @@ def _read_runtime_agent_prompt(target: Path, runtime: str, agent_name: str) -> s
     raise AssertionError(f"Unsupported runtime {runtime}")
 
 
-def _assert_installed_contract_visibility(
-    verifier: str,
-    executor: str,
-    new_project: str,
-    plan_phase: str,
-    write_paper: str,
-    plan_schema: str,
-    execute_phase: str,
-    verify_work: str,
-    *,
-    runtime: str,
-) -> None:
-    verifier = _canonicalize_runtime_markdown(verifier, runtime=runtime)
-    executor = _canonicalize_runtime_markdown(executor, runtime=runtime)
-    new_project = _canonicalize_runtime_markdown(new_project, runtime=runtime)
-    plan_phase = _canonicalize_runtime_markdown(plan_phase, runtime=runtime)
-    write_paper = _canonicalize_runtime_markdown(write_paper, runtime=runtime)
-    plan_schema = _canonicalize_runtime_markdown(plan_schema, runtime=runtime)
-    execute_phase = _canonicalize_runtime_markdown(execute_phase, runtime=runtime)
-    verify_work = _canonicalize_runtime_markdown(verify_work, runtime=runtime)
-
-    assert "Execute phase plans through the workflow-owned wave executor" in execute_phase
-    assert "references/orchestration/context-budget.md" in execute_phase
-    assert "<inline_guidance>" not in execute_phase
-
-    assert "templates/contract-results-schema.md" in verifier
-    assert "plan_contract_ref" in verifier
-    assert "contract_results" in verifier
-    assert "comparison_verdicts" in verifier
-    assert "suggested_contract_checks" in verifier
-    assert "contract_results.uncertainty_markers" in verifier
-
-    assert "templates/contract-results-schema.md" in executor
-    assert "plan_contract_ref" in executor
-    assert "contract_results" in executor
-    assert "comparison_verdicts" in executor
-    assert "These ledgers are user-visible evidence." in executor
-
-    assert "templates/project-contract-schema.md" in new_project
-    assert "project_contract_load_info" in new_project
-    assert "project_contract_validation" in new_project
-    assert "`schema_version` must be the integer `1`" in new_project
-    assert "`references[].must_surface` must stay a boolean `true` or `false`" in new_project
-    assert "`context_intake`" in new_project
-    assert "`approach_policy`" in new_project
-    assert "`uncertainty_markers`" in new_project
-    assert "`context_intake`, `approach_policy`, and `uncertainty_markers` must each stay as objects, not strings or lists." in new_project
-    assert "review_mode: publication" in write_paper
-    assert "${selected_publication_root}/AUTHOR-RESPONSE{round_suffix}.md" in write_paper
-    assert "${selected_review_root}/REFEREE_RESPONSE{round_suffix}.md" in write_paper
-    assert "${selected_review_root}/REVIEW-LEDGER{round_suffix}.json" in write_paper
-    assert "${selected_review_root}/REFEREE-DECISION{round_suffix}.json" in write_paper
-    assert "${selected_publication_root}/REFEREE-REPORT{round_suffix}.md" in write_paper
-    assert "references/publication/publication-review-round-artifacts.md" in write_paper
-
-    assert "Canonical contract schema and hard validation rules" in plan_phase
-    assert (
-        "every proof-bearing plan must surface the theorem statement, named parameters, hypotheses, "
-        "quantifier/domain obligations, and intended conclusion clauses visibly enough that a later audit can "
-        "detect missing coverage"
-    ) in plan_phase
-
-    assert "`contract.context_intake` is required and must be a non-empty object" in plan_schema
-    assert "`must_surface` is a boolean scalar. Use the YAML literals `true` and `false`" in plan_schema
-    assert "If `must_surface: true`, `required_actions` must not be empty." in plan_schema
-    assert "If `must_surface: true`, `applies_to[]` must not be empty." in plan_schema
-    assert "`carry_forward_to[]` is optional free-text workflow scope" in plan_schema
-    assert "`uncertainty_markers` must be a YAML object, not a string or list." in plan_schema
-
-    assert "workflow.verifier=false" in execute_phase
-    assert "skip verification" in execute_phase
-    assert "proof red-teaming" in execute_phase
-    assert "{plan_id}-PROOF-REDTEAM.md" in execute_phase
-    assert "Targeted flags narrow the optional check mix only." in verify_work
-    assert "Every spawned agent is a one-shot delegation" in verify_work
-    assert (
-        "For proof-bearing work, require a canonical `*-PROOF-REDTEAM.md` artifact; "
-        "if missing/stale/malformed/not `passed`, spawn `gpd-check-proof` once"
-    ) in verify_work
-
-
 @pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)
 def test_installed_peer_review_prompt_keeps_publication_lane_boundary(
     real_installed_repo_factory,
@@ -416,15 +528,28 @@ def test_installed_peer_review_prompt_keeps_publication_lane_boundary(
 ) -> None:
     target = real_installed_repo_factory(runtime)
     peer_review = _read_runtime_command_prompt(target.parent, target, runtime, "peer-review")
-    peer_review = _canonicalize_runtime_markdown(peer_review, runtime=runtime)
+    peer_review = _command_or_workflow_authority_text(target, peer_review, runtime, "peer-review")
 
-    assert (
-        "Use centralized preflight's selected publication/review roots for GPD-authored review artifacts."
-        in peer_review
-    )
-    assert (
-        "Keep the manuscript and manuscript-local publication manifests rooted at the resolved manuscript directory."
-        in peer_review
+    if has_staged_shim_sentinel(peer_review):
+        case = _staged_projection_case("peer-review")
+        assert_compact_staged_command_shim(
+            peer_review,
+            command_name=case.command_name,
+            first_stage=case.first_stage_id,
+            staged_loading_keys=case.staged_loading_keys,
+        )
+        return
+
+    assert_prompt_contracts(
+        peer_review,
+        semantic_anchor(
+            "installed peer-review keeps centralized publication and review roots visible",
+            ("selected publication/review roots", "GPD-authored review artifacts"),
+        ),
+        semantic_anchor(
+            "installed peer-review keeps manuscript-local artifact boundary visible",
+            ("manuscript-local publication manifests", "resolved manuscript directory"),
+        ),
     )
 
 
@@ -435,18 +560,20 @@ def test_installed_verifier_prompt_surface_keeps_one_wrapper_and_stays_within_bu
 ) -> None:
     target = real_installed_repo_factory(runtime)
     verifier = _read_runtime_agent_prompt(target, runtime, "gpd-verifier")
-    descriptor = get_runtime_descriptor(runtime)
-    line_budget, char_budget = (900, 60_000) if descriptor.native_include_support else (6_500, 430_000)
+    line_budget, char_budget = (500, 35_000)
 
     assert verifier.count("## Agent Requirements") == 1
     assert verifier.index("## Agent Requirements") < verifier.index("## Bootstrap Discipline")
-    if descriptor.native_include_support:
-        for include_suffix in VERIFIER_SCHEMA_INCLUDE_SUFFIXES:
-            assert _raw_include_count(verifier, include_suffix) == 1
-    else:
-        assert verifier.count("# Verification Report Template") == 1
-        assert verifier.count("# Contract Results Schema") == 1
-        assert verifier.count("# Canonical Schema Discipline") == 1
+    for include_suffix in VERIFIER_SCHEMA_INCLUDE_SUFFIXES:
+        assert include_suffix in verifier
+        assert raw_include_count(verifier, include_suffix) == 0
+    assert "# Verification Report Template" not in verifier
+    assert "# Contract Results Schema" not in verifier
+    assert "# Canonical Schema Discipline" not in verifier
+    assert "`gpd verification-report skeleton ... --write --body-file ... --validate contract`" in verifier
+    assert "`gpd verification-report finalize ... --patch ... --body-file ... --validate contract`" in verifier
+    assert "## Physics Stub Detection Patterns" not in verifier
+    assert "Load on demand from `references/verification/examples/verifier-worked-examples.md`." in verifier
     assert len(verifier.splitlines()) <= line_budget
     assert len(verifier) <= char_budget
 
@@ -494,9 +621,7 @@ def test_update_surface_materializes_workflow_paths_in_compiled_artifacts(
         assert f'GPD_GLOBAL_CONFIG_DIR="{canonical_global_dir.as_posix()}"' in content
         update_command = f"{adapter.update_command} --local"
         assert f'UPDATE_COMMAND="{update_command}"' in content
-        assert (
-            f'PATCH_META="{target.as_posix()}/{_SHARED_INSTALL.patches_dir_name}/backup-meta.json"' in content
-        )
+        assert f'PATCH_META="{target.as_posix()}/{_SHARED_INSTALL.patches_dir_name}/backup-meta.json"' in content
         assert "TARGET_DIR_ARG=$(" not in content
 
 
@@ -532,6 +657,319 @@ def test_installed_referee_latex_template_exists_and_matches_source(
     assert source_template.exists()
     assert installed_template.exists()
     assert installed_template.read_bytes() == source_template.read_bytes()
+
+
+@pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)
+@pytest.mark.parametrize("command_name", INSTALLED_STAGED_SMOKE_COMMANDS)
+def test_installed_smoke_staged_command_surface_uses_native_include_or_compact_stage_shim(
+    real_installed_repo_factory,
+    runtime: str,
+    command_name: str,
+) -> None:
+    target = real_installed_repo_factory(runtime)
+    prompt = _read_runtime_command_prompt(target.parent, target, runtime, command_name)
+    descriptor = get_runtime_descriptor(runtime)
+    case = _staged_projection_case(command_name)
+
+    assert (_installed_workflow_text(target, command_name)).strip()
+    assert_no_unresolved_include_markers(prompt, label=f"{runtime} {command_name}")
+    _assert_runtime_command_label_visible(prompt, runtime=runtime, command_name=command_name)
+
+    if descriptor.native_include_support:
+        _assert_native_staged_command_include(prompt, command_name=command_name)
+        assert f"<!-- [included: {command_name}.md] -->" not in prompt
+        assert not has_staged_shim_sentinel(prompt)
+        return
+
+    assert raw_include_count(prompt, f"workflows/{command_name}.md") == 0
+    assert f"<!-- [included: {command_name}.md] -->" not in prompt
+    assert_compact_staged_command_shim(
+        prompt,
+        command_name=case.command_name,
+        first_stage=case.first_stage_id,
+        staged_loading_keys=case.staged_loading_keys,
+        command_label=get_adapter(runtime).format_command(case.command_name),
+    )
+    assert not has_help_bridge_shim_sentinel(prompt)
+    assert len(prompt) < 20_000
+
+
+@pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)
+@pytest.mark.parametrize("command_name", INSTALLED_PROTOCOL_BUNDLE_SMOKE_COMMANDS)
+def test_installed_smoke_staged_command_surfaces_protocol_bundle_jit_without_catalog_inline(
+    real_installed_repo_factory,
+    runtime: str,
+    command_name: str,
+) -> None:
+    target = real_installed_repo_factory(runtime)
+    prompt = _read_runtime_command_prompt(target.parent, target, runtime, command_name)
+    case = _staged_projection_case(command_name)
+
+    assert_protocol_bundle_jit_shape(
+        prompt,
+        case=case,
+        runtime=runtime,
+        expected_bundle_fields=staged_command_protocol_bundle_fields(WORKFLOWS_DIR, command_name),
+    )
+
+
+@pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)
+def test_installed_help_surface_uses_native_include_or_compact_help_bridge_shim(
+    real_installed_repo_factory,
+    runtime: str,
+) -> None:
+    target = real_installed_repo_factory(runtime)
+    prompt = _read_runtime_command_prompt(target.parent, target, runtime, "help")
+    descriptor = get_runtime_descriptor(runtime)
+
+    assert (_installed_workflow_text(target, "help")).strip()
+    assert_no_unresolved_include_markers(prompt, label=f"{runtime} help")
+    _assert_runtime_command_label_visible(prompt, runtime=runtime, command_name="help")
+
+    assert raw_include_count(prompt, "workflows/help.md") == 0
+    assert "<!-- [included: help.md] -->" not in prompt
+    assert not has_staged_shim_sentinel(prompt)
+    assert "<current-help-command>" not in prompt
+    assert "--raw help" in prompt
+    assert "--raw help --all" in prompt
+    assert "--raw help --command <name>" in prompt
+    assert len(prompt) < 10_000
+
+    if not descriptor.native_include_support:
+        assert has_help_bridge_shim_sentinel(prompt)
+
+
+@pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)
+def test_installed_smoke_command_runtime_note_tags_match_runtime_container(
+    real_installed_repo_factory,
+    runtime: str,
+) -> None:
+    target = real_installed_repo_factory(runtime)
+    kind = _installed_command_kind(runtime)
+
+    for command_name in INSTALLED_PROJECTION_SMOKE_COMMANDS:
+        prompt = _read_runtime_command_prompt(target.parent, target, runtime, command_name)
+        label = f"{runtime}:{command_name}:{kind}"
+
+        if runtime == "codex":
+            assert tag_count(prompt, "codex_runtime_notes") == (1, 1), label
+            assert tag_count(prompt, "gemini_runtime_notes") == (0, 0), label
+            assert tag_count(prompt, "gemini_shell_runtime_notes") == (0, 0), label
+            continue
+
+        if runtime == "gemini":
+            assert tag_count(prompt, "codex_runtime_notes") == (0, 0), label
+            bridge_command = _expected_local_bridge_for_runtime(runtime, target)
+            expected_runtime_note_count = (
+                (1, 1) if _gemini_prompt_needs_generic_runtime_note(prompt, bridge_command=bridge_command) else (0, 0)
+            )
+            assert tag_count(prompt, "gemini_runtime_notes") == expected_runtime_note_count, label
+            expected_shell_note_count = (1, 1) if shell_fences(prompt) else (0, 0)
+            assert tag_count(prompt, "gemini_shell_runtime_notes") == expected_shell_note_count, label
+            continue
+
+        for tag in RUNTIME_NOTE_TAGS:
+            assert tag_count(prompt, tag) == (0, 0), label
+        if runtime == "opencode":
+            assert prompt.count("<!-- Managed by Get Physics Done (GPD). -->") == 1, label
+
+
+@pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)
+def test_installed_command_surfaces_have_no_unresolved_install_shape(
+    real_installed_repo_factory,
+    runtime: str,
+) -> None:
+    target = real_installed_repo_factory(runtime)
+
+    for command_name, prompt, kind in _iter_installed_command_prompts(target, runtime):
+        label = f"{runtime}:{command_name}:{kind}"
+        assert_no_unresolved_include_markers(prompt, label=label)
+        offenders = [marker for marker in UNRESOLVED_INSTALL_SHAPE_MARKERS if marker in prompt]
+        assert offenders == [], f"{label} contains unresolved install shape markers: {offenders}"
+
+
+@pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)
+def test_installed_command_surfaces_only_embed_active_runtime_bridge(
+    real_installed_repo_factory,
+    runtime: str,
+) -> None:
+    target = real_installed_repo_factory(runtime)
+    smoke_commands = tuple(dict.fromkeys((*INSTALLED_PROJECTION_SMOKE_COMMANDS, *INSTALLED_SHELL_SMOKE_COMMANDS)))
+
+    for command_name in smoke_commands:
+        prompt = _read_runtime_command_prompt(target.parent, target, runtime, command_name)
+        assert_runtime_bridge_targets_active_runtime(
+            prompt,
+            runtime=runtime,
+            label=f"{runtime}:{command_name}:{_installed_command_kind(runtime)}",
+        )
+
+
+@pytest.mark.parametrize("runtime", FLAT_COMMAND_RUNTIME_MATRIX)
+def test_installed_flat_command_manifest_metadata_is_catalog_driven_and_matches_command_files(
+    real_installed_repo_factory,
+    runtime: str,
+) -> None:
+    target = real_installed_repo_factory(runtime)
+    policy = _flat_generated_command_manifest_policy(runtime)
+    manifest = json.loads((target / "gpd-file-manifest.json").read_text(encoding="utf-8"))
+    generated = manifest.get(policy.key)
+    expected_generated = tuple(sorted(f"gpd-{command_name}.md" for command_name in _installed_command_names()))
+
+    assert isinstance(generated, list), f"{runtime} manifest should include list metadata {policy.key!r}"
+    assert all(isinstance(item, str) for item in generated)
+    assert tuple(generated) == expected_generated
+    assert {f"command/{file_name}" for file_name in generated} <= set(manifest["files"])
+    assert all((target / "command" / file_name).is_file() for file_name in generated)
+
+    foreign_flat_metadata_keys = {
+        other_policy.key
+        for descriptor in iter_runtime_descriptors()
+        if descriptor.runtime_name != runtime and descriptor.managed_install_surface.flat_command_globs
+        for other_policy in descriptor.manifest_metadata_list_policies
+        if other_policy.item_prefix == "gpd-" and other_policy.item_suffix == ".md"
+    }
+    assert foreign_flat_metadata_keys.isdisjoint(manifest)
+
+
+@pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)
+def test_installed_smoke_command_shell_fences_use_runtime_bridge_or_public_cli(
+    real_installed_repo_factory,
+    runtime: str,
+) -> None:
+    target = real_installed_repo_factory(runtime)
+    bridge_command = _expected_local_bridge_for_runtime(runtime, target)
+    kind = _installed_command_kind(runtime)
+    offenders: list[str] = []
+
+    for command_name in INSTALLED_SHELL_SMOKE_COMMANDS:
+        prompt = _read_runtime_command_prompt(target.parent, target, runtime, command_name)
+        fences = shell_fences(prompt)
+        if not fences:
+            continue
+        for fence in fences:
+            for line in runnable_shell_lines(fence):
+                rewritten = rewrite_gpd_shell_line_to_runtime_bridge(line, bridge_command)
+                if rewritten != line:
+                    offenders.append(
+                        f"{runtime}:{command_name}:{kind}: lines {fence.start_line}-{fence.end_line}: {line!r}"
+                    )
+                if RAW_GPD_COMMAND_SUBSTITUTION_RE.search(line):
+                    offenders.append(
+                        f"{runtime}:{command_name}:{kind}: lines {fence.start_line}-{fence.end_line}: "
+                        f"raw gpd command substitution {line!r}"
+                    )
+
+    assert offenders == []
+
+
+@pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)
+def test_installed_target_workflow_helper_calls_stay_local_cli_not_runtime_labels(
+    real_installed_repo_factory,
+    runtime: str,
+) -> None:
+    target = real_installed_repo_factory(runtime)
+    bridge_command = _expected_local_bridge_for_runtime(runtime, target)
+    public_helper_labels = _runtime_public_helper_labels(runtime)
+    offenders: list[str] = []
+    helper_reference_count = 0
+
+    for workflow_name in STAGED_HELPER_TARGET_WORKFLOWS:
+        workflow_text = _installed_workflow_text(target, workflow_name)
+        helper_reference_count += len(LOCAL_HELPER_TERM_RE.findall(workflow_text))
+
+        for line_number, line in enumerate(workflow_text.splitlines(), start=1):
+            if not LOCAL_HELPER_TERM_RE.search(line):
+                continue
+            for public_label in public_helper_labels:
+                if public_label in line:
+                    offenders.append(
+                        f"{runtime}:{workflow_name}: line {line_number}: internal helper surfaced as {public_label!r}"
+                    )
+
+        for fence in shell_fences(workflow_text):
+            for line in runnable_shell_lines(fence):
+                if not LOCAL_HELPER_TERM_RE.search(line):
+                    continue
+                rewritten = rewrite_gpd_shell_line_to_runtime_bridge(line, bridge_command)
+                if rewritten != line:
+                    offenders.append(
+                        f"{runtime}:{workflow_name}: lines {fence.start_line}-{fence.end_line}: "
+                        f"helper shell line was not bridged: {line!r}"
+                    )
+                for public_label in public_helper_labels:
+                    if public_label in line:
+                        offenders.append(
+                            f"{runtime}:{workflow_name}: lines {fence.start_line}-{fence.end_line}: "
+                            f"helper shell line used runtime label {public_label!r}"
+                        )
+
+    assert helper_reference_count > 0
+    assert offenders == []
+
+
+def test_installed_gemini_toml_policy_and_shell_fence_classification(real_installed_repo_factory) -> None:
+    target = real_installed_repo_factory("gemini")
+    bridge_command = _expected_local_bridge_for_runtime("gemini", target)
+    policy = tomllib.loads((target / "policies" / "gpd-auto-edit.toml").read_text(encoding="utf-8"))
+    rules = policy.get("rule")
+
+    assert isinstance(rules, list) and len(rules) == 1
+    rule = rules[0]
+    assert rule["toolName"] == "run_shell_command"
+    assert rule["decision"] == "allow"
+    assert rule["modes"] == ["autoEdit"]
+    assert rule["allowRedirection"] is True
+    assert "allow_redirection" not in rule
+
+    raw_policy_prefixes = rule["commandPrefix"]
+    assert isinstance(raw_policy_prefixes, list)
+    policy_prefixes = tuple(prefix for prefix in raw_policy_prefixes if isinstance(prefix, str))
+    assert len(policy_prefixes) == len(raw_policy_prefixes)
+    assert policy_prefixes[0] == bridge_command
+
+    offenders: list[str] = []
+    shell_note_commands = 0
+    kind = _installed_command_kind("gemini")
+    for command_name in INSTALLED_SHELL_SMOKE_COMMANDS:
+        prompt = _read_runtime_command_prompt(target.parent, target, "gemini", command_name)
+        label = f"gemini:{command_name}:{kind}"
+        fences = shell_fences(prompt)
+        assert fences, f"{label} should expose a shell fence"
+
+        shell_note_commands += 1
+        shell_note = single_runtime_note_block(prompt, "gemini_shell_runtime_notes", label=label)
+        for prefix in policy_prefixes:
+            assert f"`{prefix}`" in shell_note, f"{label} shell notes omit policy prefix {prefix!r}"
+
+        for fence in fences:
+            classification = _classify_installed_gemini_shell_fence(
+                fence,
+                bridge_command=bridge_command,
+                policy_prefixes=policy_prefixes,
+            )
+            first_command = first_runnable_shell_command(fence)
+            if classification not in {"runnable-bridge", "policy-static"}:
+                offenders.append(
+                    f"{label}: lines {fence.start_line}-{fence.end_line}: "
+                    f"{classification} first command {first_command!r}"
+                )
+                continue
+            assert first_command is not None
+            if not first_command.startswith(policy_prefixes):
+                offenders.append(
+                    f"{label}: lines {fence.start_line}-{fence.end_line}: "
+                    f"first command is outside installed policy prefixes: {first_command!r}"
+                )
+            for fragment in GEMINI_FORBIDDEN_INSTALLED_SHELL_FRAGMENTS:
+                if fragment in fence.body:
+                    offenders.append(f"{label}: lines {fence.start_line}-{fence.end_line}: contains {fragment!r}")
+            for line in runnable_shell_lines(fence):
+                if LEADING_SHELL_ASSIGNMENT_RE.match(line):
+                    offenders.append(f"{label}: lines {fence.start_line}-{fence.end_line}: leading assignment {line!r}")
+
+    assert shell_note_commands > 0
+    assert offenders == []
 
 
 # ---------------------------------------------------------------------------
@@ -649,6 +1087,9 @@ class TestCodexRoundtrip:
             line_count = len(content.splitlines())
             char_count = len(content)
 
+            if has_staged_shim_sentinel(content):
+                assert line_count <= 300, f"{skill_md.parent.name} staged shim has {line_count} lines"
+                assert char_count <= 20_000, f"{skill_md.parent.name} staged shim has {char_count} chars"
             assert line_count <= 2_700, f"{skill_md.parent.name} has {line_count} lines"
             assert char_count <= 145_000, f"{skill_md.parent.name} has {char_count} chars"
             assert content.count("<codex_runtime_notes>") == 1, skill_md.parent.name
@@ -792,21 +1233,47 @@ def test_real_installed_public_local_cli_commands_stay_canonical(
         assert f"{bridge_command}{public_command[3:]}" not in installed_text
 
 
+def test_opencode_command_projection_rewrites_live_public_command_prefixes(real_installed_repo_factory) -> None:
+    target = real_installed_repo_factory("opencode")
+    command_paths = sorted((target / "command").glob("gpd-*.md"))
+
+    assert {path.stem.removeprefix("gpd-") for path in command_paths} == set(_opencode_rewritten_command_stems())
+    for command_path in command_paths:
+        content = command_path.read_text(encoding="utf-8")
+        match = _opencode_canonical_public_command_re().search(content)
+        assert match is None, f"{command_path.name} still uses OpenCode-incompatible {match.group(0)!r}"
+
+
 def test_help_like_skills_keep_canonical_local_cli_language(tmp_path: Path) -> None:
     """Codex skills keep canonical local CLI names in prose even when shell steps bridge."""
     _install_real_repo_for_runtime(tmp_path, "codex")
     skills = tmp_path / "skills"
+    target = tmp_path / ".codex"
     help_skill = (skills / "gpd-help" / "SKILL.md").read_text(encoding="utf-8")
     tour_skill = (skills / "gpd-tour" / "SKILL.md").read_text(encoding="utf-8")
     settings_skill = (skills / "gpd-settings" / "SKILL.md").read_text(encoding="utf-8")
+    help_reference = (
+        _installed_workflow_text(target, "help") if has_help_bridge_shim_sentinel(help_skill) else help_skill
+    )
+    settings_reference = (
+        _installed_workflow_text(target, "settings")
+        if has_workflow_reference_shim_sentinel(settings_skill)
+        else settings_skill
+    )
 
-    assert "Use `gpd --help` to inspect the executable local install/readiness/permissions/diagnostics surface directly." in help_skill
-    assert "For a normal-terminal, current-workspace read-only recovery snapshot without launching the runtime, use `gpd resume`." in help_skill
-    assert "For a normal-terminal, read-only machine-local usage / cost summary, use `gpd cost`." in help_skill
+    assert (
+        "Use `gpd --help` to inspect the executable local install/readiness/permissions/diagnostics surface directly."
+        in help_reference
+    )
+    assert "Recovery ladder: use `gpd resume` for the current-workspace read-only recovery snapshot." in help_reference
+    assert "- `gpd cost`" in help_reference
     assert "The normal terminal is where you install GPD, run `gpd --help`, and run" in tour_skill
     assert "`gpd resume` is the normal-terminal recovery step for reopening the right" in tour_skill
-    assert "use `gpd --help` when you need the broader local CLI entrypoint" in settings_skill
-    assert "use `gpd cost` after runs for advisory local usage / cost, optional USD budget guardrails, and the current profile tier mix" in settings_skill
+    assert "use `gpd --help` when you need the broader local CLI entrypoint" in settings_reference
+    assert (
+        "use `gpd cost` after runs for advisory local usage / cost, optional USD budget guardrails, and the current profile tier mix"
+        in settings_reference
+    )
     assert re.search(r"`[^`\n]*gpd\.runtime_cli[^`\n]*(?:--help|resume|cost)[^`\n]*`", help_skill) is None
     assert re.search(r"`[^`\n]*gpd\.runtime_cli[^`\n]*(?:--help|resume|cost)[^`\n]*`", tour_skill) is None
     assert re.search(r"`[^`\n]*gpd\.runtime_cli[^`\n]*(?:--help|resume|cost)[^`\n]*`", settings_skill) is None
@@ -818,17 +1285,18 @@ def test_real_installed_help_prompt_keeps_relaxed_technical_analysis_contract(
     runtime: str,
 ) -> None:
     target = real_installed_repo_factory(runtime)
-    help_prompt = _canonicalize_runtime_markdown(
-        _read_runtime_command_prompt(target.parent, target, runtime, "help"),
-        runtime=runtime,
-    )
+    raw_help_prompt = _read_runtime_command_prompt(target.parent, target, runtime, "help")
+    help_prompt = _command_or_workflow_authority_text(target, raw_help_prompt, runtime, "help")
 
     assert "Project-aware technical-analysis lane:" in help_prompt
     assert "GPD/analysis/" in help_prompt
-    assert "`gpd:graph` and `gpd:error-propagation` are separate commands and are not part of this relaxed current-workspace lane." in help_prompt
-    assert "Usage: `gpd:dimensional-analysis results/01-SUMMARY.md`" in help_prompt
-    assert "Usage: `gpd:limiting-cases results/01-SUMMARY.md`" in help_prompt
-    assert "Usage: `gpd:numerical-convergence results/mesh-study.csv`" in help_prompt
+    assert (
+        "`gpd:graph` and `gpd:error-propagation` are separate commands and are not part of this relaxed current-workspace lane."
+        in help_prompt
+    )
+    assert "`gpd:dimensional-analysis results/01-SUMMARY.md`" in help_prompt
+    assert "`gpd:limiting-cases results/01-SUMMARY.md`" in help_prompt
+    assert "`gpd:numerical-convergence results/mesh-study.csv`" in help_prompt
 
 
 @pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)
@@ -837,43 +1305,11 @@ def test_real_installed_help_prompt_surfaces_bounded_write_paper_external_author
     runtime: str,
 ) -> None:
     target = real_installed_repo_factory(runtime)
-    help_prompt = _canonicalize_runtime_markdown(
-        _read_runtime_command_prompt(target.parent, target, runtime, "help"),
-        runtime=runtime,
-    )
+    raw_help_prompt = _read_runtime_command_prompt(target.parent, target, runtime, "help")
+    help_prompt = _command_or_workflow_authority_text(target, raw_help_prompt, runtime, "help")
 
     assert_publication_lane_boundary_contract(help_prompt)
-    assert "Usage: `gpd:write-paper --intake intake/write-paper-authoring-input.json`" in help_prompt
-
-
-@pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)
-def test_installed_prompt_contract_visibility_survives_adapter_projection(
-    real_installed_repo_factory,
-    runtime: str,
-) -> None:
-    target = real_installed_repo_factory(runtime)
-    verifier = _read_runtime_agent_prompt(target, runtime, "gpd-verifier")
-    executor = _read_runtime_agent_prompt(target, runtime, "gpd-executor")
-    new_project = _read_runtime_command_prompt(target.parent, target, runtime, "new-project")
-    plan_phase = _read_runtime_command_prompt(target.parent, target, runtime, "plan-phase")
-    write_paper = _read_runtime_command_prompt(target.parent, target, runtime, "write-paper")
-    plan_schema = (target / "get-physics-done" / "templates" / "plan-contract-schema.md").read_text(encoding="utf-8")
-    execute_phase = _read_runtime_command_prompt(target.parent, target, runtime, "execute-phase")
-    verify_work = _read_runtime_command_prompt(target.parent, target, runtime, "verify-work")
-
-    _assert_installed_contract_visibility(
-        verifier,
-        executor,
-        new_project,
-        plan_phase,
-        write_paper,
-        plan_schema,
-        execute_phase,
-        verify_work,
-        runtime=runtime,
-    )
-    assert "## Physics Stub Detection Patterns" not in verifier
-    assert "Load on demand from `references/verification/examples/verifier-worked-examples.md`." in verifier
+    assert "`gpd:write-paper --intake intake/write-paper-authoring-input.json`" in help_prompt
 
 
 @pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)
@@ -900,8 +1336,17 @@ def test_installed_planner_bootstrap_surface_defers_execution_and_completion_mat
     bootstrap, separator, _ = planner.partition("On-demand references:")
 
     assert separator == "On-demand references:"
-    assert "phase-prompt.md" in bootstrap
-    assert "planner contract schema is carried there" in bootstrap
+    assert_prompt_contracts(
+        bootstrap,
+        semantic_anchor(
+            "installed planner bootstrap names the late-loaded plan template and carried schema",
+            (
+                "phase-prompt.md",
+                "plan-contract-schema.md",
+                "before plan frontmatter",
+            ),
+        ),
+    )
     assert "@{GPD_INSTALL_DIR}/templates/plan-contract-schema.md" not in bootstrap
     if "# PLAN Contract Schema" in bootstrap:
         assert bootstrap.count("# PLAN Contract Schema") == 1

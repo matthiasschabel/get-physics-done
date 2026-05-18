@@ -6,7 +6,20 @@ import re
 from pathlib import Path
 
 from gpd.adapters.install_utils import expand_at_includes
+from gpd.core.return_contract import validate_gpd_return_markdown
 from gpd.core.workflow_staging import load_workflow_stage_manifest
+from tests.assertion_taxonomy_support import (
+    assert_prompt_contracts,
+    forbidden_duplicate,
+    semantic_anchor,
+    semantic_concept,
+)
+from tests.markdown_test_support import has_line_with_terms, tag_blocks, yaml_fence_bodies
+from tests.workflow_authority_support import (
+    STAGED_WORKFLOW_AUTHORITY_NAMES,
+    workflow_authority_paths,
+    workflow_authority_text,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
@@ -18,11 +31,21 @@ RESULT_LOOKUP_WORKFLOWS = ("explain.md", "compare-experiment.md", "limiting-case
 
 
 def _read(name: str) -> str:
+    if name.removesuffix(".md") in STAGED_WORKFLOW_AUTHORITY_NAMES:
+        return workflow_authority_text(WORKFLOWS_DIR, name)
     return (WORKFLOWS_DIR / name).read_text(encoding="utf-8")
+
+
+def _read_authority(name: str) -> str:
+    return workflow_authority_text(WORKFLOWS_DIR, name)
 
 
 def _expand(name: str) -> str:
     return expand_at_includes(_read(name), REPO_ROOT / "src/gpd", "/runtime/")
+
+
+def _expand_authority(name: str) -> str:
+    return expand_at_includes(_read_authority(name), REPO_ROOT / "src/gpd", "/runtime/")
 
 
 def _between(text: str, start: str, end: str) -> str:
@@ -31,6 +54,23 @@ def _between(text: str, start: str, end: str) -> str:
     body, end_marker, _ = tail.partition(end)
     assert end_marker, f"missing marker: {end}"
     return body
+
+
+def _assert_prompt_concept(
+    text: str,
+    label: str,
+    *,
+    required: tuple[str, ...] = (),
+    forbidden: tuple[str, ...] = (),
+) -> None:
+    assert_prompt_contracts(
+        text,
+        *semantic_concept(
+            label,
+            required=required or None,
+            forbidden=forbidden or None,
+        ),
+    )
 
 
 def test_installed_prompt_paths_do_not_reference_source_specs_segment() -> None:
@@ -73,12 +113,43 @@ def test_command_wrappers_do_not_repeat_self_workflow_reference_after_include() 
         assert len(workflow_reference.findall(content)) <= 1, path.relative_to(REPO_ROOT)
 
 
+def test_non_publication_staged_roots_are_indexes_not_authority_catalogs() -> None:
+    allowed_root_references = {
+        "new-project": {"@{GPD_INSTALL_DIR}/references/shared/interactive-choice-fallback.md"},
+    }
+
+    for workflow_id in ("autonomous", "plan-phase", "quick", "new-project", "verify-work"):
+        root = (WORKFLOWS_DIR / f"{workflow_id}.md").read_text(encoding="utf-8")
+        manifest = load_workflow_stage_manifest(workflow_id)
+
+        assert "<canonical_references>" not in root
+        assert "only the stage map" in root or "Do not load this index as a stage authority" in root
+        for stage in manifest.stages:
+            assert f"`{stage.id}`" in root
+            assert stage.mode_paths[0] in root
+            for authority in stage.loaded_authorities:
+                if authority.startswith(f"workflows/{workflow_id}/"):
+                    continue
+                allowed = allowed_root_references.get(workflow_id, set())
+                assert authority not in root or authority in allowed
+
+        for wrapper_or_stage_owned_fragment in (
+            "Full mode output",
+            "Minimal mode output",
+            "Typical quick tasks in physics research",
+            "lifecycle-contract-gate",
+            "gpd --raw init verify-work",
+            "Load `templates/",
+        ):
+            assert wrapper_or_stage_owned_fragment not in root
+
+
 def test_set_profile_updates_only_model_profile_through_config_cli() -> None:
     set_profile = _read("set-profile.md")
 
     assert 'PROFILE="$(printf' in set_profile
     assert 'gpd config set model_profile "$PROFILE"' in set_profile
-    assert "This is an action workflow" in set_profile
+    _assert_prompt_concept(set_profile, "set-profile stays action-oriented", required=("action workflow",))
     assert "preserving all other `GPD/config.json` keys" in set_profile
     assert "gpd --raw init progress --include state,config" not in set_profile
     assert "$ARGUMENTS.profile" not in set_profile
@@ -89,11 +160,11 @@ def test_set_profile_updates_only_model_profile_through_config_cli() -> None:
 def test_planner_workflows_expand_the_shared_planner_template_once_per_route() -> None:
     plan_phase_raw = _read("plan-phase.md")
     quick_raw = _read("quick.md")
-    verify_work_raw = _read("verify-work.md")
+    verify_work_raw = _read_authority("verify-work")
     planner_agent_raw = (AGENTS_DIR / "gpd-planner.md").read_text(encoding="utf-8")
 
     quick = _expand("quick.md")
-    verify_work = _expand("verify-work.md")
+    verify_work = _expand_authority("verify-work")
     planner_template = (TEMPLATES_DIR / "planner-subagent-prompt.md").read_text(encoding="utf-8")
 
     assert "templates/planner-subagent-prompt.md" in plan_phase_raw
@@ -104,9 +175,27 @@ def test_planner_workflows_expand_the_shared_planner_template_once_per_route() -
     assert plan_phase_raw.count("templates/planner-subagent-prompt.md") == 2
     assert verify_work_raw.count("templates/planner-subagent-prompt.md") == 2
     assert "templates/planner-subagent-prompt.md" not in quick_raw
-    assert planner_agent_raw.count("@{GPD_INSTALL_DIR}/templates/phase-prompt.md") == 1
-    assert planner_agent_raw.count("@{GPD_INSTALL_DIR}/templates/plan-contract-schema.md") == 0
-    assert "This template carries the hard planner contract gates." in planner_agent_raw
+    assert_prompt_contracts(
+        planner_agent_raw,
+        forbidden_duplicate(
+            "planner defers the plan template instead of eagerly including it",
+            "@{GPD_INSTALL_DIR}/templates/phase-prompt.md",
+            max_count=0,
+        ),
+        forbidden_duplicate(
+            "planner defers the plan schema instead of eagerly including it",
+            "@{GPD_INSTALL_DIR}/templates/plan-contract-schema.md",
+            max_count=0,
+        ),
+        semantic_anchor(
+            "planner keeps the late-loaded template and schema visible",
+            (
+                "{GPD_INSTALL_DIR}/templates/phase-prompt.md",
+                "{GPD_INSTALL_DIR}/templates/plan-contract-schema.md",
+                "before plan frontmatter",
+            ),
+        ),
+    )
 
     assert planner_template.count("## Standard Planning Template") == 1
     assert planner_template.count("## Revision Template") == 1
@@ -115,8 +204,8 @@ def test_planner_workflows_expand_the_shared_planner_template_once_per_route() -
     assert "# Planner Subagent Prompt Template" not in verify_work
     assert "## Standard Planning Template" not in verify_work
     assert "## Revision Template" not in verify_work
-    assert "project_contract_load_info.status" in verify_work
-    assert "project_contract_load_info.errors" in verify_work_raw
+    assert "project_contract_load_info" in verify_work
+    assert "project_contract_load_info" in verify_work_raw
 
     assert "project_contract_gate.authoritative" in planner_template
     plan_phase_prompt = _between(plan_phase_raw, "Planner prompt:", "task(")
@@ -131,7 +220,7 @@ def test_planner_workflows_expand_the_shared_planner_template_once_per_route() -
 def test_planner_workflows_do_not_embed_the_removed_long_policy_blocks() -> None:
     plan_phase = _read("plan-phase.md")
     quick = _read("quick.md")
-    verify_work = _read("verify-work.md")
+    verify_work = _read_authority("verify-work")
 
     for removed_phrase in (
         "Each plan has a complete contract block (claims, deliverables, acceptance tests, forbidden proxies, uncertainty markers, and `references[]` whenever grounding is not already explicit elsewhere in the contract)",
@@ -144,15 +233,36 @@ def test_planner_workflows_do_not_embed_the_removed_long_policy_blocks() -> None
         assert removed_phrase not in plan_phase
         assert removed_phrase not in verify_work
 
-    assert "Render the template's `## Standard Planning Template` into `filled_prompt`" in plan_phase
-    assert "Render the template's `## Revision Template` into `revision_prompt`" in plan_phase
-    assert "Do not restate template-owned contract gates" in plan_phase
-    assert "Use the shared planner template, phase template, and `templates/plan-contract-schema.md`." not in plan_phase
-    assert (
-        "Before planning, load the shared planner template, phase template, and canonical contract schema." not in quick
+    assert has_line_with_terms(plan_phase, "## Standard Planning Template", "filled_prompt")
+    assert has_line_with_terms(plan_phase, "## Revision Template", "revision_prompt")
+    assert has_line_with_terms(plan_phase, "template-owned", "contract gates")
+    assert not has_line_with_terms(
+        plan_phase,
+        "shared planner template",
+        "phase template",
+        "templates/plan-contract-schema.md",
     )
-    assert "The shared planner template owns the canonical planning policy and contract gate." not in verify_work
-    assert "The shared planner template owns the canonical planning and revision policy." not in verify_work
+    assert not has_line_with_terms(
+        quick,
+        "before planning",
+        "shared planner template",
+        "canonical contract schema",
+        casefold=True,
+    )
+    assert not has_line_with_terms(
+        verify_work,
+        "shared planner template",
+        "canonical planning",
+        "contract gate",
+        casefold=True,
+    )
+    assert not has_line_with_terms(
+        verify_work,
+        "shared planner template",
+        "canonical planning",
+        "revision policy",
+        casefold=True,
+    )
 
 
 def test_lifecycle_workflow_prompts_reference_every_real_stage_id() -> None:
@@ -160,7 +270,7 @@ def test_lifecycle_workflow_prompts_reference_every_real_stage_id() -> None:
         ("plan-phase", "plan-phase.md"),
         ("execute-phase", "execute-phase.md"),
     ):
-        workflow = _read(workflow_name)
+        workflow = _read_authority(workflow_id) if workflow_id == "execute-phase" else _read(workflow_name)
         manifest = load_workflow_stage_manifest(workflow_id)
 
         missing = [
@@ -175,6 +285,7 @@ def test_lifecycle_workflow_prompts_reference_every_real_stage_id() -> None:
 def test_planner_agent_does_not_duplicate_canonical_plan_template_blocks() -> None:
     planner_agent = (AGENTS_DIR / "gpd-planner.md").read_text(encoding="utf-8")
     phase_template = (TEMPLATES_DIR / "phase-prompt.md").read_text(encoding="utf-8")
+    gap_policy = (REFERENCES_DIR / "planning" / "planner-gap-and-revision-policy.md").read_text(encoding="utf-8")
 
     canonical_only_markers = (
         "# Phase Plan Prompt Template",
@@ -191,28 +302,40 @@ def test_planner_agent_does_not_duplicate_canonical_plan_template_blocks() -> No
         assert marker not in planner_agent
 
     assert "## PLAN.md Source Of Truth" in planner_agent
-    assert "Gap-specific fields to insert into the canonical `phase-prompt.md` template:" in planner_agent
+    assert "## Gap-Specific Contract Fields" in gap_policy
 
 
 def test_new_project_workflow_keeps_contract_preservation_rules_single_sourced() -> None:
-    new_project = _read("new-project.md")
-
-    assert (
-        "If the init JSON already contains `project_contract`, `project_contract_load_info`, or "
-        "`project_contract_validation`, preserve that state in the approval gate and continuation decision."
-    ) in new_project
-    assert (
-        "preserve any init-surfaced `project_contract`, `project_contract_load_info`, and "
-        "`project_contract_validation` state while deciding whether this is fresh work or a continuation."
-    ) not in new_project
-    assert (
-        "`schema_version` must be the integer `1`, `references[].must_surface` must stay a boolean `true` or "
-        "`false`, and `context_intake`, `uncertainty_markers`, and `references[]` must stay visible in the approval gate"
-    ) in new_project
-    assert (
-        "keep `schema_version` at `1`, and keep `references[].must_surface` as a boolean, not a synonym"
-        not in new_project
+    scope_intake = (WORKFLOWS_DIR / "new-project" / "scope-intake.md").read_text(encoding="utf-8")
+    scope_approval = (WORKFLOWS_DIR / "new-project" / "scope-approval.md").read_text(encoding="utf-8")
+    contract_schema = expand_at_includes(
+        (TEMPLATES_DIR / "project-contract-schema.md").read_text(encoding="utf-8"),
+        REPO_ROOT / "src/gpd/specs",
+        "/runtime/",
     )
+
+    for fragment in (
+        "`project_contract`",
+        "`project_contract_load_info`",
+        "`project_contract_validation`",
+        "preserve that state",
+        "fresh work or a continuation",
+        "visible-but-blocked contract",
+    ):
+        assert fragment in scope_intake
+    assert has_line_with_terms(scope_approval, "approval", "contract", "schema")
+    assert not has_line_with_terms(
+        scope_intake + scope_approval, "preserve any init-surfaced", "fresh work", "continuation"
+    )
+    for fragment in (
+        "`schema_version` must be the integer `1`",
+        "`references[]`",
+        "`must_surface` is a boolean scalar",
+    ):
+        assert fragment in contract_schema
+    for fragment in ("`context_intake`", "`uncertainty_markers`", "`project_contract`"):
+        assert fragment in scope_approval
+    assert not has_line_with_terms(contract_schema, "schema_version", "references[].must_surface", "not a synonym")
 
 
 def test_new_project_workflow_references_late_artifact_templates_without_inlining_skeletons() -> None:
@@ -220,15 +343,15 @@ def test_new_project_workflow_references_late_artifact_templates_without_inlinin
     project_template = (TEMPLATES_DIR / "project.md").read_text(encoding="utf-8")
     state_template = (TEMPLATES_DIR / "state.md").read_text(encoding="utf-8")
 
-    assert "{GPD_INSTALL_DIR}/templates/project.md" in new_project
-    assert "{GPD_INSTALL_DIR}/templates/state.md" in new_project
+    assert "templates/project.md" in new_project
+    assert "templates/state.md" in new_project
     assert "@{GPD_INSTALL_DIR}/templates/project.md" not in new_project
     assert "@{GPD_INSTALL_DIR}/templates/state.md" not in new_project
 
     assert "# {project_title}" in project_template
     assert "## Scoping Contract Summary" in project_template
     assert "## Current Position" in state_template
-    assert "**Current Phase Name:** [Phase name]" in state_template
+    assert has_line_with_terms(state_template, "Current Phase Name", "[Phase name]")
 
     assert new_project.count("## Scoping Contract Summary") <= 1
     for removed_project_skeleton_marker in (
@@ -257,8 +380,8 @@ def test_notation_coordinator_references_subfield_defaults_without_inlining_tabl
 
     assert canonical_reference in notation_coordinator
     assert f"@{canonical_reference}" not in notation_coordinator
-    assert "Load the canonical subfield defaults reference and look up the matching subfield." in notation_coordinator
-    assert "Pre-populate `CONVENTIONS.md` with the default choices." in notation_coordinator
+    assert has_line_with_terms(notation_coordinator, "subfield defaults reference", "matching subfield")
+    assert has_line_with_terms(notation_coordinator, "CONVENTIONS.md", "default choices")
 
     assert "## Convention Defaults by Subfield" in subfield_defaults
     assert "## Convention Defaults by Subfield" not in notation_coordinator
@@ -274,8 +397,10 @@ def test_notation_coordinator_references_subfield_defaults_without_inlining_tabl
 def test_planner_workflows_keep_tangent_policy_single_sourced() -> None:
     plan_phase = _read("plan-phase.md")
 
-    assert plan_phase.count("Required 4-way tangent decision model:") == 1
-    assert plan_phase.count("Branch as alternative hypothesis") == 1
+    assert plan_phase.count("Tangent invariant:") == 1
+    assert plan_phase.count("gpd:tangent") == 1
+    assert plan_phase.count("gpd:branch-hypothesis") == 2
+    assert not has_line_with_terms(plan_phase, "required", "4-way", "tangent", "decision model", casefold=True)
 
 
 def test_context_pressure_default_threshold_table_is_single_sourced() -> None:
@@ -286,7 +411,7 @@ def test_context_pressure_default_threshold_table_is_single_sourced() -> None:
 
     assert infra.count("| GREEN | < 40% | Proceed normally |") == 1
     assert "| GREEN | < 40% | Proceed normally |" not in thresholds
-    assert "This file only lists per-agent overrides and calibration notes." in thresholds
+    assert has_line_with_terms(thresholds, "per-agent overrides", "calibration notes")
 
 
 def test_result_lookup_policy_is_single_sourced_for_high_level_workflows() -> None:
@@ -297,7 +422,7 @@ def test_result_lookup_policy_is_single_sourced_for_high_level_workflows() -> No
     assert policy.count("gpd result show") == 1
     assert policy.count("gpd result deps") == 1
     assert policy.count("gpd result downstream") == 1
-    assert "Keep `gpd query search` for SUMMARY/frontmatter lookup" in policy
+    assert has_line_with_terms(policy, "gpd query search", "SUMMARY/frontmatter")
 
     for workflow_name in RESULT_LOOKUP_WORKFLOWS:
         raw = _read(workflow_name)
@@ -316,7 +441,9 @@ def test_result_lookup_policy_is_single_sourced_for_high_level_workflows() -> No
             assert command not in raw, workflow_name
             assert command not in expanded, workflow_name
         assert "direct stored-result view before" not in raw, workflow_name
-        assert "reverse dependency tree separated into direct and transitive" not in raw, workflow_name
+        assert not has_line_with_terms(raw, "reverse dependency tree", "direct", "transitive", casefold=True), (
+            workflow_name
+        )
 
 
 def test_state_portability_uses_canonical_continuation_prose() -> None:
@@ -324,42 +451,65 @@ def test_state_portability_uses_canonical_continuation_prose() -> None:
         encoding="utf-8"
     )
 
-    assert "Canonical state in `state.json.continuation` wins first" in state_portability
-    assert "gpd --raw resume` emits the canonical top-level list" in state_portability
-    assert (
-        "A derived head without a portable usable resume file remains advisory continuity context only."
-        not in state_portability
-    )
+    assert has_line_with_terms(state_portability, "state.json.continuation", "wins first")
+    assert has_line_with_terms(state_portability, "gpd --raw resume", "top-level list")
+    assert not has_line_with_terms(state_portability, "derived head", "advisory continuity")
 
 
 def test_execute_phase_runtime_delegation_rules_are_single_sourced() -> None:
-    execute_phase = _read("execute-phase.md")
+    execute_phase = _read_authority("execute-phase")
 
     assert execute_phase.count("references/orchestration/runtime-delegation-note.md") == 1
-    assert "The shared note owns runtime-neutral task construction and handoff gates." in execute_phase
-    assert "The shared note owns empty-model omission" not in execute_phase
-    assert "preserve empty-model omission, `readonly=false`, artifact-gated completion" not in execute_phase
-    assert execute_phase.count("Apply the canonical runtime delegation convention above.") >= 3
+    assert has_line_with_terms(execute_phase, "runtime-neutral", "handoff gates")
+    assert not has_line_with_terms(execute_phase, "shared note", "empty-model omission", casefold=True)
+    assert not has_line_with_terms(
+        execute_phase,
+        "empty-model omission",
+        "readonly=false",
+        "artifact-gated completion",
+        casefold=True,
+    )
+    assert execute_phase.count("runtime delegation convention") <= 8
 
 
 def test_runtime_delegation_note_is_loaded_once_per_workflow() -> None:
     include = "@{GPD_INSTALL_DIR}/references/orchestration/runtime-delegation-note.md"
-    repeated_reference = "Apply the canonical runtime delegation convention already loaded above."
     workflows_using_short_references = {
         "audit-milestone.md",
         "explain.md",
         "new-milestone.md",
-        "new-project.md",
         "quick.md",
-        "write-paper.md",
+    }
+    workflows_using_manifest_conditional_references = {
+        "write-paper.md": "{GPD_INSTALL_DIR}/references/orchestration/runtime-delegation-note.md",
     }
 
     for path in sorted(WORKFLOWS_DIR.glob("*.md")):
-        text = path.read_text(encoding="utf-8")
-        assert text.count(include) <= 1, path.name
+        authority_paths = workflow_authority_paths(WORKFLOWS_DIR, path.stem)
+        for authority_path in authority_paths:
+            text = authority_path.read_text(encoding="utf-8")
+            assert text.count(include) <= 1, authority_path.relative_to(WORKFLOWS_DIR)
         if path.name in workflows_using_short_references:
-            assert text.count(include) == 1, path.name
-            assert repeated_reference in text, path.name
+            text = _read_authority(path.stem)
+            expected_count = 2 if path.name == "quick.md" else 1
+            assert text.count(include) == expected_count, path.name
+            assert has_line_with_terms(text, "runtime delegation convention", "loaded above"), path.name
+        if path.name in workflows_using_manifest_conditional_references:
+            text = _read_authority(path.stem)
+            assert include not in text, path.name
+            assert workflows_using_manifest_conditional_references[path.name] in text, path.name
+
+    new_project_authority_paths = workflow_authority_paths(WORKFLOWS_DIR, "new-project")
+    new_project_task_stage_names = {
+        authority_path.name
+        for authority_path in new_project_authority_paths
+        if include in authority_path.read_text(encoding="utf-8")
+    }
+    assert new_project_task_stage_names == {
+        "literature-survey.md",
+        "roadmap-authoring.md",
+        "conventions-handoff.md",
+    }
 
 
 def test_experiment_designer_uses_external_ising_example_as_single_source() -> None:
@@ -368,8 +518,28 @@ def test_experiment_designer_uses_external_ising_example_as_single_source() -> N
         encoding="utf-8"
     )
 
-    assert "## Worked Example: 2D Ising Model Phase Diagram via Monte Carlo" not in designer
-    assert designer.count("@{GPD_INSTALL_DIR}/references/examples/ising-experiment-design-example.md") == 1
+    for inline_fragment in (
+        "## Worked Example: 2D Ising Model Phase Diagram via Monte Carlo",
+        "#### Worked Examples of Physics-Informed Grids",
+        "log-spaced: t = [",
+        "T_above = T_c * (1 + t)",
+        "T_below = T_c * (1 - t)",
+        "Response Surface Methodology",
+        "Bayesian Optimization for Expensive Simulations",
+    ):
+        assert inline_fragment not in designer
+
+    for lazy_reference in (
+        "{GPD_INSTALL_DIR}/references/examples/ising-experiment-design-example.md",
+        "{GPD_INSTALL_DIR}/references/protocols/monte-carlo.md",
+        "{GPD_INSTALL_DIR}/references/protocols/statistical-inference.md",
+        "{GPD_INSTALL_DIR}/references/protocols/numerical-computation.md",
+        "{GPD_INSTALL_DIR}/references/protocols/reproducibility.md",
+        "{GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md",
+    ):
+        assert lazy_reference in designer
+        assert f"@{lazy_reference}" not in designer
+
     assert "This gives 15 critical-region temperatures" in example
     assert "This gives 14 temperatures" not in example
 
@@ -378,13 +548,19 @@ def test_numeric_context_budget_guidance_is_single_sourced() -> None:
     context_budget = (REFERENCES_DIR / "orchestration" / "context-budget.md").read_text(encoding="utf-8")
     infra = (REFERENCES_DIR / "orchestration" / "agent-infrastructure.md").read_text(encoding="utf-8")
     meta = (REFERENCES_DIR / "orchestration" / "meta-orchestration.md").read_text(encoding="utf-8")
-    execute_phase = _read("execute-phase.md")
+    execute_phase = _read_authority("execute-phase")
 
     assert "## Phase-Class Budget Targets" in context_budget
     assert "Summary aggregation heuristic" in context_budget
     assert "estimated_tokens = plan_count * tasks_per_plan * 6000" not in infra
-    assert "| Phase Type | Orchestrator Budget | Agent Budget (each) | Total per Phase | Notes |" not in meta
-    assert "This document owns strategic routing; it does not restate the budget table." in meta
+    assert not has_line_with_terms(
+        meta,
+        "Phase Type",
+        "Orchestrator Budget",
+        "Agent Budget",
+        "Total per Phase",
+    )
+    assert has_line_with_terms(meta, "strategic routing", "budget table")
     assert "references/orchestration/context-budget.md` as the canonical numeric source" in infra
     assert "references/orchestration/context-budget.md" in execute_phase
 
@@ -402,8 +578,8 @@ def test_executor_uses_plain_paths_for_inline_references_and_at_includes_only_fo
     assert "`{GPD_INSTALL_DIR}/templates/summary.md`" in executor
 
 
-def test_agent_specific_return_examples_defer_base_envelope_fields_to_infrastructure() -> None:
-    trimmed_agents = (
+def test_agent_specific_return_examples_include_complete_valid_base_envelope_fields() -> None:
+    agent_examples = (
         "gpd-experiment-designer.md",
         "gpd-notation-coordinator.md",
         "gpd-project-researcher.md",
@@ -422,20 +598,25 @@ def test_agent_specific_return_examples_defer_base_envelope_fields_to_infrastruc
         "gpd-planner.md",
     )
 
-    for agent_name in trimmed_agents:
+    required_fields = ("status:", "files_written:", "issues:", "next_actions:")
+
+    for agent_name in agent_examples:
         text = (AGENTS_DIR / agent_name).read_text(encoding="utf-8")
-        assert (
-            "# Base fields (`status`, `files_written`, `issues`, `next_actions`) follow agent-infrastructure.md."
-            in text
-        ), agent_name
+        gpd_blocks = [block for block in yaml_fence_bodies(text) if "gpd_return:" in block]
+        assert gpd_blocks, agent_name
+        for yaml_block in gpd_blocks:
+            assert all(field in yaml_block for field in required_fields), (agent_name, yaml_block)
+            result = validate_gpd_return_markdown(f"```yaml\n{yaml_block}\n```")
+            assert result.passed, (agent_name, result.errors, yaml_block)
         assert "The four base fields (`status`, `files_written`, `issues`, `next_actions`)" not in text, agent_name
 
 
 def test_bibliographer_delegates_return_boilerplate_to_agent_infrastructure() -> None:
     text = (AGENTS_DIR / "gpd-bibliographer.md").read_text(encoding="utf-8")
 
-    assert "Use agent-infrastructure.md for checkpoint ownership, return-envelope base fields" in text
-    assert "# Base fields (`status`, `files_written`, `issues`, `next_actions`) follow agent-infrastructure.md." in text
+    assert has_line_with_terms(text, "agent-infrastructure.md", "return-envelope")
+    assert "status: completed" in text
+    assert "files_written:\n    - paper/references.bib\n    - GPD/references-status.json" in text
 
     for removed_phrase in (
         "Checkpoint ownership is orchestrator-side",
@@ -462,28 +643,28 @@ def test_research_agents_delegate_file_templates_to_canonical_templates() -> Non
     ):
         assert f"{{GPD_INSTALL_DIR}}/templates/research-project/{template_name}" in project_researcher
 
-    assert "Do not inline the project-literature skeletons here." in project_researcher
+    assert has_line_with_terms(project_researcher, "project-literature skeletons", "canonical template")
     assert "# Research Summary: [Project Name]" not in project_researcher
     assert "### Governing Theory" not in project_researcher
     assert "## FEASIBILITY.md (feasibility mode only)" not in project_researcher
 
     assert "{GPD_INSTALL_DIR}/templates/research.md" in phase_researcher
-    assert "Do not inline or reconstruct a second full `RESEARCH.md` skeleton here." in phase_researcher
+    assert has_line_with_terms(phase_researcher, "templates/research.md", "RESEARCH.md")
     assert "# Phase [X]: [Name] - Research" not in phase_researcher
     assert "### Package / Framework Reuse Decision" in phase_researcher
 
     assert "{GPD_INSTALL_DIR}/templates/research-project/SUMMARY.md" in synthesizer
     assert "# Research Summary Template" in summary_template
-    assert "Follow the canonical template and add the synthesizer-specific sections produced above" in synthesizer
-    assert "```markdown\n# Research Summary: [Project Title]" not in synthesizer
-    assert "[Aggregated references from all research files, organized by topic]" not in synthesizer
+    assert has_line_with_terms(synthesizer, "canonical template", "synthesizer-specific")
+    assert not has_line_with_terms(synthesizer, "Research Summary", "[Project Title]")
+    assert not has_line_with_terms(synthesizer, "Aggregated references", "research files", "organized by topic")
 
 
 def test_roadmapper_keeps_project_type_template_catalog_single_sourced() -> None:
     roadmapper = (AGENTS_DIR / "gpd-roadmapper.md").read_text(encoding="utf-8")
     project_type_templates = sorted((TEMPLATES_DIR / "project-types").glob("*.md"))
-    downstream_consumer = _between(roadmapper, "<downstream_consumer>", "</downstream_consumer>")
-    phase_identification = _between(roadmapper, "<phase_identification>", "</phase_identification>")
+    downstream_consumer = tag_blocks(roadmapper, "downstream_consumer")[0]
+    phase_identification = tag_blocks(roadmapper, "phase_identification")[0]
 
     assert project_type_templates
     assert "{GPD_INSTALL_DIR}/templates/project-types/" in downstream_consumer

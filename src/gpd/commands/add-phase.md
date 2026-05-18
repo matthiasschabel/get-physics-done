@@ -7,6 +7,11 @@ allowed-tools:
   - file_read
   - file_write
   - shell
+help:
+  group: Roadmap and milestones
+  order: 220
+  compact_description: Append a new phase to the roadmap
+  display_signature: gpd:add-phase <description>
 ---
 
 

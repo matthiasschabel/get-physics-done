@@ -49,6 +49,13 @@ def _create_phase_dir(tmp_path: Path, name: str) -> Path:
     return phase_dir
 
 
+def _write_passed_verification(phase_dir: Path) -> Path:
+    phase_number = phase_dir.name.split("-", 1)[0]
+    path = phase_dir / f"{phase_number}-VERIFICATION.md"
+    path.write_text("---\nstatus: passed\n---\n\n# Verification\nPASS\n", encoding="utf-8")
+    return path
+
+
 class TestRoadmapCheckboxMatching:
     def _make_project(self, tmp_path: Path, roadmap_content: str) -> Path:
         gpd_dir = tmp_path / "GPD"
@@ -57,9 +64,7 @@ class TestRoadmapCheckboxMatching:
         (gpd_dir / "ROADMAP.md").write_text(roadmap_content, encoding="utf-8")
         return tmp_path
 
-    def test_roadmap_checkbox_matching_keeps_phase_one_separate_from_phase_ten(
-        self, tmp_path: Path
-    ) -> None:
+    def test_roadmap_checkbox_matching_keeps_phase_one_separate_from_phase_ten(self, tmp_path: Path) -> None:
         from gpd.core.phases import roadmap_analyze
 
         roadmap = (
@@ -83,9 +88,7 @@ class TestRoadmapCheckboxMatching:
         assert phase1.roadmap_complete is False
         assert phase10.roadmap_complete is True
 
-    def test_roadmap_completion_tracks_phase_one_independently_from_phase_ten(
-        self, tmp_path: Path
-    ) -> None:
+    def test_roadmap_completion_tracks_phase_one_independently_from_phase_ten(self, tmp_path: Path) -> None:
         from gpd.core.phases import roadmap_analyze
 
         roadmap = (
@@ -221,6 +224,7 @@ def test_phase_complete_uses_utc_date_near_midnight(tmp_path: Path) -> None:
     phase_dir = _create_phase_dir(tmp_path, "01-setup")
     (phase_dir / "a-PLAN.md").write_text("plan", encoding="utf-8")
     (phase_dir / "a-SUMMARY.md").write_text("done", encoding="utf-8")
+    _write_passed_verification(phase_dir)
     _create_phase_dir(tmp_path, "02-build")
 
     fake_utc = datetime(2026, 1, 15, 23, 30, 0, tzinfo=UTC)

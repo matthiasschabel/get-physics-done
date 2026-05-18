@@ -2,6 +2,8 @@
 
 Quantitative readiness score (0-100) for physics manuscripts. Used by `gpd:write-paper` to determine if the paper is ready for submission packaging. Each category is scored independently; the total is a weighted sum.
 
+The score threshold is necessary but not sufficient. `ready_for_submission` also requires zero blocking issues, including a passed verification report when verification applies; paper quality cannot bypass verification, staged review, or artifact preflight gates.
+
 This is **not** the final referee-decision policy. A manuscript can score well on packaging/readiness and still deserve `major_revision` or `reject` if its novelty, significance, venue fit, or claim-evidence proportionality are weak. Those publication-judgment gates belong to the staged peer-review policy and `validate referee-decision`.
 
 ## Scoring Categories
@@ -74,7 +76,7 @@ This is **not** the final referee-decision policy. A manuscript can score well o
 
 | Score | Status | Action |
 |-------|--------|--------|
-| **90-100** | Publication ready | Submit to target journal |
+| **90-100** | Quality ready | Continue only if verification, review, and artifact preflight gates have no blockers |
 | **80-89** | Nearly ready | Fix specific deficiencies, then submit |
 | **70-79** | Needs work | Address all items scoring 0; re-score after fixes |
 | **60-69** | Significant gaps | Multiple categories need attention; plan revision phase |
@@ -101,7 +103,7 @@ The artifact-driven path is intentionally conservative: it can infer many figure
 ## Integration Points
 
 - **`gpd:write-paper`**: Runs quality scoring after all sections drafted, before generating submission package
-- **`gpd:arxiv-submission`**: Requires the resolved journal profile's `minimum_submission_score` to proceed (override with `--force`)
+- **`gpd:arxiv-submission`**: Requires the resolved journal profile's `minimum_submission_score` and strict publication preflight to proceed; no paper-quality score or manual override bypasses verification, review, or artifact blockers
 - **`gpd:respond-to-referees`**: Re-scores after revision to track improvement
 - **VERIFICATION.md**: Quality score recorded in paper section of verification report
 

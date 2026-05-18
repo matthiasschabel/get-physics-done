@@ -5,6 +5,12 @@ from pathlib import Path
 
 import anyio
 
+from tests.assertion_taxonomy_support import assert_prompt_contracts, semantic_concept
+
+
+def _assert_semantic_surface(text: str, label: str, *, required: tuple[str, ...]) -> None:
+    assert_prompt_contracts(text, *semantic_concept(label, required=required))
+
 
 def test_verification_contract_policy_text_stays_aligned_across_public_surfaces() -> None:
     from gpd.mcp.builtin_servers import build_public_descriptors
@@ -28,12 +34,12 @@ def test_verification_contract_policy_text_stays_aligned_across_public_surfaces(
     repo_root = Path(__file__).resolve().parents[2]
     plan_schema = (repo_root / "src/gpd/specs/templates/plan-contract-schema.md").read_text(encoding="utf-8")
     state_schema = (repo_root / "src/gpd/specs/templates/state-json-schema.md").read_text(encoding="utf-8")
-    project_contract_schema = (
-        repo_root / "src/gpd/specs/templates/project-contract-schema.md"
-    ).read_text(encoding="utf-8")
-    grounding_linkage = (
-        repo_root / "src/gpd/specs/templates/project-contract-grounding-linkage.md"
-    ).read_text(encoding="utf-8")
+    project_contract_schema = (repo_root / "src/gpd/specs/templates/project-contract-schema.md").read_text(
+        encoding="utf-8"
+    )
+    grounding_linkage = (repo_root / "src/gpd/specs/templates/project-contract-grounding-linkage.md").read_text(
+        encoding="utf-8"
+    )
 
     assert _CONTRACT_PAYLOAD_INPUT_SCHEMA["description"] == VERIFICATION_CONTRACT_POLICY_TEXT
     assert VERIFICATION_BINDING_TARGETS == (
@@ -54,6 +60,12 @@ def test_verification_contract_policy_text_stays_aligned_across_public_surfaces(
     )
     assert verification_descriptor["description"] == verification_server_description()
     assert infra_descriptor["description"] == verification_server_description()
+    assert verification_descriptor["description"].startswith("GPD physics verification support tools.")
+    _assert_semantic_surface(
+        verification_descriptor["description"],
+        "verification descriptor scientific status boundary",
+        required=("static triage", "MCP results", "final scientific verification status"),
+    )
     assert tools["run_contract_check"].description is not None
     assert tools["suggest_contract_checks"].description is not None
     assert verification_contract_surface_summary_text() in verification_descriptor["description"]
@@ -62,38 +74,71 @@ def test_verification_contract_policy_text_stays_aligned_across_public_surfaces(
     assert tools["suggest_contract_checks"].description.count(VERIFICATION_CONTRACT_POLICY_TEXT) == 0
     assert verification_contract_surface_summary_text() in tools["run_contract_check"].description
     assert verification_contract_surface_summary_text() in tools["suggest_contract_checks"].description
-    assert "``request`` object" in tools["run_contract_check"].description
-    assert "``request`` input schema" in tools["run_contract_check"].description
-    assert "``request.contract`` is optional" in tools["run_contract_check"].description
-    assert "project_dir" in tools["run_contract_check"].description
-    assert "request_template" in tools["suggest_contract_checks"].description
-    assert "active_checks" in tools["suggest_contract_checks"].description
-    assert "``contract`` must be an object" in tools["suggest_contract_checks"].description
-    assert "schema_required_request_fields" in tools["suggest_contract_checks"].description
-    assert "Nested object schemas are closed at every level" in VERIFICATION_CONTRACT_POLICY_TEXT
-    assert "unknown top-level or nested keys" in VERIFICATION_CONTRACT_POLICY_TEXT
-    assert "contract-payload closed-enum case drift" in VERIFICATION_CONTRACT_POLICY_TEXT
-    assert "observed enum-like source values must match exactly" in VERIFICATION_CONTRACT_POLICY_TEXT
-    assert "Only contract-payload enum case drift is recoverable" in verification_contract_surface_summary_text()
-    assert "observed enums must match source evidence exactly" in verification_contract_surface_summary_text()
-    assert "its absence is a blocker" in VERIFICATION_CONTRACT_POLICY_TEXT
-    assert "missing `must_surface=true` is a non-blocking warning" in VERIFICATION_CONTRACT_POLICY_TEXT
+    _assert_semantic_surface(
+        tools["run_contract_check"].description,
+        "run_contract_check description request shape",
+        required=("request", "object", "input schema", "request.contract", "optional", "project_dir"),
+    )
+    _assert_semantic_surface(
+        tools["suggest_contract_checks"].description,
+        "suggest_contract_checks description request shape",
+        required=("request_template", "active_checks", "contract", "object", "schema_required_request_fields"),
+    )
+    _assert_semantic_surface(
+        VERIFICATION_CONTRACT_POLICY_TEXT,
+        "contract payload strictness policy",
+        required=(
+            "Nested object schemas",
+            "closed",
+            "unknown top-level",
+            "nested keys",
+            "hard errors",
+            "contract-payload closed-enum case drift",
+            "observed enum-like source values",
+            "match exactly",
+        ),
+    )
+    _assert_semantic_surface(
+        verification_contract_surface_summary_text(),
+        "contract payload summary strictness",
+        required=(
+            "contract-payload enum case drift",
+            "recoverable",
+            "observed enums",
+            "source evidence",
+            "exactly",
+        ),
+    )
+    _assert_semantic_surface(
+        VERIFICATION_CONTRACT_POLICY_TEXT,
+        "must_surface grounding severity",
+        required=("references[]", "must_surface=true", "blocker", "non-blocking warning"),
+    )
     for field_name in VERIFICATION_BINDING_FIELD_NAMES:
         assert f"`{field_name}`" in VERIFICATION_CONTRACT_POLICY_TEXT
-    assert (
-        "If `references[]` is non-empty and the contract does not already carry concrete grounding elsewhere, "
-        "at least one reference must set `must_surface: true`."
-    ) in plan_schema
-    assert "a missing `must_surface: true` reference is a warning, not a blocker" in plan_schema
+    _assert_semantic_surface(
+        plan_schema,
+        "plan schema must_surface grounding policy",
+        required=("references[]", "concrete grounding", "must_surface: true", "warning", "not a blocker"),
+    )
     assert "@{GPD_INSTALL_DIR}/templates/project-contract-schema.md" in state_schema
-    assert (
-        "If a project contract has any `references[]` and does not already carry concrete prior-output, "
-        "user-anchor, or baseline grounding, at least one reference must set `must_surface: true`."
-    ) in grounding_linkage
-    assert "a missing `must_surface: true` reference is still a warning" in grounding_linkage
-    assert (
-        "Project-scoping contracts must also provide non-empty `scope.in_scope` naming at least one concrete "
-        "objective or boundary"
-    ) in _CONTRACT_SCOPE_INPUT_SCHEMA["description"]
-    assert "`scope.in_scope` is required and must name at least one project boundary or objective." in plan_schema
-    assert "`scope.in_scope` must name at least one project boundary or objective." in project_contract_schema
+    _assert_semantic_surface(
+        grounding_linkage,
+        "project contract must_surface grounding policy",
+        required=("references[]", "prior-output", "user-anchor", "baseline grounding", "must_surface: true", "warning"),
+    )
+    _assert_semantic_surface(
+        _CONTRACT_SCOPE_INPUT_SCHEMA["description"],
+        "contract scope input requires in-scope boundary",
+        required=("Project-scoping contracts", "scope.in_scope", "objective", "boundary"),
+    )
+    _assert_semantic_surface(
+        plan_schema,
+        "plan schema scope boundary requirement",
+        required=("scope.in_scope", "required", "project boundary", "objective"),
+    )
+    _assert_semantic_surface(
+        project_contract_schema,
+        "project contract schema scope boundary requirement",
+        required=("scope.in_scope", "project boundary", "objective"),
+    )

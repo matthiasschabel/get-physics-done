@@ -10,6 +10,31 @@ from dataclasses import dataclass, fields
 from functools import lru_cache
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
+from gpd.core.strict_json_contract import (
+    require_allowed_keys as _strict_require_allowed_keys,
+)
+from gpd.core.strict_json_contract import (
+    require_bool as _strict_require_bool,
+)
+from gpd.core.strict_json_contract import (
+    require_int as _strict_require_int,
+)
+from gpd.core.strict_json_contract import (
+    require_object as _strict_require_object,
+)
+from gpd.core.strict_json_contract import (
+    require_required_keys as _strict_require_required_keys,
+)
+from gpd.core.strict_json_contract import (
+    require_schema_version as _strict_require_schema_version,
+)
+from gpd.core.strict_json_contract import (
+    require_string as _strict_require_string,
+)
+from gpd.core.strict_json_contract import (
+    require_unique_string_tuple as _strict_require_unique_string_tuple,
+)
+
 
 @dataclass(frozen=True, slots=True)
 class GlobalConfigPolicy:
@@ -181,9 +206,7 @@ _USAGE_TOKEN_HOOK_PAYLOAD_FIELDS = ("usage_keys", "input_tokens_keys", "output_t
 
 
 def _require_mapping(value: object, *, label: str) -> dict[str, object]:
-    if not isinstance(value, dict):
-        raise ValueError(f"{label} must be a mapping")
-    return value
+    return _strict_require_object(value, label=label, object_name="mapping")
 
 
 def _require_allowed_keys(
@@ -192,9 +215,7 @@ def _require_allowed_keys(
     label: str,
     allowed_keys: frozenset[str],
 ) -> None:
-    unknown_keys = sorted(key for key in payload if key not in allowed_keys)
-    if unknown_keys:
-        raise ValueError(f"{label} contains unknown key(s): {', '.join(unknown_keys)}")
+    _strict_require_allowed_keys(payload, label=label, keys=allowed_keys)
 
 
 def _require_keys(
@@ -203,15 +224,11 @@ def _require_keys(
     label: str,
     required_keys: frozenset[str],
 ) -> None:
-    missing_keys = sorted(key for key in required_keys if key not in payload)
-    if missing_keys:
-        raise ValueError(f"{label} is missing required key(s): {', '.join(missing_keys)}")
+    _strict_require_required_keys(payload, label=label, keys=required_keys)
 
 
 def _require_string(value: object, *, label: str) -> str:
-    if not isinstance(value, str) or not value or value != value.strip():
-        raise ValueError(f"{label} must be a non-empty string")
-    return value
+    return _strict_require_string(value, label=label)
 
 
 def _require_pattern(value: object, *, label: str, pattern: re.Pattern[str], description: str) -> str:
@@ -383,15 +400,11 @@ def _require_runtime_surface_label(
 
 
 def _require_bool(value: object, *, label: str) -> bool:
-    if type(value) is not bool:
-        raise ValueError(f"{label} must be a boolean")
-    return value
+    return _strict_require_bool(value, label=label)
 
 
 def _require_int(value: object, *, label: str) -> int:
-    if type(value) is not int:
-        raise ValueError(f"{label} must be an integer")
-    return value
+    return _strict_require_int(value, label=label)
 
 
 def _require_string_tuple(
@@ -400,21 +413,7 @@ def _require_string_tuple(
     label: str,
     allow_empty: bool,
 ) -> tuple[str, ...]:
-    if not isinstance(value, list):
-        raise ValueError(f"{label} must be a list of strings")
-    if not value and not allow_empty:
-        raise ValueError(f"{label} must contain at least one string")
-
-    items: list[str] = []
-    seen: set[str] = set()
-    for index, item in enumerate(value):
-        item_label = f"{label}[{index}]"
-        normalized = _require_string(item, label=item_label)
-        if normalized in seen:
-            raise ValueError(f"{label} must not contain duplicate values")
-        seen.add(normalized)
-        items.append(normalized)
-    return tuple(items)
+    return _strict_require_unique_string_tuple(value, label=label, allow_empty=allow_empty)
 
 
 def _validated_capability_values(
@@ -614,8 +613,7 @@ def _validate_capability_policy_coherence(
 def _load_runtime_catalog_schema_shape() -> dict[str, object]:
     schema_path = _runtime_catalog_schema_path()
     raw_schema = json.loads(schema_path.read_text(encoding="utf-8"))
-    if not isinstance(raw_schema, dict) or not raw_schema:
-        raise ValueError("runtime catalog schema must be a non-empty JSON object")
+    raw_schema = _strict_require_object(raw_schema, label="runtime catalog schema", non_empty=True)
 
     allowed_top_level_keys = {
         "schema_version",
@@ -639,14 +637,15 @@ def _load_runtime_catalog_schema_shape() -> dict[str, object]:
         formatted = ", ".join(unknown_top_level_keys)
         raise ValueError(f"runtime catalog schema contains unknown key(s): {formatted}")
 
-    schema_version = raw_schema.get("schema_version")
-    if type(schema_version) is not int or schema_version != 1:
-        raise ValueError(f"Unsupported runtime catalog schema_version: {schema_version!r}")
+    schema_version = _strict_require_schema_version(
+        raw_schema.get("schema_version"),
+        label="runtime catalog schema.schema_version",
+        expected=1,
+        invalid_message="Unsupported runtime catalog schema_version: {value!r}",
+    )
 
     def _require_schema_mapping(value: object, *, label: str) -> dict[str, object]:
-        if not isinstance(value, dict) or not value:
-            raise ValueError(f"{label} must be a non-empty JSON object")
-        return value
+        return _strict_require_object(value, label=label, non_empty=True)
 
     entry_required_keys = frozenset(
         _require_string_tuple(

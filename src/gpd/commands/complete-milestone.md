@@ -1,6 +1,6 @@
 ---
 name: gpd:complete-milestone
-description: Archive completed research milestone and prepare for next phase of investigation
+description: Archive completed research milestone and prepare the next investigation stage
 argument-hint: <version>
 context_mode: project-required
 requires:
@@ -9,50 +9,54 @@ allowed-tools:
   - file_read
   - file_write
   - shell
+help:
+  group: Roadmap and milestones
+  order: 280
+  compact_description: Archive a completed milestone
+  display_signature: gpd:complete-milestone <version>
 ---
 
-
 <objective>
-Mark research milestone {version} complete, archive to milestones/, and update ROADMAP.md and REQUIREMENTS.md.
 
-This wrapper owns the public command surface and required version argument. The workflow owns audit/readiness checks, milestone statistics, archive generation, PROJECT.md evolution, MILESTONES.md updates, commit/tag behavior, and next-step routing.
+Mark research milestone {version} complete, archive to milestones/, and prepare
+the next research stage.
+
+This wrapper owns the public command surface and required version argument.
+The workflow owns audit/readiness checks, milestone statistics, archive
+generation, PROJECT.md evolution, MILESTONES.md updates, commit/tag behavior,
+and next-step routing.
+
 </objective>
 
 <execution_context>
-**Load these files NOW (before proceeding):**
 
-- @{GPD_INSTALL_DIR}/workflows/complete-milestone.md (main workflow)
-- @{GPD_INSTALL_DIR}/templates/milestone.md (milestone template)
-- @{GPD_INSTALL_DIR}/templates/milestone-archive.md (archive template)
-  </execution_context>
+Load the workflow authority before executing:
+
+- @{GPD_INSTALL_DIR}/workflows/complete-milestone.md
+
+</execution_context>
+
+<late_read_authorities>
+
+Read these templates only when the workflow asks for the corresponding
+milestone/archive write step:
+
+- `{GPD_INSTALL_DIR}/templates/milestone.md`
+- `{GPD_INSTALL_DIR}/templates/milestone-archive.md`
+
+</late_read_authorities>
 
 <context>
-**User input:**
 
-- Version: {version} (e.g., "1.0", "1.1", "2.0")
+- Version: {version} (for example `1.0`, `1.1`, or `2.0`)
+- Primary archive outputs: `GPD/milestones/v{version}-ROADMAP.md` and
+  `GPD/milestones/v{version}-REQUIREMENTS.md`
 
-Primary outputs remain workflow-owned:
-
-- `GPD/milestones/v{version}-ROADMAP.md`
-- `GPD/milestones/v{version}-REQUIREMENTS.md`
-  </context>
+</context>
 
 <process>
-Follow the included complete-milestone workflow end-to-end after loading the execution-context files above.
 
-Use the workflow's readiness, audit, confirmation, archive, commit, and tag gates as the authority. The wrapper must not restate or fork those mechanics.
+Follow the included complete-milestone workflow end-to-end. Do not restate or
+fork its readiness, archive, commit, tag, or next-step mechanics.
 
 </process>
-
-<success_criteria>
-
-- Milestone archived to `GPD/milestones/v{version}-ROADMAP.md`
-- Requirements archived to `GPD/milestones/v{version}-REQUIREMENTS.md`
-- Complete-milestone workflow executed as the authority for readiness, archive, commit, tag, and next-step mechanics
-  </success_criteria>
-
-<critical_rules>
-
-- **Load workflow first:** Read complete-milestone.md before executing
-- **Do not fork workflow gates:** Audit, readiness, archive-before-delete, commit, tag, and next-milestone routing come from the workflow
-  </critical_rules>

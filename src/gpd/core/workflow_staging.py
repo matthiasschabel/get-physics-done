@@ -9,6 +9,47 @@ from functools import cache
 from pathlib import Path, PurePosixPath
 
 from gpd.adapters.tool_names import CANONICAL_TOOL_NAMES, canonical
+from gpd.core.staged_context_fields import (
+    ARXIV_SUBMISSION_BOOTSTRAP_FIELDS,
+    ARXIV_SUBMISSION_SNAPSHOT_FIELDS,
+    EXECUTE_PHASE_EXECUTION_RUNTIME_FIELDS,
+    EXECUTE_PHASE_REFERENCE_RUNTIME_FIELDS,
+    EXECUTE_PHASE_SCHEMA_BRIDGE_FIELDS,
+    EXECUTE_PHASE_STATE_MEMORY_FIELDS,
+    EXECUTE_PHASE_STRUCTURED_STATE_FIELDS,
+    EXECUTE_PHASE_TASK_OVERLAY_FIELDS,
+    NEW_MILESTONE_FILE_CONTENT_FIELDS,
+    NEW_MILESTONE_REFERENCE_RUNTIME_FIELDS,
+    PLAN_PHASE_CONTRACT_GATE_FIELDS,
+    PLAN_PHASE_FILE_CONTENT_FIELDS,
+    PLAN_PHASE_REFERENCE_RUNTIME_FIELDS,
+    PLAN_PHASE_STATE_MEMORY_FIELDS,
+    PLAN_PHASE_STRUCTURED_STATE_FIELDS,
+    PROJECT_CONTRACT_GATE_FIELDS,
+    PUBLICATION_REVIEW_SNAPSHOT_FIELDS,
+    QUICK_CONTRACT_GATE_FIELDS,
+    QUICK_REFERENCE_RUNTIME_FIELDS,
+    RESEARCH_PHASE_FILE_CONTENT_FIELDS,
+    RESUME_FILE_CONTENT_FIELDS,
+    RESUME_REFERENCE_RUNTIME_FIELDS,
+    STAGED_BODY_FIELDS,
+    STAGED_REFERENCE_HANDLE_STATUS_FIELDS,
+    STAGED_REFERENCE_RENDERED_CONTEXT_FIELDS,
+    STAGED_REFERENCE_RUNTIME_FIELDS,
+    STATE_MEMORY_FIELDS,
+    STRUCTURED_STATE_FIELDS,
+    SYNC_STATE_FILE_CONTENT_FIELDS,
+    SYNC_STATE_STRUCTURED_STATE_FIELDS,
+    VERIFY_WORK_CONTRACT_GATE_FIELDS,
+    VERIFY_WORK_REFERENCE_RUNTIME_FIELDS,
+    VERIFY_WORK_SCHEMA_BRIDGE_FIELDS,
+    VERIFY_WORK_STATE_MEMORY_FIELDS,
+    VERIFY_WORK_STRUCTURED_STATE_FIELDS,
+    WRITE_PAPER_FILE_CONTENT_FIELDS,
+    WRITE_PAPER_PUBLICATION_BOOTSTRAP_FIELDS,
+    WRITE_PAPER_REFERENCE_RUNTIME_FIELDS,
+)
+from gpd.core.workflow_manifest_compaction import canonicalize_workflow_stage_manifest_payload
 from gpd.specs import SPECS_DIR
 
 WORKFLOW_STAGE_MANIFEST_DIR = SPECS_DIR / "workflows"
@@ -23,6 +64,7 @@ LITERATURE_REVIEW_STAGE_MANIFEST_PATH = (
 )
 RESEARCH_PHASE_STAGE_MANIFEST_PATH = WORKFLOW_STAGE_MANIFEST_DIR / f"research-phase{WORKFLOW_STAGE_MANIFEST_SUFFIX}"
 MAP_RESEARCH_STAGE_MANIFEST_PATH = WORKFLOW_STAGE_MANIFEST_DIR / f"map-research{WORKFLOW_STAGE_MANIFEST_SUFFIX}"
+AUTONOMOUS_STAGE_MANIFEST_PATH = WORKFLOW_STAGE_MANIFEST_DIR / f"autonomous{WORKFLOW_STAGE_MANIFEST_SUFFIX}"
 WRITE_PAPER_MANAGED_MANUSCRIPT_ROOT = "GPD/publication/{subject_slug}/manuscript"
 WRITE_PAPER_MANAGED_INTAKE_ROOT = "GPD/publication/{subject_slug}/intake"
 RESUME_WORK_INIT_FIELDS = frozenset(
@@ -52,68 +94,18 @@ RESUME_WORK_INIT_FIELDS = frozenset(
         "research_mode",
         "resume_surface_schema_version",
         "active_bounded_segment",
-        "derived_execution_head",
         "derived_execution_head_resume_file",
-        "continuity_handoff_file",
-        "recorded_continuity_handoff_file",
-        "missing_continuity_handoff_file",
-        "has_continuity_handoff",
         "active_resume_kind",
         "active_resume_origin",
         "active_resume_pointer",
         "active_resume_result",
         "resume_candidates",
-        "current_hostname",
-        "current_platform",
-        "session_hostname",
-        "session_platform",
-        "session_last_date",
-        "session_stopped_at",
-        "machine_change_detected",
-        "machine_change_notice",
-        "execution_review_pending",
-        "execution_pre_fanout_review_pending",
-        "execution_skeptical_requestioning_required",
-        "execution_downstream_locked",
-        "execution_blocked",
-        "execution_resumable",
-        "execution_paused_at",
-        "current_execution_resume_file",
-        "handoff_resume_file",
-        "recorded_handoff_resume_file",
-        "missing_handoff_resume_file",
-        "execution_resume_file",
-        "execution_resume_file_source",
-        "project_contract",
-        "project_contract_gate",
-        "project_contract_load_info",
-        "project_contract_validation",
-        "contract_intake",
-        "effective_reference_intake",
-        "active_reference_context",
-        "reference_artifact_files",
-        "reference_artifacts_content",
-        "state_load_source",
-        "state_integrity_issues",
-        "convention_lock",
-        "convention_lock_count",
-        "intermediate_results",
-        "intermediate_result_count",
-        "approximations",
-        "approximation_count",
-        "propagated_uncertainties",
-        "propagated_uncertainty_count",
-        "derived_convention_lock",
-        "derived_convention_lock_count",
-        "derived_intermediate_results",
-        "derived_intermediate_result_count",
-        "derived_approximations",
-        "derived_approximation_count",
-        "state_content",
-        "project_content",
-        "roadmap_content",
-        "derivation_state_content",
-        "continuity_handoff_content",
+        *EXECUTE_PHASE_EXECUTION_RUNTIME_FIELDS,
+        *PROJECT_CONTRACT_GATE_FIELDS,
+        *RESUME_REFERENCE_RUNTIME_FIELDS,
+        *STRUCTURED_STATE_FIELDS,
+        *STATE_MEMORY_FIELDS,
+        *RESUME_FILE_CONTENT_FIELDS,
         "platform",
     }
 )
@@ -130,15 +122,9 @@ SYNC_STATE_INIT_FIELDS = frozenset(
         "state_json_exists",
         "state_json_backup_exists",
         "state_recovery_guidance",
-        "state_md_content",
-        "state_json_content",
-        "state_json_backup_content",
-        "state_load_source",
-        "state_integrity_issues",
-        "project_contract",
-        "project_contract_gate",
-        "project_contract_load_info",
-        "project_contract_validation",
+        *SYNC_STATE_FILE_CONTENT_FIELDS,
+        *SYNC_STATE_STRUCTURED_STATE_FIELDS,
+        *PROJECT_CONTRACT_GATE_FIELDS,
         "platform",
     }
 )
@@ -171,10 +157,7 @@ NEW_PROJECT_INIT_FIELDS = frozenset(
         "needs_research_map",
         "has_git",
         "platform",
-        "project_contract",
-        "project_contract_gate",
-        "project_contract_load_info",
-        "project_contract_validation",
+        *PROJECT_CONTRACT_GATE_FIELDS,
     }
 )
 NEW_MILESTONE_INIT_FIELDS = frozenset(
@@ -184,6 +167,7 @@ NEW_MILESTONE_INIT_FIELDS = frozenset(
         "roadmapper_model",
         "commit_docs",
         "autonomy",
+        "init_root_policy",
         "research_mode",
         "research_enabled",
         "current_milestone",
@@ -191,30 +175,10 @@ NEW_MILESTONE_INIT_FIELDS = frozenset(
         "project_exists",
         "roadmap_exists",
         "state_exists",
-        "project_contract",
-        "project_contract_gate",
-        "project_contract_load_info",
-        "project_contract_validation",
-        "contract_intake",
-        "effective_reference_intake",
-        "active_reference_context",
-        "reference_artifact_files",
-        "reference_artifacts_content",
-        "literature_review_files",
-        "literature_review_count",
-        "research_map_reference_files",
-        "research_map_reference_count",
-        "derived_convention_lock",
-        "derived_convention_lock_count",
-        "derived_intermediate_results",
-        "derived_intermediate_result_count",
-        "derived_approximations",
-        "derived_approximation_count",
-        "project_content",
-        "state_content",
-        "milestones_content",
-        "requirements_content",
-        "roadmap_content",
+        *PROJECT_CONTRACT_GATE_FIELDS,
+        *NEW_MILESTONE_REFERENCE_RUNTIME_FIELDS,
+        *STATE_MEMORY_FIELDS,
+        *NEW_MILESTONE_FILE_CONTENT_FIELDS,
         "platform",
     }
 )
@@ -247,75 +211,13 @@ EXECUTE_PHASE_INIT_FIELDS = frozenset(
         "incomplete_count",
         "state_exists",
         "roadmap_exists",
-        "project_contract",
-        "project_contract_gate",
-        "project_contract_validation",
-        "project_contract_load_info",
-        "contract_intake",
-        "effective_reference_intake",
-        "active_reference_context",
-        "reference_artifact_files",
-        "reference_artifacts_content",
-        "state_load_source",
-        "state_integrity_issues",
-        "convention_lock",
-        "convention_lock_count",
-        "intermediate_results",
-        "intermediate_result_count",
-        "approximations",
-        "approximation_count",
-        "propagated_uncertainties",
-        "propagated_uncertainty_count",
-        "derived_convention_lock",
-        "derived_convention_lock_count",
-        "derived_intermediate_results",
-        "derived_intermediate_result_count",
-        "derived_approximations",
-        "derived_approximation_count",
-        "selected_protocol_bundle_ids",
-        "protocol_bundle_count",
-        "protocol_bundle_context",
-        "protocol_bundle_verifier_extensions",
-        "current_execution",
-        "has_live_execution",
-        "execution_review_pending",
-        "execution_pre_fanout_review_pending",
-        "execution_skeptical_requestioning_required",
-        "execution_downstream_locked",
-        "execution_blocked",
-        "execution_resumable",
-        "execution_paused_at",
-        "current_execution_resume_file",
-        "handoff_resume_file",
-        "recorded_handoff_resume_file",
-        "missing_handoff_resume_file",
-        "execution_resume_file",
-        "execution_resume_file_source",
-        "resume_projection",
-        "current_hostname",
-        "current_platform",
-        "session_hostname",
-        "session_platform",
-        "session_last_date",
-        "session_stopped_at",
-        "machine_change_detected",
-        "machine_change_notice",
-        "literature_review_files",
-        "literature_review_count",
-        "research_map_reference_files",
-        "research_map_reference_count",
-        "derived_active_references",
-        "derived_active_reference_count",
-        "citation_source_files",
-        "citation_source_count",
-        "citation_source_warnings",
-        "derived_citation_sources",
-        "derived_citation_source_count",
-        "active_references",
-        "active_reference_count",
-        "derived_manuscript_reference_status",
-        "derived_manuscript_reference_status_count",
-        "derived_manuscript_proof_review_status",
+        *PROJECT_CONTRACT_GATE_FIELDS,
+        *EXECUTE_PHASE_REFERENCE_RUNTIME_FIELDS,
+        *EXECUTE_PHASE_STRUCTURED_STATE_FIELDS,
+        *EXECUTE_PHASE_STATE_MEMORY_FIELDS,
+        *EXECUTE_PHASE_TASK_OVERLAY_FIELDS,
+        *EXECUTE_PHASE_EXECUTION_RUNTIME_FIELDS,
+        *EXECUTE_PHASE_SCHEMA_BRIDGE_FIELDS,
         "platform",
     }
 )
@@ -342,68 +244,6 @@ PLAN_PHASE_BASE_INIT_FIELDS = frozenset(
         "planning_exists",
         "roadmap_exists",
         "platform",
-    }
-)
-PLAN_PHASE_CONTRACT_GATE_FIELDS = frozenset(
-    {
-        "project_contract",
-        "project_contract_gate",
-        "project_contract_load_info",
-        "project_contract_validation",
-    }
-)
-PLAN_PHASE_REFERENCE_RUNTIME_FIELDS = frozenset(
-    {
-        "contract_intake",
-        "effective_reference_intake",
-        "selected_protocol_bundle_ids",
-        "protocol_bundle_count",
-        "protocol_bundle_context",
-        "protocol_bundle_verifier_extensions",
-        "active_reference_context",
-        "reference_artifact_files",
-        "reference_artifacts_content",
-        "literature_review_files",
-        "literature_review_count",
-        "research_map_reference_files",
-        "research_map_reference_count",
-        "derived_manuscript_proof_review_status",
-    }
-)
-PLAN_PHASE_STRUCTURED_STATE_FIELDS = frozenset(
-    {
-        "state_load_source",
-        "state_integrity_issues",
-        "convention_lock",
-        "convention_lock_count",
-        "intermediate_results",
-        "intermediate_result_count",
-        "approximations",
-        "approximation_count",
-        "propagated_uncertainties",
-        "propagated_uncertainty_count",
-    }
-)
-PLAN_PHASE_STATE_MEMORY_FIELDS = frozenset(
-    {
-        "derived_convention_lock",
-        "derived_convention_lock_count",
-        "derived_intermediate_results",
-        "derived_intermediate_result_count",
-        "derived_approximations",
-        "derived_approximation_count",
-    }
-)
-PLAN_PHASE_FILE_CONTENT_FIELDS = frozenset(
-    {
-        "state_content",
-        "roadmap_content",
-        "requirements_content",
-        "context_content",
-        "research_content",
-        "experiment_design_content",
-        "verification_content",
-        "validation_content",
     }
 )
 PLAN_PHASE_INIT_FIELDS = frozenset(
@@ -436,32 +276,6 @@ QUICK_BASE_INIT_FIELDS = frozenset(
         "platform",
     }
 )
-QUICK_CONTRACT_GATE_FIELDS = frozenset(
-    {
-        "project_contract",
-        "project_contract_gate",
-        "project_contract_load_info",
-        "project_contract_validation",
-    }
-)
-QUICK_REFERENCE_RUNTIME_FIELDS = frozenset(
-    {
-        "contract_intake",
-        "effective_reference_intake",
-        "selected_protocol_bundle_ids",
-        "protocol_bundle_count",
-        "protocol_bundle_context",
-        "protocol_bundle_verifier_extensions",
-        "active_reference_context",
-        "reference_artifact_files",
-        "reference_artifacts_content",
-        "literature_review_files",
-        "literature_review_count",
-        "research_map_reference_files",
-        "research_map_reference_count",
-        "derived_manuscript_proof_review_status",
-    }
-)
 QUICK_INIT_FIELDS = frozenset(
     {
         *QUICK_BASE_INIT_FIELDS,
@@ -481,43 +295,8 @@ LITERATURE_REVIEW_INIT_FIELDS = frozenset(
         "research_mode",
         "autonomy",
         "platform",
-        "project_contract",
-        "project_contract_gate",
-        "project_contract_load_info",
-        "project_contract_validation",
-        "contract_intake",
-        "effective_reference_intake",
-        "active_reference_context",
-        "reference_artifact_files",
-        "reference_artifacts_content",
-        "literature_review_files",
-        "literature_review_count",
-        "research_map_reference_files",
-        "research_map_reference_count",
-        "derived_active_references",
-        "derived_active_reference_count",
-        "derived_knowledge_docs",
-        "derived_knowledge_doc_count",
-        "knowledge_doc_files",
-        "knowledge_doc_count",
-        "stable_knowledge_doc_files",
-        "stable_knowledge_doc_count",
-        "knowledge_doc_status_counts",
-        "knowledge_doc_warnings",
-        "citation_source_files",
-        "citation_source_count",
-        "citation_source_warnings",
-        "derived_citation_sources",
-        "derived_citation_source_count",
-        "selected_protocol_bundle_ids",
-        "protocol_bundle_count",
-        "protocol_bundle_verifier_extensions",
-        "protocol_bundle_context",
-        "active_references",
-        "active_reference_count",
-        "derived_manuscript_reference_status",
-        "derived_manuscript_reference_status_count",
-        "derived_manuscript_proof_review_status",
+        *PROJECT_CONTRACT_GATE_FIELDS,
+        *STAGED_REFERENCE_RUNTIME_FIELDS,
     }
 )
 RESEARCH_PHASE_INIT_FIELDS = frozenset(
@@ -553,87 +332,13 @@ RESEARCH_PHASE_INIT_FIELDS = frozenset(
         "state_exists",
         "roadmap_exists",
         "planning_exists",
-        "project_contract",
-        "project_contract_gate",
-        "project_contract_validation",
-        "project_contract_load_info",
-        "contract_intake",
-        "effective_reference_intake",
-        "active_reference_context",
-        "reference_artifact_files",
-        "reference_artifacts_content",
-        "knowledge_doc_files",
-        "knowledge_doc_count",
-        "stable_knowledge_doc_files",
-        "stable_knowledge_doc_count",
-        "knowledge_doc_status_counts",
-        "derived_knowledge_docs",
-        "derived_knowledge_doc_count",
-        "knowledge_doc_warnings",
-        "state_load_source",
-        "state_integrity_issues",
-        "convention_lock",
-        "convention_lock_count",
-        "intermediate_results",
-        "intermediate_result_count",
-        "approximations",
-        "approximation_count",
-        "propagated_uncertainties",
-        "propagated_uncertainty_count",
-        "derived_convention_lock",
-        "derived_convention_lock_count",
-        "derived_intermediate_results",
-        "derived_intermediate_result_count",
-        "derived_approximations",
-        "derived_approximation_count",
-        "selected_protocol_bundle_ids",
-        "protocol_bundle_count",
-        "protocol_bundle_context",
-        "protocol_bundle_verifier_extensions",
-        "current_execution",
-        "has_live_execution",
-        "execution_review_pending",
-        "execution_pre_fanout_review_pending",
-        "execution_skeptical_requestioning_required",
-        "execution_downstream_locked",
-        "execution_blocked",
-        "execution_resumable",
-        "execution_paused_at",
-        "current_execution_resume_file",
-        "handoff_resume_file",
-        "recorded_handoff_resume_file",
-        "missing_handoff_resume_file",
-        "execution_resume_file",
-        "execution_resume_file_source",
-        "resume_projection",
-        "current_hostname",
-        "current_platform",
-        "session_hostname",
-        "session_platform",
-        "session_last_date",
-        "session_stopped_at",
-        "machine_change_detected",
-        "machine_change_notice",
-        "literature_review_files",
-        "literature_review_count",
-        "research_map_reference_files",
-        "research_map_reference_count",
-        "derived_active_references",
-        "derived_active_reference_count",
-        "citation_source_files",
-        "citation_source_count",
-        "citation_source_warnings",
-        "derived_citation_sources",
-        "derived_citation_source_count",
-        "active_references",
-        "active_reference_count",
-        "derived_manuscript_reference_status",
-        "derived_manuscript_reference_status_count",
-        "derived_manuscript_proof_review_status",
+        *PROJECT_CONTRACT_GATE_FIELDS,
+        *STAGED_REFERENCE_RUNTIME_FIELDS,
+        *STRUCTURED_STATE_FIELDS,
+        *STATE_MEMORY_FIELDS,
+        *EXECUTE_PHASE_EXECUTION_RUNTIME_FIELDS,
         "platform",
-        "state_content",
-        "config_content",
-        "roadmap_content",
+        *RESEARCH_PHASE_FILE_CONTENT_FIELDS,
     }
 )
 MAP_RESEARCH_INIT_FIELDS = frozenset(
@@ -656,43 +361,87 @@ MAP_RESEARCH_INIT_FIELDS = frozenset(
         "planning_exists",
         "research_map_dir_exists",
         "platform",
-        "project_contract",
-        "project_contract_gate",
-        "project_contract_load_info",
-        "project_contract_validation",
-        "contract_intake",
-        "effective_reference_intake",
-        "active_reference_context",
-        "reference_artifact_files",
-        "reference_artifacts_content",
-        "literature_review_files",
-        "literature_review_count",
-        "research_map_reference_files",
-        "research_map_reference_count",
-        "knowledge_doc_files",
-        "knowledge_doc_count",
-        "stable_knowledge_doc_files",
-        "stable_knowledge_doc_count",
-        "knowledge_doc_status_counts",
-        "derived_active_references",
-        "derived_active_reference_count",
-        "derived_knowledge_docs",
-        "derived_knowledge_doc_count",
-        "knowledge_doc_warnings",
-        "citation_source_files",
-        "citation_source_count",
-        "citation_source_warnings",
-        "derived_citation_sources",
-        "derived_citation_source_count",
-        "derived_manuscript_reference_status",
-        "derived_manuscript_reference_status_count",
-        "derived_manuscript_proof_review_status",
-        "selected_protocol_bundle_ids",
-        "protocol_bundle_count",
-        "protocol_bundle_verifier_extensions",
-        "protocol_bundle_context",
-        "active_references",
-        "active_reference_count",
+        *PROJECT_CONTRACT_GATE_FIELDS,
+        *STAGED_REFERENCE_RUNTIME_FIELDS,
+    }
+)
+_READ_WRITE_SEARCH_TOOLS = frozenset(
+    {
+        "file_read",
+        "file_write",
+        "find_files",
+        "search_files",
+        "shell",
+    }
+)
+_READ_WRITE_SEARCH_TASK_TOOLS = frozenset(
+    {
+        *_READ_WRITE_SEARCH_TOOLS,
+        "task",
+    }
+)
+_ASK_READ_SHELL_TASK_TOOLS = frozenset(
+    {
+        "ask_user",
+        "file_read",
+        "shell",
+        "task",
+    }
+)
+_ASK_READ_WRITE_SHELL_TASK_TOOLS = frozenset(
+    {
+        "ask_user",
+        "file_read",
+        "file_write",
+        "shell",
+        "task",
+    }
+)
+_ASK_READ_SEARCH_TASK_TOOLS = frozenset(
+    {
+        "ask_user",
+        "file_read",
+        "find_files",
+        "search_files",
+        "shell",
+        "task",
+    }
+)
+_ASK_READ_WRITE_SEARCH_TASK_TOOLS = frozenset(
+    {
+        *_READ_WRITE_SEARCH_TASK_TOOLS,
+        "ask_user",
+    }
+)
+_ASK_FULL_FILE_TASK_TOOLS = frozenset(
+    {
+        *_ASK_READ_WRITE_SEARCH_TASK_TOOLS,
+        "file_edit",
+    }
+)
+_PLAN_PHASE_STAGE_ALLOWED_TOOLS = frozenset(
+    {
+        *_READ_WRITE_SEARCH_TASK_TOOLS,
+        "web_fetch",
+    }
+)
+_LITERATURE_REVIEW_STAGE_ALLOWED_TOOLS = frozenset(
+    {
+        *_ASK_READ_SEARCH_TASK_TOOLS,
+        "web_fetch",
+        "web_search",
+    }
+)
+_PEER_REVIEW_STAGE_ALLOWED_TOOLS = frozenset(
+    {
+        *_ASK_READ_WRITE_SEARCH_TASK_TOOLS,
+        "web_search",
+    }
+)
+_WRITE_PAPER_STAGE_ALLOWED_TOOLS = frozenset(
+    {
+        *_ASK_FULL_FILE_TASK_TOOLS,
+        "web_search",
     }
 )
 VERIFY_WORK_MCP_VERIFICATION_TOOLS = frozenset(
@@ -731,82 +480,13 @@ VERIFY_WORK_BASE_INIT_FIELDS = frozenset(
         "phase_name",
         "has_verification",
         "has_validation",
+        "active_verification_sessions",
+        "verification_report_path",
+        "verification_report_status",
+        "verification_session_status",
+        "verification_report_status_payload",
         "phase_proof_review_status",
         "platform",
-    }
-)
-VERIFY_WORK_CONTRACT_GATE_FIELDS = frozenset(
-    {
-        "project_contract",
-        "project_contract_validation",
-        "project_contract_load_info",
-        "project_contract_gate",
-    }
-)
-VERIFY_WORK_REFERENCE_RUNTIME_FIELDS = frozenset(
-    {
-        "contract_intake",
-        "effective_reference_intake",
-        "derived_active_references",
-        "derived_active_reference_count",
-        "derived_knowledge_docs",
-        "derived_knowledge_doc_count",
-        "knowledge_doc_warnings",
-        "citation_source_files",
-        "citation_source_count",
-        "citation_source_warnings",
-        "derived_citation_sources",
-        "derived_citation_source_count",
-        "derived_manuscript_reference_status",
-        "derived_manuscript_reference_status_count",
-        "derived_manuscript_proof_review_status",
-        "active_references",
-        "active_reference_count",
-        "selected_protocol_bundle_ids",
-        "protocol_bundle_count",
-        "protocol_bundle_verifier_extensions",
-        "protocol_bundle_context",
-        "active_reference_context",
-        "knowledge_doc_files",
-        "knowledge_doc_count",
-        "stable_knowledge_doc_files",
-        "stable_knowledge_doc_count",
-        "knowledge_doc_status_counts",
-        "literature_review_files",
-        "literature_review_count",
-        "research_map_reference_files",
-        "research_map_reference_count",
-        "reference_artifact_files",
-        "reference_artifacts_content",
-    }
-)
-VERIFY_WORK_STRUCTURED_STATE_FIELDS = frozenset(
-    {
-        "state_load_source",
-        "state_integrity_issues",
-        "convention_lock",
-        "convention_lock_count",
-        "intermediate_results",
-        "intermediate_result_count",
-        "approximations",
-        "approximation_count",
-        "propagated_uncertainties",
-        "propagated_uncertainty_count",
-    }
-)
-VERIFY_WORK_STATE_MEMORY_FIELDS = frozenset(
-    {
-        "derived_convention_lock",
-        "derived_convention_lock_count",
-        "derived_intermediate_results",
-        "derived_intermediate_result_count",
-        "derived_approximations",
-        "derived_approximation_count",
-    }
-)
-VERIFY_WORK_SCHEMA_BRIDGE_FIELDS = frozenset(
-    {
-        "verification_report_skeleton_bridge",
     }
 )
 VERIFY_WORK_INIT_FIELDS = frozenset(
@@ -820,7 +500,22 @@ VERIFY_WORK_INIT_FIELDS = frozenset(
     }
 )
 _DEFAULT_ALLOWED_TOOLS_BY_WORKFLOW = {
+    "arxiv-submission": _READ_WRITE_SEARCH_TASK_TOOLS,
+    "autonomous": _ASK_READ_SHELL_TASK_TOOLS,
+    "execute-phase": _ASK_FULL_FILE_TASK_TOOLS,
+    "literature-review": _LITERATURE_REVIEW_STAGE_ALLOWED_TOOLS,
+    "map-research": _ASK_READ_WRITE_SEARCH_TASK_TOOLS,
+    "new-milestone": _ASK_READ_WRITE_SHELL_TASK_TOOLS,
+    "new-project": _ASK_READ_WRITE_SHELL_TASK_TOOLS,
+    "peer-review": _PEER_REVIEW_STAGE_ALLOWED_TOOLS,
+    "plan-phase": _PLAN_PHASE_STAGE_ALLOWED_TOOLS,
+    "quick": _ASK_READ_WRITE_SEARCH_TASK_TOOLS,
+    "research-phase": _ASK_READ_SHELL_TASK_TOOLS,
+    "respond-to-referees": _ASK_FULL_FILE_TASK_TOOLS,
+    "resume-work": frozenset({"ask_user", "file_read", "file_write", "shell"}),
+    "sync-state": _READ_WRITE_SEARCH_TOOLS,
     "verify-work": VERIFY_WORK_STAGE_ALLOWED_TOOLS,
+    "write-paper": _WRITE_PAPER_STAGE_ALLOWED_TOOLS,
 }
 WRITE_PAPER_INIT_FIELDS = frozenset(
     {
@@ -831,62 +526,11 @@ WRITE_PAPER_INIT_FIELDS = frozenset(
         "autonomy",
         "research_mode",
         "write_paper_argument_input",
-        "project_contract",
-        "project_contract_gate",
-        "project_contract_load_info",
-        "project_contract_validation",
-        "contract_intake",
-        "effective_reference_intake",
-        "publication_subject",
-        "publication_subject_status",
-        "publication_subject_source",
-        "publication_subject_detail",
-        "publication_subject_slug",
-        "publication_lane_kind",
-        "publication_lane_owner",
-        "publication_artifact_base",
-        "selected_publication_root",
-        "selected_review_root",
-        "publication_intake_root",
-        "manuscript_resolution_status",
-        "manuscript_resolution_detail",
-        "manuscript_root",
-        "manuscript_entrypoint",
-        "artifact_manifest_path",
-        "bibliography_audit_path",
-        "reproducibility_manifest_path",
-        "managed_publication_root",
-        "managed_manuscript_root",
-        "publication_bootstrap",
-        "publication_bootstrap_mode",
-        "publication_bootstrap_root",
-        "publication_bootstrap_detail",
-        "selected_protocol_bundle_ids",
-        "protocol_bundle_context",
-        "active_reference_context",
-        "derived_manuscript_reference_status",
-        "derived_manuscript_reference_status_count",
-        "derived_manuscript_proof_review_status",
-        "reference_artifact_files",
-        "reference_artifacts_content",
-        "literature_review_files",
-        "literature_review_count",
-        "research_map_reference_files",
-        "research_map_reference_count",
-        "citation_source_files",
-        "citation_source_count",
-        "citation_source_warnings",
-        "derived_citation_sources",
-        "derived_citation_source_count",
-        "derived_convention_lock",
-        "derived_convention_lock_count",
-        "derived_intermediate_results",
-        "derived_intermediate_result_count",
-        "derived_approximations",
-        "derived_approximation_count",
-        "state_content",
-        "roadmap_content",
-        "requirements_content",
+        *PROJECT_CONTRACT_GATE_FIELDS,
+        *WRITE_PAPER_PUBLICATION_BOOTSTRAP_FIELDS,
+        *WRITE_PAPER_REFERENCE_RUNTIME_FIELDS,
+        *STATE_MEMORY_FIELDS,
+        *WRITE_PAPER_FILE_CONTENT_FIELDS,
         "platform",
     }
 )
@@ -904,125 +548,10 @@ PEER_REVIEW_INIT_FIELDS = frozenset(
         "review_target_mode_reason",
         "resolved_review_target",
         "resolved_review_root",
-        "project_contract",
-        "project_contract_gate",
-        "project_contract_load_info",
-        "project_contract_validation",
-        "contract_intake",
-        "effective_reference_intake",
-        "selected_protocol_bundle_ids",
-        "protocol_bundle_context",
-        "active_reference_context",
-        "derived_manuscript_reference_status",
-        "derived_manuscript_reference_status_count",
-        "derived_manuscript_proof_review_status",
-        "reference_artifact_files",
-        "reference_artifacts_content",
-        "literature_review_files",
-        "literature_review_count",
-        "research_map_reference_files",
-        "research_map_reference_count",
-        "citation_source_files",
-        "citation_source_count",
-        "citation_source_warnings",
-        "derived_citation_sources",
-        "derived_citation_source_count",
-        "publication_subject_slug",
-        "publication_lane_kind",
-        "publication_lane_owner",
-        "managed_publication_root",
-        "selected_publication_root",
-        "selected_review_root",
-        "manuscript_resolution_status",
-        "manuscript_resolution_detail",
-        "manuscript_root",
-        "manuscript_entrypoint",
-        "artifact_manifest_path",
-        "bibliography_audit_path",
-        "reproducibility_manifest_path",
-        "publication_blockers",
-        "publication_blocker_count",
-        "latest_review_round",
-        "latest_review_round_suffix",
-        "latest_review_ledger",
-        "latest_referee_decision",
-        "latest_referee_report_md",
-        "latest_referee_report_tex",
-        "latest_proof_redteam",
-        "latest_review_artifacts",
-        "latest_response_round",
-        "latest_response_round_suffix",
-        "latest_author_response",
-        "latest_referee_response",
-        "latest_response_artifacts",
-        "latest_response_freshness_policy",
-        "latest_response_requires_fresh_review",
-        "latest_response_required_review_round",
-        "latest_response_required_review_round_suffix",
-        "latest_response_freshness_detail",
-        "latest_response_freshness",
+        *PROJECT_CONTRACT_GATE_FIELDS,
+        *WRITE_PAPER_REFERENCE_RUNTIME_FIELDS,
+        *PUBLICATION_REVIEW_SNAPSHOT_FIELDS,
         "platform",
-    }
-)
-ARXIV_SUBMISSION_BOOTSTRAP_FIELDS = frozenset(
-    {
-        "commit_docs",
-        "arxiv_submission_argument_input",
-        "project_root",
-        "state_exists",
-        "project_exists",
-        "autonomy",
-        "research_mode",
-        "project_contract",
-        "project_contract_gate",
-        "project_contract_load_info",
-        "project_contract_validation",
-        "selected_protocol_bundle_ids",
-        "protocol_bundle_context",
-        "active_reference_context",
-        "derived_manuscript_reference_status",
-        "derived_manuscript_reference_status_count",
-        "derived_manuscript_proof_review_status",
-        "platform",
-    }
-)
-ARXIV_SUBMISSION_SNAPSHOT_FIELDS = frozenset(
-    {
-        "publication_subject_slug",
-        "publication_lane_kind",
-        "publication_lane_owner",
-        "managed_publication_root",
-        "selected_publication_root",
-        "selected_review_root",
-        "manuscript_resolution_status",
-        "manuscript_resolution_detail",
-        "manuscript_root",
-        "manuscript_entrypoint",
-        "artifact_manifest_path",
-        "bibliography_audit_path",
-        "reproducibility_manifest_path",
-        "manuscript_reference_status_warnings",
-        "publication_blockers",
-        "publication_blocker_count",
-        "latest_review_round",
-        "latest_review_round_suffix",
-        "latest_review_ledger",
-        "latest_referee_decision",
-        "latest_referee_report_md",
-        "latest_referee_report_tex",
-        "latest_proof_redteam",
-        "latest_review_artifacts",
-        "latest_response_round",
-        "latest_response_round_suffix",
-        "latest_author_response",
-        "latest_referee_response",
-        "latest_response_artifacts",
-        "latest_response_freshness_policy",
-        "latest_response_requires_fresh_review",
-        "latest_response_required_review_round",
-        "latest_response_required_review_round_suffix",
-        "latest_response_freshness_detail",
-        "latest_response_freshness",
     }
 )
 ARXIV_SUBMISSION_INIT_FIELDS = frozenset(
@@ -1031,7 +560,51 @@ ARXIV_SUBMISSION_INIT_FIELDS = frozenset(
         *ARXIV_SUBMISSION_SNAPSHOT_FIELDS,
     }
 )
+AUTONOMOUS_INIT_FIELDS = frozenset(
+    {
+        "project_root",
+        "autonomous_argument_input",
+        "autonomous_from_phase",
+        "commit_docs",
+        "autonomy",
+        "research_mode",
+        "review_cadence",
+        "model_profile",
+        "platform",
+        "milestone_version",
+        "milestone_name",
+        "milestone_slug",
+        "phase_count",
+        "completed_phases",
+        "all_phases_complete",
+        "project_exists",
+        "roadmap_exists",
+        "state_exists",
+        "phases_dir_exists",
+        "autonomous_phase_plan",
+        "autonomous_completed_phase_numbers",
+        "autonomous_completed_phase_verification_statuses",
+        "autonomous_incomplete_phase_count",
+        "autonomous_current_phase_number",
+        "autonomous_current_phase_name",
+        "autonomous_current_phase_goal",
+        "autonomous_current_phase_success_criteria",
+        "phase_found",
+        "phase_dir",
+        "phase_number",
+        "phase_name",
+        "phase_slug",
+        "padded_phase",
+        "has_context",
+        "has_plans",
+        "plan_count",
+        "verification_report_status",
+        "verification_report_status_payload",
+        "phase_proof_review_status",
+    }
+)
 _DEFAULT_KNOWN_INIT_FIELDS_BY_WORKFLOW = {
+    "autonomous": AUTONOMOUS_INIT_FIELDS,
     "resume-work": RESUME_WORK_INIT_FIELDS,
     "sync-state": SYNC_STATE_INIT_FIELDS,
     "new-project": NEW_PROJECT_INIT_FIELDS,
@@ -1048,6 +621,26 @@ _DEFAULT_KNOWN_INIT_FIELDS_BY_WORKFLOW = {
     "write-paper": WRITE_PAPER_INIT_FIELDS,
     "execute-phase": EXECUTE_PHASE_INIT_FIELDS,
 }
+_MANIFEST_DERIVED_KNOWN_INIT_FIELD_WORKFLOWS = frozenset(
+    {
+        "arxiv-submission",
+        "autonomous",
+        "execute-phase",
+        "literature-review",
+        "map-research",
+        "new-milestone",
+        "new-project",
+        "peer-review",
+        "plan-phase",
+        "quick",
+        "research-phase",
+        "respond-to-referees",
+        "resume-work",
+        "sync-state",
+        "verify-work",
+        "write-paper",
+    }
+)
 
 _ALLOWED_TOP_LEVEL_KEYS = frozenset(
     {
@@ -1065,6 +658,7 @@ _ALLOWED_STAGE_KEYS = frozenset(
         "id",
         "order",
         "purpose",
+        "init_spec_id",
         "mode_paths",
         "required_init_field_groups",
         "required_init_fields",
@@ -1078,7 +672,7 @@ _ALLOWED_STAGE_KEYS = frozenset(
         "checkpoints",
     }
 )
-_OPTIONAL_STAGE_KEYS = frozenset({"required_init_field_groups", "required_init_fields"})
+_OPTIONAL_STAGE_KEYS = frozenset({"init_spec_id", "required_init_field_groups", "required_init_fields"})
 _REQUIRED_STAGE_KEYS = _ALLOWED_STAGE_KEYS - _OPTIONAL_STAGE_KEYS
 _ALLOWED_CONDITIONAL_KEYS = frozenset({"when", "authorities"})
 _AUTHORITY_ROOTS = ("workflows/", "references/", "templates/")
@@ -1106,6 +700,90 @@ _STAGED_LOADING_PAYLOAD_FIELDS = (
     "next_stages",
     "checkpoints",
 )
+_BODY_FIELD_SUFFIX = "_content"
+_HANDLE_STATUS_SUFFIXES = (
+    "_count",
+    "_counts",
+    "_file",
+    "_files",
+    "_ids",
+    "_load_info",
+    "_manifest",
+    "_status",
+    "_statuses",
+    "_summary",
+    "_warnings",
+)
+_PROTOCOL_BUNDLE_HANDLE_FIELDS = frozenset({"selected_protocol_bundle_ids", "protocol_bundle_load_manifest"})
+
+
+def render_staged_field_access_instruction(
+    workflow_id: str,
+    stage: WorkflowStage,
+    *,
+    init_reference: str = "<INIT>",
+) -> str:
+    """Render the compact active-stage field-access instruction."""
+
+    raw_command = f"gpd --raw stage field-access {workflow_id} --stage {stage.id} --style instruction"
+    required_marker = f"`{init_reference}.staged_loading.required_init_fields`"
+    parts = [
+        (
+            f"Field access ({workflow_id}.{stage.id}): run `{raw_command}` for the selected-field "
+            f"inventory or aliases; read only selected init keys listed in {required_marker}. "
+            "Selected fields stay structured there, not repeated as prose. "
+            "Treat unlisted init/body fields as unavailable for this active stage. "
+            "Reject stale/older init payloads and shell variables from another stage."
+        )
+    ]
+
+    body_fields = _selected_body_fields(stage.required_init_fields)
+    handle_status_fields = _selected_handle_status_fields(stage.required_init_fields)
+    if body_fields:
+        parts.append(
+            "Body fields: selected body fields are target-scoped "
+            f"({', '.join(body_fields)}); read them only after choosing the concrete section, issue, "
+            "artifact, gap, handoff, or reference target; use handles/status/load manifests first."
+        )
+    elif handle_status_fields:
+        parts.append(
+            "Body fields: no staged body fields are selected; selected handle/status fields are handles "
+            "only, so use handles/status/load manifests first."
+        )
+    else:
+        parts.append("Body fields: no staged body fields are selected for this stage.")
+
+    rendered_context_fields = _selected_rendered_context_fields(stage.required_init_fields)
+    if rendered_context_fields:
+        parts.append(
+            "Rendered context fields selected for this stage "
+            f"({', '.join(rendered_context_fields)}) do not make unselected body fields available."
+        )
+    if _PROTOCOL_BUNDLE_HANDLE_FIELDS.intersection(stage.required_init_fields):
+        parts.append(
+            "Protocol bundles: selected IDs/load manifests are handles until needed; for domain judgments, "
+            "open only relevant verification_domains/execution_guides portable_path entries from "
+            "protocol_bundle_load_manifest; keep unselected assets absent."
+        )
+    return " ".join(parts)
+
+
+def _selected_body_fields(selected_fields: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(
+        field for field in selected_fields if field in STAGED_BODY_FIELDS or field.endswith(_BODY_FIELD_SUFFIX)
+    )
+
+
+def _selected_handle_status_fields(selected_fields: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(
+        field
+        for field in selected_fields
+        if field in STAGED_REFERENCE_HANDLE_STATUS_FIELDS or field.endswith(_HANDLE_STATUS_SUFFIXES)
+    )
+
+
+def _selected_rendered_context_fields(selected_fields: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(field for field in selected_fields if field in STAGED_REFERENCE_RENDERED_CONTEXT_FIELDS)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1135,6 +813,7 @@ class WorkflowStage:
     produced_state: tuple[str, ...]
     next_stages: tuple[str, ...]
     checkpoints: tuple[str, ...]
+    init_spec_id: str | None = None
 
     def eager_authorities(self, *, selected_conditions: Iterable[str] = ()) -> tuple[str, ...]:
         selected = {condition for condition in selected_conditions if condition}
@@ -1167,21 +846,28 @@ class WorkflowStage:
         return payload
 
     def to_payload(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "id": self.id,
             "order": self.order,
             "purpose": self.purpose,
-            **self._sequence_payload_fields(_STAGE_MANIFEST_PAYLOAD_FIELDS),
         }
+        if self.init_spec_id is not None:
+            payload["init_spec_id"] = self.init_spec_id
+        payload.update(self._sequence_payload_fields(_STAGE_MANIFEST_PAYLOAD_FIELDS))
+        return payload
 
     def to_staged_loading_payload(self, workflow_id: str) -> dict[str, object]:
-        payload = {
+        payload: dict[str, object] = {
             "workflow_id": workflow_id,
             "stage_id": self.id,
             "order": self.order,
-            **self._sequence_payload_fields(_STAGED_LOADING_PAYLOAD_FIELDS[:3]),
+            "required_init_fields": list(self.required_init_fields),
+            "field_access_instruction": render_staged_field_access_instruction(workflow_id, self),
+            **self._sequence_payload_fields(_STAGED_LOADING_PAYLOAD_FIELDS[1:3]),
             "eager_authorities": list(self.eager_authorities()),
         }
+        if self.init_spec_id is not None:
+            payload["init_spec_id"] = self.init_spec_id
         payload.update(self._sequence_payload_fields(_STAGED_LOADING_PAYLOAD_FIELDS[3:]))
         return payload
 
@@ -1220,6 +906,59 @@ class WorkflowStageManifest:
         if self.prompt_usage != "staged_init":
             payload["prompt_usage"] = self.prompt_usage
         return payload
+
+
+def staged_loading_payload_contract_keys(manifest: WorkflowStageManifest) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Return staged-loading keys required for every stage and keys used only sometimes."""
+
+    payloads = tuple(stage.to_staged_loading_payload(manifest.workflow_id) for stage in manifest.stages)
+    if not payloads:
+        return (), ()
+
+    required_key_set = set(payloads[0])
+    for payload in payloads[1:]:
+        required_key_set.intersection_update(payload)
+
+    required_keys = tuple(key for key in payloads[0] if key in required_key_set)
+    seen = set(required_keys)
+    optional_keys: list[str] = []
+    for payload in payloads:
+        for key in payload:
+            if key in seen:
+                continue
+            seen.add(key)
+            optional_keys.append(key)
+    return required_keys, tuple(optional_keys)
+
+
+def staged_protocol_bundle_required_init_fields(manifest: WorkflowStageManifest) -> tuple[str, ...]:
+    """Return protocol-bundle init fields selected by any stage in manifest order."""
+
+    fields: list[str] = []
+    seen: set[str] = set()
+    for stage in manifest.stages:
+        for field in stage.required_init_fields:
+            if not _is_protocol_bundle_required_init_field(field) or field in seen:
+                continue
+            seen.add(field)
+            fields.append(field)
+    return tuple(fields)
+
+
+def staged_ids_requiring_init_fields(
+    manifest: WorkflowStageManifest,
+    field_names: Iterable[str],
+) -> tuple[str, ...]:
+    """Return stage ids whose required init fields intersect *field_names*."""
+
+    selected = set(field_names)
+    if not selected:
+        return ()
+    return tuple(stage.id for stage in manifest.stages if selected.intersection(stage.required_init_fields))
+
+
+def _is_protocol_bundle_required_init_field(field: str) -> bool:
+    return field == "selected_protocol_bundle_ids" or field.startswith("protocol_bundle_")
 
 
 def _require_string(raw: object, *, label: str) -> str:
@@ -1270,14 +1009,29 @@ def resolve_workflow_stage_manifest_path(workflow_id: str) -> Path:
     return WORKFLOW_STAGE_MANIFEST_DIR / f"{workflow_slug}{WORKFLOW_STAGE_MANIFEST_SUFFIX}"
 
 
-def _normalize_manifest_doc_path(raw: object, *, label: str) -> str:
+def _normalize_specs_root(specs_root: Path | None = None) -> Path:
+    root = SPECS_DIR if specs_root is None else specs_root
+    return root.expanduser().resolve(strict=False)
+
+
+def _specs_root_cache_key(specs_root: Path | None = None) -> str:
+    return _normalize_specs_root(specs_root).as_posix()
+
+
+def _workflow_stage_manifest_path(workflow_id: str, *, specs_root: Path | None = None) -> Path:
+    workflow_slug = _normalize_workflow_id(workflow_id)
+    root = _normalize_specs_root(specs_root)
+    return root / "workflows" / f"{workflow_slug}{WORKFLOW_STAGE_MANIFEST_SUFFIX}"
+
+
+def _normalize_manifest_doc_path(raw: object, *, label: str, specs_root: Path) -> str:
     normalized = _normalize_relative_posix_path(raw, label=label)
     path = PurePosixPath(normalized)
     if path.suffix != ".md":
         raise ValueError(f"{label} must reference an existing markdown file: {normalized}")
     if not normalized.startswith(_AUTHORITY_ROOTS):
         raise ValueError(f"{label} must reference an authority path under workflows/, references/, or templates/")
-    if not (SPECS_DIR / normalized).is_file():
+    if not (specs_root / normalized).is_file():
         raise ValueError(f"{label} must reference an existing markdown file: {normalized}")
     return normalized
 
@@ -1304,7 +1058,7 @@ def _normalize_relative_posix_path(raw: object, *, label: str) -> str:
 
 def _normalize_tool_set(values: Iterable[str] | None, *, workflow_id: str) -> frozenset[str]:
     if values is None:
-        return _DEFAULT_ALLOWED_TOOLS_BY_WORKFLOW.get(workflow_id, frozenset(CANONICAL_TOOL_NAMES))
+        return allowed_tools_for_workflow(workflow_id)
     normalized: set[str] = set()
     for value in values:
         if not isinstance(value, str):
@@ -1314,6 +1068,13 @@ def _normalize_tool_set(values: Iterable[str] | None, *, workflow_id: str) -> fr
             raise ValueError("allowed_tools must not contain blank entries")
         normalized.add(tool)
     return frozenset(normalized)
+
+
+def allowed_tools_for_workflow(workflow_id: str | None) -> frozenset[str]:
+    if workflow_id is None:
+        return frozenset(CANONICAL_TOOL_NAMES)
+    normalized_workflow_id = _normalize_workflow_id(workflow_id)
+    return _DEFAULT_ALLOWED_TOOLS_BY_WORKFLOW.get(normalized_workflow_id, frozenset(CANONICAL_TOOL_NAMES))
 
 
 def _normalize_init_field_set(values: Iterable[str] | None, *, workflow_id: str) -> frozenset[str] | None:
@@ -1334,11 +1095,13 @@ def known_init_fields_for_workflow(workflow_id: str | None) -> frozenset[str] | 
     if workflow_id is None:
         return None
     normalized_workflow_id = _normalize_workflow_id(workflow_id)
+    if normalized_workflow_id in _MANIFEST_DERIVED_KNOWN_INIT_FIELD_WORKFLOWS:
+        return frozenset(_manifest_expanded_required_init_field_union(normalized_workflow_id))
     return _DEFAULT_KNOWN_INIT_FIELDS_BY_WORKFLOW.get(normalized_workflow_id)
 
 
 def _validate_conditional_authorities(
-    raw: object, *, stage_index: int
+    raw: object, *, stage_index: int, specs_root: Path
 ) -> tuple[WorkflowStageConditionalAuthority, ...]:
     if not isinstance(raw, list):
         raise ValueError(f"stages[{stage_index}].conditional_authorities must be a list")
@@ -1359,7 +1122,11 @@ def _validate_conditional_authorities(
             raise ValueError(f"stages[{stage_index}].conditional_authorities must not contain duplicate when values")
         seen_conditions.add(when)
         authorities = tuple(
-            _normalize_manifest_doc_path(authority, label=f"{entry_label}.authorities[{authority_index}]")
+            _normalize_manifest_doc_path(
+                authority,
+                label=f"{entry_label}.authorities[{authority_index}]",
+                specs_root=specs_root,
+            )
             for authority_index, authority in enumerate(
                 _require_string_tuple(entry["authorities"], label=f"{entry_label}.authorities")
             )
@@ -1420,7 +1187,85 @@ def _expand_required_init_fields(
             raise ValueError(f"stages[{index}].required_init_fields contains duplicate field: {field_name}")
         seen.add(field_name)
         fields.append(field_name)
+
     return tuple(fields)
+
+
+def _read_workflow_stage_manifest_payload(workflow_id: str, *, specs_root: Path | None = None) -> object:
+    path = _workflow_stage_manifest_path(workflow_id, specs_root=specs_root)
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Failed to read workflow stage manifest {path}: {exc}") from exc
+
+
+def _expanded_required_init_fields_by_stage_from_payload(
+    raw: object,
+    *,
+    expected_workflow_id: str | None = None,
+) -> tuple[tuple[str, tuple[str, ...]], ...]:
+    if not isinstance(raw, dict):
+        raise ValueError("workflow stage manifest must be a JSON object")
+    raw = canonicalize_workflow_stage_manifest_payload(raw)
+    if not isinstance(raw, dict):
+        raise ValueError("workflow stage manifest must be a JSON object")
+    if expected_workflow_id is not None:
+        workflow_id = _normalize_workflow_id(raw.get("workflow_id"))
+        if workflow_id != expected_workflow_id:
+            raise ValueError(
+                f"workflow stage manifest workflow_id must be {expected_workflow_id!r}, got {workflow_id!r}"
+            )
+
+    stages_raw = raw.get("stages")
+    if not isinstance(stages_raw, list) or not stages_raw:
+        raise ValueError("stages must be a non-empty list")
+
+    groups = _validate_required_init_field_groups(raw.get("required_init_field_groups"))
+    fields_by_stage: list[tuple[str, tuple[str, ...]]] = []
+    for index, raw_stage in enumerate(stages_raw):
+        if not isinstance(raw_stage, dict):
+            raise ValueError(f"stages[{index}] must be a JSON object")
+        if "required_init_fields" not in raw_stage and "required_init_field_groups" not in raw_stage:
+            raise ValueError(f"stages[{index}] is missing required key(s): required_init_fields")
+        stage_id = _require_string(raw_stage.get("id"), label=f"stages[{index}].id")
+        fields_by_stage.append(
+            (
+                stage_id,
+                _expand_required_init_fields(
+                    raw_stage,
+                    index=index,
+                    groups=groups,
+                ),
+            )
+        )
+    return tuple(fields_by_stage)
+
+
+def _stable_required_init_field_union(field_sequences: Iterable[Iterable[str]]) -> tuple[str, ...]:
+    fields: list[str] = []
+    seen: set[str] = set()
+    for sequence in field_sequences:
+        for field_name in sequence:
+            if field_name in seen:
+                continue
+            seen.add(field_name)
+            fields.append(field_name)
+    return tuple(fields)
+
+
+def _manifest_expanded_required_init_field_union(
+    workflow_id: str,
+    *,
+    specs_root: Path | None = None,
+) -> tuple[str, ...]:
+    payload = _read_workflow_stage_manifest_payload(workflow_id, specs_root=specs_root)
+    return _stable_required_init_field_union(
+        fields
+        for _, fields in _expanded_required_init_fields_by_stage_from_payload(
+            payload,
+            expected_workflow_id=workflow_id,
+        )
+    )
 
 
 def _validate_stage(
@@ -1431,6 +1276,7 @@ def _validate_stage(
     allowed_tools: frozenset[str],
     known_init_fields: frozenset[str] | None,
     required_init_field_groups: dict[str, tuple[str, ...]],
+    specs_root: Path,
 ) -> WorkflowStage:
     if not isinstance(raw, dict):
         raise ValueError(f"stages[{index}] must be a JSON object")
@@ -1448,8 +1294,15 @@ def _validate_stage(
     stage_id = _require_string(raw["id"], label=f"stages[{index}].id")
     order = _require_int(raw["order"], label=f"stages[{index}].order")
     purpose = _require_string(raw["purpose"], label=f"stages[{index}].purpose")
+    init_spec_id = None
+    if "init_spec_id" in raw:
+        init_spec_id = _require_string(raw["init_spec_id"], label=f"stages[{index}].init_spec_id")
     mode_paths = tuple(
-        _normalize_manifest_doc_path(mode_path, label=f"stages[{index}].mode_paths[{mode_index}]")
+        _normalize_manifest_doc_path(
+            mode_path,
+            label=f"stages[{index}].mode_paths[{mode_index}]",
+            specs_root=specs_root,
+        )
         for mode_index, mode_path in enumerate(
             _require_string_tuple(raw["mode_paths"], label=f"stages[{index}].mode_paths")
         )
@@ -1460,7 +1313,11 @@ def _validate_stage(
         groups=required_init_field_groups,
     )
     loaded_authorities = tuple(
-        _normalize_manifest_doc_path(authority, label=f"stages[{index}].loaded_authorities[{authority_index}]")
+        _normalize_manifest_doc_path(
+            authority,
+            label=f"stages[{index}].loaded_authorities[{authority_index}]",
+            specs_root=specs_root,
+        )
         for authority_index, authority in enumerate(
             _require_string_tuple(
                 raw["loaded_authorities"], label=f"stages[{index}].loaded_authorities", allow_empty=True
@@ -1470,9 +1327,14 @@ def _validate_stage(
     conditional_authorities = _validate_conditional_authorities(
         raw.get("conditional_authorities", []),
         stage_index=index,
+        specs_root=specs_root,
     )
     must_not_eager_load = tuple(
-        _normalize_manifest_doc_path(authority, label=f"stages[{index}].must_not_eager_load[{authority_index}]")
+        _normalize_manifest_doc_path(
+            authority,
+            label=f"stages[{index}].must_not_eager_load[{authority_index}]",
+            specs_root=specs_root,
+        )
         for authority_index, authority in enumerate(
             _require_string_tuple(
                 raw["must_not_eager_load"], label=f"stages[{index}].must_not_eager_load", allow_empty=True
@@ -1538,6 +1400,7 @@ def _validate_stage(
         produced_state=produced_state,
         next_stages=next_stages,
         checkpoints=checkpoints,
+        init_spec_id=init_spec_id,
     )
 
 
@@ -1547,7 +1410,11 @@ def validate_workflow_stage_manifest_payload(
     expected_workflow_id: str | None = None,
     allowed_tools: Iterable[str] | None = None,
     known_init_fields: Iterable[str] | None = None,
+    specs_root: Path | None = None,
 ) -> WorkflowStageManifest:
+    if not isinstance(raw, dict):
+        raise ValueError("workflow stage manifest must be a JSON object")
+    raw = canonicalize_workflow_stage_manifest_payload(raw)
     if not isinstance(raw, dict):
         raise ValueError("workflow stage manifest must be a JSON object")
 
@@ -1579,6 +1446,7 @@ def validate_workflow_stage_manifest_payload(
 
     normalized_allowed_tools = _normalize_tool_set(allowed_tools, workflow_id=workflow_id)
     normalized_known_init_fields = _normalize_init_field_set(known_init_fields, workflow_id=workflow_id)
+    normalized_specs_root = _normalize_specs_root(specs_root)
     required_init_field_groups = _validate_required_init_field_groups(raw.get("required_init_field_groups"))
     stages = tuple(
         _validate_stage(
@@ -1588,6 +1456,7 @@ def validate_workflow_stage_manifest_payload(
             allowed_tools=normalized_allowed_tools,
             known_init_fields=normalized_known_init_fields,
             required_init_field_groups=required_init_field_groups,
+            specs_root=normalized_specs_root,
         )
         for index, stage in enumerate(stages_raw)
     )
@@ -1650,6 +1519,7 @@ def _infer_known_init_fields_cache_key_from_payload(raw: object) -> tuple[str, .
 @cache
 def _load_workflow_stage_manifest_cached(
     manifest_path: str,
+    specs_root_key: str,
     expected_workflow_id: str | None,
     allowed_tools_key: tuple[str, ...] | None,
     known_init_fields_key: tuple[str, ...] | None,
@@ -1667,6 +1537,7 @@ def _load_workflow_stage_manifest_cached(
         expected_workflow_id=expected_workflow_id,
         allowed_tools=allowed_tools_key,
         known_init_fields=known_init_fields_for_validation,
+        specs_root=Path(specs_root_key),
     )
 
 
@@ -1675,11 +1546,14 @@ def load_workflow_stage_manifest(
     *,
     allowed_tools: Iterable[str] | None = None,
     known_init_fields: Iterable[str] | None = None,
+    specs_root: Path | None = None,
 ) -> WorkflowStageManifest:
     workflow_id = _normalize_workflow_id(workflow_id)
-    manifest_path = resolve_workflow_stage_manifest_path(workflow_id)
+    manifest_path = _workflow_stage_manifest_path(workflow_id, specs_root=specs_root)
+    specs_root_key = _specs_root_cache_key(specs_root)
     return _load_workflow_stage_manifest_cached(
         manifest_path.as_posix(),
+        specs_root_key,
         workflow_id,
         _cache_key_tools(allowed_tools, workflow_id=workflow_id),
         _cache_key_init_fields(known_init_fields, workflow_id=workflow_id),
@@ -1692,6 +1566,7 @@ def load_workflow_stage_manifest_from_path(
     expected_workflow_id: str | None = None,
     allowed_tools: Iterable[str] | None = None,
     known_init_fields: Iterable[str] | None = None,
+    specs_root: Path | None = None,
 ) -> WorkflowStageManifest:
     workflow_id = _normalize_workflow_id(expected_workflow_id) if expected_workflow_id is not None else None
     if known_init_fields is not None:
@@ -1701,12 +1576,33 @@ def load_workflow_stage_manifest_from_path(
         normalized_init_fields = _cache_key_init_fields(None, workflow_id=workflow_id)
     else:
         normalized_init_fields = None
+    specs_root_key = _specs_root_cache_key(specs_root)
     return _load_workflow_stage_manifest_cached(
         manifest_path.as_posix(),
+        specs_root_key,
         workflow_id,
         _cache_key_tools(allowed_tools, workflow_id=workflow_id or ""),
         normalized_init_fields,
     )
+
+
+def expanded_required_init_fields_by_stage(
+    manifest: WorkflowStageManifest,
+) -> tuple[tuple[str, tuple[str, ...]], ...]:
+    """Return expanded required init fields keyed by stage in manifest order."""
+
+    return tuple((stage.id, stage.required_init_fields) for stage in manifest.stages)
+
+
+def expanded_required_init_fields_for_workflow(
+    workflow_id: str,
+    *,
+    specs_root: Path | None = None,
+) -> tuple[str, ...]:
+    """Return the stable first-seen union of expanded required init fields."""
+
+    manifest = load_workflow_stage_manifest(workflow_id, specs_root=specs_root)
+    return _stable_required_init_field_union(stage.required_init_fields for stage in manifest.stages)
 
 
 def invalidate_workflow_stage_manifest_cache() -> None:
@@ -1762,6 +1658,14 @@ def validate_arxiv_submission_stage_contract_payload(raw: object) -> WorkflowSta
     return validate_workflow_stage_manifest_payload(raw, expected_workflow_id="arxiv-submission")
 
 
+def load_autonomous_stage_contract() -> WorkflowStageManifest:
+    return load_workflow_stage_manifest("autonomous")
+
+
+def validate_autonomous_stage_contract_payload(raw: object) -> WorkflowStageManifest:
+    return validate_workflow_stage_manifest_payload(raw, expected_workflow_id="autonomous")
+
+
 def load_literature_review_stage_contract() -> WorkflowStageManifest:
     return load_workflow_stage_manifest("literature-review")
 
@@ -1802,6 +1706,8 @@ __all__ = [
     "ARXIV_SUBMISSION_BOOTSTRAP_FIELDS",
     "ARXIV_SUBMISSION_INIT_FIELDS",
     "ARXIV_SUBMISSION_SNAPSHOT_FIELDS",
+    "AUTONOMOUS_INIT_FIELDS",
+    "AUTONOMOUS_STAGE_MANIFEST_PATH",
     "NEW_PROJECT_INIT_FIELDS",
     "NEW_PROJECT_STAGE_MANIFEST_PATH",
     "NEW_MILESTONE_INIT_FIELDS",
@@ -1811,7 +1717,9 @@ __all__ = [
     "MAP_RESEARCH_INIT_FIELDS",
     "MAP_RESEARCH_STAGE_MANIFEST_PATH",
     "EXECUTE_PHASE_INIT_FIELDS",
+    "EXECUTE_PHASE_SCHEMA_BRIDGE_FIELDS",
     "EXECUTE_PHASE_STAGE_MANIFEST_PATH",
+    "EXECUTE_PHASE_TASK_OVERLAY_FIELDS",
     "PLAN_PHASE_BASE_INIT_FIELDS",
     "PLAN_PHASE_CONTRACT_GATE_FIELDS",
     "PLAN_PHASE_FILE_CONTENT_FIELDS",
@@ -1848,12 +1756,16 @@ __all__ = [
     "WorkflowStage",
     "WorkflowStageConditionalAuthority",
     "WorkflowStageManifest",
+    "allowed_tools_for_workflow",
+    "expanded_required_init_fields_by_stage",
+    "expanded_required_init_fields_for_workflow",
     "invalidate_workflow_stage_manifest_cache",
     "load_new_project_stage_contract",
     "load_new_project_stage_contract_from_path",
     "load_new_milestone_stage_contract",
     "load_new_milestone_stage_contract_from_path",
     "load_arxiv_submission_stage_contract",
+    "load_autonomous_stage_contract",
     "load_literature_review_stage_contract",
     "load_literature_review_stage_contract_from_path",
     "load_execute_phase_stage_contract",
@@ -1865,10 +1777,12 @@ __all__ = [
     "load_workflow_stage_manifest",
     "load_workflow_stage_manifest_from_path",
     "known_init_fields_for_workflow",
+    "render_staged_field_access_instruction",
     "resolve_workflow_stage_manifest_path",
     "validate_new_project_stage_contract_payload",
     "validate_new_milestone_stage_contract_payload",
     "validate_arxiv_submission_stage_contract_payload",
+    "validate_autonomous_stage_contract_payload",
     "validate_literature_review_stage_contract_payload",
     "validate_map_research_stage_contract_payload",
     "validate_execute_phase_stage_contract_payload",

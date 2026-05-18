@@ -10,6 +10,12 @@ allowed-tools:
   - shell
   - search_files
   - find_files
+help:
+  group: Planning and execution
+  order: 160
+  compact_description: Inspect one phase's artifacts and status
+  display_signature: gpd:show-phase <number>
+  root_detail_order: 90
 ---
 
 

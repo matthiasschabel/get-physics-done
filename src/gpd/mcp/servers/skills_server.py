@@ -16,7 +16,7 @@ import re
 from collections.abc import Callable
 from functools import cache, lru_cache
 from pathlib import Path
-from typing import Annotated, NamedTuple
+from typing import Annotated
 
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
@@ -29,9 +29,16 @@ from gpd.command_labels import (
     runtime_command_prefixes,
     runtime_command_surface_is_path_like_context,
 )
+from gpd.core.agent_role_kits import role_kit_authority_paths
 from gpd.core.errors import GPDError
 from gpd.core.observability import gpd_span
+from gpd.core.reference_graph import (
+    ReferenceResolver,
+    ReferenceSeed,
+    build_reference_lists,
+)
 from gpd.core.review_contract_prompt import review_contract_payload
+from gpd.core.task_overlays import build_task_overlay_compatibility_manifest
 from gpd.mcp.descriptor_text import SKILL_BEHAVIORAL_GUARDRAIL_HINT
 from gpd.mcp.servers import (
     configure_mcp_logging,
@@ -70,74 +77,15 @@ _GENERIC_ROUTE_TOKENS = frozenset(
     }
 )
 
-_SPEC_ROOT = content_registry.SPECS_DIR.resolve()
-_AGENT_ROOT = content_registry.AGENTS_DIR.resolve()
-_COMMAND_ROOT = content_registry.COMMANDS_DIR.resolve()
-_REPO_ROOT = _SPEC_ROOT.parents[2]
-_REFERENCE_ROOT = _SPEC_ROOT / "references"
-
-
-class _ReferencePrefixSpec(NamedTuple):
-    raw_prefix: str
-    portable_prefix: str
-    root: Path
-    kind: str
-    allow_missing: bool = False
-
-
-_REFERENCE_PREFIX_SPECS: tuple[_ReferencePrefixSpec, ...] = (
-    _ReferencePrefixSpec("references/", "@{GPD_INSTALL_DIR}/references/", _REFERENCE_ROOT, "reference"),
-    _ReferencePrefixSpec("workflows/", "@{GPD_INSTALL_DIR}/workflows/", _SPEC_ROOT / "workflows", "workflow"),
-    _ReferencePrefixSpec("templates/", "@{GPD_INSTALL_DIR}/templates/", _SPEC_ROOT / "templates", "template"),
-    _ReferencePrefixSpec("bundles/", "@{GPD_INSTALL_DIR}/bundles/", _SPEC_ROOT / "bundles", "bundle"),
-    _ReferencePrefixSpec("shared/", "@{GPD_INSTALL_DIR}/references/shared/", _REFERENCE_ROOT / "shared", "reference"),
-    _ReferencePrefixSpec(
-        "execution/", "@{GPD_INSTALL_DIR}/references/execution/", _REFERENCE_ROOT / "execution", "reference"
-    ),
-    _ReferencePrefixSpec(
-        "verification/", "@{GPD_INSTALL_DIR}/references/verification/", _REFERENCE_ROOT / "verification", "reference"
-    ),
-    _ReferencePrefixSpec(
-        "conventions/", "@{GPD_INSTALL_DIR}/references/conventions/", _REFERENCE_ROOT / "conventions", "reference"
-    ),
-    _ReferencePrefixSpec(
-        "research/", "@{GPD_INSTALL_DIR}/references/research/", _REFERENCE_ROOT / "research", "reference"
-    ),
-    _ReferencePrefixSpec(
-        "publication/", "@{GPD_INSTALL_DIR}/references/publication/", _REFERENCE_ROOT / "publication", "reference"
-    ),
-    _ReferencePrefixSpec(
-        "protocols/", "@{GPD_INSTALL_DIR}/references/protocols/", _REFERENCE_ROOT / "protocols", "reference"
-    ),
-    _ReferencePrefixSpec(
-        "subfields/", "@{GPD_INSTALL_DIR}/references/subfields/", _REFERENCE_ROOT / "subfields", "reference"
-    ),
-    _ReferencePrefixSpec(
-        "orchestration/",
-        "@{GPD_INSTALL_DIR}/references/orchestration/",
-        _REFERENCE_ROOT / "orchestration",
-        "reference",
-    ),
-    _ReferencePrefixSpec("commands/", "@{GPD_INSTALL_DIR}/commands/", _COMMAND_ROOT, "command"),
-    _ReferencePrefixSpec("agents/", "@{GPD_AGENTS_DIR}/", _AGENT_ROOT, "agent"),
-    _ReferencePrefixSpec("docs/", "@GPD/docs/", _REPO_ROOT / "docs", "docs", allow_missing=True),
-)
+_REFERENCE_RESOLVER = ReferenceResolver()
 _SKILL_COMMAND_PREFIX = "gpd-"
-_RELATIVE_REFERENCE_PREFIXES = ("domains/",)
 
 
 @lru_cache(maxsize=1)
 def _markdown_reference_re() -> re.Pattern[str]:
     """Return the matcher for direct markdown references."""
 
-    relative_prefixes = "|".join(
-        re.escape(prefix)
-        for prefix in (*[spec.raw_prefix for spec in _REFERENCE_PREFIX_SPECS], *_RELATIVE_REFERENCE_PREFIXES)
-    )
-    return re.compile(
-        r"(?<![A-Za-z0-9_}/.-])(?P<path>(?:@?\{GPD_(?:INSTALL|AGENTS)_DIR\}/|(?:\.\./|\.\/)?"
-        rf"(?:{relative_prefixes}|GPD/|src/gpd/))[^\s`\"')]+?\.md)"
-    )
+    return _REFERENCE_RESOLVER.markdown_reference_re()
 
 
 def _load_skill_index() -> list[content_registry.SkillDef]:
@@ -319,8 +267,17 @@ def _agent_policy_payload(agent: content_registry.AgentDef) -> dict[str, object]
         "role_family": agent.role_family,
         "artifact_write_authority": agent.artifact_write_authority,
         "shared_state_authority": agent.shared_state_authority,
+        "role_kits": list(agent.role_kits),
+        "role_kit_authorities": list(role_kit_authority_paths(agent.role_kits)),
         "tools": list(agent.tools),
     }
+
+
+def _agent_task_overlay_compatibility_payload(agent: content_registry.AgentDef) -> dict[str, object] | None:
+    payload = build_task_overlay_compatibility_manifest(role=agent.name)
+    if payload["overlay_count"] == 0:
+        return None
+    return payload
 
 
 def _canonical_skill_content(skill: content_registry.SkillDef) -> tuple[str, Path]:
@@ -405,108 +362,11 @@ def _derived_route_keywords(skill: content_registry.SkillDef) -> list[str]:
 
 def _portable_reference_path(raw_path: str, *, base_path: Path | None = None) -> tuple[str, Path | None] | None:
     """Return a stable reference path plus its local file path, if resolvable."""
-    candidate = raw_path.rstrip(".,:;")
-    if not candidate:
-        return None
-
-    def _normalize_resolved_path(resolved: Path) -> tuple[str, Path] | None:
-        resolved = resolved.resolve()
-        if not resolved.is_file():
-            return None
-        for spec in _REFERENCE_PREFIX_SPECS:
-            try:
-                rel = resolved.relative_to(spec.root)
-            except ValueError:
-                continue
-            portable = f"{spec.portable_prefix}{rel.as_posix()}"
-            return portable, resolved
-        return None
-
-    def _safe_missing_reference_suffix(relative: str) -> str | None:
-        normalized = relative.replace("\\", "/")
-        if not normalized or normalized.startswith("/"):
-            return None
-        parts = normalized.split("/")
-        if any(part in {"", ".", ".."} for part in parts):
-            return None
-        return normalized
-
-    def _missing_portable_path(spec: _ReferencePrefixSpec, relative: str) -> tuple[str, Path | None] | None:
-        safe_relative = _safe_missing_reference_suffix(relative)
-        if safe_relative is None:
-            return None
-        portable = f"{spec.portable_prefix}{safe_relative}"
-        return portable, None
-
-    def _reference_spec_for(candidate_path: str) -> _ReferencePrefixSpec | None:
-        for spec in _REFERENCE_PREFIX_SPECS:
-            if candidate_path.startswith(spec.raw_prefix):
-                return spec
-        return None
-
-    def _resolve_install_relative_path(relative: str) -> Path:
-        spec = _reference_spec_for(relative)
-        if spec is not None:
-            return spec.root / relative.removeprefix(spec.raw_prefix)
-        return _SPEC_ROOT / relative
-
-    if candidate.startswith("@{GPD_INSTALL_DIR}/") or candidate.startswith("{GPD_INSTALL_DIR}/"):
-        relative = candidate.split("}/", 1)[1]
-        resolved = _resolve_install_relative_path(relative)
-        normalized = _normalize_resolved_path(resolved)
-        return normalized
-
-    if candidate.startswith("@{GPD_AGENTS_DIR}/") or candidate.startswith("{GPD_AGENTS_DIR}/"):
-        relative = candidate.split("}/", 1)[1]
-        resolved = _AGENT_ROOT / relative
-        normalized = _normalize_resolved_path(resolved)
-        return normalized
-
-    spec = _reference_spec_for(candidate)
-    if spec is not None:
-        relative = candidate.removeprefix(spec.raw_prefix)
-        resolved = spec.root / relative
-        normalized = _normalize_resolved_path(resolved)
-        if normalized is not None:
-            return normalized
-        if spec.allow_missing:
-            return _missing_portable_path(spec, relative)
-        return None
-
-    raw_path_obj = Path(candidate)
-    if raw_path_obj.is_absolute():
-        normalized = _normalize_resolved_path(raw_path_obj)
-        if normalized is not None:
-            return normalized
-        return None
-
-    if candidate.startswith(("GPD/", "@GPD/")):
-        project_path = candidate.removeprefix("@")
-        return f"@{project_path}", None
-
-    if candidate.startswith("src/gpd/"):
-        resolved = (_REPO_ROOT / candidate).resolve()
-        normalized = _normalize_resolved_path(resolved)
-        if normalized is not None:
-            return normalized
-        return candidate, None
-
-    if base_path is not None:
-        resolved = (base_path.parent / candidate).resolve()
-        normalized = _normalize_resolved_path(resolved)
-        if normalized is not None:
-            return normalized
-
-    return None
+    return _REFERENCE_RESOLVER.portable_reference_path(raw_path, base_path=base_path)
 
 
 def _reference_kind(path: str) -> str:
-    for spec in _REFERENCE_PREFIX_SPECS:
-        if path.startswith(spec.portable_prefix):
-            return spec.kind
-    if path.startswith("@GPD/"):
-        return "project"
-    return "spec"
+    return _REFERENCE_RESOLVER.reference_kind(path)
 
 
 def _read_frontmatter_block(path: Path) -> str:
@@ -535,29 +395,6 @@ def _read_frontmatter_block(path: Path) -> str:
     return "".join(lines)
 
 
-def _markdown_without_fenced_code_blocks(markdown: str) -> str:
-    """Return markdown with fenced code blocks removed for dependency scans."""
-
-    lines: list[str] = []
-    in_fence = False
-    fence_marker = ""
-
-    for line in markdown.splitlines():
-        stripped = line.lstrip()
-        if in_fence:
-            if stripped.startswith(fence_marker):
-                in_fence = False
-                fence_marker = ""
-            continue
-        if stripped.startswith(("```", "~~~")):
-            in_fence = True
-            fence_marker = stripped[:3]
-            continue
-        lines.append(line)
-
-    return "\n".join(lines)
-
-
 def _extract_referenced_files(
     content: str,
     *,
@@ -566,60 +403,79 @@ def _extract_referenced_files(
 ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     """Return direct and transitive markdown references discovered in *content*."""
 
-    direct_references: list[dict[str, object]] = []
-    transitive_references: list[dict[str, object]] = []
-    direct_seen: set[str] = set()
-    transitive_seen: set[str] = set()
-    visited_docs: set[str] = set()
+    return build_reference_lists(
+        content,
+        source_path=source_path,
+        read_transitive_reference_bodies=read_transitive_reference_bodies,
+        resolver=_REFERENCE_RESOLVER,
+        resolve_reference=_portable_reference_path,
+        reference_kind=_reference_kind,
+        content_transform=_portable_skill_content,
+    )
 
-    def _record(
-        entry_list: list[dict[str, object]],
-        seen: set[str],
-        *,
-        path: str,
-        raw_path: str,
-        depth: int | None,
-    ) -> None:
-        if path in seen:
-            return
-        seen.add(path)
-        entry: dict[str, object] = {"path": path, "kind": _reference_kind(path)}
-        if raw_path.startswith("@{GPD_"):
-            entry["eager"] = True
-        if depth is not None:
-            entry["depth"] = depth
-        entry_list.append(entry)
 
-    def _collect(markdown: str, *, current_path: Path | None, depth: int) -> None:
-        for match in _markdown_reference_re().finditer(_markdown_without_fenced_code_blocks(markdown)):
-            raw_path = match.group("path")
-            normalized = _portable_reference_path(raw_path, base_path=current_path)
-            if normalized is None:
-                continue
-            path, referenced_path = normalized
-            if depth == 0:
-                _record(direct_references, direct_seen, path=path, raw_path=raw_path, depth=None)
-            else:
-                _record(transitive_references, transitive_seen, path=path, raw_path=raw_path, depth=depth)
-            if path in visited_docs:
-                continue
-            visited_docs.add(path)
-            if referenced_path is None or referenced_path.suffix != ".md" or not referenced_path.exists():
-                continue
-            if depth > 0 and not read_transitive_reference_bodies:
-                continue
-            try:
-                nested = _portable_skill_content(referenced_path.read_text(encoding="utf-8"))
-            except OSError:
-                continue
-            _collect(
-                nested,
-                current_path=referenced_path,
-                depth=depth + 1,
+def _staged_loading_reference_seeds(
+    staged_loading: content_registry.WorkflowStageManifest | None,
+) -> tuple[ReferenceSeed, ...]:
+    """Return explicit graph seeds from a staged-loading manifest."""
+
+    if staged_loading is None:
+        return ()
+
+    seeds: list[ReferenceSeed] = []
+    for stage in staged_loading.stages:
+        for path in (*stage.mode_paths, *stage.loaded_authorities):
+            seeds.append(
+                ReferenceSeed(
+                    raw_path=path,
+                    source="staged_loading",
+                    relationship="stage_eager",
+                    stage=stage.id,
+                    scan_body_for_metadata=True,
+                )
             )
+        for conditional in stage.conditional_authorities:
+            for path in conditional.authorities:
+                seeds.append(
+                    ReferenceSeed(
+                        raw_path=path,
+                        source="staged_loading",
+                        relationship="stage_conditional",
+                        stage=stage.id,
+                        conditional_when=conditional.when,
+                        scan_body_for_metadata=True,
+                    )
+                )
+        for path in stage.must_not_eager_load:
+            seeds.append(
+                ReferenceSeed(
+                    raw_path=path,
+                    source="staged_loading",
+                    relationship="stage_lazy_declared",
+                    stage=stage.id,
+                    scan_body_for_metadata=False,
+                )
+            )
+    return tuple(seeds)
 
-    _collect(content, current_path=source_path, depth=0)
-    return direct_references, transitive_references
+
+def _build_skill_reference_lists(
+    content: str,
+    *,
+    source_path: Path,
+    staged_loading: content_registry.WorkflowStageManifest | None,
+    read_transitive_reference_bodies: bool,
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    return build_reference_lists(
+        content,
+        source_path=source_path,
+        seeds=_staged_loading_reference_seeds(staged_loading),
+        read_transitive_reference_bodies=read_transitive_reference_bodies,
+        resolver=_REFERENCE_RESOLVER,
+        resolve_reference=_portable_reference_path,
+        reference_kind=_reference_kind,
+        content_transform=_portable_skill_content,
+    )
 
 
 def _is_schema_reference(path: str) -> bool:
@@ -791,10 +647,12 @@ def get_skill(
                     error=f"Skill {name!r} not found",
                 )
 
+            command = content_registry.get_command(skill.registry_name) if skill.source_kind == "command" else None
             content, source_path = _canonical_skill_content(skill)
-            referenced_files, transitive_referenced_files = _extract_referenced_files(
+            referenced_files, transitive_referenced_files = _build_skill_reference_lists(
                 content,
                 source_path=source_path,
+                staged_loading=command.staged_loading if command is not None else None,
                 read_transitive_reference_bodies=include_transitive_reference_bodies,
             )
             template_references = [entry["path"] for entry in referenced_files if entry["kind"] == "template"]
@@ -848,7 +706,7 @@ def get_skill(
                 "loading_hint": loading_hint,
             }
             if skill.source_kind == "command":
-                command = content_registry.get_command(skill.registry_name)
+                assert command is not None
                 allowed_tools = _normalize_allowed_tools(command.allowed_tools)
                 payload.update(
                     {
@@ -888,6 +746,7 @@ def get_skill(
             elif skill.source_kind == "agent":
                 agent = content_registry.get_agent(skill.registry_name)
                 agent_policy = _agent_policy_payload(agent)
+                task_overlay_compatibility = _agent_task_overlay_compatibility_payload(agent)
                 payload["allowed_tools"] = _normalize_allowed_tools(agent.tools)
                 payload["allowed_tools_surface"] = "agent.tools"
                 payload["agent_policy"] = agent_policy
@@ -897,6 +756,13 @@ def get_skill(
                     "allowed_tools": "mirrored",
                     "agent_policy": "mirrored",
                 }
+                if task_overlay_compatibility is not None:
+                    payload["compatible_task_overlays"] = task_overlay_compatibility
+                    payload["structured_metadata_authority"]["compatible_task_overlays"] = "mirrored"
+                    loading_hint = (
+                        f"{loading_hint} `compatible_task_overlays` is metadata-only; load overlay bodies only when "
+                        "a runtime spawn manifest selects their portable paths."
+                    )
                 payload["loading_hint"] = loading_hint
             return stable_mcp_response(payload)
         except (GPDError, OSError, ValueError, TimeoutError) as e:

@@ -21,6 +21,7 @@ from gpd.hooks.install_metadata import (
     installed_update_command,
     load_install_manifest_runtime_status,
     load_install_manifest_scope_status,
+    load_install_manifest_snapshot,
     load_install_manifest_state,
 )
 from gpd.hooks.runtime_detect import _manifest_runtime_status as runtime_detect_manifest_runtime_status
@@ -74,7 +75,11 @@ def _valid_value_for_manifest_metadata_policy(policy: ManifestMetadataListPolicy
         (None, "missing", {}),
         (b"\xff", "corrupt", {}),
         ("[]", "invalid", {}),
-        (json.dumps({"install_scope": "local", "runtime": "codex"}), "ok", {"install_scope": "local", "runtime": "codex"}),
+        (
+            json.dumps({"install_scope": "local", "runtime": "codex"}),
+            "ok",
+            {"install_scope": "local", "runtime": "codex"},
+        ),
     ],
 )
 def test_load_install_manifest_state_classifies_manifest_payloads(
@@ -197,6 +202,22 @@ def test_assess_install_target_fails_closed_for_opencode_flat_command_in_claude_
     assert assessment.manifest_state == "missing"
     assert assessment.manifest_runtime is None
     assert assessment.expected_runtime == "claude-code"
+    assert assessment.has_managed_markers is True
+
+
+def test_assess_install_target_fails_closed_for_manifestless_copilot_flat_command(
+    tmp_path: Path,
+) -> None:
+    copilot_policy = get_managed_install_surface_policy("copilot-cli")
+    config_dir = tmp_path / ".copilot"
+    command_path = _materialize_test_path_for_glob(config_dir, copilot_policy.flat_command_globs[0])
+
+    assessment = assess_install_target(config_dir, expected_runtime="copilot-cli")
+
+    assert command_path.relative_to(config_dir).as_posix() == "command/gpd-probe.md"
+    assert assessment.state == "untrusted_manifest"
+    assert assessment.manifest_state == "missing"
+    assert assessment.manifest_runtime is None
     assert assessment.has_managed_markers is True
 
 
@@ -414,16 +435,59 @@ def test_assess_install_target_rejects_missing_explicit_target_as_complete_insta
     assert assessment.state == "untrusted_manifest"
     assert assessment.manifest_state == "missing_explicit_target"
     assert assessment.manifest_runtime == descriptor.runtime_name
+    assert assessment.manifest_scope_state == "ok"
+    assert assessment.manifest_scope == "local"
+    assert assessment.manifest_explicit_target_state == "missing_explicit_target"
+    assert assessment.manifest_explicit_target is None
     assert assessment.readiness_state == "blocked"
     assert config_dir_has_complete_install(config_dir) is False
     assert installed_update_command(config_dir) is None
+
+
+def test_assess_install_target_accepts_preloaded_manifest_snapshot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_dir = tmp_path / ".codex"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "gpd-file-manifest.json").write_text(
+        json.dumps({"install_scope": "local", "runtime": "codex", "explicit_target": False}),
+        encoding="utf-8",
+    )
+    snapshot = load_install_manifest_snapshot(config_dir)
+
+    class _FakeAdapter:
+        def missing_install_artifacts(self, target_dir: Path) -> tuple[str, ...]:
+            return ()
+
+    original_read_text = Path.read_text
+
+    def _read_text(path: Path, *args: object, **kwargs: object) -> str:
+        if path == config_dir / "gpd-file-manifest.json":
+            raise AssertionError("assessment should reuse the preloaded manifest snapshot")
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr("gpd.hooks.install_metadata.get_adapter", lambda runtime: _FakeAdapter())
+    monkeypatch.setattr(Path, "read_text", _read_text)
+
+    assessment = assess_install_target(config_dir, expected_runtime="codex", manifest=snapshot)
+
+    assert assessment.state == "owned_complete"
+    assert assessment.manifest_state == "ok"
+    assert assessment.manifest_runtime == "codex"
+    assert assessment.manifest_scope_state == "ok"
+    assert assessment.manifest_scope == "local"
+    assert assessment.manifest_explicit_target_state == "ok"
+    assert assessment.manifest_explicit_target is False
 
 
 def test_assess_install_target_preserves_runtime_owned_manifest_list_metadata(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    descriptor = next(descriptor for descriptor in iter_runtime_descriptors() if descriptor.manifest_metadata_list_policies)
+    descriptor = next(
+        descriptor for descriptor in iter_runtime_descriptors() if descriptor.manifest_metadata_list_policies
+    )
     policy = descriptor.manifest_metadata_list_policies[0]
     config_dir = tmp_path / descriptor.config_dir_name
     config_dir.mkdir(parents=True, exist_ok=True)
@@ -648,7 +712,11 @@ def test_assess_install_target_preserves_unsupported_manifest_runtime(
         (json.dumps({"install_scope": "local"}), "missing_runtime", None),
         (json.dumps({"install_scope": "local", "runtime": 123}), "malformed_runtime", None),
         (json.dumps({"install_scope": "local", "runtime": "Codex"}), "malformed_runtime", None),
-        (json.dumps({"install_scope": "local", "runtime": "retired-runtime"}), "unsupported_runtime", "retired-runtime"),
+        (
+            json.dumps({"install_scope": "local", "runtime": "retired-runtime"}),
+            "unsupported_runtime",
+            "retired-runtime",
+        ),
         (json.dumps({"install_scope": "local", "runtime": "codex"}), "ok", "codex"),
     ],
 )
@@ -738,7 +806,7 @@ def test_runtime_detect_uses_shared_manifest_scope_helper() -> None:
 
     source = inspect.getsource(runtime_detect)
 
-    assert "install_scope_from_manifest" in source
+    assert "load_install_manifest_snapshot" in source
     assert "_manifest_install_scope" not in source
 
 
@@ -776,7 +844,7 @@ def test_runtime_cli_uses_shared_manifest_runtime_helper() -> None:
 
     source = inspect.getsource(runtime_cli)
 
-    assert "load_install_manifest_runtime_status" in source
+    assert "load_install_manifest_snapshot" in source
     assert "config_dir_has_managed_install_markers" in source
     assert "def _manifest_runtime_status" not in source
     assert "def _has_managed_install_markers" not in source
@@ -793,6 +861,23 @@ def test_install_metadata_keeps_manifest_boundary_free_of_install_utils_imports(
     assert "get_shared_install_metadata" in source
 
 
+def test_install_manifest_snapshot_loader_keeps_adapter_boundary() -> None:
+    import gpd.hooks.install_metadata as install_metadata
+
+    loader_source = inspect.getsource(install_metadata.load_install_manifest_snapshot)
+    wrapper_sources = [
+        inspect.getsource(install_metadata.load_install_manifest_state),
+        inspect.getsource(install_metadata.load_install_manifest_runtime_status),
+        inspect.getsource(install_metadata.load_install_manifest_scope_status),
+        inspect.getsource(install_metadata.load_install_manifest_explicit_target_status),
+    ]
+
+    assert "get_adapter" not in loader_source
+    assert "gpd.adapters" not in loader_source
+    assert "install_utils" not in loader_source
+    assert all("load_install_manifest_snapshot" in source for source in wrapper_sources)
+
+
 def test_install_metadata_uses_catalog_manifest_metadata_policies() -> None:
     import gpd.hooks.install_metadata as install_metadata
 
@@ -803,3 +888,4 @@ def test_install_metadata_uses_catalog_manifest_metadata_policies() -> None:
     assert "codex_skills_dir" not in source
     assert "codex_generated_skill_dirs" not in source
     assert "opencode_generated_command_files" not in source
+    assert "copilot_generated_command_files" not in source

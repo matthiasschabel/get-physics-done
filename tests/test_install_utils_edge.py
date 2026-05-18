@@ -22,6 +22,7 @@ from gpd.adapters.install_utils import (
     _is_hook_command_for_script,
     build_hook_command,
     build_runtime_install_repair_command,
+    cleanup_settings_json_managed_entries,
     compile_markdown_for_runtime,
     convert_tool_references_in_body,
     copy_with_path_replacement,
@@ -37,12 +38,14 @@ from gpd.adapters.install_utils import (
     pre_install_cleanup,
     protect_runtime_agent_prompt,
     read_settings,
+    remove_managed_mcp_server_keys,
     replace_placeholders,
     tracked_hook_paths_from_manifest,
     translate_frontmatter_tool_names,
     verify_installed,
     write_manifest,
     write_settings,
+    write_settings_if_modified_and_prune_empty,
 )
 from gpd.adapters.runtime_catalog import (
     ManagedInstallSurfacePolicy,
@@ -1055,6 +1058,145 @@ class TestEnsureUpdateHook:
         ]
 
 
+class TestSettingsCleanupHelpers:
+    """Tests for shared uninstall cleanup of settings-backed runtimes."""
+
+    def test_cleanup_removes_managed_statusline_and_exact_mcp_keys(self, tmp_path: Path) -> None:
+        target_dir = tmp_path / ".runtime"
+        settings = {
+            "statusLine": {
+                "type": "command",
+                "command": f"python3 {target_dir / 'hooks' / 'statusline.py'}",
+            },
+            "mcpServers": {
+                "gpd-state": {"command": "python3", "args": ["-m", "gpd.mcp.servers.state_server"]},
+                "custom-server": {"command": "node", "args": ["custom.js"]},
+            },
+        }
+
+        result = cleanup_settings_json_managed_entries(
+            settings,
+            target_dir=target_dir,
+            config_dir_name=".runtime",
+            session_start_hook_filenames=("check_update.py",),
+            mcp_server_keys=frozenset({"gpd-state"}),
+        )
+
+        assert result.modified is True
+        assert result.removed_statusline is True
+        assert result.removed_mcp_server_keys == ("gpd-state",)
+        assert "statusLine" not in settings
+        assert settings["mcpServers"] == {"custom-server": {"command": "node", "args": ["custom.js"]}}
+
+    def test_cleanup_preserves_unmanaged_statusline_with_matching_basename(self, tmp_path: Path) -> None:
+        target_dir = tmp_path / ".runtime"
+        settings = {
+            "statusLine": {
+                "type": "command",
+                "command": "python3 /tmp/third-party/hooks/statusline.py",
+            }
+        }
+
+        result = cleanup_settings_json_managed_entries(
+            settings,
+            target_dir=target_dir,
+            config_dir_name=".runtime",
+            session_start_hook_filenames=("check_update.py",),
+            mcp_server_keys=frozenset(),
+        )
+
+        assert result.modified is False
+        assert settings["statusLine"]["command"] == "python3 /tmp/third-party/hooks/statusline.py"
+
+    def test_cleanup_preserves_unmanaged_hooks_inside_mixed_sessionstart_entry(self, tmp_path: Path) -> None:
+        target_dir = tmp_path / ".runtime"
+        settings = {
+            "hooks": {
+                "SessionStart": [
+                    {
+                        "matcher": "startup",
+                        "hooks": [
+                            {"type": "command", "command": f"python3 {target_dir / 'hooks' / 'check_update.py'}"},
+                            {"type": "command", "command": "echo keep-me"},
+                            {"type": "command", "command": "python3 /tmp/third-party/hooks/check_update.py"},
+                        ],
+                    },
+                    {"hooks": [{"type": "command", "command": f"python3 {target_dir / 'hooks' / 'statusline.py'}"}]},
+                    {"hooks": [{"type": "command", "command": "echo keep-entry"}]},
+                ],
+                "PostToolUse": [{"hooks": [{"type": "command", "command": "echo keep-other-event"}]}],
+            }
+        }
+
+        result = cleanup_settings_json_managed_entries(
+            settings,
+            target_dir=target_dir,
+            config_dir_name=".runtime",
+            session_start_hook_filenames=("check_update.py", "statusline.py"),
+            mcp_server_keys=frozenset(),
+        )
+
+        assert result.modified is True
+        assert result.removed_session_start_hooks == 2
+        session_start = settings["hooks"]["SessionStart"]
+        commands = [
+            hook["command"]
+            for entry in session_start
+            if isinstance(entry, dict)
+            for hook in entry.get("hooks", [])
+            if isinstance(hook, dict) and isinstance(hook.get("command"), str)
+        ]
+        assert commands == [
+            "echo keep-me",
+            "python3 /tmp/third-party/hooks/check_update.py",
+            "echo keep-entry",
+        ]
+        assert settings["hooks"]["PostToolUse"] == [
+            {"hooks": [{"type": "command", "command": "echo keep-other-event"}]}
+        ]
+
+    def test_remove_managed_mcp_server_keys_preserves_unmanaged_servers(self) -> None:
+        config = {
+            "mcpServers": {
+                "gpd-state": {"command": "python3"},
+                "gpd-wolfram": {"command": "python3"},
+                "custom-server": {"command": "node"},
+            }
+        }
+
+        removed = remove_managed_mcp_server_keys(config, managed_keys=frozenset({"gpd-state", "gpd-wolfram"}))
+
+        assert removed == ("gpd-state", "gpd-wolfram")
+        assert config["mcpServers"] == {"custom-server": {"command": "node"}}
+
+    def test_write_settings_prunes_empty_file_only_when_caller_allows(self, tmp_path: Path) -> None:
+        settings_path = tmp_path / ".runtime" / "settings.json"
+        settings_path.parent.mkdir(parents=True)
+        settings_path.write_text("{}\n", encoding="utf-8")
+
+        assert (
+            write_settings_if_modified_and_prune_empty(
+                settings_path,
+                {},
+                modified=False,
+                prune_empty=False,
+            )
+            is False
+        )
+        assert settings_path.exists()
+
+        assert (
+            write_settings_if_modified_and_prune_empty(
+                settings_path,
+                {},
+                modified=False,
+                prune_empty=True,
+            )
+            is True
+        )
+        assert not settings_path.exists()
+
+
 # =========================================================================
 # 3. write_settings
 # =========================================================================
@@ -1268,7 +1410,7 @@ class TestCopyWithPathReplacement:
         content = (dest / "workflow.md").read_text(encoding="utf-8")
         assert f'{adapter.translate_tool_name("AskUserQuestion")}([{{"label": "Yes"}}])' in content
         assert f'{adapter.translate_tool_name("Task")}(prompt="Run it")' in content
-        assert f'{adapter.translate_tool_name("WebSearch")} then {adapter.translate_tool_name("WebFetch")}' in content
+        assert f"{adapter.translate_tool_name('WebSearch')} then {adapter.translate_tool_name('WebFetch')}" in content
         assert f"{adapter.public_command_surface_prefix}plan-phase 3" in content
         assert "ask_user(" not in content
         assert "web_search" not in content
@@ -1626,9 +1768,7 @@ class TestInstallBackupSafety:
         pre_install_cleanup(config_dir)
 
         patches_dir = config_dir / "gpd-local-patches"
-        assert '"backup_mode": "fallback-snapshot"' in (patches_dir / "backup-meta.json").read_text(
-            encoding="utf-8"
-        )
+        assert '"backup_mode": "fallback-snapshot"' in (patches_dir / "backup-meta.json").read_text(encoding="utf-8")
         for path in managed_files:
             backup_path = patches_dir / path.relative_to(config_dir)
             assert backup_path.read_text(encoding="utf-8") == path.read_text(encoding="utf-8")

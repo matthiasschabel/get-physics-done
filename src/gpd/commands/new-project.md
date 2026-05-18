@@ -9,6 +9,26 @@ allowed-tools:
   - file_write
   - task
   - ask_user
+help:
+  group: Starter commands
+  order: 40
+  compact_description: Create a full GPD project
+  display_signature: gpd:new-project
+  variants:
+    - command: gpd:new-project --minimal
+      description: Create a GPD project through the shortest setup path
+  detail_signature: gpd:new-project
+  examples:
+    - gpd:new-project --minimal
+    - gpd:new-project --minimal @file.md
+    - gpd:new-project --auto
+  notes:
+    - All modes build a scoping contract before downstream artifacts.
+    - Blocking gaps get one targeted repair prompt, and scope must be explicitly approved before requirements or roadmap generation.
+    - '`--minimal @file.md` still repairs blocking gaps and asks for scoping approval.'
+    - '`--auto` follows the configured autonomy gates.'
+    - '`GPD/state.json.bak` and `GPD/state.json.lock` are local recovery/coordination files.'
+  root_detail_order: 10
 ---
 
 <context>
@@ -16,45 +36,38 @@ allowed-tools:
 - `--auto` — Automatic mode. Synthesizes a scoping contract from the supplied document, asks for one explicit scope approval, then runs research → requirements → roadmap with minimal follow-up interaction. Expects a research proposal document via @ reference.
 - `--minimal` — Fast staged-init mode. Uses one structured intake plus one scoping approval gate, then creates the core project artifacts with lean content. Scope, anchors, and decisive outputs are still required.
 - `--minimal @file.md` — Create project directly from a markdown file describing your research and staged continuation path. Parses research question, anchors, and key work chunks from the file.
+
+Mode-specific artifact lists, output displays, and completion checklists are
+owned by the staged authorities, especially `completion`.
 </context>
 
 <objective>
-Initialize a new physics research project through one flow: questioning or structured intake → scoping contract approval → literature survey (optional) → requirements → staged roadmap/conventions handoff when that mode creates them.
-
-If no project config exists yet, start with physics questioning, surface a preset choice before workflow preferences, and ask detailed config questions only after scope approval and before the first project-artifact commit.
-
-**Full mode creates:**
-
-- `GPD/PROJECT.md` — project context
-- `GPD/config.json` — workflow preferences
-- `GPD/literature/` — optional domain and literature survey
-- `GPD/REQUIREMENTS.md` — scoped requirements
-- `GPD/ROADMAP.md` — phase structure
-- `GPD/STATE.md` — project memory
-- `GPD/state.json` `project_contract` — authoritative machine-readable scoping contract
-- `GPD/CONVENTIONS.md` — notation conventions, established after the staged roadmap
+Initialize a new physics research project through staged authorities: intake,
+scoping contract approval, selected artifact generation, and completion.
 
 **Minimal mode creates only the core startup set:** `GPD/PROJECT.md`, `GPD/config.json`, `GPD/REQUIREMENTS.md`, `GPD/ROADMAP.md`, `GPD/STATE.md`, and `GPD/state.json` with the approved `project_contract`. It does not promise `GPD/literature/` or `GPD/CONVENTIONS.md`.
+Full mode may create `GPD/literature/` and `GPD/CONVENTIONS.md` only through
+their owning later stages. roadmap generation and the staged roadmap/conventions handoff
+happen only after the scoping approval gate.
 
-**After this command:** Run `gpd:discuss-phase 1`; show native runtime label.
+**After this command:** Run `gpd:discuss-phase 1`.
 </objective>
 
 <execution_context>
-@{GPD_INSTALL_DIR}/workflows/new-project.md
+@{GPD_INSTALL_DIR}/workflows/new-project/scope-intake.md
 </execution_context>
 
 <process>
-**CRITICAL: First, read the full workflow file using the file_read tool:**
-Read the included workflow first and follow it exactly.
+**CRITICAL: First, read the included stage authority using the file_read tool:**
+Start from the included `scope_intake` authority. It owns read-only setup,
+recovery routing, existing-work routing, and the first narrow scope/anchor
+question.
+Start with physics questioning and do not surface a preset choice before
+workflow preferences. In full/auto mode, `workflow_preferences` may ask for the
+preset before the first project-artifact commit because `project_artifacts`
+requires `GPD/config.json`.
 
-After that, load late-stage authorities only when the workflow reaches the matching stage:
-- Read {GPD_INSTALL_DIR}/references/research/questioning.md only when entering the full questioning path.
-- Read {GPD_INSTALL_DIR}/templates/project-contract-schema.md and {GPD_INSTALL_DIR}/templates/project-contract-grounding-linkage.md only when preparing the approval gate and validating the raw scoping contract.
-- Read {GPD_INSTALL_DIR}/references/shared/canonical-schema-discipline.md only when authoring or repairing the scoping contract.
-- Read {GPD_INSTALL_DIR}/templates/project.md only when writing `GPD/PROJECT.md`.
-- Read {GPD_INSTALL_DIR}/templates/requirements.md only when writing `GPD/REQUIREMENTS.md`.
-- Read {GPD_INSTALL_DIR}/templates/state.md only when writing `GPD/STATE.md`.
-- Read {GPD_INSTALL_DIR}/references/ui/ui-brand.md only when rendering branded completion or status blocks.
+Later stage loading is manifest/stage-owned. `scope_approval` owns `templates/project-contract-schema.md`, `templates/project-contract-grounding-linkage.md`, and canonical schema discipline. Never load `workflows/new-project.md` as authority; it is an index.
 
 Execute the workflow end-to-end. Preserve all workflow gates (validation, approvals, routing).
 
@@ -84,63 +97,17 @@ This conflict stop happens before git initialization, `GPD/` creation, or state/
 Do not initialize git in Setup. The workflow initializes git only at its first mutation gate after invalid arguments, existing-work routing, recovery routing, and explicit scope approval have all passed.
 </process>
 
-<output>
-
-**Full mode output:**
-
-- `GPD/PROJECT.md`
-- `GPD/config.json`
-- `GPD/literature/` (if literature survey selected)
-  - `PRIOR-WORK.md`
-  - `METHODS.md`
-  - `COMPUTATIONAL.md`
-  - `PITFALLS.md`
-  - `SUMMARY.md`
-- `GPD/REQUIREMENTS.md`
-- `GPD/ROADMAP.md`
-- `GPD/STATE.md`
-- `GPD/state.json` `project_contract`
-- `GPD/CONVENTIONS.md` (established by gpd-notation-coordinator)
-
-**Minimal mode output:**
-
-- `GPD/PROJECT.md`
-- `GPD/config.json`
-- `GPD/REQUIREMENTS.md`
-- `GPD/ROADMAP.md`
-- `GPD/STATE.md`
-- `GPD/state.json` `project_contract`
-
-</output>
-
 <success_criteria>
 
-**Full mode success criteria:**
-- [ ] `GPD/` exists and the repo is initialized
-- [ ] Deep questioning captured the research context
-- [ ] Scoping contract captures decisive outputs, anchors, weakest assumptions, and unresolved gaps
-- [ ] Scoping contract is explicitly approved before requirements or roadmap generation
-- [ ] `PROJECT.md` created and committed
-- [ ] `config.json` created and committed
-- [ ] Literature survey completed if selected and committed
-- [ ] `REQUIREMENTS.md` created with REQ-IDs and committed
-- [ ] `ROADMAP.md` created with phases and requirement mappings and committed
-- [ ] `STATE.md` initialized
-- [ ] `CONVENTIONS.md` created via `gpd-notation-coordinator` and committed
-- [ ] Convention lock populated via `gpd convention set`
+Stage-owned success criteria live in the active authority, with final display in
+`workflows/new-project/completion.md`.
+
+- [ ] invalid flag combinations stop before writes
+- [ ] scoping contract is explicitly approved, validated, and persisted before downstream artifact generation
 - [ ] User told the next step is `gpd:discuss-phase 1`
 
 **Minimal mode success criteria (if `--minimal`):**
 
-- [ ] `GPD/` created and the repo initialized
-- [ ] Structured intake captured the core question, decisive outputs, anchors, and known gaps
-- [ ] Scoping contract approved before requirements or roadmap generation
-- [ ] `PROJECT.md` created from one description or input file and committed
-- [ ] `ROADMAP.md` created from the input and committed
-- [ ] `REQUIREMENTS.md` created with auto-generated REQ-IDs and committed
-- [ ] `STATE.md` initialized and committed
-- [ ] `config.json` created with defaults and committed
-- [ ] All files committed in one commit: `docs: initialize research project (minimal)`
 - [ ] Minimal output is limited to the documented core startup set; no literature or conventions artifact is promised
 - [ ] User offered "Discuss phase 1 now?"
 

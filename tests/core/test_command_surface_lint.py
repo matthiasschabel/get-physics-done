@@ -25,6 +25,14 @@ def _registered_cli_surface() -> tuple[set[str], dict[str, set[str]]]:
         for group in cli.app.registered_groups
         if group.name
     }
+    for group in cli.app.registered_groups:
+        if not group.name:
+            continue
+        for subgroup in group.typer_instance.registered_groups:
+            if subgroup.name:
+                command_groups[f"{group.name} {subgroup.name}"] = {
+                    command.name for command in subgroup.typer_instance.registered_commands if command.name
+                }
     return root_commands, command_groups
 
 
@@ -148,6 +156,14 @@ def _validate_gpd_invocation(
         if index + 1 >= len(tokens) or tokens[index + 1].startswith("-"):
             return f"`{invocation}` names CLI group `gpd {command}` without a subcommand"
         subcommand = tokens[index + 1]
+        nested_group = f"{command} {subcommand}"
+        if nested_group in command_groups:
+            if index + 2 >= len(tokens) or tokens[index + 2].startswith("-"):
+                return f"`{invocation}` names CLI group `gpd {nested_group}` without a subcommand"
+            nested_subcommand = tokens[index + 2]
+            if nested_subcommand not in command_groups[nested_group]:
+                return f"`{invocation}` uses unknown local CLI subcommand `gpd {nested_group} {nested_subcommand}`"
+            return None
         if subcommand not in command_groups[command]:
             return f"`{invocation}` uses unknown local CLI subcommand `gpd {command} {subcommand}`"
         return None

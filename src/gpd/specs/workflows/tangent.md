@@ -15,7 +15,7 @@ Load enough project context to frame the tangent:
 INIT=$(gpd --raw init progress --include roadmap,state)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd initialization failed: $INIT"
-  # STOP — display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 ```
 

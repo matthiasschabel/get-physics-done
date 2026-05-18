@@ -33,26 +33,17 @@ If `gemini` is missing, install the runtime first with:
 npm install -g @google/gemini-cli
 ```
 
-## 2) Install GPD for Gemini CLI
+## 2) Install, start, and use GPD
+
+<!-- gpd-public-surface:runtime-quickstart-gemini:start -->
+From your normal terminal:
 
 ```bash
 npx -y get-physics-done --gemini --local
-```
-
-## 3) Start Gemini CLI
-
-From the same project folder:
-
-```bash
 gemini
 ```
 
-If you are not signed in yet, choose **Sign in with Google** and finish the browser login flow.
-If you are using a paid Gemini Code Assist license from your organization, set `GOOGLE_CLOUD_PROJECT` before launching `gemini`. For Google Workspace accounts or other auth methods, use the official authentication guide linked below.
-
-## 4) First launch / help / start / tour
-
-Type these inside Gemini CLI, not in your normal terminal:
+Inside Gemini CLI:
 
 ```text
 /gpd:help
@@ -63,30 +54,15 @@ Type these inside Gemini CLI, not in your normal terminal:
 /gpd:resume-work
 ```
 
-If you are not sure what this folder is yet, start with `/gpd:start`.
-If you want a read-only walkthrough first, use `/gpd:tour`.
+Suggested order for beginners: `/gpd:help`, `/gpd:start`, `/gpd:tour`, then either `/gpd:new-project --minimal`, `/gpd:map-research`, or `/gpd:resume-work`.
 
-Suggested order for beginners: `/gpd:help`, `/gpd:start`, `/gpd:tour`, then
-either `/gpd:new-project --minimal`, `/gpd:map-research`, or
-`/gpd:resume-work`.
+Return to work from your normal terminal with `gpd resume` or `gpd resume --recent`, then reopen `gemini` in the right folder and run `/gpd:resume-work`.
 
-GPD is designed to favor scientific rigor and critical thinking. Treat preferred answers as hypotheses to test, and if a citation, artifact, or run result is missing, keep that gap explicit instead of inventing it.
+After your first successful start or later, use `/gpd:settings` to review autonomy, workflow defaults, model-cost posture, runtime permission sync, and preset/tier overrides. The safest starting point is `review` plus runtime defaults. Favor scientific rigor and explicit uncertainty over agreement-seeking, and keep missing evidence or artifacts explicit instead of inventing them.
+<!-- gpd-public-surface:runtime-quickstart-gemini:end -->
 
-## Return to work
-
-- Use `/gpd:resume-work` when this folder already has GPD state and you want to
-  continue.
-- If you are not sure whether this folder already has GPD state, use
-  `/gpd:start` first.
-- If you need to reopen the project from your normal terminal first, use
-  `gpd resume` or `gpd resume --recent`, then open the right folder and run
-  `/gpd:resume-work`.
-
-## Settings
-
-After your first successful start or later, use `/gpd:settings` to review
-autonomy, workflow defaults, and model-cost posture. Use `/gpd:set-tier-models`
-when you only want to pin concrete `tier-1`, `tier-2`, and `tier-3` model ids.
+If you are not signed in yet, choose **Sign in with Google** and finish the browser login flow.
+If you are using a paid Gemini Code Assist license from your organization, set `GOOGLE_CLOUD_PROJECT` before launching `gemini`. For Google Workspace accounts or other auth methods, use the official authentication guide linked below.
 
 ## Readiness before unattended runs
 
@@ -109,7 +85,7 @@ If the verdict is `relaunch-required`, exit Gemini CLI and relaunch through the
 GPD-managed launcher wrapper shown by the command output before treating
 unattended use as ready.
 
-## 5) What success looks like
+## What success looks like
 
 - `gemini --help` works.
 - `npx -y get-physics-done --gemini --local` finishes without errors.
@@ -118,7 +94,7 @@ unattended use as ready.
 - `/gpd:tour` gives a read-only walkthrough of the main commands.
 - `/gpd:new-project --minimal`, `/gpd:map-research`, or `/gpd:resume-work` starts the right GPD flow for new work, existing research, or an existing GPD project.
 
-## 6) Quick troubleshooting
+## Quick troubleshooting
 
 - `gemini: command not found`: install Gemini CLI, then reopen your terminal.
 - GPD commands are missing: rerun `npx -y get-physics-done --gemini --local`.

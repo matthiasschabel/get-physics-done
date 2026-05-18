@@ -2,42 +2,78 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
+
+import yaml
+
+from gpd.core.child_handoff import ChildGateTuple, child_gate_tuple_from_payload
+from tests.core.test_spawn_contracts import _assert_spawn_contract, _task_blocks_by_agent
+from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
+_YAML_BLOCK_RE = re.compile(r"```ya?ml\n(?P<body>.*?)\n```", re.DOTALL)
 
 
 def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def test_new_project_synthesizer_seam_routes_on_typed_returns_and_rejects_stale_summary_files() -> None:
-    workflow = _read(WORKFLOWS_DIR / "new-project.md")
+def _child_gate(source: str, gate_id: str) -> ChildGateTuple:
+    for match in _YAML_BLOCK_RE.finditer(source):
+        payload = yaml.safe_load(match.group("body"))
+        if not isinstance(payload, dict):
+            continue
+        child_gate = payload.get("child_gate")
+        if isinstance(child_gate, dict) and child_gate.get("id") == gate_id:
+            return child_gate_tuple_from_payload(payload)
+    raise AssertionError(f"missing child gate {gate_id}")
 
-    assert "After all 4 scout artifacts are present on disk and each fresh `gpd_return.files_written` proves its expected artifact, spawn synthesizer to create SUMMARY.md:" in workflow
-    assert "<research_files>" in workflow
-    assert "- GPD/PROJECT.md" in workflow
-    assert "- GPD/config.json" in workflow
-    assert "- GPD/literature/SUMMARY.md (if re-synthesizing an existing survey)" in workflow
-    assert "Handle the synthesizer return:" in workflow
-    assert "Route on the full canonical `gpd_return` envelope (`status`, `files_written`, `issues`, and `next_actions`)" in workflow
-    assert "`GPD/literature/SUMMARY.md` is freshly named in `gpd_return.files_written`" in workflow
-    assert "If `checkpoint`, present it to the user, collect the response, and spawn a fresh continuation after the response." in workflow
-    assert "If `blocked`, surface the blocker and stop this synth path until it is resolved." in workflow
-    assert "If `failed`, surface the failure and retry once." in workflow
-    assert "If the synthesizer agent fails to spawn or returns an error:" in workflow
-    assert "Treat any preexisting `GPD/literature/SUMMARY.md` as stale." in workflow
-    assert "If the summary artifact is still missing, or the retry does not produce a fresh typed return naming it, STOP and surface the blocker." in workflow
-    assert "Do not trust the runtime handoff status by itself." in workflow
+
+def _artifact_paths(gate: ChildGateTuple) -> tuple[str, ...]:
+    return tuple(artifact.path for artifact in gate.expected_artifacts)
+
+
+def test_new_project_synthesizer_seam_routes_on_typed_returns_and_rejects_stale_summary_files() -> None:
+    workflow = workflow_authority_text(WORKFLOWS_DIR, "new-project")
+    path = WORKFLOWS_DIR / "new-project.md"
+    synth_tasks = _task_blocks_by_agent(path, "gpd-research-synthesizer")
+    assert len(synth_tasks) == 1
+    synth = synth_tasks[0]
+    gate = _child_gate(workflow, "literature_synthesizer")
+
+    assert workflow.index('id: "literature_scouts"') < synth.start
+    assert synth.start < workflow.index('id: "literature_synthesizer"')
+    for research_file in (
+        "GPD/PROJECT.md",
+        "GPD/config.json",
+        "GPD/literature/PRIOR-WORK.md",
+        "GPD/literature/METHODS.md",
+        "GPD/literature/COMPUTATIONAL.md",
+        "GPD/literature/PITFALLS.md",
+        "GPD/literature/SUMMARY.md (if re-synthesizing an existing survey)",
+    ):
+        assert research_file in synth.text
+    _assert_spawn_contract(synth, ("GPD/literature/SUMMARY.md",))
+    assert gate.role == "gpd-research-synthesizer"
+    assert gate.return_profile == "synthesizer"
+    assert _artifact_paths(gate) == ("GPD/literature/SUMMARY.md",)
+    assert gate.allowed_roots == ("GPD/literature",)
+    assert gate.freshness is not None
+    assert gate.freshness.marker == "$SYNTHESIZER_HANDOFF_STARTED_AT"
+    assert any("gpd validate handoff-artifacts - --expected GPD/literature/SUMMARY.md" in validator for validator in gate.validators)
+    assert any("--require-status completed --require-files-written" in validator for validator in gate.validators)
+    assert any("stop synth path" in route for route in gate.failure_route.values())
+    assert "surface the blocker" in workflow
+    assert "creating a fallback" in workflow
+    assert "summary in the main context" in workflow
 
 
 def test_new_milestone_synthesizer_seam_keeps_child_contract_visible_and_task_local() -> None:
-    workflow = _read(WORKFLOWS_DIR / "new-milestone.md")
+    workflow = workflow_authority_text(WORKFLOWS_DIR, "new-milestone")
 
-    assert "This is a one-shot handoff. Return a typed `gpd_return` envelope with `status` and `files_written`." in workflow
-    assert "Treat each scout as a one-shot handoff: if it needs user input, it must return `status: checkpoint` and stop, not wait in place." in workflow
-    assert "Treat `gpd_return.status` and `gpd_return.files_written` as the only freshness signal for a scout result." in workflow
+    assert "Route `checkpoint`, `blocked`, or final `failed` through\n`references/orchestration/child-artifact-gate.md`" in workflow
     assert "After all 4 complete and required artifacts are present, spawn synthesizer:" in workflow
     assert "task(prompt=\"First, read {GPD_AGENTS_DIR}/gpd-research-synthesizer.md for your role and instructions." in workflow
     assert "<files_to_read>" in workflow
@@ -52,11 +88,6 @@ def test_new_milestone_synthesizer_seam_keeps_child_contract_visible_and_task_lo
     assert "    - GPD/literature/SUMMARY.md" in workflow
     assert "shared_state_policy: return_only" in workflow
     assert "This synthesizer contract is task-local. Do not reuse survey write scopes or widen the summary handoff." in workflow
-    assert "If the synthesizer agent fails to spawn or returns an error:" in workflow
-    assert "Retry once if `GPD/literature/SUMMARY.md` is missing." in workflow
-    assert "If `gpd_return.status: checkpoint`" in workflow
-    assert "If `gpd_return.status: blocked`" in workflow
-    assert "If `gpd_return.status: failed`" in workflow
-    assert "Do not fabricate a fallback summary in the main context, do not infer survey conclusions from partial files, and do not display or commit from a preexisting summary without a fresh `gpd_return.files_written` proof." in workflow
-    assert "If the synthesizer reports `gpd_return.status: completed`, verify that `GPD/literature/SUMMARY.md` is readable and named in `gpd_return.files_written`." in workflow
-    assert "Do not create SUMMARY.md in the main context from partial scout output or from a stale summary that was not named in the fresh return." in workflow
+    assert "Synthesizer child gate:" in workflow
+    assert "gpd validate handoff-artifacts - --expected GPD/literature/SUMMARY.md" in workflow
+    assert "Do not display or commit `SUMMARY.md`, create it in the\nmain context" in workflow

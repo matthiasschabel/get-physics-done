@@ -25,13 +25,7 @@ def _write_state_md(tmp_path: Path, decisions_body: str) -> Path:
     planning = tmp_path / "GPD"
     planning.mkdir(exist_ok=True)
     (planning / "STATE.md").write_text(
-        "# State\n\n"
-        "## Position\n\n"
-        "Current Phase: 05\n\n"
-        "### Decisions\n"
-        f"{decisions_body}\n\n"
-        "### Blockers\n\n"
-        "None.\n",
+        f"# State\n\n## Position\n\nCurrent Phase: 05\n\n### Decisions\n{decisions_body}\n\n### Blockers\n\nNone.\n",
         encoding="utf-8",
     )
     return tmp_path
@@ -59,6 +53,16 @@ def _write_phase_file(tmp_path: Path, phase_dir_name: str, filename: str, conten
         target.write_bytes(content)
         return
     target.write_text(content, encoding="utf-8")
+
+
+def _write_passed_verification(tmp_path: Path, phase_dir_name: str) -> None:
+    phase_number = phase_dir_name.split("-", 1)[0]
+    _write_phase_file(
+        tmp_path,
+        phase_dir_name,
+        f"{phase_number}-VERIFICATION.md",
+        "---\nstatus: passed\n---\n\n# Verification\nPASS\n",
+    )
 
 
 def test_safe_read_file_returns_none_for_binary_files(tmp_path: Path) -> None:
@@ -284,11 +288,7 @@ def test_result_update_wraps_validation_error_as_result_error() -> None:
     from gpd.core.errors import ResultError
     from gpd.core.results import result_update
 
-    state = {
-        "intermediate_results": [
-            {"result_id": "R-01-001", "description": "test", "value": "1.0", "phase": "01"}
-        ]
-    }
+    state = {"intermediate_results": [{"result_id": "R-01-001", "description": "test", "value": "1.0", "phase": "01"}]}
 
     with pytest.raises(ResultError):
         result_update(state, "R-01-001", depends_on=[123])
@@ -512,6 +512,7 @@ def test_phase_complete_keeps_checkpoint_sync_nonfatal_for_malformed_summary(tmp
         "01-01-SUMMARY.md",
         '---\nphase: "01"\nplan: "01"\ndepth: full\nprovides: []\ncompleted: "2026-02-23"\none-liner: "Summary 01"\n---\n\n# Summary\n',
     )
+    _write_passed_verification(tmp_path, "01-setup")
     _write_phase_file(tmp_path, "02-derivation", "02-01-PLAN.md", "# Plan 1\n")
     _write_phase_file(
         tmp_path,
@@ -592,6 +593,7 @@ def test_checkpoint_sync_failure_surfaces_for_phase_completion_and_removal(
         "01-01-SUMMARY.md",
         '---\nphase: "01"\nplan: "01"\ndepth: full\nprovides: []\ncompleted: "2026-02-23"\none-liner: "Summary 01"\n---\n\n# Summary\n',
     )
+    _write_passed_verification(tmp_path, "01-setup")
     _write_phase_file(tmp_path, "02-derivation", "02-01-PLAN.md", "# Plan 1\n")
 
     def fail_sync(_cwd: Path) -> None:

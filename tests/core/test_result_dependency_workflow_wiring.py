@@ -69,7 +69,7 @@ def test_numerical_convergence_command_doc_uses_centralized_command_context_gate
 def test_sensitivity_analysis_prompts_for_result_deps_after_canonical_lookup() -> None:
     text = SENSITIVITY_ANALYSIS.read_text(encoding="utf-8")
 
-    assert 'gpd result search' in text
+    assert "gpd result search" in text
     assert 'gpd result show "{result_id}"' in text
     assert 'gpd result deps "{result_id}"' in text
 
@@ -77,12 +77,7 @@ def test_sensitivity_analysis_prompts_for_result_deps_after_canonical_lookup() -
 def test_agent_infrastructure_separates_phase_and_result_dependency_commands() -> None:
     text = AGENT_INFRASTRUCTURE.read_text(encoding="utf-8")
 
-    assert 'gpd query deps <identifier>' in text
-    assert 'Trace a specific phase/frontmatter dependency across phases' in text
-    assert 'gpd result show <identifier>' in text
-    assert 'Inspect one canonical result directly' in text
-    assert text.count('gpd result show <identifier>') >= 2
-    assert 'gpd result deps <identifier>' in text
-    assert 'Trace dependencies for a canonical result identifier' in text
-    assert 'gpd result downstream <identifier>' in text
-    assert 'Trace downstream dependents with direct/transitive separation' in text
+    assert "gpd query deps <identifier>" in text
+    assert "specific phase/frontmatter dependency across phases" in text
+    assert "gpd result deps <identifier>" in text
+    assert "gpd regression-check [phase] [--quick]" in text

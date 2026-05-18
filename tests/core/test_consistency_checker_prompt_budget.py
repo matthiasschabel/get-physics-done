@@ -24,8 +24,8 @@ def test_gpd_consistency_checker_prompt_stays_small_and_keeps_its_canonical_cont
     assert metrics.expanded_line_count < 100
     assert metrics.expanded_char_count < 6_000
     assert "one-shot handoff" in source
-    assert "status: completed | checkpoint | blocked | failed" in source
-    assert "files_written: [GPD/phases/{scope}/CONSISTENCY-CHECK.md]" in source
+    assert "status: completed" in source
+    assert "files_written:\n    - GPD/phases/03-conventions/CONSISTENCY-CHECK.md" in source
     assert "GPD/CONSISTENCY-CHECK.md" in source
     assert "Do not claim ownership of code fixes, commits, convention-authoring, or pattern-library updates." in source
     assert "@{GPD_INSTALL_DIR}" not in source

@@ -17,33 +17,48 @@ import shlex
 import shutil
 import tomllib
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from gpd.adapters.base import RuntimeAdapter
+from gpd.adapters.command_projection import (
+    classify_projection_shell_fence,
+    prepend_projection_note,
+    rewrite_projection_shell_bridge,
+    strip_projection_note_blocks,
+)
+from gpd.adapters.gemini_shell_patches import (
+    GEMINI_APPROVED_CONTRACT_PATH,
+    rewrite_gemini_shell_workflow_guidance,
+)
 from gpd.adapters.install_utils import (
     DEFAULT_RUNTIME_BRIDGE_SHELL_FENCE_LANGUAGES,
     HOOK_SCRIPTS,
     MANIFEST_NAME,
     _is_hook_command_for_script,
+    _markdown_fence_language,
+    _markdown_fence_marker,
     build_hook_command,
+    build_runtime_managed_mcp_servers,
+    cleanup_settings_json_managed_entries,
+    compile_command_markdown_for_runtime,
     compile_markdown_for_runtime,
     convert_tool_references_in_body,
     ensure_update_hook,
-    hook_python_interpreter,
     parse_jsonc,
     process_attribution,
     protect_runtime_agent_prompt,
     prune_empty_ancestors,
     read_settings,
-    remove_empty_json_object_file,
     remove_stale_agents,
     render_markdown_frontmatter,
-    rewrite_gpd_cli_invocations_to_runtime_bridge,
+    runtime_managed_mcp_server_keys,
     split_markdown_frontmatter,
     strip_sub_tags,
     verify_installed,
     write_manifest,
-    write_settings,
+    write_settings_if_modified_and_prune_empty,
 )
 from gpd.adapters.install_utils import (
     finish_install as _finish_install,
@@ -51,7 +66,6 @@ from gpd.adapters.install_utils import (
 from gpd.adapters.runtime_catalog import get_manifest_metadata_list_policy_key, get_runtime_descriptor
 from gpd.adapters.tool_names import build_runtime_alias_map, reference_translation_map, translate_for_runtime
 from gpd.command_labels import rewrite_runtime_command_surfaces_to_public, validated_public_command_prefix
-from gpd.mcp import managed_integrations as _managed_integrations
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +118,7 @@ _GEMINI_POLICY_DIR_NAME = "policies"
 _GEMINI_POLICY_FILE_NAME = "gpd-auto-edit.toml"
 _GEMINI_RUNTIME_BIN_DIR_NAME = "bin"
 _GEMINI_YOLO_WRAPPER_NAME = "gemini-gpd-yolo"
-_GEMINI_APPROVED_CONTRACT_PATH = "GPD/.approved-project-contract.json"
+_GEMINI_APPROVED_CONTRACT_PATH = GEMINI_APPROVED_CONTRACT_PATH
 _GEMINI_STATIC_POLICY_COMMAND_PREFIXES: tuple[str, ...] = (
     "git init",
     "mkdir -p GPD",
@@ -113,11 +127,24 @@ _GEMINI_STATIC_POLICY_COMMAND_PREFIXES: tuple[str, ...] = (
     "test -d GPD",
     "test -f GPD/",
 )
+GeminiShellFenceKind = Literal["runnable-bridge", "terminal-example", "pseudocode", "policy-static", "non-runnable"]
+
+
+@dataclass(frozen=True, slots=True)
+class GeminiShellFenceClassification:
+    """Gemini rendering decision for one source shell fence."""
+
+    kind: GeminiShellFenceKind
+    first_runnable_command: str | None
+    reasons: tuple[str, ...]
+
+
 _GEMINI_COMMAND_RUNTIME_NOTE = (
     "<gemini_runtime_notes>\n"
     "Gemini runtime compatibility:\n"
-    "- Keep user-facing command names canonical in prose: `gpd ...` for your normal terminal and `{public_prefix}...` for Gemini commands.\n"
-    "- When runnable shell steps call the GPD CLI, use {launcher} instead of the ambient `gpd` on PATH.\n"
+    "- Runtime bridge for runnable shell GPD CLI calls: {launcher}.\n"
+    "- Stable runtime rules: installed `get-physics-done/references/tooling/runtime-command-snippets.md`.\n"
+    "- Public labels: `gpd ...` for terminals and `{public_prefix}...` for Gemini commands.\n"
     "</gemini_runtime_notes>\n\n"
 )
 _GEMINI_COMMAND_RUNTIME_NOTE_BLOCK_RE = re.compile(
@@ -126,156 +153,17 @@ _GEMINI_COMMAND_RUNTIME_NOTE_BLOCK_RE = re.compile(
 )
 _GEMINI_COMMAND_SHELL_ALLOWLIST_NOTE = (
     "<gemini_shell_runtime_notes>\n"
-    "Gemini shell compatibility:\n"
-    "- When shell steps call the GPD CLI, use {launcher} instead of the ambient `gpd` on PATH.\n"
-    "- Gemini's enforced shell-prefix allowlist for GPD auto-edit mode is:\n{allowlist}\n"
-    "- Gemini policy checks are syntactic in headless auto-edit mode. Prefer direct commands and reason over stdout instead of wrapping approved commands in shell variables, `$(...)`, heredocs, or extra chained blocks.\n"
-    "- Any remaining `VAR=$(...)` examples in rendered workflow guidance are non-runnable shorthand; do not copy them into Gemini auto-edit mode.\n"
+    "Gemini shell compatibility: enforced shell-prefix allowlist for auto-edit mode:\n{allowlist}\n"
+    "- Use direct commands; runnable GPD CLI shell calls must start with {launcher}.\n"
+    "- Stable shell rules: installed `get-physics-done/references/tooling/runtime-command-snippets.md`.\n"
     "- If `run_shell_command` is denied by policy, stop and report the policy block. Do not replace validation or persistence commands with unvalidated file writes.\n"
-    "- Keep contract JSON in-memory or under `GPD/`. Do not write approved contracts to `/tmp`.\n"
     "</gemini_shell_runtime_notes>\n\n"
 )
 _GEMINI_COMMAND_SHELL_ALLOWLIST_NOTE_BLOCK_RE = re.compile(
     r"<gemini_shell_runtime_notes>\n.*?</gemini_shell_runtime_notes>\n*",
     re.DOTALL,
 )
-_GEMINI_NEW_PROJECT_INIT_REPLACEMENT = """Run the init command as its own shell call in Gemini auto-edit mode. Do not wrap it in `INIT=$(...)` or an `if` block.
-
-```bash
-gpd --raw init new-project
-```
-
-If the init command fails, stop, surface the error, and do not proceed with the workflow."""
-_GEMINI_NEW_PROJECT_INIT_BLOCK_RE = re.compile(
-    r"```bash\n"
-    r"INIT=\$\((?:gpd --raw init new-project(?: --stage [a-z_]+)?)\)\n"
-    r"if \[ \$\? -ne 0 \]; then\n"
-    r"(?:  .*\n)+?"
-    r"fi\n"
-    r"```",
-    re.MULTILINE,
-)
-_GEMINI_SET_PROFILE_BLOCK = """```bash
-gpd config ensure-section
-INIT=$(gpd --raw init progress --include state,config)
-if [ $? -ne 0 ]; then
-  echo "ERROR: gpd initialization failed: $INIT"
-  # STOP — display the error to the user and do not proceed.
-fi
-```"""
-_GEMINI_SET_PROFILE_REPLACEMENT = """Run these as separate shell calls in Gemini auto-edit mode. Do not combine them into one multi-line shell block.
-
-```bash
-gpd config ensure-section
-```
-
-Then run:
-
-```bash
-gpd config set model_profile "$PROFILE"
-```
-
-These commands may only repair `GPD/config.json` and update `GPD/config.json::model_profile`; do not run project init, progress, state sync, or project reentry from `set-profile`."""
-_GEMINI_SET_PROFILE_VALIDATE_BLOCK = """```bash
-PROFILE="$(printf '%s' "$ARGUMENTS" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-case "$PROFILE" in
-  deep-theory|numerical|exploratory|review|paper-writing) ;;
-  "")
-    echo "ERROR: Missing profile. Valid profiles: deep-theory, numerical, exploratory, review, paper-writing"
-    exit 1
-    ;;
-  *[[:space:]]*)
-    echo "ERROR: set-profile accepts exactly one profile argument."
-    exit 1
-    ;;
-  *)
-    echo "ERROR: Invalid profile \\"$PROFILE\\". Valid profiles: deep-theory, numerical, exploratory, review, paper-writing"
-    exit 1
-    ;;
-esac
-```"""
-_GEMINI_SET_PROFILE_VALIDATE_REPLACEMENT = """Validate the single profile argument without a shell call before running persistence commands. Trim surrounding whitespace. Accept exactly one of: `deep-theory`, `numerical`, `exploratory`, `review`, `paper-writing`. If the argument is missing, contains whitespace, or is not in that list, stop and surface the validation error."""
-_GEMINI_SET_PROFILE_VALIDATE_BLOCK_RE = re.compile(
-    r"```bash\n"
-    r"PROFILE=\"\$\(printf '%s' \"\$ARGUMENTS\" \| sed 's/\^\[\[:space:\]\]\*//;s/\[\[:space:\]\]\*\$//'\)\"\n"
-    r"case \"\$PROFILE\" in\n"
-    r"  deep-theory\|numerical\|exploratory\|review\|paper-writing\) ;;\n"
-    r"  \"\"\)\n"
-    r"    echo \"ERROR: Missing profile\. Valid profiles: deep-theory, numerical, exploratory, review, paper-writing\"\n"
-    r"    exit 1\n"
-    r"    ;;\n"
-    r"  \*\[\[:space:\]\]\*\)\n"
-    r"    echo \"ERROR: set-profile accepts exactly one profile argument\.\"\n"
-    r"    exit 1\n"
-    r"    ;;\n"
-    r"  \*\)\n"
-    r"    echo \"ERROR: Invalid profile \"\\\$PROFILE\"\. Valid profiles: deep-theory, numerical, exploratory, review, paper-writing\"\n"
-    r"    exit 1\n"
-    r"    ;;\n"
-    r"esac\n"
-    r"```",
-    re.MULTILINE,
-)
-_GEMINI_SET_PROFILE_BLOCK_RE = re.compile(
-    r"```bash\n"
-    r"gpd config ensure-section\n"
-    r"(?:#.*\n)*"
-    r"INIT=\$\((?:gpd --raw init progress --include state,config(?: --no-project-reentry)?)\)\n"
-    r"if \[ \$\? -ne 0 \]; then\n"
-    r"(?:  .*\n)+?"
-    r"fi\n"
-    r"```",
-    re.MULTILINE,
-)
-_GEMINI_MINIMAL_COMMIT_BLOCK = """```bash
-mkdir -p GPD
-
-PRE_CHECK=$(gpd pre-commit-check --files GPD/PROJECT.md GPD/REQUIREMENTS.md GPD/ROADMAP.md GPD/STATE.md GPD/state.json GPD/config.json 2>&1) || true
-echo "$PRE_CHECK"
-
-gpd commit "docs: initialize research project (minimal)" --files GPD/PROJECT.md GPD/REQUIREMENTS.md GPD/ROADMAP.md GPD/STATE.md GPD/state.json GPD/config.json
-```"""
-_GEMINI_MINIMAL_COMMIT_REPLACEMENT = """Create the directory structure, run the pre-check, then commit everything. In Gemini auto-edit mode, execute each shell command separately rather than pasting the whole block as one command.
-
-```bash
-mkdir -p GPD
-```
-
-Then run:
-
-```bash
-gpd pre-commit-check --files GPD/PROJECT.md GPD/REQUIREMENTS.md GPD/ROADMAP.md GPD/STATE.md GPD/state.json GPD/config.json
-```
-
-If the pre-check reports issues or exits non-zero, surface the output and continue to the commit.
-
-```bash
-gpd commit "docs: initialize research project (minimal)" --files GPD/PROJECT.md GPD/REQUIREMENTS.md GPD/ROADMAP.md GPD/STATE.md GPD/state.json GPD/config.json
-```"""
-_GEMINI_HEALTH_BLOCK_REPLACEMENT = """In Gemini auto-edit mode, run health checks as a direct shell call instead of capturing stderr through temp files.
-
-Default read-only check:
-
-```bash
-gpd --raw health
-```
-
-Only after explicit confirmation for `--fix`:
-
-```bash
-gpd --raw health --fix
-```
-
-Do not treat a nonzero health exit status as a wrapper failure when the command output parses as the valid report JSON below."""
-_GEMINI_CONTRACT_PERSIST_SENTENCE = (
-    "Write the exact approved contract JSON to "
-    f"`{_GEMINI_APPROVED_CONTRACT_PATH}` using file tools, then persist it into `GPD/state.json`:"
-)
-_GEMINI_CONTRACT_FILE_NOTE = (
-    "Do not write `/tmp` intermediates for the approved contract. In Gemini headless auto-edit mode, keep the exact approved JSON in "
-    f"`{_GEMINI_APPROVED_CONTRACT_PATH}`, then validate and persist from that file using direct `gpd` commands. "
-    "Do not stash the approved contract in shell variables, command substitutions, or heredocs."
-)
+_GEMINI_RUNTIME_HELPER_RE = re.compile(r"(?:gpd\.runtime_cli|\bgpd_cli\s+--raw\b|\bgpd\s+--raw\b)")
 
 
 def _manifest_gemini_managed_runtime_files_key() -> str:
@@ -378,24 +266,6 @@ def _render_gemini_shell_allowlist(bridge_command: str) -> str:
     return "\n".join(f"  - `{prefix}`" for prefix in _gemini_policy_command_prefixes(bridge_command))
 
 
-def _project_managed_mcp_servers(
-    env: Mapping[str, str] | None = None,
-    *,
-    cwd: Path | None = None,
-    python_path: str | None = None,
-) -> dict[str, dict[str, object]]:
-    """Project shared optional integrations into Gemini's ``mcpServers`` shape."""
-    python_path = python_path or hook_python_interpreter()
-    return _managed_integrations.projected_managed_optional_mcp_servers(env, cwd=cwd, python_path=python_path)
-
-
-def _managed_mcp_server_keys() -> frozenset[str]:
-    """Return GPD-managed Gemini MCP server keys, including optional integrations."""
-    from gpd.mcp.builtin_servers import GPD_MCP_SERVER_KEYS
-
-    return frozenset(set(GPD_MCP_SERVER_KEYS) | set(_managed_integrations.managed_optional_mcp_server_keys()))
-
-
 def _rewrite_gpd_cli_invocations(content: str, bridge_command: str) -> str:
     """Rewrite shell-command ``gpd`` calls to the shared runtime CLI bridge.
 
@@ -403,11 +273,7 @@ def _rewrite_gpd_cli_invocations(content: str, bridge_command: str) -> str:
     This keeps prose and inline code spans canonical while still rewriting
     runnable shell steps.
     """
-    return rewrite_gpd_cli_invocations_to_runtime_bridge(
-        content,
-        bridge_command,
-        shell_fence_languages=DEFAULT_RUNTIME_BRIDGE_SHELL_FENCE_LANGUAGES,
-    )
+    return rewrite_projection_shell_bridge(content, bridge_command)
 
 
 def _contains_gemini_shell_fence(content: str) -> bool:
@@ -423,44 +289,241 @@ def _inject_gemini_command_runtime_note(
     content: str,
     bridge_command: str,
     *,
+    include_runtime_note: bool = True,
     include_shell_allowlist: bool = False,
 ) -> str:
     """Prepend Gemini-specific shell guidance to installed top-level commands."""
-    public_prefix = validated_public_command_prefix(get_runtime_descriptor("gemini"))
-    note = _GEMINI_COMMAND_RUNTIME_NOTE.format(
-        launcher=bridge_command,
-        public_prefix=public_prefix,
-    )
+    note = ""
+    if include_runtime_note:
+        public_prefix = validated_public_command_prefix(get_runtime_descriptor("gemini"))
+        note += _GEMINI_COMMAND_RUNTIME_NOTE.format(
+            launcher=bridge_command,
+            public_prefix=public_prefix,
+        )
     if include_shell_allowlist:
         note += _GEMINI_COMMAND_SHELL_ALLOWLIST_NOTE.format(
             launcher=bridge_command,
             allowlist=_render_gemini_shell_allowlist(bridge_command),
         )
-    preamble, frontmatter, separator, body = split_markdown_frontmatter(content)
-    if not frontmatter:
-        content = _strip_gemini_command_runtime_note_blocks(content)
-        return note + content
-    body = _strip_gemini_command_runtime_note_blocks(body)
-    return render_markdown_frontmatter(preamble, frontmatter, separator, note + body)
+    return prepend_projection_note(
+        content,
+        note,
+        strip_patterns=(
+            _GEMINI_COMMAND_RUNTIME_NOTE_BLOCK_RE,
+            _GEMINI_COMMAND_SHELL_ALLOWLIST_NOTE_BLOCK_RE,
+        ),
+    )
 
 
-def _strip_gemini_command_runtime_note_blocks(content: str) -> str:
-    """Remove adapter-injected Gemini runtime-note blocks before reinjection."""
-    content = _GEMINI_COMMAND_RUNTIME_NOTE_BLOCK_RE.sub("", content)
-    return _GEMINI_COMMAND_SHELL_ALLOWLIST_NOTE_BLOCK_RE.sub("", content)
+def _strip_gemini_command_runtime_notes(content: str) -> str:
+    """Return Gemini command content without adapter-injected note blocks."""
+    return strip_projection_note_blocks(
+        content,
+        (
+            _GEMINI_COMMAND_RUNTIME_NOTE_BLOCK_RE,
+            _GEMINI_COMMAND_SHELL_ALLOWLIST_NOTE_BLOCK_RE,
+        ),
+    )
 
 
-def _render_gemini_command_prompt(content: str, *, bridge_command: str) -> str:
+def _needs_gemini_runtime_note(content: str, *, bridge_command: str) -> bool:
+    """Return whether note-free content still needs Gemini runtime bridge guidance."""
+    note_free_content = _strip_gemini_command_runtime_notes(content)
+    return bridge_command in note_free_content or _GEMINI_RUNTIME_HELPER_RE.search(note_free_content) is not None
+
+
+_GEMINI_SHELL_SQUARE_PLACEHOLDER_RE = re.compile(r"\[[A-Za-z][^\]\n]*(?:dir|file|hash|name|path|phase|slug)[^\]\n]*\]")
+_GEMINI_SHELL_UNSAFE_FRAGMENTS = (
+    "<<",
+    "mktemp",
+    "PROJECT_CONTRACT_JSON",
+    "printf '%s\\n'",
+)
+_GEMINI_HARD_UNSAFE_PROJECTION_KINDS = frozenset(
+    {
+        "control_flow",
+        "heredoc_or_stdin_contract_write",
+        "variable_capture",
+    }
+)
+_GEMINI_DIRECT_PLACEHOLDER_REASONS = frozenset(
+    {
+        "ellipsis-placeholder",
+        "template-placeholder",
+    }
+)
+
+
+def _gemini_direct_command_prefixes(bridge_command: str | None) -> tuple[str, ...]:
+    """Return direct command prefixes Gemini may keep executable."""
+    if bridge_command is None:
+        return ("gpd ",)
+    return ("gpd ", bridge_command)
+
+
+def _gemini_extra_shell_block_reasons(body: str) -> tuple[str, ...]:
+    """Return Gemini-only blockers that are intentionally outside the shared classifier."""
+    reasons: list[str] = []
+    if any(fragment in body for fragment in _GEMINI_SHELL_UNSAFE_FRAGMENTS):
+        reasons.append("unsafe-shell-fragment")
+    if _GEMINI_SHELL_SQUARE_PLACEHOLDER_RE.search(body):
+        reasons.append("template-placeholder")
+    return tuple(dict.fromkeys(reasons))
+
+
+def _is_gemini_direct_bridge_projection(
+    kind: str,
+    reasons: tuple[str, ...],
+    first_command: str,
+    direct_prefixes: tuple[str, ...],
+) -> bool:
+    """Return whether a shared projection maps to Gemini's runnable bridge class."""
+    if not _starts_with_gemini_direct_prefix(first_command, direct_prefixes):
+        return False
+    if kind == "direct_command":
+        return True
+    return kind == "pseudocode" and bool(reasons) and set(reasons) <= _GEMINI_DIRECT_PLACEHOLDER_REASONS
+
+
+def _is_safe_gemini_static_policy_projection(kind: str, reasons: tuple[str, ...]) -> bool:
+    """Return whether a static Gemini allowlist prefix has no unsafe shell structure."""
+    return kind == "terminal_example" or reasons == ("unclassified-shell-shape",)
+
+
+def _starts_with_gemini_direct_prefix(command: str, prefixes: tuple[str, ...]) -> bool:
+    return any(command.startswith(prefix) for prefix in prefixes)
+
+
+def _classify_gemini_shell_fence_body(
+    body: str,
+    *,
+    bridge_command: str | None = None,
+) -> GeminiShellFenceClassification:
+    """Classify one shell fence before Gemini command rendering.
+
+    Gemini headless auto-edit policy checks the first runnable shell command
+    syntactically. Source prompts often use shell fences for terminal examples
+    and pseudocode, so Gemini projection must decide which fences remain
+    runnable instead of trying to patch every prose variant with exact rewrites.
+    """
+    direct_prefixes = _gemini_direct_command_prefixes(bridge_command)
+    projection = classify_projection_shell_fence(body, direct_command_prefixes=direct_prefixes)
+    first = projection.first_command
+    if first is None or projection.kind == "non_runnable":
+        return GeminiShellFenceClassification("non-runnable", first, projection.reasons)
+
+    gemini_reasons = _gemini_extra_shell_block_reasons(body)
+    if gemini_reasons:
+        return GeminiShellFenceClassification("pseudocode", first, gemini_reasons)
+    if projection.kind in _GEMINI_HARD_UNSAFE_PROJECTION_KINDS:
+        return GeminiShellFenceClassification("pseudocode", first, projection.reasons)
+    if _is_gemini_direct_bridge_projection(projection.kind, projection.reasons, first, direct_prefixes):
+        if bridge_command is not None and first.startswith(bridge_command):
+            return GeminiShellFenceClassification("runnable-bridge", first, ("bridge-command",))
+        return GeminiShellFenceClassification("runnable-bridge", first, ("canonical-gpd-command",))
+    if first.startswith(_GEMINI_STATIC_POLICY_COMMAND_PREFIXES) and _is_safe_gemini_static_policy_projection(
+        projection.kind,
+        projection.reasons,
+    ):
+        return GeminiShellFenceClassification("policy-static", first, ("static-policy-prefix",))
+    if projection.kind == "terminal_example":
+        return GeminiShellFenceClassification("terminal-example", first, projection.reasons)
+    return GeminiShellFenceClassification("pseudocode", first, projection.reasons)
+
+
+def classify_gemini_shell_fence_body(
+    body: str,
+    *,
+    bridge_command: str | None = None,
+) -> GeminiShellFenceClassification:
+    """Classify a Gemini shell fence body using the renderer's decision logic."""
+    return _classify_gemini_shell_fence_body(body, bridge_command=bridge_command)
+
+
+def _replace_markdown_fence_language(line: str, marker: str, language: str) -> str:
+    """Return *line* with its opening fence language replaced."""
+    stripped = line.lstrip()
+    indent = line[: len(line) - len(stripped)]
+    eol = "\n" if line.endswith("\n") else ""
+    return f"{indent}{marker}{language}{eol}"
+
+
+def _render_gemini_classified_shell_fences(content: str, *, bridge_command: str) -> tuple[str, bool]:
+    """Downgrade Gemini-non-runnable shell fences and report if shell policy is needed."""
+    rendered: list[str] = []
+    active_marker: str | None = None
+    opening_line = ""
+    opening_is_shell = False
+    body_lines: list[str] = []
+    shell_policy_required = False
+
+    for line in content.splitlines(keepends=True):
+        stripped = line.lstrip()
+        fence_marker = _markdown_fence_marker(stripped)
+        if active_marker is None:
+            if fence_marker is None:
+                rendered.append(line)
+                continue
+
+            active_marker = fence_marker
+            opening_line = line
+            opening_is_shell = (
+                _markdown_fence_language(stripped, fence_marker) in DEFAULT_RUNTIME_BRIDGE_SHELL_FENCE_LANGUAGES
+            )
+            body_lines = []
+            continue
+
+        if fence_marker == active_marker:
+            body = "".join(body_lines)
+            if not opening_is_shell:
+                rendered.append(opening_line)
+                rendered.append(body)
+                rendered.append(line)
+            else:
+                classification = _classify_gemini_shell_fence_body(body, bridge_command=bridge_command)
+                if classification.kind in {"runnable-bridge", "policy-static"}:
+                    shell_policy_required = True
+                    rendered.append(opening_line)
+                else:
+                    rendered.append(_replace_markdown_fence_language(opening_line, active_marker, "text"))
+                rendered.append(body)
+                rendered.append(line)
+            active_marker = None
+            opening_line = ""
+            opening_is_shell = False
+            body_lines = []
+            continue
+
+        body_lines.append(line)
+
+    if active_marker is not None:
+        rendered.append(opening_line)
+        rendered.extend(body_lines)
+
+    return "".join(rendered), shell_policy_required
+
+
+def _render_gemini_command_prompt(
+    content: str,
+    *,
+    bridge_command: str,
+    command_name: str | None = None,
+) -> str:
     """Render one canonical command markdown source into Gemini prompt text."""
     content = strip_sub_tags(content)
     content = convert_tool_references_in_body(content, _TOOL_REFERENCE_MAP)
-    content = _rewrite_gemini_shell_workflow_guidance(content)
-    shell_allowlist_required = _contains_gemini_shell_fence(content)
+    content = _rewrite_gemini_shell_workflow_guidance(content, command_name=command_name)
+    content, shell_allowlist_required = _render_gemini_classified_shell_fences(
+        content,
+        bridge_command=bridge_command,
+    )
     rewritten = _rewrite_gpd_cli_invocations(content, bridge_command)
     shell_allowlist_required = shell_allowlist_required or rewritten != content
+    runtime_note_required = _needs_gemini_runtime_note(rewritten, bridge_command=bridge_command)
     return _inject_gemini_command_runtime_note(
         rewritten,
         bridge_command,
+        include_runtime_note=runtime_note_required,
         include_shell_allowlist=shell_allowlist_required,
     )
 
@@ -499,7 +562,7 @@ def _validate_existing_gemini_managed_state(target_dir: Path) -> None:
         raise RuntimeError("Gemini managed_runtime_files is malformed.")
 
 
-def _rewrite_gemini_shell_workflow_guidance(content: str) -> str:
+def _rewrite_gemini_shell_workflow_guidance(content: str, *, command_name: str | None = None) -> str:
     """Rewrite known shell-heavy workflow snippets into Gemini-safe forms.
 
     Gemini CLI's policy engine validates shell commands syntactically from the
@@ -509,272 +572,7 @@ def _rewrite_gemini_shell_workflow_guidance(content: str) -> str:
     Gemini headless auto-edit they lead the model to generate commands that are
     denied before GPD ever runs.
     """
-    content = _GEMINI_NEW_PROJECT_INIT_BLOCK_RE.sub(_GEMINI_NEW_PROJECT_INIT_REPLACEMENT, content)
-    content = content.replace(_GEMINI_SET_PROFILE_VALIDATE_BLOCK, _GEMINI_SET_PROFILE_VALIDATE_REPLACEMENT)
-    content = _GEMINI_SET_PROFILE_VALIDATE_BLOCK_RE.sub(_GEMINI_SET_PROFILE_VALIDATE_REPLACEMENT, content)
-    content = _GEMINI_SET_PROFILE_BLOCK_RE.sub(_GEMINI_SET_PROFILE_REPLACEMENT, content)
-    content = content.replace(_GEMINI_MINIMAL_COMMIT_BLOCK, _GEMINI_MINIMAL_COMMIT_REPLACEMENT)
-    content = re.sub(
-        r"```bash\n"
-        r"HEALTH_ERR=\$\(mktemp\)\n"
-        r"if echo \"\$ARGUMENTS\" \| grep -q \"\\-\\-fix\"; then\n"
-        r"[\s\S]+?"
-        r"fi\n"
-        r"HEALTH_STDERR=\$\(cat \"\$HEALTH_ERR\"\)\n"
-        r"rm -f \"\$HEALTH_ERR\"\n"
-        r"```",
-        _GEMINI_HEALTH_BLOCK_REPLACEMENT,
-        content,
-        flags=re.MULTILINE,
-    )
-    content = re.sub(
-        r'(?m)^([ \t]*)PRE_CHECK=\$\((gpd pre-commit-check --files [^\n]+) 2>&1\) \|\| true\n\1echo "\$PRE_CHECK"$',
-        (
-            r"\1# Gemini auto-edit: run the pre-check as its own shell call.\n"
-            r"\1\2\n"
-            r"\1# If the pre-check exits non-zero, surface the output and continue."
-        ),
-        content,
-    )
-    content = content.replace(
-        "printf '%s\\n' \"$PROJECT_CONTRACT_JSON\" | gpd --raw validate project-contract -",
-        f"gpd --raw validate project-contract {_GEMINI_APPROVED_CONTRACT_PATH}",
-    )
-    content = content.replace(
-        "printf '%s\\n' \"$PROJECT_CONTRACT_JSON\" | gpd state set-project-contract -",
-        f"gpd state set-project-contract {_GEMINI_APPROVED_CONTRACT_PATH}",
-    )
-    content = content.replace(
-        "Persist the approved contract into `GPD/state.json` from the same stdin payload:",
-        _GEMINI_CONTRACT_PERSIST_SENTENCE,
-    )
-    content = content.replace(
-        "After validation passes, persist the approved contract into `GPD/state.json` from the same stdin payload:",
-        _GEMINI_CONTRACT_PERSIST_SENTENCE,
-    )
-    content = content.replace(
-        "Do not write `/tmp` intermediates for the approved contract. Prefer piping the exact approved JSON directly to `gpd ... -`. Only write a file if the user explicitly wants a durable saved copy, and if so place it under the project, not an OS temp directory.",
-        _GEMINI_CONTRACT_FILE_NOTE,
-    )
-    content = _rewrite_gemini_capture_and_check_blocks(content)
-    return content
-
-
-def _rewrite_gemini_capture_and_check_blocks(content: str) -> str:
-    """Rewrite Gemini-hostile shell capture examples into direct command guidance."""
-    content = content.replace(
-        """```bash
-CONV_CHECK=$(gpd --raw convention check 2>/dev/null)
-if [ $? -ne 0 ]; then
-  echo "WARNING: Convention verification failed — unit mismatches between theory and experiment are the #1 source of false discrepancies"
-  echo "$CONV_CHECK"
-fi
-```""",
-        """```bash
-# Gemini: run convention verification directly.
-gpd --raw convention check 2>/dev/null
-```""",
-    )
-    content = content.replace(
-        """```bash
-CONV_CHECK=$(gpd --raw convention check 2>/dev/null)
-if [ $? -ne 0 ]; then
-  echo "WARNING: Convention verification failed — review before writing paper"
-  echo "$CONV_CHECK"
-fi
-```""",
-        """```bash
-# Gemini: run convention verification directly.
-gpd --raw convention check 2>/dev/null
-```""",
-    )
-    content = content.replace(
-        """```bash
-CONTEXT=$(gpd --raw validate command-context validate-conventions "$ARGUMENTS")
-if [ $? -ne 0 ]; then
-  echo "$CONTEXT"
-  exit 1
-fi
-```""",
-        """```bash
-# Gemini: run command-context validation directly.
-gpd --raw validate command-context validate-conventions "$ARGUMENTS"
-```""",
-    )
-    content = content.replace(
-        """```bash
-CONTEXT=$(gpd --raw validate command-context write-paper "$ARGUMENTS")
-if [ $? -ne 0 ]; then
-  echo "$CONTEXT"
-  exit 1
-fi
-```""",
-        """```bash
-# Gemini: run command-context validation directly.
-gpd --raw validate command-context write-paper "$ARGUMENTS"
-```""",
-    )
-    content = content.replace(
-        """```bash
-QUALITY=$(gpd --raw validate paper-quality --from-project . 2>/dev/null)
-```""",
-        """```bash
-# Gemini: run paper-quality validation directly.
-gpd --raw validate paper-quality --from-project . 2>/dev/null
-```""",
-    )
-    content = content.replace(
-        """```bash
-PRE_CHECK=$(gpd pre-commit-check --files "${COMPARISON_OUTPUT_PATH}" 2>&1) || true
-echo "$PRE_CHECK"
-
-gpd commit \
-  "docs: theory-experiment comparison for {slug}" \
-  --files "${COMPARISON_OUTPUT_PATH}"
-```""",
-        """```bash
-# Gemini: run the pre-check directly; inspect output before committing.
-gpd pre-commit-check --files "${COMPARISON_OUTPUT_PATH}" 2>&1 || true
-
-gpd commit \
-  "docs: theory-experiment comparison for {slug}" \
-  --files "${COMPARISON_OUTPUT_PATH}"
-```""",
-    )
-    content = content.replace(
-        """```bash
-PRE_CHECK=$(gpd pre-commit-check --files GPD/DEPENDENCY-GRAPH.md 2>&1) || true
-echo "$PRE_CHECK"
-
-gpd commit "docs: generate dependency graph" --files GPD/DEPENDENCY-GRAPH.md
-```""",
-        """```bash
-# Gemini: run the pre-check directly; inspect output before committing.
-gpd pre-commit-check --files GPD/DEPENDENCY-GRAPH.md 2>&1 || true
-
-gpd commit "docs: generate dependency graph" --files GPD/DEPENDENCY-GRAPH.md
-```""",
-    )
-    content = content.replace(
-        """```bash
-INIT=$(gpd --raw init phase-op)
-if [ $? -ne 0 ]; then
-  echo "ERROR: gpd initialization failed: $INIT"
-  # STOP — display the error to the user and do not proceed.
-fi
-```""",
-        """```bash
-# Gemini: run initialization directly.
-gpd --raw init phase-op
-```""",
-    )
-    content = content.replace(
-        """```bash
-INIT=$(gpd --raw init progress --include state,roadmap,config)
-if [ $? -ne 0 ]; then
-  echo "ERROR: gpd initialization failed: $INIT"
-  # STOP — display the error to the user and do not proceed.
-fi
-```""",
-        """```bash
-# Gemini: run initialization directly.
-gpd --raw init progress --include state,roadmap,config
-```""",
-    )
-    content = content.replace(
-        """```bash
-INIT=$(gpd --raw init progress --include state)
-if [ $? -ne 0 ]; then
-  echo "ERROR: gpd initialization failed: $INIT"
-  # STOP — display the error to the user and do not proceed.
-fi
-```""",
-        """```bash
-# Gemini: run initialization directly.
-gpd --raw init progress --include state
-```""",
-    )
-    content = content.replace(
-        """```bash
-INIT=$(gpd --raw init phase-op --include state,config "${PHASE_ARG:-}")
-if [ $? -ne 0 ]; then
-  echo "ERROR: gpd initialization failed: $INIT"
-  # STOP — display the error to the user and do not proceed.
-fi
-```""",
-        """```bash
-# Gemini: run initialization directly.
-gpd --raw init phase-op --include state,config "${PHASE_ARG:-}"
-```""",
-    )
-    content = content.replace(
-        """```bash
-INIT=$(gpd --raw init progress --include state,config)
-if [ $? -ne 0 ]; then
-  echo "ERROR: gpd initialization failed: $INIT"
-  # STOP — display the error to the user and do not proceed.
-fi
-```""",
-        """```bash
-# Gemini: run initialization directly.
-gpd --raw init progress --include state,config
-```""",
-    )
-    return _rewrite_gemini_capture_assignments(content)
-
-
-_GEMINI_CAPTURE_ASSIGNMENT_RE = re.compile(
-    r"^(?P<indent>[ \t]*)(?P<var>[A-Z][A-Z0-9_]*)=\$\((?P<command>gpd[^\n]*)\)(?P<suffix>[ \t]*(?:\|\|\s*true)?)$",
-    re.MULTILINE,
-)
-_GEMINI_CAPTURED_GPD_STATUS_BLOCK_RE = re.compile(
-    r"^(?P<indent>[ \t]*)(?P<var>[A-Z][A-Z0-9_]*)=\$\((?P<command>gpd[^\n]*)\)(?P<suffix>[ \t]*(?:\|\|\s*true)?)\n"
-    r"(?P=indent)if \[ \$\? -ne 0 \]; then\n"
-    r"(?:(?P=indent)[ \t]+.*\n)+?"
-    r"(?P=indent)fi$",
-    re.MULTILINE,
-)
-_GEMINI_CAPTURED_GPD_ECHO_BLOCK_RE = re.compile(
-    r"^(?P<indent>[ \t]*)(?P<var>[A-Z][A-Z0-9_]*)=\$\((?P<command>gpd[^\n]*)\)(?P<suffix>[ \t]*(?:\|\|\s*true)?)\n"
-    r'(?P=indent)echo "\$(?P=var)"$',
-    re.MULTILINE,
-)
-
-
-def _gemini_direct_command_comment(command: str) -> str:
-    """Return a concise Gemini note for transformed shell-capture examples."""
-    if command.startswith("gpd --raw init"):
-        return "# Gemini: run initialization directly."
-    return "# Gemini: run this command directly."
-
-
-def _rewrite_gemini_capture_assignments(content: str) -> str:
-    """Rewrite single-line Gemini shell capture examples into direct commands."""
-
-    def _replace_capture_block(match: re.Match[str]) -> str:
-        indent = match.group("indent")
-        command = match.group("command").strip()
-        suffix = (match.group("suffix") or "").strip()
-        comment = f"{indent}{_gemini_direct_command_comment(command)}"
-        rewritten = f"{indent}{command}"
-        if suffix:
-            rewritten = f"{rewritten} {suffix}"
-        return f"{comment}\n{rewritten}"
-
-    def _replace(match: re.Match[str]) -> str:
-        indent = match.group("indent")
-        command = match.group("command").strip()
-        suffix = match.group("suffix") or ""
-        suffix = suffix.strip()
-        comment = f"{indent}{_gemini_direct_command_comment(command)}"
-        rewritten = f"{indent}{command}"
-        if suffix:
-            rewritten = f"{rewritten} {suffix}"
-        return f"{comment}\n{rewritten}"
-
-    content = _GEMINI_CAPTURED_GPD_STATUS_BLOCK_RE.sub(_replace_capture_block, content)
-    content = _GEMINI_CAPTURED_GPD_ECHO_BLOCK_RE.sub(_replace_capture_block, content)
-    return _GEMINI_CAPTURE_ASSIGNMENT_RE.sub(_replace, content)
+    return rewrite_gemini_shell_workflow_guidance(content, command_name=command_name)
 
 
 # ---------------------------------------------------------------------------
@@ -933,7 +731,7 @@ def _render_gemini_policy_toml(bridge_command: str) -> str:
         'decision = "allow"\n'
         "priority = 350\n"
         'modes = ["autoEdit"]\n'
-        "allow_redirection = true\n"
+        "allowRedirection = true\n"
     )
 
 
@@ -1161,20 +959,26 @@ def _copy_commands_recursive(
                 explicit_target=explicit_target,
             )
         elif entry.suffix == ".md":
-            content = compile_markdown_for_runtime(
+            content = compile_command_markdown_for_runtime(
                 entry.read_text(encoding="utf-8"),
                 runtime="gemini",
+                command_name=entry.stem,
                 path_prefix=path_prefix,
                 install_scope=install_scope,
                 src_root=gpd_src_root,
                 workflow_target_dir=workflow_target_dir,
                 explicit_target=explicit_target,
+                bridge_command=bridge_command,
             )
             content = process_attribution(content, attribution)
             public_prefix = validated_public_command_prefix(get_runtime_descriptor("gemini"))
             content = content.replace("`gpd:`", f"`{public_prefix}`")
             content = rewrite_runtime_command_surfaces_to_public(content, public_prefix=public_prefix)
-            content = _render_gemini_command_prompt(content, bridge_command=bridge_command)
+            content = _render_gemini_command_prompt(
+                content,
+                bridge_command=bridge_command,
+                command_name=entry.stem,
+            )
             toml_content = _convert_to_gemini_toml(content)
             toml_path = dest_dir / entry.with_suffix(".toml").name
             toml_path.write_text(toml_content, encoding="utf-8")
@@ -1208,7 +1012,7 @@ class GeminiAdapter(RuntimeAdapter):
         command_name: str | None = None,
         bridge_command: str | None = None,
     ) -> str:
-        del path_prefix, command_name
+        del path_prefix
         if surface_kind != "command":
             return super().project_markdown_surface(
                 content,
@@ -1219,7 +1023,11 @@ class GeminiAdapter(RuntimeAdapter):
         if bridge_command is None:
             raise ValueError("bridge_command is required for projected Gemini command surfaces")
         content = self.translate_shared_command_references(content)
-        rendered = _render_gemini_command_prompt(content, bridge_command=bridge_command)
+        rendered = _render_gemini_command_prompt(
+            content,
+            bridge_command=bridge_command,
+            command_name=command_name,
+        )
         prompt = tomllib.loads(_convert_to_gemini_toml(rendered)).get("prompt")
         if not isinstance(prompt, str):
             raise ValueError("gemini projected command surface must expose a prompt string")
@@ -1320,6 +1128,10 @@ class GeminiAdapter(RuntimeAdapter):
                 install_scope=install_scope,
             )
             translated = _rewrite_gemini_shell_workflow_guidance(translated)
+            translated, _shell_allowlist_required = _render_gemini_classified_shell_fences(
+                translated,
+                bridge_command=bridge_command,
+            )
             return _rewrite_gpd_cli_invocations(translated, bridge_command)
 
         from gpd.adapters.install_utils import install_gpd_content
@@ -1413,14 +1225,10 @@ class GeminiAdapter(RuntimeAdapter):
         self._managed_policy_paths = added_policy_paths
 
         # Wire MCP servers into settings so they start automatically.
-        from gpd.mcp.builtin_servers import build_mcp_servers_dict, merge_managed_mcp_servers
+        from gpd.mcp.builtin_servers import merge_managed_mcp_servers
 
-        python_path = hook_python_interpreter()
-        mcp_servers = build_mcp_servers_dict(python_path=python_path)
-        project_cwd = None if is_global or getattr(self, "_install_explicit_target", False) else target_dir.parent
-        managed_mcp_servers = _project_managed_mcp_servers(cwd=project_cwd, python_path=python_path)
-        if managed_mcp_servers:
-            mcp_servers.update(managed_mcp_servers)
+        project_cwd = self._project_cwd_for_runtime_config(target_dir, is_global)
+        mcp_servers = build_runtime_managed_mcp_servers(cwd=project_cwd)
         if mcp_servers:
             existing_mcp = settings.get("mcpServers", {})
             merged_mcp = merge_managed_mcp_servers(existing_mcp, mcp_servers)
@@ -1640,36 +1448,14 @@ class GeminiAdapter(RuntimeAdapter):
             settings = read_settings(settings_path)
             modified = False
 
-            # Remove GPD statusline
-            status_line = settings.get("statusLine")
-            if isinstance(status_line, dict):
-                cmd = status_line.get("command", "")
-                if _is_hook_command_for_script(
-                    cmd,
-                    HOOK_SCRIPTS["statusline"],
-                    target_dir=target_dir,
-                    config_dir_name=self.config_dir_name,
-                ):
-                    del settings["statusLine"]
-                    modified = True
-
-            # Remove GPD hooks from SessionStart
-            hooks = settings.get("hooks")
-            if isinstance(hooks, dict):
-                session_start = hooks.get("SessionStart")
-                if isinstance(session_start, list):
-                    before = len(session_start)
-                    session_start[:] = [
-                        entry
-                        for entry in session_start
-                        if not _entry_has_gpd_hook(entry, target_dir=target_dir, config_dir_name=self.config_dir_name)
-                    ]
-                    if len(session_start) < before:
-                        modified = True
-                    if not session_start:
-                        del hooks["SessionStart"]
-                    if not hooks:
-                        del settings["hooks"]
+            cleanup = cleanup_settings_json_managed_entries(
+                settings,
+                target_dir=target_dir,
+                config_dir_name=self.config_dir_name,
+                session_start_hook_filenames=(HOOK_SCRIPTS["check_update"],),
+                mcp_server_keys=runtime_managed_mcp_server_keys(),
+            )
+            modified = cleanup.modified
 
             # Remove experimental.enableAgents only when GPD introduced it.
             experimental = settings.get("experimental")
@@ -1697,22 +1483,15 @@ class GeminiAdapter(RuntimeAdapter):
                     else:
                         settings.pop("policyPaths", None)
 
-            # Remove GPD MCP servers
-            mcp_servers = settings.get("mcpServers")
-            if isinstance(mcp_servers, dict):
-                removed_keys = [key for key in list(mcp_servers) if key in _managed_mcp_server_keys()]
-                if removed_keys:
-                    for key in removed_keys:
-                        del mcp_servers[key]
-                    if not mcp_servers:
-                        del settings["mcpServers"]
-                    modified = True
-
-            if modified:
-                write_settings(settings_path, settings)
-                logger.info("Cleaned up Gemini settings.json (statusline, hooks, experimental, MCP)")
-            if has_authoritative_manifest and remove_empty_json_object_file(settings_path):
+            if write_settings_if_modified_and_prune_empty(
+                settings_path,
+                settings,
+                modified=modified,
+                prune_empty=has_authoritative_manifest,
+            ):
                 result.setdefault("removed", []).append(settings_path.name)
+            if modified:
+                logger.info("Cleaned up Gemini settings.json (statusline, hooks, experimental, MCP)")
 
         policy_dir = _managed_gemini_policy_path(target_dir).parent
         if has_authoritative_manifest:

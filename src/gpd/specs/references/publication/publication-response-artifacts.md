@@ -39,11 +39,12 @@ The runtime treats missing or mismatched response frontmatter as incomplete for 
 
 ## Delegation Rule
 
-- If a spawned writer needs user input, it returns `status: checkpoint` and stops. The orchestrator resumes with a fresh continuation; it does not wait inside the same run.
+- Apply `{GPD_INSTALL_DIR}/references/publication/stage-recovery-gate.md` for spawned writer lifecycle, checkpoint continuation, and stale-output rejection.
+- A writer that returns `status: checkpoint` is not complete; continuation is owned by that recovery gate.
 - A reported `status: completed` is provisional until the response pair exists on disk and those same fresh paths appear in typed `gpd_return.files_written`.
 
 ## Completion Gate
 
 - Successful response-round completion requires both `${selected_publication_root}/AUTHOR-RESPONSE{round_suffix}.md` and `${selected_review_root}/REFEREE_RESPONSE{round_suffix}.md`.
-- Do not accept stale preexisting files, prose-only status messages, or a single mirrored letter as proof of completion.
+- Do not accept prose-only status messages or a single mirrored letter as proof of completion; stale-output handling comes from the stage-recovery gate.
 - When decision artifacts exist, keep blocking issue IDs and their statuses synchronized across the paired response files, and keep the response frontmatter round/manuscript binding aligned with the active review artifacts.

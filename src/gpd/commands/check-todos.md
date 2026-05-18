@@ -8,6 +8,11 @@ allowed-tools:
   - file_write
   - shell
   - ask_user
+help:
+  group: Tangents, memory, and exports
+  order: 550
+  compact_description: Review pending todos and pick one
+  display_signature: gpd:check-todos [area]
 ---
 
 

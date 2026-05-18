@@ -8,6 +8,11 @@ allowed-tools:
   - file_write
   - file_edit
   - shell
+help:
+  group: Tangents, memory, and exports
+  order: 620
+  compact_description: Save a project-specific lesson
+  display_signature: gpd:record-insight [description]
 ---
 
 

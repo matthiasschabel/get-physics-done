@@ -9,21 +9,23 @@ Read all files referenced by the invoking prompt's execution_context before star
 <process>
 
 <step name="detect_workspace_state">
-Figure out what kind of folder this is before offering any commands. Use the non-staged raw CLI classifier, which delegates to GPD's workspace-bound, read-only classifier instead of hand-rolled current-directory marker checks. The classifier must describe the invoked folder itself; do not let an ancestor or home-directory GPD project claim an unrelated nested checkout.
+Before offering commands, classify the invoked folder with the thin raw CLI start-context classifier. It uses GPD's workspace-bound, read-only classifier instead of hand-rolled marker checks, and must not let an ancestor or home-directory project claim an unrelated checkout.
 
 ```bash
-START_CONTEXT=$(gpd --raw init new-project)
+START_CONTEXT=$(gpd --raw init start-context)
 ```
 
-Parse the JSON result and use these fields:
+Use `folder_state` first; use booleans only as supporting facts:
 
 - `project_exists=true` means this folder already has a `GPD project` (a folder where GPD already saved its own project files, notes, and state), such as `GPD/PROJECT.md`.
 - `recoverable_project_exists=true` means this folder has GPD state that should not be treated as fresh. If `partial_project_exists=true`, route to recovery/inspection rather than new setup.
-- `roadmap_exists=true` means partial state has a roadmap-like recovery anchor.
-- `state_exists=true` means partial state has a state file that can be reconciled.
+- `roadmap_exists=true` or `state_exists=true` means partial state has a recovery anchor.
+- `init_progress.exists=true` or `init_progress_exists=true` means GPD setup was interrupted; route to recovery/inspection rather than fresh setup.
 - `has_research_map=true` means this folder already has a `research map` (GPD's summary of an existing research folder before full project setup).
 - `has_research_files=true`, `has_project_manifest=true`, or `needs_research_map=true` means this looks like an existing research folder. Example files might be `.tex`, `.py`, `.ipynb`, `.pdf`, or `.csv`.
 - `research_file_samples` is a sorted, bounded list of up to 5 project-relative research-looking files noticed by the classifier.
+- `folder_state` is the normalized route state: `initialized_project`, `partial_project`, `research_map`, `existing_research`, or `fresh`.
+- `raw_diagnostics_command` points to the broader raw new-project diagnostics command for troubleshooting only; do not use it as the normal start classifier.
 - Otherwise, treat this as a fresh folder with no obvious GPD state yet.
 
 If `$ARGUMENTS` is non-empty, briefly repeat it back as the researcher’s goal, but keep the folder-state routing rules above.
@@ -142,8 +144,7 @@ Ask for exactly one choice.
 Route immediately into the real existing workflow for the chosen path.
 
 Normalize the reply to one stable `option_id`; labels are aliases only.
-
-For every start-routed path, the start-menu choice authorizes only the route into that command. If the selected downstream workflow is write-capable, state the route boundary visibly and stop at its first downstream write-capable gate unless that downstream workflow obtains its own separate explicit approval after the handoff.
+For every start-routed path, the start-menu choice authorizes only routing into that command. For write-capable routes, say plainly: opened command, no downstream writes approved by `gpd:start`, and the next downstream approval/confirmation needed before writes.
 
 **If the researcher chooses option_id `resume_work` (`Resume this project (recommended)`, `Continue where I left off`, `Inspect recovery state (recommended)`, or `Inspect recovery state`):**
 
@@ -151,31 +152,31 @@ For every start-routed path, the start-menu choice authorizes only the route int
 - Use `gpd:resume-work` as the selected runtime command label while following that workflow.
 
 **If the researcher chooses option_id `sync_state` (`Reconcile state files`):**
-- Say exactly: "I will route to `gpd:sync-state` now and stop after its recovery diagnosis/instruction gate; no state repair or state rewrite is approved by this start choice."
+- Say: "Opening `gpd:sync-state`; `gpd:start` approves no repairs or writes. Next gate: explicit sync/repair confirmation."
 - Read `{GPD_INSTALL_DIR}/workflows/sync-state.md` with the file-read tool.
 - Use `gpd:sync-state` as the selected runtime command label while following that workflow.
 - In one-shot or headless runtime prompts, do not continue through the sync-state shell repair workflow from `gpd:start`; stop after the route-boundary/recovery instruction gate is visible.
 - Route boundary for `sync_state`: do not run `gpd state repair-sync`, promote backups, rewrite `GPD/STATE.md`, or rewrite `GPD/state.json` unless the user gives a separate exact sync/repair confirmation inside `gpd:sync-state` or invokes that command directly with explicit repair intent.
 
 **If the researcher chooses option_id `progress` (`Review the project status first`, `Review project status first`, or `Review visible progress`):**
-- Say exactly: "I will route to `gpd:progress` now in default/report mode only; no reconcile, state write, compaction, or next-action execution is approved by this start choice."
+- Say: "Opening `gpd:progress`; `gpd:start` approves no reconciliation, state changes, or recommended next action. Next gate: explicit progress reconcile confirmation."
 - Read `{GPD_INSTALL_DIR}/workflows/progress.md` with the file-read tool.
 - Use `gpd:progress` as the selected runtime command label while following that workflow.
 - Route boundary for `progress`: use default/report mode only. Do not switch to `--reconcile`, execute the recommended next action, update state, compact state, or write progress/state files from this start-routed status check.
 
 **If the researcher chooses option_id `map_research` (`Map this folder first (recommended)` or `Refresh the research map`):**
-- Say exactly: "I will route to `gpd:map-research` now and stop at its first map-research decision/write gate; no research-map files, mapper agents, archives, or summaries are approved by this start choice."
+- Say: "Opening `gpd:map-research`; `gpd:start` approves no research-map writes or mapper agents. Next gate: explicit durable-write confirmation."
 - Read `{GPD_INSTALL_DIR}/workflows/map-research.md` with the file-read tool.
 - Use `gpd:map-research` as the selected runtime command label while following that workflow.
 - Route boundary for `map_research`: stop before creating, archiving, or updating `GPD/research-map/`, before spawning mapper agents, and before writing summaries unless the downstream map workflow obtains an explicit durable-write confirmation after the route handoff.
 
 **If the researcher chooses option_id `new_project_minimal` (`Fast start (recommended)`, `Fast start`, or `Start a brand-new GPD project anyway`):**
-- Say exactly: "I will route to `gpd:new-project --minimal` now and stop at its first downstream intake or scope-approval gate; no project, git, state, or progress files are approved by this start choice."
+- Say: "Opening `gpd:new-project --minimal`; `gpd:start` approves no `GPD/`, git, state, progress, or project-artifact writes. Next gate: downstream minimal-project scope approval."
 - Use `gpd:new-project --minimal` as the selected runtime command label and follow its installed command contract directly.
 - Route boundary for `new_project_minimal`: do not create `GPD/`, initialize git, write state, write progress files, or create project artifacts unless `gpd:new-project --minimal` obtains its own explicit downstream intake/scope approval after this start route.
 
 **If the researcher chooses option_id `new_project_full` (`Full guided setup`, `Turn this into a full GPD project (recommended)`, or `Turn this into a full GPD project`):**
-- Say exactly: "I will route to `gpd:new-project` now and stop at its first downstream intake or scope-approval gate; no project, git, state, or progress files are approved by this start choice."
+- Say: "Opening `gpd:new-project`; `gpd:start` approves no `GPD/`, git, state, progress, or project-artifact writes. Next gate: downstream full-project scope approval."
 - Use `gpd:new-project` as the selected runtime command label and follow its installed command contract directly.
 - Route boundary for `new_project_full`: do not create `GPD/`, initialize git, write state, write progress files, or create project artifacts unless `gpd:new-project` obtains its own explicit downstream intake/scope approval after this start route.
 

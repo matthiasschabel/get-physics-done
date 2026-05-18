@@ -58,6 +58,19 @@ allowed-tools:
   - find_files
   - task
   - ask_user
+help:
+  group: Knowledge authoring
+  order: 430
+  compact_description: Review one canonical current-workspace knowledge doc and write its review artifact
+  display_signature: gpd:review-knowledge [knowledge path|knowledge id]
+  detail_signature: gpd:review-knowledge [knowledge path or knowledge id]
+  examples:
+    - gpd:review-knowledge GPD/knowledge/K-example.md
+  notes:
+    - Reviews a canonical current-workspace knowledge document using typed approval evidence.
+    - Approval can promote stable knowledge; stable and superseded states remain addressable and traceable by canonical path or knowledge id.
+    - Writes review artifacts under GPD/knowledge/reviews/.
+  root_detail_order: 240
 ---
 
 <objective>
@@ -97,9 +110,9 @@ Follow the included review-knowledge workflow exactly. The workflow owns schema 
 <success_criteria>
 - [ ] Review target resolved exactly from a current-workspace canonical path or canonical knowledge_id
 - [ ] Review artifact written under `GPD/knowledge/reviews/`
-- [ ] Review metadata records round, reviewer identity, artifact path/hash, reviewed-content hash, and stale handling
+- [ ] Review metadata records round, reviewer identity, artifact path/hash, reviewed-content hash, and recency handling
 - [ ] `approved` promotes the document to `stable` only when the review is fresh
 - [ ] `needs_changes` and `rejected` keep or mark the document `in_review`
-- [ ] Validation fails closed on non-canonical lookalikes, ambiguous targets, or stale approved evidence
+- [ ] Validation fails closed on non-canonical lookalikes, ambiguous targets, or expired approved evidence
 - [ ] No automatic import, beginner onboarding exposure, or full supersession orchestration is claimed
 </success_criteria>

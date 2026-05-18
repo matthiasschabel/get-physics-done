@@ -13,6 +13,7 @@ import gpd.core.phases as phases_module
 from gpd.core.phases import (
     MilestoneIncompleteError,
     PhaseAmbiguityError,
+    PhaseCloseoutBlockedError,
     PhaseIncompleteError,
     PhaseNotFoundError,
     PhaseValidationError,
@@ -54,6 +55,22 @@ def _create_phase_dir(tmp_path: Path, name: str) -> Path:
     phase_dir = tmp_path / "GPD" / "phases" / name
     phase_dir.mkdir(parents=True, exist_ok=True)
     return phase_dir
+
+
+def _write_passed_verification(phase_dir: Path) -> Path:
+    """Write the canonical passed verification report required for closeout."""
+    phase_number = phase_dir.name.split("-", 1)[0]
+    path = phase_dir / f"{phase_number}-VERIFICATION.md"
+    path.write_text(
+        "---\n"
+        f"phase: {phase_dir.name}\n"
+        "status: passed\n"
+        'score: "1/1 contract targets verified"\n'
+        "---\n\n"
+        "# Verification\n\nPASS: closeout evidence accepted.\n",
+        encoding="utf-8",
+    )
+    return path
 
 
 def _create_roadmap(tmp_path: Path, content: str) -> Path:
@@ -877,6 +894,7 @@ def test_phase_complete_uses_canonical_state_lock_and_locked_writer(
     phase_dir = _create_phase_dir(tmp_path, "01-setup")
     (phase_dir / "a-PLAN.md").write_text("plan", encoding="utf-8")
     (phase_dir / "a-SUMMARY.md").write_text("done", encoding="utf-8")
+    _write_passed_verification(phase_dir)
     _create_phase_dir(tmp_path, "02-build")
 
     lock_calls = _assert_canonical_state_lock_and_locked_writer(tmp_path, monkeypatch)
@@ -907,6 +925,7 @@ def test_phase_complete_rolls_back_roadmap_when_atomic_state_save_fails(
     phase_dir = _create_phase_dir(tmp_path, "01-setup")
     (phase_dir / "a-PLAN.md").write_text("plan", encoding="utf-8")
     (phase_dir / "a-SUMMARY.md").write_text("done", encoding="utf-8")
+    _write_passed_verification(phase_dir)
     _create_phase_dir(tmp_path, "02-build")
 
     before_roadmap = (tmp_path / "GPD" / "ROADMAP.md").read_text(encoding="utf-8")
@@ -942,6 +961,7 @@ def test_phase_complete_rolls_back_when_checkpoint_sync_fails(
     phase_dir = _create_phase_dir(tmp_path, "01-setup")
     (phase_dir / "a-PLAN.md").write_text("plan", encoding="utf-8")
     (phase_dir / "a-SUMMARY.md").write_text("done", encoding="utf-8")
+    _write_passed_verification(phase_dir)
     _create_phase_dir(tmp_path, "02-build")
 
     before_roadmap = (tmp_path / "GPD" / "ROADMAP.md").read_text(encoding="utf-8")
@@ -1567,6 +1587,7 @@ def test_phase_complete_success(tmp_path: Path) -> None:
     phase_dir = _create_phase_dir(tmp_path, "01-setup")
     (phase_dir / "a-PLAN.md").write_text("plan", encoding="utf-8")
     (phase_dir / "a-SUMMARY.md").write_text("done", encoding="utf-8")
+    _write_passed_verification(phase_dir)
     _create_phase_dir(tmp_path, "02-build")
 
     result = phase_complete(tmp_path, "1")
@@ -1574,6 +1595,56 @@ def test_phase_complete_success(tmp_path: Path) -> None:
     assert result.all_plans_complete is True
     assert result.next_phase == "02"
     assert result.is_last_phase is False
+
+
+def test_phase_complete_requires_green_top_level_lifecycle_readiness(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Nested readiness alone must not permit mutation when lifecycle says blocked."""
+    _setup_project(tmp_path)
+    _create_roadmap(
+        tmp_path,
+        """\
+        ### Phase 1: Setup
+        **Goal:** setup
+
+        ### Phase 2: Build
+        **Goal:** build
+        """,
+    )
+    _seed_state_pair(tmp_path, current_phase="01", current_phase_name="Setup", total_phases=2, status="Verified")
+    phase_dir = _create_phase_dir(tmp_path, "01-setup")
+    (phase_dir / "01-PLAN.md").write_text("plan", encoding="utf-8")
+    (phase_dir / "01-SUMMARY.md").write_text("summary", encoding="utf-8")
+    _write_passed_verification(phase_dir)
+
+    before_roadmap = (tmp_path / "GPD" / "ROADMAP.md").read_text(encoding="utf-8")
+    before_state = (tmp_path / "GPD" / "STATE.md").read_text(encoding="utf-8")
+    before_state_json = (tmp_path / "GPD" / "state.json").read_text(encoding="utf-8")
+
+    def _blocked_decision(cwd: Path, phase: str, *, require_verification: bool) -> dict[str, object]:
+        del cwd, phase, require_verification
+        return {
+            "decision": "needs_verification",
+            "closeout_ready": False,
+            "closeout_blockers": ["top-level lifecycle is not ready"],
+            "closeout_readiness": {
+                "ready": True,
+                "mutation_allowed": True,
+                "blockers": [],
+                "verification_routing_status": "passed",
+            },
+        }
+
+    monkeypatch.setattr(phases_module, "_phase_lifecycle_decision", _blocked_decision)
+
+    with pytest.raises(PhaseCloseoutBlockedError, match="top-level lifecycle is not ready"):
+        phase_complete(tmp_path, "1")
+
+    assert (tmp_path / "GPD" / "ROADMAP.md").read_text(encoding="utf-8") == before_roadmap
+    assert (tmp_path / "GPD" / "STATE.md").read_text(encoding="utf-8") == before_state
+    assert (tmp_path / "GPD" / "state.json").read_text(encoding="utf-8") == before_state_json
 
 
 def test_phase_complete_uses_roadmap_for_unscaffolded_next_phase(tmp_path: Path) -> None:
@@ -1607,6 +1678,7 @@ def test_phase_complete_uses_roadmap_for_unscaffolded_next_phase(tmp_path: Path)
     phase_dir = _create_phase_dir(tmp_path, "01-setup")
     (phase_dir / "a-PLAN.md").write_text("plan", encoding="utf-8")
     (phase_dir / "a-SUMMARY.md").write_text("done", encoding="utf-8")
+    _write_passed_verification(phase_dir)
 
     result = phase_complete(tmp_path, "1")
 
@@ -1658,6 +1730,7 @@ def test_phase_complete_handles_padded_em_dash_roadmap_heading(tmp_path: Path) -
     phase_dir = _create_phase_dir(tmp_path, "01-setup")
     (phase_dir / "a-PLAN.md").write_text("plan", encoding="utf-8")
     (phase_dir / "a-SUMMARY.md").write_text("done", encoding="utf-8")
+    _write_passed_verification(phase_dir)
 
     result = phase_complete(tmp_path, "1")
 
@@ -2218,6 +2291,7 @@ def test_phase_complete_sets_current_plan_to_inactive_sentinel(tmp_path: Path) -
     phase_dir = _create_phase_dir(tmp_path, "01-setup")
     (phase_dir / "a-PLAN.md").write_text("plan", encoding="utf-8")
     (phase_dir / "a-SUMMARY.md").write_text("done", encoding="utf-8")
+    _write_passed_verification(phase_dir)
     _create_phase_dir(tmp_path, "02-build")
 
     phase_complete(tmp_path, "1")

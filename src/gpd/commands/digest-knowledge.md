@@ -34,6 +34,28 @@ allowed-tools:
   - find_files
   - task
   - ask_user
+help:
+  group: Knowledge authoring
+  order: 420
+  compact_description: Create or update a draft knowledge doc under `GPD/knowledge/` in the current workspace
+  display_signature: gpd:digest-knowledge [topic|arXiv id|source file|knowledge path]
+  detail_signature: gpd:digest-knowledge [topic|arXiv id|source file|knowledge path]
+  examples:
+    - gpd:digest-knowledge "renormalization group fixed points"
+    - gpd:digest-knowledge 2401.12345v2
+    - gpd:digest-knowledge hep-th/9901001
+    - gpd:digest-knowledge ./notes/rg-notes.md
+    - gpd:digest-knowledge ./sources/review.docx
+    - gpd:digest-knowledge ./data/observables.csv
+    - gpd:digest-knowledge GPD/knowledge/K-renormalization-group-fixed-points.md
+  notes:
+    - Creates a current-workspace knowledge document draft from a topic, paper, source file, or explicit knowledge path.
+    - 'Example document source: `gpd:digest-knowledge ./sources/review.docx`; example tabular source: `gpd:digest-knowledge ./data/observables.csv`.'
+    - Knowledge lifecycle states are draft, in_review, stable, and superseded; use gpd:review-knowledge for approval.
+    - Stable knowledge enters shared runtime reference surfaces as reviewed background synthesis; it is a separate authority tier and does not override stronger evidence.
+    - Resolves one canonical `GPD/knowledge/{knowledge_id}.md` target in the current workspace and stops on ambiguity.
+    - Supports an arXiv identifier with accepted prefixes.
+  root_detail_order: 230
 ---
 
 <objective>

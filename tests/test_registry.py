@@ -7,8 +7,12 @@ from pathlib import Path
 
 import pytest
 
-from gpd import cli as cli_module
 from gpd import registry
+from gpd.core.command_arguments import _PROJECT_AWARE_EXPLICIT_INPUT_PREDICATES
+from gpd.core.command_subjects import (
+    _command_explicit_input_labels_from_policy,
+    _command_has_typed_subject_policy,
+)
 from gpd.core.model_visible_text import (
     COMMAND_POLICY_PROMPT_WRAPPER_KEY,
     agent_visibility_note,
@@ -16,6 +20,7 @@ from gpd.core.model_visible_text import (
     review_contract_visibility_note,
     skeptical_rigor_guardrails_section,
 )
+from gpd.core.task_overlays import build_task_overlay_compatibility_manifest
 from gpd.core.workflow_staging import WorkflowStageManifest
 from gpd.registry import (
     AgentDef,
@@ -29,9 +34,17 @@ from gpd.registry import (
     _parse_tools,
     _RegistryCache,
     load_agents_from_dir,
+    render_agent_visibility_sections_from_frontmatter,
     render_command_visibility_sections_from_frontmatter,
 )
 from gpd.specs import SPECS_DIR as CANONICAL_SPECS_DIR
+from tests.agent_policy_test_support import (
+    assert_agent_role_kit_policy,
+    assert_agent_role_kit_section,
+    assert_role_kit_section_in_prompt,
+)
+from tests.assertion_taxonomy_support import assert_prompt_contracts, semantic_concept
+from tests.markdown_test_support import extract_markdown_section, parse_yaml_fences, require_mapping
 
 NEW_PROJECT_COMMAND_PATH = Path(__file__).resolve().parents[1] / "src" / "gpd" / "commands" / "new-project.md"
 RESEARCH_SYNTHESIZER_SUMMARY_CONTRACT = {
@@ -39,6 +52,14 @@ RESEARCH_SYNTHESIZER_SUMMARY_CONTRACT = {
     "expected_artifacts": ["GPD/literature/SUMMARY.md"],
     "shared_state_policy": "return_only",
 }
+
+
+def _model_visible_yaml_payload(text: str, heading: str, *, context: str) -> dict[str, object]:
+    section = extract_markdown_section(text, f"## {heading}", context=context)
+    fences = parse_yaml_fences(section, info="yaml", context=f"{context} {heading}")
+    assert len(fences) == 1
+    data = require_mapping(fences[0].data, context=f"{context} {heading} YAML")
+    return {str(key): value for key, value in data.items()}
 
 
 def _write_review_contract_command(tmp_path: Path, file_name: str, review_contract_body: str) -> Path:
@@ -216,18 +237,64 @@ class TestParseAgentFile:
         assert agent.shared_state_authority == "direct"
         assert agent.color == "blue"
         assert agent.system_prompt.startswith("## Agent Requirements\n")
-        assert "Agent YAML rules. Use this YAML." in agent.system_prompt
-        assert "Closed schema; no extra keys." in agent.system_prompt
         assert agent_visibility_note() in agent.system_prompt
-        assert "commit_authority: orchestrator" in agent.system_prompt
-        assert "surface: public" in agent.system_prompt
-        assert "role_family: worker" in agent.system_prompt
-        assert "artifact_write_authority: scoped_write" in agent.system_prompt
-        assert "shared_state_authority: direct" in agent.system_prompt
-        assert "tools:\n- file_read\n- file_write" in agent.system_prompt
+        assert _model_visible_yaml_payload(agent.system_prompt, "Agent Requirements", context="agent prompt") == {
+            "commit_authority": "orchestrator",
+            "surface": "public",
+            "role_family": "worker",
+            "artifact_write_authority": "scoped_write",
+            "shared_state_authority": "direct",
+            "tools": ["file_read", "file_write"],
+        }
         assert skeptical_rigor_guardrails_section() in agent.system_prompt
         assert agent.system_prompt.endswith("System prompt.")
         assert agent.source == "agents"
+
+    def test_agent_file_parses_role_kits_and_renders_section(self, tmp_path: Path) -> None:
+        f = tmp_path / "role-kit-agent.md"
+        f.write_text(
+            "---\n"
+            "name: role-kit-agent\n"
+            "tools: file_read\n"
+            "role_kits:\n"
+            "  - status-routing\n"
+            "  - fresh-continuation\n"
+            "---\n"
+            "System prompt.",
+            encoding="utf-8",
+        )
+
+        agent = _parse_agent_file(f, source="agents")
+
+        assert agent.system_prompt.count("## Agent Requirements") == 1
+        assert_agent_role_kit_policy(agent, ("status-routing", "fresh-continuation"))
+        assert_agent_role_kit_section(agent, before="## Scientific Rigor Guardrails")
+        assert agent.system_prompt.endswith("System prompt.")
+
+    def test_agent_file_rejects_unknown_role_kit(self, tmp_path: Path) -> None:
+        f = tmp_path / "bad-role-kit.md"
+        f.write_text("---\nname: bad\nrole_kits:\n  - missing-kit\n---\nPrompt.", encoding="utf-8")
+
+        with pytest.raises(ValueError, match="Unknown role_kit 'missing-kit' for bad"):
+            _parse_agent_file(f, source="agents")
+
+    def test_agent_file_rejects_duplicate_role_kits(self, tmp_path: Path) -> None:
+        f = tmp_path / "duplicate-role-kit.md"
+        f.write_text(
+            "---\nname: bad\nrole_kits: status-routing, status-routing\n---\nPrompt.",
+            encoding="utf-8",
+        )
+
+        with pytest.raises(ValueError, match="role_kits for bad must not contain duplicate id 'status-routing'"):
+            _parse_agent_file(f, source="agents")
+
+    def test_render_agent_visibility_sections_from_frontmatter_includes_role_kits(self) -> None:
+        rendered = render_agent_visibility_sections_from_frontmatter(
+            "name: role-kit-agent\nrole_kits:\n  - status-routing\n",
+            agent_name="role-kit-agent",
+        )
+
+        assert_role_kit_section_in_prompt(rendered, ("status-routing",), context="role-kit-agent frontmatter")
 
     def test_agent_file_no_frontmatter_raises(self, tmp_path: Path) -> None:
         f = tmp_path / "bare-agent.md"
@@ -248,11 +315,32 @@ class TestParseAgentFile:
         assert agent.role_family == "analysis"
         assert agent.artifact_write_authority == "scoped_write"
         assert agent.shared_state_authority == "return_only"
+        assert agent.role_kits == ()
         assert agent.color == ""
         assert agent.source == "agents"
         assert agent.system_prompt.startswith("## Agent Requirements\n")
         assert skeptical_rigor_guardrails_section() in agent.system_prompt
         assert agent.system_prompt.endswith("Prompt.")
+
+    def test_task_overlay_compatibility_manifest_is_metadata_only(self) -> None:
+        payload = build_task_overlay_compatibility_manifest(role="gpd-executor")
+
+        assert payload["schema_version"] == 1
+        assert payload["role"] == "gpd-executor"
+        assert payload["compatible_task_overlay_ids"] == [
+            "executor.proof_bearing",
+            "executor.bounded_segment",
+        ]
+        assert payload["overlay_count"] == 2
+        assert payload["body_policy"] == "metadata_only"
+
+        forbidden_keys = {"body", "content", "markdown", "text", "overlay_body", "overlay_content", "overlay_text"}
+        for entry in payload["overlays"]:
+            assert set(entry).isdisjoint(forbidden_keys)
+            assert entry["role"] == "gpd-executor"
+            assert entry["path"] == "references/orchestration/task-overlays.md"
+            assert entry["portable_path"] == "@{GPD_INSTALL_DIR}/references/orchestration/task-overlays.md"
+            assert entry["body_loaded"] is False
 
     def test_agent_file_parses_explicit_commit_authority(self, tmp_path: Path) -> None:
         f = tmp_path / "direct.md"
@@ -383,8 +471,13 @@ class TestParseAgentFile:
         f.write_text("---\nname: nobody\n---\n", encoding="utf-8")
         agent = _parse_agent_file(f, source="agents")
         assert agent.system_prompt.startswith("## Agent Requirements\n")
-        assert "Agent YAML rules. Use this YAML." in agent.system_prompt
-        assert "commit_authority:" in agent.system_prompt
+        assert agent_visibility_note() in agent.system_prompt
+        assert (
+            _model_visible_yaml_payload(agent.system_prompt, "Agent Requirements", context="empty agent prompt")[
+                "commit_authority"
+            ]
+            == "orchestrator"
+        )
         assert skeptical_rigor_guardrails_section() in agent.system_prompt
         assert agent.system_prompt.rstrip().endswith("disconfirming check still needed.")
 
@@ -655,11 +748,21 @@ class TestParseCommandFile:
             ),
         )
         assert cmd.content.startswith("## Command Requirements\n\n")
-        assert "Closed schema; no extra keys." in cmd.content
-        assert "Strict booleans only" in cmd.content
         assert command_visibility_note() in cmd.content
-        assert "GPD/ROADMAP.md" in cmd.content
-        assert f"{COMMAND_POLICY_PROMPT_WRAPPER_KEY}:" in cmd.content
+        assert _model_visible_yaml_payload(cmd.content, "Command Requirements", context="full command") == {
+            "context_mode": "project-required",
+            "project_reentry_capable": False,
+            "allowed_tools": ["file_read", "shell"],
+            "requires": {"files": ["GPD/ROADMAP.md"]},
+            COMMAND_POLICY_PROMPT_WRAPPER_KEY: {
+                "schema_version": 1,
+                "supporting_context_policy": {
+                    "project_context_mode": "project-required",
+                    "project_reentry_mode": "disallowed",
+                    "required_file_patterns": ["GPD/ROADMAP.md"],
+                },
+            },
+        }
         assert skeptical_rigor_guardrails_section() in cmd.content
         assert cmd.content.endswith("Command body.")
 
@@ -690,8 +793,11 @@ class TestParseCommandFile:
         cmd = _parse_command_file(f, source="commands")
 
         assert cmd.content.startswith("## Command Requirements\n\n")
-        assert "Closed schema; no extra keys." in cmd.content
-        assert "Strict booleans only" in cmd.content
+        assert command_visibility_note() in cmd.content
+        requirements = _model_visible_yaml_payload(cmd.content, "Command Requirements", context="review command")
+        assert requirements["context_mode"] == "project-required"
+        assert requirements["requires"] == {"files": ["GPD/ROADMAP.md"]}
+        assert COMMAND_POLICY_PROMPT_WRAPPER_KEY in requirements
         assert cmd.content.index("## Review Contract") > cmd.content.index("## Command Requirements")
         assert cmd.content.endswith("Body.")
 
@@ -782,9 +888,14 @@ class TestParseCommandFile:
             command_name="gpd:plan-phase",
         )
 
-        assert "agent: gpd-planner" in rendered
-        assert "context_mode: project-required" in rendered
-        assert f"{COMMAND_POLICY_PROMPT_WRAPPER_KEY}:" in rendered
+        requirements = _model_visible_yaml_payload(
+            rendered,
+            "Command Requirements",
+            context="rendered command requirements",
+        )
+        assert requirements["agent"] == "gpd-planner"
+        assert requirements["context_mode"] == "project-required"
+        assert COMMAND_POLICY_PROMPT_WRAPPER_KEY in requirements
 
     def test_render_command_visibility_sections_comment_only_frontmatter_keeps_default_constraints(self) -> None:
         rendered = render_command_visibility_sections_from_frontmatter(
@@ -855,10 +966,31 @@ class TestParseCommandFile:
                 default_output_subtree="GPD/review",
             ),
         )
-        assert "context_mode: project-aware" in cmd.content
-        assert f"{COMMAND_POLICY_PROMPT_WRAPPER_KEY}:" in cmd.content
-        assert "subject_kind: publication" in cmd.content
-        assert "default_output_subtree: GPD/review" in cmd.content
+        requirements = _model_visible_yaml_payload(
+            cmd.content,
+            "Command Requirements",
+            context="command policy command",
+        )
+        assert requirements["context_mode"] == "project-aware"
+        assert requirements[COMMAND_POLICY_PROMPT_WRAPPER_KEY] == {
+            "schema_version": 1,
+            "subject_policy": {
+                "subject_kind": "publication",
+                "resolution_mode": "explicit_or_project_manuscript",
+                "explicit_input_kinds": ["manuscript_path"],
+                "allow_external_subjects": True,
+            },
+            "supporting_context_policy": {
+                "project_context_mode": "project-aware",
+                "project_reentry_mode": "disallowed",
+                "required_file_patterns": ["PROJECT.md"],
+            },
+            "output_policy": {
+                "output_mode": "managed",
+                "managed_root_kind": "gpd_managed_durable",
+                "default_output_subtree": "GPD/review",
+            },
+        }
 
     def test_command_policy_rejects_prompt_wrapper_alias_in_frontmatter(self, tmp_path: Path) -> None:
         f = tmp_path / "write-paper.md"
@@ -989,7 +1121,7 @@ class TestParseCommandFile:
 
         assert "project-contract-schema.md" in command_text
         assert "project-contract-grounding-linkage.md" in command_text
-        assert "staged_loading" not in command_text
+        assert "Later stage loading is manifest/stage-owned" in command_text
         assert "new-project-stage-manifest.json" not in command_text
         assert "<!-- [included:" not in command_text
         assert "<!-- [end included] -->" not in command_text
@@ -997,7 +1129,7 @@ class TestParseCommandFile:
     def test_new_project_command_source_stays_prompt_budget_thin(self) -> None:
         command_text = NEW_PROJECT_COMMAND_PATH.read_text(encoding="utf-8")
 
-        assert "staged_loading" not in command_text
+        assert "Later stage loading is manifest/stage-owned" in command_text
         assert "new-project-stage-manifest.json" not in command_text
         assert "conditional_authorities" not in command_text
 
@@ -1833,8 +1965,12 @@ class TestDiscovery:
         assert debugger_skill.name == "gpd-debugger"
         assert debugger_agent.surface == "public"
         assert debugger_agent.role_family == "worker"
-        assert (
-            "public writable production agent specialized for discrepancy investigation" in debugger_agent.system_prompt
+        assert_prompt_contracts(
+            debugger_agent.system_prompt,
+            *semantic_concept(
+                "debugger production investigation role",
+                required=("public", "writable", "production agent", "discrepancy", "investigation"),
+            ),
         )
         assert {"gpd-debug", "gpd-debugger"}.issubset(registry.list_skills())
 
@@ -1907,11 +2043,11 @@ class TestDiscovery:
     def test_project_aware_cli_predicates_take_input_labels_from_command_policy(self) -> None:
         registry.invalidate_cache()
 
-        for command_name, predicate in cli_module._PROJECT_AWARE_EXPLICIT_INPUT_PREDICATES.items():
+        for command_name, predicate in _PROJECT_AWARE_EXPLICIT_INPUT_PREDICATES.items():
             command = registry.get_command(command_name)
 
             assert callable(predicate)
-            assert cli_module._command_explicit_input_labels_from_policy(command), command_name
+            assert _command_explicit_input_labels_from_policy(command), command_name
 
     def test_project_aware_label_only_policy_does_not_make_analysis_helpers_subject_required(self) -> None:
         registry.invalidate_cache()
@@ -1930,7 +2066,7 @@ class TestDiscovery:
             assert subject_policy is not None
             assert subject_policy.explicit_input_kinds
             assert subject_policy.resolution_mode is None
-            assert cli_module._command_has_typed_subject_policy(command) is False
+            assert _command_has_typed_subject_policy(command) is False
 
     def test_command_skill_categories_cover_current_registry_without_other_fallbacks(self) -> None:
         registry.invalidate_cache()
@@ -2052,8 +2188,14 @@ class TestRegistryPromptIncludeInlining:
 
             assert "<!-- hidden command note -->" not in command.content
             assert "<!-- hidden agent note -->" not in agent.system_prompt
-            assert "Inline marker prose keeps <!-- AI-drafted --> visible." in command.content
-            assert "Inline marker prose keeps <!-- AI-drafted --> visible." in agent.system_prompt
+            for content in (command.content, agent.system_prompt):
+                assert_prompt_contracts(
+                    content,
+                    *semantic_concept(
+                        "inline marker prose remains visible",
+                        required=("Inline marker prose", "<!-- AI-drafted -->", "visible"),
+                    ),
+                )
             assert "```markdown\n<!-- AI-drafted -->\n```" in command.content
             assert "```markdown\n<!-- AI-drafted -->\n```" in agent.system_prompt
             assert "Visible tail." in command.content
@@ -2067,10 +2209,10 @@ class TestRegistryPromptIncludeInlining:
         durable_fragments = (
             "## Domain Routing Stub",
             "Load only the matching domain checklist pack(s);",
-            "# Verification Report Template",
-            "# Contract Results Schema",
-            "# Canonical Schema Discipline",
-            "Fallback report-writer rule",
+            "templates/verification-report.md",
+            "templates/contract-results-schema.md",
+            "references/shared/canonical-schema-discipline.md",
+            "Canonical verification report authoring",
             "`verification_report_skeleton_bridge`",
             "`writer_command`",
             "body-only evidence",
@@ -2078,66 +2220,97 @@ class TestRegistryPromptIncludeInlining:
             "body-only Markdown",
             "one fenced executed `python`/`bash` block",
             "adjacent `**Output:**` plus fenced `output`",
-            "following `PASS`/`FAIL`/`INCONCLUSIVE` verdict",
-            "Do not hand-author or reflow `VERIFICATION.md` YAML",
-            "Use `skeleton_command` only as a read-only preview",
+            "a `PASS`/`FAIL`/`INCONCLUSIVE` verdict",
+            "Do not hand-author or reflow `VERIFICATION.md` frontmatter",
+            "`skeleton_command` is preview-only",
+            "gpd verification-report skeleton ... --write --body-file ... --validate contract",
             "Keep `gpd_return`, computational-oracle/runtime details, command transcripts, hashes, and prose-only evidence out of frontmatter",
-            "Omit ambiguous `evidence[]`",
-            "contract-results-schema.md#compact-gap-report-crib",
-            "# Compact Gap Report Crib",
-            "Do not add `contract_results.status` or `contract_results.summary`",
-            "perform exactly one bounded repair pass",
-            "max two targeted repairs",
-            "After the second validator failure total",
-            "stop all edits and return `gpd_return.status: blocked`",
+            "helper-generated compact gap ledger",
+            "Use the verification-report helper to serialize the gap ledger",
+            "perform one bounded repair pass",
+            "stop blocked with latest errors",
             "only after the canonical report passes frontmatter and contract validation",
         )
         for fragment in durable_fragments:
             assert fragment in agent.system_prompt
         assert "<!-- [included:" not in agent.system_prompt
 
-    def test_verify_work_skill_surface_keeps_fallback_schema_bridge_visible(self) -> None:
+    def test_verify_work_skill_surface_defers_fallback_schema_bridge_to_inventory_stage(self) -> None:
         skill = registry.get_skill("gpd-verify-work")
+        repo_root = Path(__file__).resolve().parents[1]
+        inventory_stage = (
+            repo_root / "src" / "gpd" / "specs" / "workflows" / "verify-work" / "inventory-build.md"
+        ).read_text(encoding="utf-8")
 
         durable_fragments = (
-            "fallback verifier execution is still `gpd-verifier` execution",
+            "fallback execution is still `gpd-verifier` work",
             "verification_report_skeleton_bridge",
-            "write body-only evidence",
-            "satisfies bridge `body_contract`",
-            "one fenced executed `python`/`bash` block",
-            "adjacent `**Output:**` plus fenced `output`",
-            "following `PASS`/`FAIL`/`INCONCLUSIVE` verdict",
-            "replace `BODY.md` in its `writer_command`",
-            "The writer serializes YAML and validates before canonical acceptance.",
-            "Use `skeleton_command` only as read-only preview context",
-            "do not hand-author or reflow frontmatter",
-            "keep command transcripts, hashes, oracle details, prose-only evidence, and `gpd_return` out of YAML",
-            "Read the runtime-projected `{GPD_AGENTS_DIR}/gpd-verifier.md` and schema refs for verifier policy",
-            "not for wrapper-side schema recreation",
-            "do not route to gaps unless a schema-valid gap report exists",
+            "verification_report_finalizer_bridge",
+            "bridge-valid body-only evidence",
+            "skeleton bridge only for conservative gap reports",
+            "gpd verification-report finalize",
+            "Do not hand-author frontmatter",
+            "do not wrapper-repair the canonical report",
+            "route to gaps",
         )
 
         assert skill.source_kind == "command"
+        assert "Stage id: `session_router`." in skill.content
+        assert_prompt_contracts(
+            skill.content,
+            *semantic_concept(
+                "verify-work session router defers reference bundle assumptions",
+                required=("do not assume", "reference ledgers", "bundles", "report schemas"),
+            ),
+        )
         for fragment in durable_fragments:
-            assert fragment in skill.content
+            assert fragment not in skill.content
+            assert fragment in inventory_stage
+        assert_prompt_contracts(
+            inventory_stage,
+            *semantic_concept(
+                "fallback report YAML isolation",
+                required=(
+                    "Verification-report YAML",
+                    "skeleton/finalizer helpers",
+                    "transcripts",
+                    "hashes",
+                    "oracle details",
+                    "prose-only evidence",
+                    "gpd_return",
+                    "out of YAML",
+                ),
+            ),
+        )
+        assert_prompt_contracts(
+            skill.content,
+            *semantic_concept(
+                "fallback report YAML isolation stays deferred",
+                forbidden=("Verification-report YAML", "skeleton/finalizer helpers", "prose-only evidence"),
+            ),
+        )
 
     def test_project_researcher_system_prompt_keeps_one_shot_checkpoint_contract_visible(self) -> None:
         agent = registry.get_skill("gpd-project-researcher")
 
         assert agent.source_kind == "agent"
         assert agent.path.endswith("gpd-project-researcher.md")
-        assert "Checkpoint after the initial survey with scope confirmation." in agent.content
-        assert "gpd_return:" in agent.content
-        assert (
-            "# Base fields (`status`, `files_written`, `issues`, `next_actions`) follow agent-infrastructure.md."
-            in agent.content
+        assert_prompt_contracts(
+            agent.content,
+            *semantic_concept(
+                "project researcher checkpoint handoff",
+                required=("checkpoint", "initial survey", "scope confirmation"),
+                forbidden=("wait for confirmation", "pause here for approval", "ask the user then continue"),
+            ),
         )
+        assert "gpd_return:" in agent.content
+        assert "status: completed" in agent.content
+        assert "files_written:" in agent.content
+        assert "issues: []" in agent.content
+        assert "next_actions:" in agent.content
         assert "commit_authority: orchestrator" in agent.content
         assert "Authority: use the frontmatter-derived Agent Requirements block" not in agent.content
         assert "## Agent Requirements" in agent.content
-        assert "wait for confirmation" not in agent.content
-        assert "pause here for approval" not in agent.content
-        assert "ask the user then continue" not in agent.content
 
     def test_plan_checker_registry_surface_keeps_direct_plan_contract_schema_and_checkpoint_contract_visible(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -2169,12 +2342,17 @@ class TestRegistryPromptIncludeInlining:
         assert skill.source_kind == "agent"
         assert skill.path.endswith("gpd-plan-checker.md")
         assert "{GPD_INSTALL_DIR}/templates/plan-contract-schema.md" in skill.content
-        assert (
-            "This is a one-shot handoff. If user input is needed, return `status: checkpoint`; do not wait inside the same run."
-            in skill.content
+        assert "{GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md" in skill.content
+        assert_prompt_contracts(
+            skill.content,
+            *semantic_concept(
+                "plan checker continuation boundary handoff",
+                required=("one-shot handoff", "user input", "typed checkpoint", "stop"),
+            ),
         )
-        assert "approved_plans: [list of plan IDs that passed]" in skill.content
-        assert "blocked_plans: [list of plan IDs needing revision or escalation]" in skill.content
+        assert "approved_plans:" in skill.content
+        assert '    - "04-01"' in skill.content
+        assert "blocked_plans: []" in skill.content
 
     def test_write_paper_command_surface_uses_staged_loading_for_contract_schemas(self) -> None:
         command = registry.get_command("gpd:write-paper")
@@ -2183,22 +2361,16 @@ class TestRegistryPromptIncludeInlining:
         assert "Paper Config Schema" not in command.content
         assert "Review Ledger Schema" not in command.content
         assert "Referee Decision Schema" not in command.content
-        assert (
-            "templates/paper/paper-config-schema.md"
-            in command.staged_loading.stage("outline_and_scaffold").loaded_authorities
+        outline = command.staged_loading.stage("outline_and_scaffold")
+        outline_conditionals = tuple(
+            authority for conditional in outline.conditional_authorities for authority in conditional.authorities
         )
-        assert (
-            "references/publication/peer-review-panel.md"
-            in command.staged_loading.stage("publication_review").loaded_authorities
-        )
-        assert (
-            "templates/paper/review-ledger-schema.md"
-            in command.staged_loading.stage("publication_review").loaded_authorities
-        )
-        assert (
-            "templates/paper/referee-decision-schema.md"
-            in command.staged_loading.stage("publication_review").loaded_authorities
-        )
+        assert "templates/paper/paper-config-schema.md" in outline_conditionals
+        publication_review = command.staged_loading.stage("publication_review")
+        assert "references/publication/publication-review-round-artifacts.md" in publication_review.loaded_authorities
+        assert "references/publication/peer-review-panel.md" in publication_review.must_not_eager_load
+        assert "templates/paper/review-ledger-schema.md" in publication_review.must_not_eager_load
+        assert "templates/paper/referee-decision-schema.md" in publication_review.must_not_eager_load
 
     def test_write_paper_registry_surface_exposes_bounded_external_authoring_lane(self) -> None:
         command = registry.get_command("gpd:write-paper")
@@ -2457,7 +2629,13 @@ class TestRegistryPromptIncludeInlining:
             ),
         )
         assert "Proof-redteam" in skill.content
-        assert "Manuscript review on demand only" in skill.content
+        assert_prompt_contracts(
+            skill.content,
+            *semantic_concept(
+                "check-proof manuscript review loading",
+                required=("manuscript review", "on demand"),
+            ),
+        )
 
     def test_paper_writer_registry_surface_preserves_lightweight_path_mentions(self) -> None:
         skill = registry.get_skill("gpd-paper-writer")
@@ -2808,8 +2986,21 @@ class TestPublicAPI:
 
         assert cmd.staged_loading is not None
         assert cmd.staged_loading.workflow_id == "new-project"
-        assert cmd.staged_loading.stage_ids() == ("scope_intake", "scope_approval", "post_scope")
-        assert cmd.staged_loading.stages[0].loaded_authorities == ("workflows/new-project.md",)
+        assert cmd.staged_loading.stage_ids() == (
+            "scope_intake",
+            "scope_approval",
+            "minimal_artifacts",
+            "workflow_preferences",
+            "project_artifacts",
+            "literature_survey",
+            "requirements_authoring",
+            "roadmap_authoring",
+            "conventions_handoff",
+            "completion",
+        )
+        assert cmd.staged_loading.stages[0].loaded_authorities == ("workflows/new-project/scope-intake.md",)
+        assert "researcher_model" not in cmd.staged_loading.stages[0].required_init_fields
+        assert "synthesizer_model" not in cmd.staged_loading.stages[0].required_init_fields
         assert "project_contract_gate" in cmd.staged_loading.stages[0].required_init_fields
         assert "project_contract_load_info" in cmd.staged_loading.stages[0].required_init_fields
         assert cmd.staged_loading.stages[0].produced_state == (
@@ -2830,14 +3021,17 @@ class TestPublicAPI:
             "project contract is ready for persistence",
         )
         assert cmd.staged_loading.stages[2].produced_state == (
-            "project artifacts",
-            "workflow preferences",
-            "downstream stage handoff",
+            "minimal project artifacts",
+            "approved project contract reflected in state",
         )
         assert cmd.staged_loading.stages[2].checkpoints == (
-            "approval gate has passed",
-            "stage-aware deferred reads are now allowed",
+            "approved scope is persisted",
+            "minimal artifact set is ready",
         )
+        assert cmd.staged_loading.stage("roadmap_authoring").loaded_authorities == (
+            "workflows/new-project/roadmap-authoring.md",
+        )
+        assert cmd.staged_loading.stage("completion").next_stages == ()
 
     def test_get_command_new_project_surfaces_spawn_contract_inventory(self) -> None:
         registry.invalidate_cache()
@@ -2902,9 +3096,15 @@ class TestPublicAPI:
 
         command = registry.get_command("gpd:new-milestone")
 
-        assert "gpd-roadmapper spawned with staged continuation context" in command.content
-        assert "gpd-roadmapper" in command.content
-        assert "roadmapper" in command.content
+        assert command.staged_loading is not None
+        assert command.staged_loading.stages[0].loaded_authorities[0] == (
+            "workflows/new-milestone/milestone-bootstrap.md"
+        )
+        assert "gpd-roadmapper spawned with staged continuation context" not in command.content
+        assert any(
+            contract.get("expected_artifacts") == ["GPD/ROADMAP.md", "GPD/REQUIREMENTS.md"]
+            for contract in command.spawn_contracts
+        )
 
     def test_get_command_new_milestone_surfaces_staged_loading_manifest(
         self,
@@ -2970,9 +3170,15 @@ class TestPublicAPI:
 
         assert synthesizer.source_kind == "agent"
         assert synthesizer.path.endswith("gpd-research-synthesizer.md")
-        assert "This agent writes only `GPD/literature/SUMMARY.md`;" in synthesizer.content
-        assert "files_written` must list only files actually written in this run." in synthesizer.content
-        assert "Use only status names: `completed` | `checkpoint` | `blocked` | `failed`." in synthesizer.content
+        assert "`files-written-freshness`" in synthesizer.content
+        assert (
+            "Use the synthesizer profile (`gpd return skeleton --role synthesizer --status <status>`)"
+            in synthesizer.content
+        )
+        assert (
+            "record `GPD/literature/SUMMARY.md` as the sole written artifact when this run creates or updates it"
+            in synthesizer.content
+        )
         assert "gpd_return:" in synthesizer.content
 
         assert new_project.spawn_contracts == new_project_command.spawn_contracts
@@ -3089,13 +3295,22 @@ class TestPublicAPI:
             "interactive_validation",
             "gap_repair",
         )
-        assert cmd.staged_loading.stages[0].loaded_authorities == ("workflows/verify-work.md",)
-        assert cmd.staged_loading.stages[2].loaded_authorities == (
-            "workflows/verify-work.md",
-            "references/verification/meta/verification-independence.md",
+        assert cmd.staged_loading.stages[0].loaded_authorities == ("workflows/verify-work/session-router.md",)
+        assert cmd.staged_loading.stages[1].loaded_authorities == (
+            "workflows/verify-work/phase-bootstrap.md",
+            "references/verification/core/proof-redteam-workflow-gate.md",
         )
-        assert cmd.staged_loading.stages[2].next_stages == ("interactive_validation",)
-        assert cmd.staged_loading.stages[2].checkpoints == (
+        inventory_build = cmd.staged_loading.stages[2]
+        assert inventory_build.loaded_authorities == ("workflows/verify-work/inventory-build.md",)
+        assert [entry.to_payload() for entry in inventory_build.conditional_authorities] == [
+            {
+                "when": "full_independence_policy_check",
+                "authorities": ["references/verification/meta/verification-independence.md"],
+            },
+        ]
+        assert "references/verification/meta/verification-independence.md" in inventory_build.must_not_eager_load
+        assert inventory_build.next_stages == ("interactive_validation",)
+        assert inventory_build.checkpoints == (
             "verifier delegation completed",
             "handoff remains fail-closed",
             "anchor obligations explicit",
@@ -3110,27 +3325,50 @@ class TestPublicAPI:
             "shell",
             "task",
         )
-        assert cmd.staged_loading.stages[3].loaded_authorities == (
-            "workflows/verify-work.md",
-            "templates/research-verification.md",
-            "templates/verification-report.md",
-            "templates/contract-results-schema.md",
-            "references/shared/canonical-schema-discipline.md",
+        assert cmd.staged_loading.stages[3].loaded_authorities == ("workflows/verify-work/interactive-validation.md",)
+        assert tuple(entry.to_payload() for entry in cmd.staged_loading.stages[3].conditional_authorities) == (
+            {
+                "when": "session_overlay_write_or_repair",
+                "authorities": [
+                    "templates/research-verification.md",
+                    "templates/verification-report.md",
+                    "templates/contract-results-schema.md",
+                    "references/shared/canonical-schema-discipline.md",
+                ],
+            },
+            {
+                "when": "custom_verifier_continuation",
+                "authorities": [
+                    "templates/verification-report.md",
+                    "templates/contract-results-schema.md",
+                    "references/shared/canonical-schema-discipline.md",
+                ],
+            },
         )
         assert cmd.staged_loading.stages[3].writes_allowed == ("GPD/phases/XX-name/XX-VERIFICATION.md",)
         assert cmd.staged_loading.stages[3].next_stages == ("gap_repair",)
         assert cmd.staged_loading.stages[3].checkpoints == (
             "verification file can be written",
-            "writer-stage schema is visible",
+            "writer-stage schema deferral barrier is visible",
             "check results remain contract-backed",
         )
-        assert cmd.staged_loading.stages[4].loaded_authorities == (
-            "workflows/verify-work.md",
-            "templates/research-verification.md",
-            "templates/verification-report.md",
-            "templates/contract-results-schema.md",
-            "references/shared/canonical-schema-discipline.md",
-            "references/protocols/error-propagation-protocol.md",
+        assert cmd.staged_loading.stages[4].loaded_authorities == ("workflows/verify-work/gap-repair.md",)
+        assert tuple(entry.to_payload() for entry in cmd.staged_loading.stages[4].conditional_authorities) == (
+            {
+                "when": "gap_report_write_or_schema_repair",
+                "authorities": [
+                    "templates/research-verification.md",
+                    "templates/verification-report.md",
+                    "templates/contract-results-schema.md",
+                    "references/shared/canonical-schema-discipline.md",
+                ],
+            },
+            {
+                "when": "error_propagation_gap",
+                "authorities": [
+                    "references/protocols/error-propagation-protocol.md",
+                ],
+            },
         )
         assert cmd.staged_loading.stages[4].writes_allowed == ("GPD/phases/XX-name/XX-VERIFICATION.md",)
         assert cmd.staged_loading.stages[4].next_stages == ()
@@ -3217,17 +3455,21 @@ class TestPublicAPI:
         assert cmd.staged_loading.workflow_id == "research-phase"
         assert cmd.staged_loading.stage_ids() == ("phase_bootstrap", "research_handoff")
         assert cmd.staged_loading.stages[0].loaded_authorities == (
-            "workflows/research-phase.md",
+            "workflows/research-phase/phase-bootstrap.md",
             "references/orchestration/model-profile-resolution.md",
         )
+        assert "workflows/research-phase.md" in cmd.staged_loading.stages[0].must_not_eager_load
+        assert "workflows/research-phase/research-handoff.md" in cmd.staged_loading.stages[0].must_not_eager_load
         assert "references/orchestration/runtime-delegation-note.md" in cmd.staged_loading.stages[0].must_not_eager_load
         assert cmd.staged_loading.stages[1].loaded_authorities == (
-            "workflows/research-phase.md",
+            "workflows/research-phase/research-handoff.md",
             "references/orchestration/model-profile-resolution.md",
             "references/orchestration/runtime-delegation-note.md",
         )
         assert cmd.staged_loading.stages[1].writes_allowed == ("GPD/phases/XX-name/XX-RESEARCH.md",)
-        assert "reference_artifacts_content" in cmd.staged_loading.stages[1].required_init_fields
+        assert "reference_artifact_files" in cmd.staged_loading.stages[1].required_init_fields
+        assert "active_references" in cmd.staged_loading.stages[1].required_init_fields
+        assert "reference_artifacts_content" not in cmd.staged_loading.stages[1].required_init_fields
 
     def test_get_agent_phase_researcher_surfaces_one_shot_handoff_contract(self) -> None:
         agent = registry.get_agent("gpd-phase-researcher")
@@ -3238,10 +3480,10 @@ class TestPublicAPI:
         assert "## RESEARCH COMPLETE" in agent.system_prompt
         assert "## RESEARCH BLOCKED" in agent.system_prompt
         assert "gpd_return:" in agent.system_prompt
-        assert (
-            "# Base fields (`status`, `files_written`, `issues`, `next_actions`) follow agent-infrastructure.md."
-            in agent.system_prompt
-        )
+        assert "status: completed" in agent.system_prompt
+        assert "files_written:" in agent.system_prompt
+        assert "issues: []" in agent.system_prompt
+        assert "next_actions:" in agent.system_prompt
         assert "RESEARCH.md" in agent.system_prompt
 
     def test_registry_cache_invalidation_clears_new_project_stage_manifest(self) -> None:
@@ -3626,13 +3868,27 @@ def test_executor_skill_defers_completion_only_materials_until_summary_creation(
 
 def test_planner_skill_defers_late_planning_materials_into_on_demand_references() -> None:
     skill = registry.get_skill("gpd-planner")
-    bootstrap, separator, _ = skill.content.partition("On-demand references:")
+    bootstrap, separator, on_demand = skill.content.partition("On-demand references:")
 
     assert skill.name == "gpd-planner"
     assert skill.source_kind == "agent"
     assert separator == "On-demand references:"
-    assert "Phase Plan Prompt" in bootstrap
-    assert "PLAN Contract Schema" in bootstrap
+    assert "{GPD_INSTALL_DIR}/templates/phase-prompt.md" in bootstrap
+    assert "{GPD_INSTALL_DIR}/templates/plan-contract-schema.md" in bootstrap
+    assert_prompt_contracts(
+        bootstrap,
+        *semantic_concept(
+            "planner deferred schema loading",
+            required=("file_read", "load", "schema", "memory"),
+        ),
+    )
+    assert "Phase Plan Prompt Template" not in bootstrap
+    assert "PLAN Contract Schema" not in bootstrap
+    assert "Notation and Convention Tracking" not in bootstrap
+    assert "Approximation Schemes and Validity" not in bootstrap
+    assert "{GPD_INSTALL_DIR}/templates/phase-prompt.md" in on_demand
+    assert "{GPD_INSTALL_DIR}/references/planning/planner-conventions.md" in on_demand
+    assert "{GPD_INSTALL_DIR}/references/planning/planner-approximations.md" in on_demand
     assert "Read config.json for planning behavior settings." not in bootstrap
     assert "## Summary Template" not in bootstrap
     assert "Order-of-Limits Awareness" not in bootstrap

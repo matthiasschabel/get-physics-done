@@ -32,6 +32,7 @@ from gpd.core.constants import (
 from gpd.core.health import _ALL_CHECKS
 from gpd.core.patterns import PatternDomain
 from gpd.registry import VALID_CONTEXT_MODES, _parse_frontmatter
+from tests.workflow_authority_support import workflow_authority_text
 
 
 def _repo_root() -> Path:
@@ -40,6 +41,10 @@ def _repo_root() -> Path:
 
 def _read(relative_path: str) -> str:
     return (_repo_root() / relative_path).read_text(encoding="utf-8")
+
+
+def _workflow_authority(name: str) -> str:
+    return workflow_authority_text(_repo_root() / "src/gpd/specs/workflows", name)
 
 
 def _decorated_mcp_tools(relative_path: str) -> list[str]:
@@ -213,17 +218,22 @@ def test_python_floor_is_consistent_across_install_surfaces() -> None:
 
     readme = _read("README.md")
     installer = _read("bin/install.js")
-    installer_preferred_minors = _installer_preferred_python_minors(installer)
+    installer_metadata = json.loads(_read("src/gpd/bootstrap/installer_metadata.json"))
+    python_compatibility = installer_metadata["python_compatibility"]
+    installer_floor = python_compatibility["minimum_supported_python"]
+    installer_recommended = python_compatibility["recommended_python_version"]
+    installer_preferred_minors = tuple(python_compatibility["preferred_versioned_python_minors"])
 
     assert f"Python {MIN_SUPPORTED_PYTHON_LABEL}+" in readme
     assert CORE_RECOMMENDED_PYTHON_VERSION == RECOMMENDED_PYTHON_VERSION
-    assert _installer_js_int_constant(installer, "MIN_SUPPORTED_PYTHON_MAJOR") == MIN_SUPPORTED_PYTHON[0]
-    assert _installer_js_int_constant(installer, "MIN_SUPPORTED_PYTHON_MINOR") == MIN_SUPPORTED_PYTHON[1]
+    assert installer_floor == {"major": MIN_SUPPORTED_PYTHON[0], "minor": MIN_SUPPORTED_PYTHON[1]}
+    assert python_compatibility["minimum_supported_python_label"] == MIN_SUPPORTED_PYTHON_LABEL
     assert installer_preferred_minors == PREFERRED_VERSIONED_PYTHON_MINORS
-    assert installer_preferred_minors[0] == RECOMMENDED_PYTHON_VERSION[1]
+    assert installer_recommended == {"major": RECOMMENDED_PYTHON_VERSION[0], "minor": RECOMMENDED_PYTHON_VERSION[1]}
     assert MIN_SUPPORTED_PYTHON[1] in installer_preferred_minors
     assert "Python 3.11+ is required" not in installer
     assert "Python ${MIN_SUPPORTED_PYTHON_LABEL} is required" in installer
+    assert "BOOTSTRAP_INSTALLER_METADATA.pythonCompatibility" in installer
     assert "preferredPythonCommands" in installer
 
 
@@ -231,13 +241,12 @@ def test_public_package_keywords_do_not_hand_maintain_runtime_names() -> None:
     project = tomllib.loads(_read("pyproject.toml"))["project"]
     package_json = json.loads(_read("package.json"))
     runtime_keyword_forms = _runtime_metadata_keyword_forms()
+    metadata_keywords = _metadata_keywords(project, package_json)
 
-    for source, keywords in _metadata_keywords(project, package_json).items():
-        leaked = sorted(
-            keyword
-            for keyword in keywords
-            if _metadata_keyword_forms(keyword) & runtime_keyword_forms
-        )
+    assert metadata_keywords["package.json"] == metadata_keywords["pyproject.toml"]
+
+    for source, keywords in metadata_keywords.items():
+        leaked = sorted(keyword for keyword in keywords if _metadata_keyword_forms(keyword) & runtime_keyword_forms)
         assert leaked == [], f"{source} should not hand-maintain runtime catalog names in package keywords"
 
 
@@ -485,22 +494,22 @@ def test_settings_workflow_documents_runtime_native_model_override_guidance() ->
 def test_branching_strategy_docs_use_canonical_config_literals() -> None:
     settings = _read("src/gpd/specs/workflows/settings.md")
     planning = _read("src/gpd/specs/references/planning/planning-config.md")
-    execute_phase = _read("src/gpd/specs/workflows/execute-phase.md")
+    execute_phase = _workflow_authority("execute-phase")
     complete_milestone = _read("src/gpd/specs/workflows/complete-milestone.md")
 
     assert '"branching_strategy": "none" | "per-phase" | "per-milestone"' in settings
     assert 'Git branching approach: `"none"`, `"per-phase"`, or `"per-milestone"`' in planning
-    assert '| `per-phase`     | At `execute-phase` start' in planning
-    assert '| `per-milestone` | At first `execute-phase` of milestone' in planning
-    assert '**"per-phase" or "per-milestone":** Use pre-computed `branch_name` from init:' in execute_phase
+    assert "| `per-phase`     | At `execute-phase` start" in planning
+    assert "| `per-milestone` | At first `execute-phase` of milestone" in planning
+    assert "`per-phase` or `per-milestone`: use precomputed `branch_name`" in execute_phase
     assert '**For "per-phase" strategy:**' in complete_milestone
     assert '**For "per-milestone" strategy:**' in complete_milestone
     assert 'if [ "$BRANCHING_STRATEGY" = "per-phase" ]; then' in complete_milestone
     assert 'if [ "$BRANCHING_STRATEGY" = "per-milestone" ]; then' in complete_milestone
     assert '"branching_strategy": "none" | "phase" | "milestone"' not in settings
     assert 'Git branching approach: `"none"`, `"phase"`, or `"milestone"`' not in planning
-    assert '| `phase`     | At `execute-phase` start' not in planning
-    assert '| `milestone` | At first `execute-phase` of milestone' not in planning
+    assert "| `phase`     | At `execute-phase` start" not in planning
+    assert "| `milestone` | At first `execute-phase` of milestone" not in planning
 
 
 def test_help_and_settings_surface_current_commit_docs_and_review_cadence_shapes() -> None:
@@ -516,9 +525,10 @@ def test_help_and_settings_surface_current_commit_docs_and_review_cadence_shapes
 
 def test_execute_phase_docs_use_review_cadence_not_removed_verify_between_waves_knob() -> None:
     execute_command = _read("src/gpd/commands/execute-phase.md")
-    execute_workflow = _read("src/gpd/specs/workflows/execute-phase.md")
+    execute_workflow = _workflow_authority("execute-phase")
 
-    assert "@{GPD_INSTALL_DIR}/workflows/execute-phase.md" in execute_command
+    assert "@{GPD_INSTALL_DIR}/workflows/execute-phase/phase-bootstrap.md" in execute_command
+    assert "@{GPD_INSTALL_DIR}/workflows/execute-phase.md" not in execute_command
     assert "execution.review_cadence" not in execute_command
     assert "dense" not in execute_command
     assert "adaptive" not in execute_command
@@ -583,19 +593,26 @@ def test_update_workflow_uses_runtime_placeholders_for_cache_paths() -> None:
 
 
 def test_referee_response_round_suffix_convention_is_consistent() -> None:
-    write_paper = _read("src/gpd/specs/workflows/write-paper.md")
-    peer_review = _read("src/gpd/specs/workflows/peer-review.md")
+    write_paper = _workflow_authority("write-paper")
+    peer_review = _workflow_authority("peer-review")
     respond_command = _read("src/gpd/commands/respond-to-referees.md")
     referee = _read("src/gpd/agents/gpd-referee.md")
-    respond = _read("src/gpd/specs/workflows/respond-to-referees.md")
-    arxiv = _read("src/gpd/specs/workflows/arxiv-submission.md")
+    respond = _workflow_authority("respond-to-referees")
+    arxiv = _workflow_authority("arxiv-submission")
     reliability = _read("src/gpd/specs/references/publication/peer-review-reliability.md")
+    response_artifacts = _read("src/gpd/specs/references/publication/publication-response-artifacts.md")
+    response_handoff = _read("src/gpd/specs/references/publication/publication-response-writer-handoff.md")
     author_response = _read("src/gpd/specs/templates/paper/author-response.md")
     template = _read("src/gpd/specs/templates/paper/referee-response.md")
 
-    assert 'ROUND_SUFFIX="-R${ROUND}"' in peer_review
-    assert '`GPD/review/REFEREE_RESPONSE{round_suffix}.md`' in respond
-    assert '`GPD/AUTHOR-RESPONSE{round_suffix}.md`' in respond
+    assert "round_suffix" in peer_review
+    assert "${REVIEW_ROOT}/REFEREE_RESPONSE{round_suffix}.md" in peer_review
+    assert "${selected_review_root}/REFEREE_RESPONSE{round_suffix}.md" in response_artifacts
+    assert "${selected_publication_root}/AUTHOR-RESPONSE{round_suffix}.md" in response_artifacts
+    assert "`GPD/review/REFEREE_RESPONSE{round_suffix}.md`" in response_handoff
+    assert "`GPD/AUTHOR-RESPONSE{round_suffix}.md`" in response_handoff
+    assert re.search(r"RESPONSE_REFEREE_PATH=.*REFEREE_RESPONSE\$\{ROUND_SUFFIX\}\.md", respond)
+    assert re.search(r"RESPONSE_AUTHOR_PATH=.*AUTHOR-RESPONSE\$\{ROUND_SUFFIX\}\.md", respond)
     assert "context_mode: project-aware" in respond_command
     assert "command-policy:" in respond_command
     assert "explicit_input_kinds:" in respond_command
@@ -609,7 +626,10 @@ def test_referee_response_round_suffix_convention_is_consistent() -> None:
     assert "REFEREE_RESPONSE_R2.md" not in respond
     assert "REFEREE_RESPONSE_R2.md" not in template
     assert "paper/referee-reports" not in respond
-    assert "Do not write `AUTHOR-RESPONSE*` or `REFEREE_RESPONSE*` beside `${PAPER_DIR}` or beside the imported report source." in respond
+    assert re.search(
+        r"Do not write\s+`AUTHOR-RESPONSE\*` or `REFEREE_RESPONSE\*` beside `\$\{PAPER_DIR\}` or an imported\s+report source",
+        respond,
+    )
     for content in (peer_review, referee):
         assert "ls GPD/REFEREE-REPORT*.md 2>/dev/null" not in content
         assert "ls GPD/AUTHOR-RESPONSE*.md 2>/dev/null" not in content
@@ -617,8 +637,8 @@ def test_referee_response_round_suffix_convention_is_consistent() -> None:
     assert "ls GPD/review/REFEREE_RESPONSE*.md 2>/dev/null" not in respond
     assert "ls GPD/review/REVIEW-LEDGER*.json 2>/dev/null" not in respond
     assert "ls GPD/review/REFEREE-DECISION*.json 2>/dev/null" not in respond
-    assert "GPD/AUTHOR-RESPONSE{ROUND_SUFFIX}.md" in peer_review
-    assert "${REVIEW_ROOT}/REFEREE_RESPONSE{ROUND_SUFFIX}.md" in peer_review
+    assert re.search(r"\$\{PUBLICATION_ROOT\}/AUTHOR-RESPONSE\{round_suffix\}\.md", peer_review)
+    assert re.search(r"\$\{REVIEW_ROOT\}/REFEREE_RESPONSE\{round_suffix\}\.md", peer_review)
     assert "matching paired response package exists for the same round" in referee
     assert re.search(
         r"If one response artifact is missing[\s\S]{0,140}stop fail-closed and report the incomplete response package",

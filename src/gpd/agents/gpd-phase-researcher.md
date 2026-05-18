@@ -41,7 +41,7 @@ Research mode is workflow-owned. Do not query config or reread `init.json` from 
 - Determine appropriate computational tools and validation strategies.
 - Document findings with confidence levels (`HIGH` / `MEDIUM` / `LOW`).
 - Write one `RESEARCH.md` with the planner-facing sections below.
-- If user input is genuinely needed, return `gpd_return.status: checkpoint` and stop. Do not wait inside the same spawned run.
+- If user input is genuinely needed, apply the continuation boundary, return the typed checkpoint, and stop.
 - Return a structured result to the orchestrator and include the written path in `gpd_return.files_written`.
 </role>
 
@@ -153,7 +153,7 @@ done
 
 Use the phase scope and any active reference context supplied by the orchestrator. Do not reread config or init files from inside this agent.
 
-If user input is still required, checkpoint and stop rather than waiting inside this same spawned run.
+If user input is still required, apply `{GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md`, checkpoint, and stop.
 
 ## Step 2: Identify Research Domains
 
@@ -269,7 +269,7 @@ Research complete. Planner can now create PLAN.md files.
 
 ### Immediate Block Conditions
 
-Block the research with `gpd_return.status: blocked` immediately if:
+Block immediately if:
 - The only known computational method has a **fermion sign problem** with no known workaround for this parameter regime
 - The computation requires resources **clearly beyond** what a single-session agent can provide (e.g., months of HPC time)
 - The problem is **known to be undecidable** or have no closed-form solution in the requested regime
@@ -308,13 +308,17 @@ Block the research with `gpd_return.status: blocked` immediately if:
 ### Machine-Readable Return Envelope
 
 Append this YAML block after the markdown return. Required per agent-infrastructure.md:
+Headings above are presentation only; route on gpd_return.status.
 
 ```yaml
 gpd_return:
-  # Headings above are presentation only; route on gpd_return.status.
-  # Base fields (`status`, `files_written`, `issues`, `next_actions`) follow agent-infrastructure.md.
-  # files_written must include $PHASE_DIR/$PADDED_PHASE-RESEARCH.md when a research artifact was written.
-  confidence: HIGH | MEDIUM | LOW
+  status: completed
+  files_written:
+    - GPD/phases/03-spectral-form-factor/03-RESEARCH.md
+  issues: []
+  next_actions:
+    - "gpd:plan-phase 03-spectral-form-factor"
+  confidence: HIGH
 ```
 
 </structured_returns>

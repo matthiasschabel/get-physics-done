@@ -8,24 +8,39 @@
       "project_root",
       "project_root_source",
       "project_root_auto_selected",
-      "commit_docs",
-      "autonomy",
       "research_mode",
       "map_focus",
       "map_focus_provided",
-      "parallelization",
       "research_map_dir",
       "research_map_dir_absolute",
       "existing_maps",
       "has_maps",
       "planning_exists",
       "research_map_dir_exists",
-      "platform",
       "project_contract",
       "project_contract_gate",
       "project_contract_load_info",
       "project_contract_validation"
     ]
+  },
+  "authority_groups": {
+    "mapper_shared_deferred": [
+      "references/shared/shared-protocols.md",
+      "references/orchestration/agent-infrastructure.md",
+      "references/physics-subfields.md"
+    ]
+  },
+  "stage_defaults": {
+    "allowed_tools": [
+      "ask_user",
+      "file_read",
+      "file_write",
+      "find_files",
+      "search_files",
+      "shell",
+      "task"
+    ],
+    "conditional_authorities": []
   },
   "stages": [
     {
@@ -33,29 +48,21 @@
       "order": 1,
       "purpose": "existing-map routing, bootstrap context, and mapping mode selection",
       "mode_paths": [
-        "workflows/map-research.md"
+        "workflows/map-research/map-bootstrap.md"
       ],
       "required_init_field_groups": [
         "map_bootstrap_context"
       ],
       "loaded_authorities": [
-        "workflows/map-research.md"
+        "workflows/map-research/map-bootstrap.md"
       ],
-      "conditional_authorities": [],
       "must_not_eager_load": [
-        "references/shared/shared-protocols.md",
-        "references/orchestration/agent-infrastructure.md",
-        "references/physics-subfields.md",
+        "workflows/map-research.md",
+        "workflows/map-research/mapper-authoring.md",
         "references/orchestration/runtime-delegation-note.md"
       ],
-      "allowed_tools": [
-        "ask_user",
-        "file_read",
-        "file_write",
-        "find_files",
-        "search_files",
-        "shell",
-        "task"
+      "must_not_eager_load_groups": [
+        "mapper_shared_deferred"
       ],
       "writes_allowed": [
         "GPD/research-map",
@@ -80,7 +87,7 @@
       "order": 2,
       "purpose": "assemble mapper prompts, load contract/reference context, and gate the mapped artifacts",
       "mode_paths": [
-        "workflows/map-research.md"
+        "workflows/map-research/mapper-authoring.md"
       ],
       "required_init_field_groups": [
         "map_bootstrap_context"
@@ -88,56 +95,21 @@
       "required_init_fields": [
         "contract_intake",
         "effective_reference_intake",
-        "active_reference_context",
         "reference_artifact_files",
-        "reference_artifacts_content",
-        "literature_review_files",
-        "literature_review_count",
-        "research_map_reference_files",
-        "research_map_reference_count",
-        "knowledge_doc_files",
-        "knowledge_doc_count",
-        "stable_knowledge_doc_files",
-        "stable_knowledge_doc_count",
-        "knowledge_doc_status_counts",
-        "derived_active_references",
-        "derived_active_reference_count",
-        "derived_knowledge_docs",
-        "derived_knowledge_doc_count",
-        "knowledge_doc_warnings",
-        "citation_source_files",
-        "citation_source_count",
-        "citation_source_warnings",
-        "derived_citation_sources",
-        "derived_citation_source_count",
-        "derived_manuscript_reference_status",
-        "derived_manuscript_reference_status_count",
-        "derived_manuscript_proof_review_status",
         "selected_protocol_bundle_ids",
-        "protocol_bundle_count",
+        "protocol_bundle_load_manifest",
         "protocol_bundle_verifier_extensions",
-        "protocol_bundle_context",
-        "active_references",
-        "active_reference_count"
+        "active_references"
       ],
       "loaded_authorities": [
-        "workflows/map-research.md",
+        "workflows/map-research/mapper-authoring.md",
         "references/orchestration/runtime-delegation-note.md"
       ],
-      "conditional_authorities": [],
       "must_not_eager_load": [
-        "references/shared/shared-protocols.md",
-        "references/orchestration/agent-infrastructure.md",
-        "references/physics-subfields.md"
+        "workflows/map-research.md"
       ],
-      "allowed_tools": [
-        "ask_user",
-        "file_read",
-        "file_write",
-        "find_files",
-        "search_files",
-        "shell",
-        "task"
+      "must_not_eager_load_groups": [
+        "mapper_shared_deferred"
       ],
       "writes_allowed": [
         "GPD/research-map/FORMALISM.md",
@@ -154,7 +126,7 @@
       ],
       "next_stages": [],
       "checkpoints": [
-        "contract and reference packs are visible to mapper prompts",
+        "contract and reference handles are visible to mapper prompts",
         "deferred delegation note is active only for spawn",
         "all mapped artifacts are file-backed before completion"
       ]

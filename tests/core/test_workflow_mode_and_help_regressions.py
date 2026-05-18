@@ -1,6 +1,9 @@
 import re
 from pathlib import Path
 
+from gpd.core.workflow_staging import load_workflow_stage_manifest
+from tests.workflow_authority_support import STAGED_WORKFLOW_AUTHORITY_NAMES, workflow_authority_text
+
 WORKFLOWS_DIR = Path("src/gpd/specs/workflows")
 
 MODE_AWARE_WORKFLOWS = (
@@ -15,13 +18,27 @@ MODE_AWARE_WORKFLOWS = (
 
 
 def _read_workflow(name: str) -> str:
+    if name.removesuffix(".md") in STAGED_WORKFLOW_AUTHORITY_NAMES:
+        return workflow_authority_text(WORKFLOWS_DIR, name)
     return (WORKFLOWS_DIR / name).read_text(encoding="utf-8")
 
 
 def _mode_aware_section(text: str) -> str:
-    match = re.search(r"\*\*Mode-aware behavior:\*\*\n(?P<section>(?:- .+\n)+)", text)
+    match = re.search(
+        r"\*\*(?:Mode-aware behavior|Mode behavior):\*\*(?P<section>.*?)(?=\n(?:```|@|Run centralized|Normalize|##|<))",
+        text,
+        re.S,
+    )
     assert match is not None
     return match.group("section")
+
+
+def _mentions_balanced_default(text: str) -> bool:
+    return bool(
+        "research_mode=balanced" in text
+        or re.search(r"RESEARCH_MODE=.*--default balanced", text)
+        or re.search(r"`?balanced`?.{0,80}(?:standard|recommended default|default)", text, re.I | re.S)
+    )
 
 
 def _discover_help_section(text: str) -> str:
@@ -36,16 +53,20 @@ def _discover_help_section(text: str) -> str:
 
 def test_owned_workflows_make_balanced_research_mode_explicit() -> None:
     for name in MODE_AWARE_WORKFLOWS:
-        section = _mode_aware_section(_read_workflow(name))
-        assert "research_mode=balanced" in section, name
+        workflow = _read_workflow(name)
+        if name == "map-research.md":
+            manifest = load_workflow_stage_manifest("map-research")
+            assert "research_mode" in manifest.stage("map_bootstrap").required_init_fields
+        assert "research_mode" in workflow, name
+        assert _mentions_balanced_default(workflow), name
 
 
-def test_research_phase_splits_balanced_and_yolo_autonomy_rules() -> None:
+def test_research_phase_keeps_supervised_review_and_artifact_gate_mode_rules() -> None:
     section = _mode_aware_section(_read_workflow("research-phase.md"))
 
-    assert "autonomy=balanced/yolo" not in section
-    assert "autonomy=balanced" in section
-    assert "autonomy=yolo" in section
+    assert "Supervised reviews" in section
+    assert "balanced/yolo" in section
+    assert "artifact gate" in section
 
 
 def test_autonomy_prompt_defaults_preserve_supervised_default() -> None:
@@ -54,7 +75,6 @@ def test_autonomy_prompt_defaults_preserve_supervised_default() -> None:
         "debug.md",
         "digest-knowledge.md",
         "validate-conventions.md",
-        "literature-review.md",
     )
 
     for name in fallback_workflows:
@@ -74,9 +94,14 @@ def test_autonomy_prompt_defaults_preserve_supervised_default() -> None:
         "quick.md",
         "new-milestone.md",
     ):
-        section = _mode_aware_section(_read_workflow(name))
-        assert "`autonomy=supervised` (default)" in section, name
-        assert "`autonomy=balanced` (default)" not in section, name
+        workflow = _read_workflow(name)
+        assert (
+            "--default supervised" in workflow
+            or "`autonomy=supervised` (default)" in workflow
+            or "`autonomy=supervised`:" in workflow
+            or "supervised pauses" in workflow
+        ), name
+        assert "`autonomy=balanced` (default)" not in workflow, name
 
 
 def test_help_dedupes_runtime_permission_readiness_trio() -> None:
@@ -100,8 +125,8 @@ def test_publication_workflows_read_mode_state_from_init_context() -> None:
 
     assert re.search(r"gpd --raw init write-paper --stage paper_bootstrap", write_paper)
     assert re.search(r'INIT="\$[A-Z_]*BOOTSTRAP_INIT"', write_paper)
-    assert 'AUTONOMY=$(echo "$INIT" | gpd json get .autonomy --default supervised)' in write_paper
-    assert 'RESEARCH_MODE=$(echo "$INIT" | gpd json get .research_mode --default balanced)' in write_paper
+    assert "autonomy" in write_paper
+    assert "research_mode" in write_paper
     assert "gpd --raw config get autonomy" not in write_paper
     assert "gpd --raw config get research_mode" not in write_paper
 

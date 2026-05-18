@@ -18,7 +18,7 @@ gpd config ensure-section
 INIT=$(gpd --raw init progress --include state,config --no-project-reentry)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd initialization failed: $INIT"
-  # STOP — display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 ```
 
@@ -109,7 +109,7 @@ Use the deterministic config helper for all writes. Do not hand-merge `model_ove
 
 The helper preserves other runtime maps, trims surrounding whitespace, treats blank / `runtime default` / `none` as clearing that tier, removes `model_overrides.<active_runtime>` when no tier overrides remain, and preserves runtime-native punctuation/case inside non-empty model strings.
 
-If `gpd --raw config set-tier-models --help` is missing, stop and report that the installed CLI is stale; do not fall back to prompt-authored JSON merging.
+If `gpd --raw config set-tier-models --help` is missing, stop and report that the installed CLI is old; do not fall back to prompt-authored JSON merging.
 
 Do **not** change:
 

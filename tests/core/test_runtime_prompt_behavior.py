@@ -8,6 +8,7 @@ from gpd.adapters import get_adapter
 from gpd.adapters.install_utils import project_markdown_for_runtime
 from gpd.adapters.runtime_catalog import iter_runtime_descriptors
 from gpd.command_labels import validated_public_command_prefix
+from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COMMANDS_DIR = REPO_ROOT / "src/gpd/commands"
@@ -26,7 +27,7 @@ def _read(path: Path) -> str:
 
 
 def _workflow(name: str) -> str:
-    return _read(WORKFLOWS_DIR / f"{name}.md")
+    return workflow_authority_text(WORKFLOWS_DIR, name)
 
 
 def _extract_step(content: str, step_name: str) -> str:
@@ -92,7 +93,7 @@ def test_claude_new_project_wrapper_keeps_post_init_next_step_runtime_native() -
     public_prefix = validated_public_command_prefix(_RUNTIME_WITH_NATIVE_INCLUDE_SUPPORT)
 
     assert f"`{public_prefix}discuss-phase 1`" in projected
-    assert "show native runtime label" in projected
+    assert "show native runtime label" not in projected.casefold()
 
 
 def test_new_project_headless_and_policy_blocks_do_not_auto_approve_or_fabricate() -> None:
@@ -108,7 +109,10 @@ def test_map_research_partial_outputs_block_complete_claims() -> None:
     workflow = _workflow("map-research")
     verify_output = _extract_step(workflow, "verify_output")
     offer_next = _extract_step(workflow, "offer_next")
-    partial_output, complete_output = offer_next.split("**If `MAP_STATUS=complete`, use this output format:**", 1)
+    partial_output, complete_output = offer_next.split(
+        "**If `MAP_STATUS=complete`, summarize the created files and next step:**",
+        1,
+    )
 
     assert "stop before secret scan and commit unless the user explicitly chooses partial mode" in verify_output
     assert "Research project mapping is partial, not complete." in verify_output

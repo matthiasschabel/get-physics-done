@@ -26,9 +26,16 @@ from gpd.adapters.gemini import (
     _render_gemini_shell_allowlist,
     _rewrite_gemini_shell_workflow_guidance,
     _rewrite_gpd_cli_invocations,
+    classify_gemini_shell_fence_body,
 )
-from gpd.adapters.install_utils import build_runtime_cli_bridge_command, hook_python_interpreter
+from gpd.adapters.gemini_shell_patches import classify_gemini_shell_workflow_block
+from gpd.adapters.install_utils import (
+    COMPACT_STAGED_COMMAND_SHIM_SENTINEL,
+    COMPACT_WORKFLOW_COMMAND_SHIM_SENTINEL,
+    hook_python_interpreter,
+)
 from gpd.hooks.install_metadata import assess_install_target
+from tests.adapters.projection_test_utils import assert_compact_staged_command_shim, runtime_bridge_command
 from tests.adapters.review_contract_test_utils import (
     assert_review_contract_prompt_surface,
     compile_review_contract_fixture_for_runtime,
@@ -36,13 +43,7 @@ from tests.adapters.review_contract_test_utils import (
 
 
 def expected_gemini_bridge(target: Path) -> str:
-    return build_runtime_cli_bridge_command(
-        "gemini",
-        target_dir=target,
-        config_dir_name=".gemini",
-        is_global=False,
-        explicit_target=False,
-    )
+    return runtime_bridge_command("gemini", target)
 
 
 def _make_managed_home_python(tmp_path: Path) -> Path:
@@ -52,6 +53,10 @@ def _make_managed_home_python(tmp_path: Path) -> Path:
     managed_python.parent.mkdir(parents=True, exist_ok=True)
     managed_python.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
     return managed_python
+
+
+def _contains_text(text: str, fragment: str) -> bool:
+    return fragment in text
 
 
 def _assert_no_manifestless_gpd_artifacts(target: Path) -> None:
@@ -302,6 +307,22 @@ class TestConvertToGeminiToml:
 
 
 class TestRewriteGeminiShellWorkflowGuidance:
+    def test_classifies_structural_init_capture_without_patch_registry(self) -> None:
+        body = (
+            "BOOTSTRAP=$(gpd --raw init progress --include state,config --no-project-reentry)\n"
+            "if [ $? -ne 0 ]; then\n"
+            '  echo "ERROR: bootstrap failed: $BOOTSTRAP"\n'
+            "  # STOP; surface the error.\n"
+            "fi\n"
+        )
+
+        rewrite = classify_gemini_shell_workflow_block(body)
+
+        assert rewrite.kind == "gpd-capture-status-block"
+        assert rewrite.replacement is not None
+        assert "gpd --raw init progress --include state,config --no-project-reentry" in rewrite.replacement
+        assert "BOOTSTRAP=$(" not in rewrite.replacement
+
     def test_rewrites_set_profile_validation_shell_block_to_non_shell_guidance(self) -> None:
         content = (
             "```bash\n"
@@ -324,10 +345,10 @@ class TestRewriteGeminiShellWorkflowGuidance:
             "```"
         )
 
-        result = _rewrite_gemini_shell_workflow_guidance(content)
+        result = _rewrite_gemini_shell_workflow_guidance(content, command_name="set-profile")
 
         assert "Validate the single profile argument without a shell call" in result
-        assert "PROFILE=\"$(" not in result
+        assert 'PROFILE="$(' not in result
         assert 'case "$PROFILE"' not in result
         assert "```bash" not in result
 
@@ -343,7 +364,7 @@ class TestRewriteGeminiShellWorkflowGuidance:
             "```"
         )
 
-        result = _rewrite_gemini_shell_workflow_guidance(content)
+        result = _rewrite_gemini_shell_workflow_guidance(content, command_name="set-profile")
 
         assert "Run these as separate shell calls in Gemini auto-edit mode." in result
         assert "gpd config ensure-section" in result
@@ -397,9 +418,159 @@ class TestRewriteGeminiShellWorkflowGuidance:
         result = _rewrite_gemini_shell_workflow_guidance(content)
 
         assert "# Gemini: run this command directly." in result
-        assert "gpd pre-commit-check --files GPD/STATE.md 2>&1 || true" in result
+        assert "gpd pre-commit-check --files GPD/STATE.md 2>&1" in result
+        assert "|| true" not in result
         assert "PREVIEW=$(" not in result
         assert "$PREVIEW" not in result
+
+    def test_preserves_captured_gpd_assignment_when_value_is_consumed_later(self) -> None:
+        content = (
+            "```bash\n"
+            "STATE_JSON=$(gpd --raw state snapshot)\n"
+            'STATE_PHASE=$(echo "$STATE_JSON" | gpd json get .current_phase --default "")\n'
+            "ROADMAP=$(gpd --raw roadmap analyze)\n"
+            'echo "$ROADMAP" | gpd json get .phases --default "[]"\n'
+            "```"
+        )
+
+        result = _rewrite_gemini_shell_workflow_guidance(content)
+
+        assert _contains_text(result, "STATE_JSON=$(gpd --raw state snapshot)")
+        assert _contains_text(result, 'echo "$STATE_JSON" | gpd json get .current_phase')
+        assert _contains_text(result, "ROADMAP=$(gpd --raw roadmap analyze)")
+        assert _contains_text(result, 'echo "$ROADMAP" | gpd json get .phases')
+
+    def test_preserves_branch_captured_gpd_assignment_when_value_is_checked_after_branch(self) -> None:
+        content = (
+            "```bash\n"
+            'if [ -n "$ARGUMENTS" ]; then\n'
+            '  BOOTSTRAP_INIT=$(gpd --raw init arxiv-submission --stage bootstrap -- "$ARGUMENTS")\n'
+            "else\n"
+            "  BOOTSTRAP_INIT=$(gpd --raw init arxiv-submission --stage bootstrap)\n"
+            "fi\n"
+            "if [ $? -ne 0 ]; then\n"
+            '  echo "ERROR: arxiv-submission bootstrap init failed: $BOOTSTRAP_INIT"\n'
+            "  exit 1\n"
+            "fi\n"
+            'INIT="$BOOTSTRAP_INIT"\n'
+            "```"
+        )
+
+        result = _rewrite_gemini_shell_workflow_guidance(content)
+
+        assert _contains_text(result, 'BOOTSTRAP_INIT=$(gpd --raw init arxiv-submission --stage bootstrap -- "$ARGUMENTS")')
+        assert _contains_text(result, "BOOTSTRAP_INIT=$(gpd --raw init arxiv-submission --stage bootstrap)")
+        assert _contains_text(result, 'echo "ERROR: arxiv-submission bootstrap init failed: $BOOTSTRAP_INIT"')
+        assert _contains_text(result, 'INIT="$BOOTSTRAP_INIT"')
+
+    def test_structural_contract_file_transport_preserves_mode_approved(self) -> None:
+        content = (
+            "```bash\n"
+            "printf '%s\\n' \"$PROJECT_CONTRACT_JSON\" | gpd --raw validate project-contract - --mode approved\n"
+            "printf '%s\\n' \"$PROJECT_CONTRACT_JSON\" | gpd state set-project-contract -\n"
+            "```"
+        )
+
+        result = _rewrite_gemini_shell_workflow_guidance(content)
+
+        assert f"gpd --raw validate project-contract {_GEMINI_APPROVED_CONTRACT_PATH} --mode approved" in result
+        assert f"gpd state set-project-contract {_GEMINI_APPROVED_CONTRACT_PATH}" in result
+        assert "PROJECT_CONTRACT_JSON" not in result
+        assert "printf '%s\\n'" not in result
+
+    def test_structural_health_tempfile_wrapper_renders_direct_health_commands(self) -> None:
+        content = (
+            "```bash\n"
+            "HEALTH_ERR=$(mktemp)\n"
+            'if echo "$ARGUMENTS" | grep -q "\\-\\-fix"; then\n'
+            '  HEALTH=$(gpd --raw health --fix 2>"$HEALTH_ERR")\n'
+            "  HEALTH_STATUS=$?\n"
+            "else\n"
+            '  HEALTH=$(gpd --raw health 2>"$HEALTH_ERR")\n'
+            "  HEALTH_STATUS=$?\n"
+            "fi\n"
+            'HEALTH_STDERR=$(cat "$HEALTH_ERR")\n'
+            'rm -f "$HEALTH_ERR"\n'
+            "```"
+        )
+
+        result = _rewrite_gemini_shell_workflow_guidance(content)
+
+        assert "gpd --raw health\n" in result
+        assert "gpd --raw health --fix" in result
+        assert "mktemp" not in result
+        assert "HEALTH_ERR=$(" not in result
+
+
+class TestGeminiShellFenceClassification:
+    @pytest.mark.parametrize(
+        ("body", "expected_kind"),
+        (
+            ("gpd status\n", "runnable-bridge"),
+            ("/runtime/gpd-cli status\n", "runnable-bridge"),
+            ('gpd status "$ARGUMENTS"\n', "runnable-bridge"),
+            ("gpd status ${PROFILE}\n", "runnable-bridge"),
+            ("git init\n", "policy-static"),
+            ("test -d GPD\n", "policy-static"),
+            ("git status --porcelain\n", "terminal-example"),
+            ("mkdir -p exports\n", "terminal-example"),
+            ("gpd status || true\n", "pseudocode"),
+            ("VALUE=$(gpd status)\n", "pseudocode"),
+            ("git show {branch}:GPD/STATE.md\n", "pseudocode"),
+            ("mkdir -p GPD/{phase}\n", "pseudocode"),
+            ("mkdir -p GPD/[phase name]\n", "pseudocode"),
+            ("HEALTH_ERR=$(mktemp)\n", "pseudocode"),
+            ("\n# comment only\n", "non-runnable"),
+        ),
+    )
+    def test_classifies_phase2_shell_fence_categories(self, body: str, expected_kind: str) -> None:
+        classification = classify_gemini_shell_fence_body(body, bridge_command="/runtime/gpd-cli")
+
+        assert classification.kind == expected_kind
+
+    def test_renderer_downgrades_non_runnable_shell_fences_before_bridge_rewrite(self) -> None:
+        bridge_command = "/runtime/gpd-cli"
+        content = (
+            "---\n"
+            "name: gpd:projection-probe\n"
+            "description: Projection probe\n"
+            "---\n"
+            "```bash\n"
+            "gpd status\n"
+            "```\n"
+            "\n"
+            "```bash\n"
+            "git status --porcelain\n"
+            "```\n"
+            "\n"
+            "```bash\n"
+            "VALUE=$(git status --porcelain)\n"
+            "```\n"
+        )
+
+        result = _render_gemini_command_prompt(content, bridge_command=bridge_command)
+
+        assert f"```bash\n{bridge_command} status\n```" in result
+        assert "```text\ngit status --porcelain\n```" in result
+        assert "```text\nVALUE=$(git status --porcelain)\n```" in result
+        assert f"VALUE=$({bridge_command} status)" not in result
+        assert "<gemini_shell_runtime_notes>" in result
+
+    def test_renderer_omits_shell_allowlist_when_only_examples_remain(self) -> None:
+        content = (
+            "---\n"
+            "name: gpd:projection-probe\n"
+            "description: Projection probe\n"
+            "---\n"
+            "```bash\n"
+            "git status --porcelain\n"
+            "```\n"
+        )
+
+        result = _render_gemini_command_prompt(content, bridge_command="/runtime/gpd-cli")
+
+        assert "```text\ngit status --porcelain\n```" in result
+        assert "<gemini_shell_runtime_notes>" not in result
 
 
 class TestGeminiCommandRuntimeNotes:
@@ -431,7 +602,7 @@ class TestGeminiCommandRuntimeNotes:
         assert "old runtime note" not in result
         assert "old shell note" not in result
 
-    def test_non_shell_command_prompt_omits_full_shell_allowlist(self) -> None:
+    def test_non_shell_command_prompt_omits_runtime_notes_when_body_has_no_bridge_need(self) -> None:
         bridge_command = "/runtime/gpd-cli"
         content = (
             "---\n"
@@ -443,11 +614,28 @@ class TestGeminiCommandRuntimeNotes:
 
         result = _render_gemini_command_prompt(content, bridge_command=bridge_command)
 
-        assert "<gemini_runtime_notes>" in result
-        assert "Gemini runtime compatibility" in result
+        assert "<gemini_runtime_notes>" not in result
+        assert "Gemini runtime compatibility" not in result
+        assert "<gemini_shell_runtime_notes>" not in result
         assert "enforced shell-prefix allowlist" not in result
         assert "`git init`" not in result
         assert "`mkdir -p GPD`" not in result
+
+    def test_non_shell_command_prompt_keeps_runtime_note_for_local_helper_reference(self) -> None:
+        bridge_command = "/runtime/gpd-cli"
+        content = (
+            "---\n"
+            "name: gpd:status\n"
+            "description: Show project status\n"
+            "---\n"
+            "Inspect the local helper output from `gpd --raw status` before summarizing."
+        )
+
+        result = _render_gemini_command_prompt(content, bridge_command=bridge_command)
+
+        assert "<gemini_runtime_notes>" in result
+        assert "Gemini runtime compatibility" in result
+        assert "<gemini_shell_runtime_notes>" not in result
 
     def test_shell_command_prompt_keeps_full_shell_allowlist(self) -> None:
         bridge_command = "/runtime/gpd-cli"
@@ -466,6 +654,48 @@ class TestGeminiCommandRuntimeNotes:
         assert "If `run_shell_command` is denied by policy, stop and report the policy block" in result
         assert f"{bridge_command} status" in result
 
+    def test_static_policy_shell_prompt_keeps_allowlist_without_generic_runtime_note(self) -> None:
+        bridge_command = "/runtime/gpd-cli"
+        content = "---\nname: gpd:init\ndescription: Initialize GPD directory\n---\n```bash\nmkdir -p GPD\n```\n"
+
+        result = _render_gemini_command_prompt(content, bridge_command=bridge_command)
+
+        assert "<gemini_runtime_notes>" not in result
+        assert "<gemini_shell_runtime_notes>" in result
+        assert "enforced shell-prefix allowlist" in result
+        assert f"`{bridge_command}`" in result
+        assert "`git init`" in result
+        assert "`mkdir -p GPD`" in result
+        assert "```bash\nmkdir -p GPD\n```" in result
+
+    def test_command_prompt_rendering_is_idempotent_for_projected_gemini_markdown(self) -> None:
+        bridge_command = "/runtime/gpd-cli"
+        content = "---\nname: gpd:status\ndescription: Show project status\n---\n```bash\ngpd status\n```\n"
+
+        once = _render_gemini_command_prompt(content, bridge_command=bridge_command)
+        twice = _render_gemini_command_prompt(once, bridge_command=bridge_command)
+
+        assert once == twice
+        assert twice.count("<gemini_runtime_notes>") == 1
+        assert twice.count("<gemini_shell_runtime_notes>") == 1
+
+    def test_command_prompt_rendering_keeps_note_free_projection_idempotent(self) -> None:
+        bridge_command = "/runtime/gpd-cli"
+        content = (
+            "---\n"
+            "name: gpd:status\n"
+            "description: Show project status\n"
+            "---\n"
+            "Summarize the current project state and ask exactly one question."
+        )
+
+        once = _render_gemini_command_prompt(content, bridge_command=bridge_command)
+        twice = _render_gemini_command_prompt(once, bridge_command=bridge_command)
+
+        assert once == twice
+        assert twice.count("<gemini_runtime_notes>") == 0
+        assert twice.count("<gemini_shell_runtime_notes>") == 0
+
     def test_rendered_shell_allowlist_matches_policy_prefixes(self) -> None:
         bridge_command = "/runtime/gpd-cli"
         rendered_allowlist = _render_gemini_shell_allowlist(bridge_command)
@@ -477,6 +707,22 @@ class TestGeminiCommandRuntimeNotes:
             assert f"`{prefix}`" in rendered_allowlist
         assert "PROJECT_CONTRACT_JSON" not in rendered_allowlist
         assert "printf '%s\\n'" not in rendered_allowlist
+
+    def test_rendered_policy_rule_schema_uses_documented_redirection_key(self) -> None:
+        bridge_command = "/runtime/gpd-cli"
+        parsed_policy = tomllib.loads(_render_gemini_policy_toml(bridge_command))
+        rule = parsed_policy["rule"][0]
+
+        assert set(rule) == {
+            "toolName",
+            "commandPrefix",
+            "decision",
+            "priority",
+            "modes",
+            "allowRedirection",
+        }
+        assert rule["allowRedirection"] is True
+        assert "allow_redirection" not in rule
 
 
 class TestInstall:
@@ -501,7 +747,7 @@ class TestInstall:
         assert "<!-- [included: update.md] -->" in content
         assert re.search(r"^\s*@.*?/workflows/update\.md\s*$", content, flags=re.MULTILINE) is None
 
-    def test_complete_milestone_command_inlines_bullet_list_includes(
+    def test_complete_milestone_command_uses_compact_workflow_reference_shim(
         self,
         adapter: GeminiAdapter,
         tmp_path: Path,
@@ -512,10 +758,12 @@ class TestInstall:
         adapter.install(gpd_root, target)
 
         content = (target / "commands" / "gpd" / "complete-milestone.toml").read_text(encoding="utf-8")
-        assert "<!-- [included: complete-milestone.md] -->" in content
-        assert "<!-- [included: milestone-archive.md] -->" in content
-        assert "Mark a completed research stage" in content
-        assert "# Milestone Archive Template" in content
+        assert COMPACT_WORKFLOW_COMMAND_SHIM_SENTINEL in content
+        assert "{GPD_INSTALL_DIR}" not in content
+        assert "get-physics-done/workflows/complete-milestone.md" in content
+        assert "get-physics-done/templates/milestone-archive.md" in content
+        assert "<!-- [included: complete-milestone.md] -->" not in content
+        assert "<!-- [included: milestone-archive.md] -->" not in content
         assert re.search(r"^\s*-\s*@.*?/workflows/complete-milestone\.md.*$", content, flags=re.MULTILINE) is None
         assert re.search(r"^\s*-\s*@.*?/templates/milestone-archive\.md.*$", content, flags=re.MULTILINE) is None
 
@@ -940,7 +1188,7 @@ class TestInstall:
         policy = policy_path.read_text(encoding="utf-8")
         assert 'toolName = "run_shell_command"' in policy
         assert 'modes = ["autoEdit"]' in policy
-        assert "allow_redirection = true" in policy
+        assert "allowRedirection = true" in policy
 
         parsed_policy = tomllib.loads(policy)
         bridge = expected_gemini_bridge(target)
@@ -974,6 +1222,59 @@ class TestInstall:
         assert "`mkdir -p GPD/research`" not in command
         assert "PROJECT_CONTRACT_JSON" not in command
         assert "printf '%s\\n'" not in command
+
+    def test_install_uses_compact_staged_command_shim_in_toml_prompt(
+        self,
+        adapter: GeminiAdapter,
+        tmp_path: Path,
+    ) -> None:
+        gpd_root = Path(__file__).resolve().parents[2] / "src" / "gpd"
+        target = tmp_path / ".gemini"
+        target.mkdir()
+
+        result = adapter.install(gpd_root, target)
+        adapter.finalize_install(result)
+
+        raw_toml = (target / "commands" / "gpd" / "execute-phase.toml").read_text(encoding="utf-8")
+        parsed = tomllib.loads(raw_toml)
+        prompt = parsed["prompt"]
+        expected_bridge = expected_gemini_bridge(target)
+
+        assert isinstance(prompt, str)
+        assert COMPACT_STAGED_COMMAND_SHIM_SENTINEL in prompt
+        assert 'command="/gpd:execute-phase"' in prompt
+        assert "<!-- [included: execute-phase.md] -->" not in prompt
+        assert "@{GPD_INSTALL_DIR}/workflows/execute-phase.md" not in prompt
+        assert "references/orchestration/context-budget.md" not in prompt
+        assert prompt.count("<gemini_runtime_notes>") == 1
+        assert prompt.count("<gemini_shell_runtime_notes>") == 1
+        assert "enforced shell-prefix allowlist" in prompt
+        assert f'{expected_bridge} --raw init execute-phase "$ARGUMENTS" --stage phase_bootstrap' in prompt
+        assert_compact_staged_command_shim(
+            prompt,
+            command_name="execute-phase",
+            first_stage="phase_bootstrap",
+            staged_loading_keys=(
+                "workflow_id",
+                "stage_id",
+                "order",
+                "required_init_fields",
+                "field_access_instruction",
+                "mode_paths",
+                "loaded_authorities",
+                "eager_authorities",
+                "conditional_authorities",
+                "must_not_eager_load",
+                "allowed_tools",
+                "writes_allowed",
+                "produced_state",
+                "next_stages",
+                "checkpoints",
+            ),
+            command_label="/gpd:execute-phase",
+            stage_count=15,
+        )
+        assert len(prompt) < 20_000
 
     def test_install_preserves_existing_policy_paths_and_mcp_trust_choice(
         self,
@@ -1083,25 +1384,37 @@ class TestInstall:
 
         expected_bridge = expected_gemini_bridge(target)
         command = (target / "commands" / "gpd" / "new-project.toml").read_text(encoding="utf-8")
-        workflow = (target / "get-physics-done" / "workflows" / "new-project.md").read_text(encoding="utf-8")
+        workflow_root = target / "get-physics-done" / "workflows"
+        workflow = (workflow_root / "new-project.md").read_text(encoding="utf-8")
+        split_workflow = "\n\n".join(
+            path.read_text(encoding="utf-8") for path in sorted((workflow_root / "new-project").glob("*.md"))
+        )
+        workflow_authority = f"{workflow}\n\n{split_workflow}"
         state_schema = (target / "get-physics-done" / "templates" / "state-json-schema.md").read_text(encoding="utf-8")
 
-        assert f"When shell steps call the GPD CLI, use {expected_bridge}" in command
-        assert "Run the init command as its own shell call in Gemini auto-edit mode." in workflow
+        assert f"Runtime bridge for runnable shell GPD CLI calls: {expected_bridge}" in command
         assert "INIT=$(gpd --raw init new-project)" not in workflow
         assert f"INIT=$({expected_bridge} --raw init new-project)" not in workflow
-        assert f"{expected_bridge} --raw init new-project" in workflow
-        assert f"{expected_bridge} commit " in workflow
-        assert ' gpd commit "' not in workflow
-        assert f"{expected_bridge} --raw validate project-contract {_GEMINI_APPROVED_CONTRACT_PATH}" in command
-        assert f"{expected_bridge} state set-project-contract {_GEMINI_APPROVED_CONTRACT_PATH}" in command
+        assert f"{expected_bridge} --raw init new-project" in workflow_authority
+        assert "docs: initialize research project" in workflow_authority
+        assert "docs: literature survey complete" in workflow_authority
+        assert ' gpd commit "' not in workflow_authority
+        if COMPACT_STAGED_COMMAND_SHIM_SENTINEL in command:
+            assert f"{expected_bridge} --raw init new-project --stage scope_intake" in command
+            assert f"{expected_bridge} --raw validate project-contract {_GEMINI_APPROVED_CONTRACT_PATH}" not in command
+            assert f"{expected_bridge} state set-project-contract {_GEMINI_APPROVED_CONTRACT_PATH}" not in command
+        else:
+            assert f"{expected_bridge} --raw validate project-contract {_GEMINI_APPROVED_CONTRACT_PATH}" in command
+            assert f"{expected_bridge} state set-project-contract {_GEMINI_APPROVED_CONTRACT_PATH}" in command
         assert "PROJECT_CONTRACT_JSON" not in command
         assert "printf '%s\\n'" not in command
-        assert "PROJECT_CONTRACT_JSON" not in workflow
+        assert "PROJECT_CONTRACT_JSON" not in workflow_authority
         assert "PROJECT_CONTRACT_JSON" not in state_schema
-        assert "PRE_CHECK=$(" not in workflow
-        assert f"{expected_bridge} --raw validate project-contract {_GEMINI_APPROVED_CONTRACT_PATH}" in workflow
-        assert f"{expected_bridge} state set-project-contract {_GEMINI_APPROVED_CONTRACT_PATH}" in workflow
+        assert "PRE_CHECK=$(" not in workflow_authority
+        assert (
+            f"{expected_bridge} --raw validate project-contract {_GEMINI_APPROVED_CONTRACT_PATH}" in workflow_authority
+        )
+        assert f"{expected_bridge} state set-project-contract {_GEMINI_APPROVED_CONTRACT_PATH}" in workflow_authority
         assert f"{expected_bridge} --raw validate project-contract {_GEMINI_APPROVED_CONTRACT_PATH}" not in state_schema
         assert f"{expected_bridge} state set-project-contract {_GEMINI_APPROVED_CONTRACT_PATH}" not in state_schema
 
@@ -1769,6 +2082,41 @@ class TestUninstall:
             if isinstance(hook, dict) and isinstance(hook.get("command"), str)
         ]
         assert "python3 /tmp/third-party/check_update.py" in commands
+
+    def test_uninstall_preserves_unmanaged_hooks_inside_mixed_sessionstart_entries(
+        self,
+        adapter: GeminiAdapter,
+        gpd_root: Path,
+        tmp_path: Path,
+    ) -> None:
+        target = tmp_path / ".gemini"
+        target.mkdir()
+        result = adapter.install(gpd_root, target)
+        adapter.finish_install(
+            result["settingsPath"],
+            result["settings"],
+            result["statuslineCommand"],
+            True,
+        )
+
+        settings_path = target / "settings.json"
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        session_start = settings.setdefault("hooks", {}).setdefault("SessionStart", [])
+        session_start[0]["hooks"].append({"type": "command", "command": "echo keep-mixed-update-peer"})
+        settings_path.write_text(json.dumps(settings), encoding="utf-8")
+
+        adapter.uninstall(target)
+
+        cleaned = json.loads(settings_path.read_text(encoding="utf-8"))
+        session_start = cleaned.get("hooks", {}).get("SessionStart", [])
+        commands = [
+            hook["command"]
+            for entry in session_start
+            if isinstance(entry, dict)
+            for hook in entry.get("hooks", [])
+            if isinstance(hook, dict) and isinstance(hook.get("command"), str)
+        ]
+        assert commands == ["echo keep-mixed-update-peer"]
 
     def test_uninstall_on_empty_dir(self, adapter: GeminiAdapter, tmp_path: Path) -> None:
         target = tmp_path / "empty"

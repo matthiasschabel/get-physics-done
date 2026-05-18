@@ -220,6 +220,14 @@
     "selection_flags": ["--copilot", "--copilot-cli"],
     "selection_aliases": ["copilot", "copilot cli", "copilot-cli", "github copilot"],
     "manifest_file_prefixes": ["command/"],
+    "manifest_metadata_list_policies": [
+      {
+        "key": "copilot_generated_command_files",
+        "value_kind": "path_segment",
+        "item_prefix": "gpd-",
+        "item_suffix": ".md"
+      }
+    ],
     "validated_command_surface": "public_runtime_slash_command",
     "capabilities": {
       "permissions_surface": "config-file",
@@ -228,6 +236,9 @@
       "supports_runtime_permission_sync": true
     },
     "hook_payload": {},
+    "managed_install_surface": {
+      "flat_command_globs": ["command/gpd-*.md"]
+    },
     "global_config": {
       "strategy": "env_or_home",
       "env_var": "COPILOT_CONFIG_DIR",

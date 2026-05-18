@@ -5,7 +5,6 @@
     "review_target_context": [
       "project_exists",
       "state_exists",
-      "commit_docs",
       "autonomy",
       "research_mode",
       "review_target_input",
@@ -28,9 +27,37 @@
       "derived_manuscript_reference_status_count",
       "derived_manuscript_proof_review_status"
     ],
+    "preflight_contract_gate_context": [
+      "project_contract_gate",
+      "project_contract_load_info",
+      "project_contract_validation",
+      "contract_intake",
+      "effective_reference_intake"
+    ],
+    "preflight_reference_status_context": [
+      "derived_manuscript_reference_status",
+      "derived_manuscript_reference_status_count",
+      "derived_manuscript_proof_review_status"
+    ],
+    "protocol_reference_handle_context": [
+      "selected_protocol_bundle_ids",
+      "protocol_bundle_load_manifest"
+    ],
     "reference_evidence_context": [
       "reference_artifact_files",
       "reference_artifacts_content",
+      "literature_review_files",
+      "literature_review_count",
+      "research_map_reference_files",
+      "research_map_reference_count",
+      "citation_source_files",
+      "citation_source_count",
+      "citation_source_warnings",
+      "derived_citation_sources",
+      "derived_citation_source_count"
+    ],
+    "reference_handle_context": [
+      "reference_artifact_files",
       "literature_review_files",
       "literature_review_count",
       "research_map_reference_files",
@@ -80,52 +107,72 @@
       "latest_response_artifacts"
     ]
   },
+  "authority_groups": {
+    "peer_bootstrap_preflight_deferred": [
+      "references/publication/publication-review-round-artifacts.md",
+      "references/publication/publication-response-artifacts.md",
+      "references/publication/peer-review-panel.md",
+      "references/publication/peer-review-panel-playbook.md",
+      "references/publication/peer-review-reliability.md",
+      "references/publication/stage-recovery-gate.md",
+      "references/publication/publication-final-adjudication-boundary.md",
+      "references/publication/publication-response-writer-handoff.md",
+      "references/verification/core/proof-redteam-workflow-gate.md",
+      "references/verification/core/proof-redteam-protocol.md",
+      "references/shared/canonical-schema-discipline.md",
+      "templates/paper/paper-config-schema.md",
+      "templates/paper/artifact-manifest-schema.md",
+      "templates/paper/bibliography-audit-schema.md",
+      "templates/paper/reproducibility-manifest.md",
+      "templates/paper/review-ledger-schema.md",
+      "templates/paper/referee-decision-schema.md",
+      "templates/proof-redteam-schema.md"
+    ]
+  },
+  "stage_defaults": {
+    "allowed_tools": [
+      "ask_user",
+      "file_read",
+      "find_files",
+      "search_files",
+      "shell",
+      "task"
+    ],
+    "conditional_authorities": [],
+    "writes_allowed": [],
+    "required_init_fields": [
+      "platform"
+    ]
+  },
   "stages": [
     {
       "id": "bootstrap",
       "order": 1,
       "purpose": "target-aware manuscript routing, intake-mode bootstrap, contract-gate validation, and review setup",
       "mode_paths": [
-        "workflows/peer-review.md"
+        "workflows/peer-review/bootstrap.md"
       ],
       "required_init_field_groups": [
         "review_target_context",
-        "contract_reference_context",
+        "preflight_contract_gate_context",
+        "preflight_reference_status_context",
         "publication_lane_context",
         "manuscript_resolution_context",
         "manuscript_package_paths",
         "publication_blockers_context",
         "latest_review_response_context"
       ],
-      "required_init_fields": [
-        "platform"
-      ],
       "loaded_authorities": [
-        "workflows/peer-review.md"
+        "workflows/peer-review/bootstrap.md"
       ],
-      "conditional_authorities": [],
       "must_not_eager_load": [
-        "references/publication/publication-review-round-artifacts.md",
-        "references/publication/publication-response-artifacts.md",
-        "references/publication/peer-review-panel.md",
-        "references/publication/peer-review-reliability.md",
-        "references/shared/canonical-schema-discipline.md",
-        "templates/paper/paper-config-schema.md",
-        "templates/paper/artifact-manifest-schema.md",
-        "templates/paper/bibliography-audit-schema.md",
-        "templates/paper/reproducibility-manifest.md",
-        "templates/paper/review-ledger-schema.md",
-        "templates/paper/referee-decision-schema.md"
+        "workflows/peer-review.md",
+        "workflows/peer-review/preflight.md",
+        "workflows/peer-review/artifact-discovery.md",
+        "workflows/peer-review/panel-stages.md",
+        "workflows/peer-review/final-adjudication.md",
+        "workflows/peer-review/finalize.md"
       ],
-      "allowed_tools": [
-        "ask_user",
-        "file_read",
-        "find_files",
-        "search_files",
-        "shell",
-        "task"
-      ],
-      "writes_allowed": [],
       "produced_state": [
         "bootstrap review state",
         "target-aware manuscript routing state",
@@ -138,6 +185,9 @@
         "intake mode and manuscript target resolved",
         "contract gate remains visible",
         "target-local round state surfaced"
+      ],
+      "must_not_eager_load_groups": [
+        "peer_bootstrap_preflight_deferred"
       ]
     },
     {
@@ -145,45 +195,45 @@
       "order": 2,
       "purpose": "mode-aware prerequisite validation and manuscript-root readiness checks",
       "mode_paths": [
-        "workflows/peer-review.md"
+        "workflows/peer-review/preflight.md"
       ],
       "required_init_field_groups": [
         "review_target_context",
-        "contract_reference_context",
-        "reference_evidence_context",
+        "preflight_contract_gate_context",
+        "preflight_reference_status_context",
         "publication_lane_context",
         "manuscript_resolution_context",
         "manuscript_package_paths",
         "publication_blockers_context"
       ],
-      "required_init_fields": [
-        "platform"
-      ],
       "loaded_authorities": [
-        "workflows/peer-review.md",
-        "templates/paper/publication-manuscript-root-preflight.md",
-        "references/publication/peer-review-reliability.md",
-        "templates/paper/paper-config-schema.md",
-        "templates/paper/artifact-manifest-schema.md",
-        "templates/paper/bibliography-audit-schema.md",
-        "templates/paper/reproducibility-manifest.md"
+        "workflows/peer-review/preflight.md",
+        "templates/paper/publication-manuscript-root-preflight.md"
       ],
-      "conditional_authorities": [],
+      "conditional_authorities": [
+        {
+          "when": "review_integrity_recovery_needed",
+          "authorities": [
+            "references/publication/peer-review-reliability.md"
+          ]
+        },
+        {
+          "when": "manual_publication_artifact_validation",
+          "authorities": [
+            "templates/paper/paper-config-schema.md",
+            "templates/paper/artifact-manifest-schema.md",
+            "templates/paper/bibliography-audit-schema.md",
+            "templates/paper/reproducibility-manifest.md"
+          ]
+        }
+      ],
       "must_not_eager_load": [
-        "references/publication/peer-review-panel.md",
-        "references/shared/canonical-schema-discipline.md",
-        "templates/paper/review-ledger-schema.md",
-        "templates/paper/referee-decision-schema.md"
+        "workflows/peer-review.md",
+        "workflows/peer-review/artifact-discovery.md",
+        "workflows/peer-review/panel-stages.md",
+        "workflows/peer-review/final-adjudication.md",
+        "workflows/peer-review/finalize.md"
       ],
-      "allowed_tools": [
-        "ask_user",
-        "file_read",
-        "find_files",
-        "search_files",
-        "shell",
-        "task"
-      ],
-      "writes_allowed": [],
       "produced_state": [
         "review preflight state",
         "mode-aware manuscript artifact freshness state"
@@ -194,6 +244,9 @@
       "checkpoints": [
         "review preflight completed",
         "project-backed gates or standalone waivers resolved"
+      ],
+      "must_not_eager_load_groups": [
+        "peer_bootstrap_preflight_deferred"
       ]
     },
     {
@@ -201,37 +254,46 @@
       "order": 3,
       "purpose": "manuscript artifact loading, target-aware round detection, and proof-bearing routing",
       "mode_paths": [
-        "workflows/peer-review.md"
+        "workflows/peer-review/artifact-discovery.md"
       ],
       "required_init_field_groups": [
         "review_target_context",
-        "contract_reference_context",
-        "reference_evidence_context",
+        "preflight_contract_gate_context",
+        "preflight_reference_status_context",
+        "reference_handle_context",
         "publication_lane_context",
         "manuscript_resolution_context",
         "manuscript_package_paths",
         "publication_blockers_context",
         "latest_review_response_context"
       ],
-      "required_init_fields": [
-        "platform"
-      ],
       "loaded_authorities": [
-        "workflows/peer-review.md",
+        "workflows/peer-review/artifact-discovery.md",
         "references/publication/publication-review-round-artifacts.md",
         "references/publication/publication-response-artifacts.md"
       ],
-      "conditional_authorities": [],
       "must_not_eager_load": [
+        "workflows/peer-review.md",
+        "workflows/peer-review/preflight.md",
+        "workflows/peer-review/panel-stages.md",
+        "workflows/peer-review/final-adjudication.md",
+        "workflows/peer-review/finalize.md",
         "references/publication/peer-review-panel.md",
+        "references/publication/peer-review-panel-playbook.md",
         "references/publication/peer-review-reliability.md",
+        "references/publication/stage-recovery-gate.md",
+        "references/publication/publication-final-adjudication-boundary.md",
+        "references/publication/publication-response-writer-handoff.md",
+        "references/verification/core/proof-redteam-workflow-gate.md",
+        "references/verification/core/proof-redteam-protocol.md",
         "references/shared/canonical-schema-discipline.md",
         "templates/paper/paper-config-schema.md",
         "templates/paper/artifact-manifest-schema.md",
         "templates/paper/bibliography-audit-schema.md",
         "templates/paper/reproducibility-manifest.md",
         "templates/paper/review-ledger-schema.md",
-        "templates/paper/referee-decision-schema.md"
+        "templates/paper/referee-decision-schema.md",
+        "templates/proof-redteam-schema.md"
       ],
       "allowed_tools": [
         "ask_user",
@@ -242,7 +304,6 @@
         "task",
         "web_search"
       ],
-      "writes_allowed": [],
       "produced_state": [
         "manuscript target routing state",
         "target-aware round detection state",
@@ -262,32 +323,64 @@
       "order": 4,
       "purpose": "claim mapping and specialist panel execution",
       "mode_paths": [
-        "workflows/peer-review.md"
+        "workflows/peer-review/panel-stages.md"
       ],
       "required_init_field_groups": [
         "review_target_context",
-        "contract_reference_context",
-        "reference_evidence_context",
+        "preflight_contract_gate_context",
+        "preflight_reference_status_context",
+        "protocol_reference_handle_context",
+        "reference_handle_context",
         "publication_lane_context",
         "manuscript_package_paths"
       ],
-      "required_init_fields": [
-        "platform"
-      ],
       "loaded_authorities": [
-        "workflows/peer-review.md",
+        "workflows/peer-review/panel-stages.md",
         "references/publication/peer-review-panel.md"
       ],
-      "conditional_authorities": [],
+      "conditional_authorities": [
+        {
+          "when": "panel_rubric_expansion_needed",
+          "authorities": [
+            "references/publication/peer-review-panel-playbook.md"
+          ]
+        },
+        {
+          "when": "panel_child_recovery_needed",
+          "authorities": [
+            "references/publication/stage-recovery-gate.md"
+          ]
+        },
+        {
+          "when": "theorem_bearing_claims_present",
+          "authorities": [
+            "references/verification/core/proof-redteam-workflow-gate.md",
+            "references/verification/core/proof-redteam-protocol.md",
+            "templates/proof-redteam-schema.md"
+          ]
+        }
+      ],
       "must_not_eager_load": [
+        "workflows/peer-review.md",
+        "workflows/peer-review/preflight.md",
+        "workflows/peer-review/artifact-discovery.md",
+        "workflows/peer-review/final-adjudication.md",
+        "workflows/peer-review/finalize.md",
+        "references/publication/publication-review-round-artifacts.md",
+        "references/publication/publication-response-artifacts.md",
+        "references/publication/peer-review-panel-playbook.md",
         "references/publication/peer-review-reliability.md",
+        "references/publication/stage-recovery-gate.md",
+        "references/publication/publication-final-adjudication-boundary.md",
+        "references/publication/publication-response-writer-handoff.md",
+        "references/verification/core/proof-redteam-workflow-gate.md",
+        "references/verification/core/proof-redteam-protocol.md",
         "references/shared/canonical-schema-discipline.md",
         "templates/paper/paper-config-schema.md",
         "templates/paper/artifact-manifest-schema.md",
         "templates/paper/bibliography-audit-schema.md",
         "templates/paper/reproducibility-manifest.md",
-        "templates/paper/review-ledger-schema.md",
-        "templates/paper/referee-decision-schema.md"
+        "templates/proof-redteam-schema.md"
       ],
       "allowed_tools": [
         "ask_user",
@@ -334,12 +427,13 @@
       "order": 5,
       "purpose": "referee adjudication and final recommendation artifacts",
       "mode_paths": [
-        "workflows/peer-review.md"
+        "workflows/peer-review/final-adjudication.md"
       ],
       "required_init_field_groups": [
         "review_target_context",
-        "contract_reference_context",
-        "reference_evidence_context",
+        "preflight_contract_gate_context",
+        "preflight_reference_status_context",
+        "reference_handle_context",
         "publication_lane_context",
         "manuscript_resolution_context",
         "manuscript_package_paths"
@@ -356,19 +450,40 @@
         "platform"
       ],
       "loaded_authorities": [
-        "workflows/peer-review.md",
-        "references/publication/peer-review-panel.md",
+        "workflows/peer-review/final-adjudication.md",
+        "references/publication/publication-final-adjudication-boundary.md",
+        "references/publication/stage-recovery-gate.md",
         "templates/paper/review-ledger-schema.md",
         "templates/paper/referee-decision-schema.md"
       ],
-      "conditional_authorities": [],
+      "conditional_authorities": [
+        {
+          "when": "upstream_stage_artifact_index_needed",
+          "authorities": [
+            "references/publication/peer-review-panel.md"
+          ]
+        }
+      ],
       "must_not_eager_load": [
+        "workflows/peer-review.md",
+        "workflows/peer-review/preflight.md",
+        "workflows/peer-review/artifact-discovery.md",
+        "workflows/peer-review/panel-stages.md",
+        "workflows/peer-review/finalize.md",
+        "references/publication/publication-review-round-artifacts.md",
+        "references/publication/publication-response-artifacts.md",
+        "references/publication/peer-review-panel.md",
         "references/publication/peer-review-reliability.md",
+        "references/publication/peer-review-panel-playbook.md",
+        "references/publication/publication-response-writer-handoff.md",
+        "references/verification/core/proof-redteam-workflow-gate.md",
+        "references/verification/core/proof-redteam-protocol.md",
         "references/shared/canonical-schema-discipline.md",
         "templates/paper/paper-config-schema.md",
         "templates/paper/artifact-manifest-schema.md",
         "templates/paper/bibliography-audit-schema.md",
-        "templates/paper/reproducibility-manifest.md"
+        "templates/paper/reproducibility-manifest.md",
+        "templates/proof-redteam-schema.md"
       ],
       "allowed_tools": [
         "ask_user",
@@ -407,31 +522,41 @@
       "order": 6,
       "purpose": "report summarization and next-action routing",
       "mode_paths": [
-        "workflows/peer-review.md"
+        "workflows/peer-review/finalize.md"
       ],
       "required_init_field_groups": [
         "review_target_context",
-        "contract_reference_context",
-        "publication_lane_context"
-      ],
-      "required_init_fields": [
-        "platform"
+        "preflight_contract_gate_context",
+        "publication_lane_context",
+        "latest_review_response_context"
       ],
       "loaded_authorities": [
-        "workflows/peer-review.md"
-      ],
-      "conditional_authorities": [],
-      "must_not_eager_load": [
+        "workflows/peer-review/finalize.md",
         "references/publication/publication-review-round-artifacts.md",
+        "references/publication/publication-response-artifacts.md",
+        "references/publication/publication-response-writer-handoff.md"
+      ],
+      "must_not_eager_load": [
+        "workflows/peer-review.md",
+        "workflows/peer-review/preflight.md",
+        "workflows/peer-review/artifact-discovery.md",
+        "workflows/peer-review/panel-stages.md",
+        "workflows/peer-review/final-adjudication.md",
         "references/publication/peer-review-panel.md",
+        "references/publication/peer-review-panel-playbook.md",
         "references/publication/peer-review-reliability.md",
+        "references/publication/stage-recovery-gate.md",
+        "references/publication/publication-final-adjudication-boundary.md",
+        "references/verification/core/proof-redteam-workflow-gate.md",
+        "references/verification/core/proof-redteam-protocol.md",
         "references/shared/canonical-schema-discipline.md",
         "templates/paper/paper-config-schema.md",
         "templates/paper/artifact-manifest-schema.md",
         "templates/paper/bibliography-audit-schema.md",
         "templates/paper/reproducibility-manifest.md",
         "templates/paper/review-ledger-schema.md",
-        "templates/paper/referee-decision-schema.md"
+        "templates/paper/referee-decision-schema.md",
+        "templates/proof-redteam-schema.md"
       ],
       "allowed_tools": [
         "ask_user",
@@ -439,7 +564,6 @@
         "shell",
         "task"
       ],
-      "writes_allowed": [],
       "produced_state": [
         "peer review summary state",
         "next-action routing state"

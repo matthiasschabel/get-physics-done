@@ -29,23 +29,28 @@ allowed-tools:
   - find_files
   - task
   - ask_user
+help:
+  group: Planning and execution
+  order: 210
+  compact_description: Run a rigorous derivation workflow from project context or one explicit current-workspace target
+  display_signature: gpd:derive-equation
+  examples:
+    - gpd:derive-equation "effective mass from self-energy"
+  notes:
+    - Part of the project-aware technical-analysis lane for explicit current-workspace derivations.
+  root_detail_order: 130
 ---
 
 
 <objective>
-Perform a rigorous physics derivation with systematic verification at each step.
-
-Provide the equation or topic to derive as an argument (e.g., `gpd:derive-equation "effective mass from self-energy"`). If project context already exists and the request is omitted or ambiguous, ask one focused clarification question. Outside a project, an explicit derivation target is required and empty standalone launches stay blocked.
+Route a derivation request into the workflow-owned rigorous derivation flow.
+Provide the equation or topic as an argument. If project context exists and the
+request is omitted or ambiguous, ask one focused clarification question. Outside a project, an explicit derivation target is required and empty standalone launches stay blocked.
 
 Keep standalone/current-workspace durable derivation artifacts under `GPD/analysis/` rooted at the invoking workspace. Only runs with authoritative phase context may additionally write sibling phase artifacts and persist project registry state.
-
-- States assumptions explicitly, establishes notation and conventions
-- Performs step-by-step derivation with dimensional analysis at each stage
-- Verifies intermediate results against known limits and symmetry properties
-- Justifies and bounds all approximations with error estimates
-- For theorem-bearing derivations, spawns `gpd-check-proof` as a separate proof critic and fails closed without its audit
-- Produces a complete, self-contained derivation document with boxed final result
-  </objective>
+The same-named workflow owns assumptions, conventions, algebra, physics checks,
+proof-redteam handoff, artifact writing, and registry persistence.
+</objective>
 
 <context>
 Target: $ARGUMENTS
@@ -71,6 +76,5 @@ fi
 ## 1. Execute the Derivation Workflow
 
 Execute the included derive-equation workflow end-to-end.
-Preserve its gates: canonical result lookup via `gpd result search` and direct stored-result inspection via `gpd result show "{result_id}"`, assumptions, notation, derivation steps, dimensional checks, limiting cases, artifact write, and registry persistence only when authoritative phase context exists.
-Registry writes use `gpd result persist-derived`, reuse or carry forward a stable `result_id`, preserve the actual canonical `result_id`, seed continuation, and stay disabled for standalone artifacts.
+Preserve canonical result lookup via `gpd result search` and direct stored-result inspection via `gpd result show "{result_id}"`. The artifact write happens inside the workflow; registry persistence only when authoritative phase context exists. Registry writes use `gpd result persist-derived`, carry forward the stable `result_id` request and actual canonical `result_id`, seed continuation from that canonical entry, and stay disabled for standalone artifacts.
 </process>

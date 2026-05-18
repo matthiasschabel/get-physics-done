@@ -29,6 +29,18 @@ allowed-tools:
   - find_files
   - web_search
   - web_fetch
+help:
+  group: Planning and execution
+  order: 150
+  compact_description: Survey methods, literature, and tools before planning; `quick` is verification-only
+  display_signature: gpd:discover [phase or topic]
+  detail_signature: gpd:discover [phase or topic] [--depth quick|medium|deep]
+  examples:
+    - gpd:discover --depth medium "finite-size scaling"
+  notes:
+    - Depth quick is verification-only and writes no file; medium and deep write discovery artifacts.
+    - Discovery artifacts feed planning or standalone analysis.
+  root_detail_order: 80
 ---
 
 

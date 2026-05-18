@@ -15,7 +15,7 @@ Load todo context:
 INIT=$(gpd --raw init todos)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd initialization failed: $INIT"
-  # STOP — display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 ```
 

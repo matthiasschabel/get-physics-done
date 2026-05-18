@@ -7,6 +7,11 @@ allowed-tools:
   - shell
   - search_files
   - find_files
+help:
+  group: Configuration and maintenance
+  order: 700
+  compact_description: Roll back the last GPD operation with a safety checkpoint
+  display_signature: gpd:undo
 ---
 
 

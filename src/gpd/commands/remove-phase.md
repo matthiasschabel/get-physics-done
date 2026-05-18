@@ -8,6 +8,11 @@ allowed-tools:
   - file_write
   - shell
   - find_files
+help:
+  group: Roadmap and milestones
+  order: 240
+  compact_description: Remove a future phase and renumber later ones
+  display_signature: gpd:remove-phase <number>
 ---
 
 

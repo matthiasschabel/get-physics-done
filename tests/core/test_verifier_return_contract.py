@@ -14,19 +14,36 @@ def _read_verifier_prompt() -> str:
 def test_verifier_prompt_keeps_the_canonical_return_contract_visible() -> None:
     verifier = _read_verifier_prompt()
 
-    assert "Return with status `completed | checkpoint | blocked | failed`:" in verifier
-    assert "Use only status names: `completed` | `checkpoint` | `blocked` | `failed`." in verifier
-    assert "# Base fields (`status`, `files_written`, `issues`, `next_actions`) follow agent-infrastructure.md." in verifier
-    assert "`gpd_return.files_written` is fail-closed:" in verifier
-    assert "list only files that genuinely landed on disk in this run" in verifier
-    assert "`checkpoint`, `blocked`, and `failed` may use `[]`" in verifier
+    required_fragments = (
+        "gpd return skeleton --role verifier --status <status>",
+        "Role kits own status routing",
+        "Local status semantics:",
+        "- **completed**",
+        "- **checkpoint**",
+        "- **blocked**",
+        "- **failed**",
+        "status: completed",
+        "files_written:\n    - GPD/phases/03-spectral-form-factor/03-VERIFICATION.md",
+        "issues: []",
+        'next_actions:\n    - "gpd:execute-phase 04"',
+        "the return file list is fail-closed",
+        "include only files that genuinely landed on disk in this run",
+        "Non-completed returns may use `[]`",
+    )
+    missing = [fragment for fragment in required_fragments if fragment not in verifier]
+    assert missing == []
 
 
 def test_verifier_prompt_surfaces_schema_sources_before_the_machine_readable_return_envelope() -> None:
     verifier = _read_verifier_prompt()
-    envelope_index = verifier.index("### Machine-Readable Return Envelope")
+    envelope_marker = "### Machine-Readable Return Envelope"
+    schema_fragments = (
+        "templates/verification-report.md",
+        "templates/contract-results-schema.md",
+        "references/shared/canonical-schema-discipline.md",
+        "## Create VERIFICATION.md",
+    )
 
-    assert verifier.index("templates/verification-report.md") < envelope_index
-    assert verifier.index("templates/contract-results-schema.md") < envelope_index
-    assert verifier.index("references/shared/canonical-schema-discipline.md") < envelope_index
-    assert verifier.index("## Create VERIFICATION.md") < envelope_index
+    envelope_index = verifier.index(envelope_marker)
+    positions = [verifier.index(fragment) for fragment in schema_fragments]
+    assert all(position < envelope_index for position in positions)

@@ -8,6 +8,11 @@ allowed-tools:
   - shell
   - find_files
   - search_files
+help:
+  group: Validation and analysis
+  order: 370
+  compact_description: Scan for regressions in recorded verification state
+  display_signature: gpd:regression-check [phase]
 ---
 
 

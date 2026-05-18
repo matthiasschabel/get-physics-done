@@ -16,28 +16,42 @@ import json
 import logging
 import re
 import shutil
-from collections.abc import Mapping
 from pathlib import Path
 
 from gpd.adapters.base import RuntimeAdapter
+from gpd.adapters.command_projection import render_projected_command_shell_fences, rewrite_projection_shell_bridge
+from gpd.adapters.flat_command_surface import (
+    FlatCommandRenderContext,
+    FlatCommandSurfacePolicy,
+    load_tracked_generated_command_files,
+    missing_flat_command_artifacts,
+)
+from gpd.adapters.flat_command_surface import (
+    copy_flattened_commands as _copy_flattened_command_surface,
+)
+from gpd.adapters.frontmatter_projection import (
+    FieldProjection,
+    FrontmatterProjectionPolicy,
+    ToolFieldProjection,
+    project_markdown_frontmatter,
+)
 from gpd.adapters.install_utils import (
     CACHE_DIR_NAME,
-    DEFAULT_RUNTIME_BRIDGE_SHELL_FENCE_LANGUAGES,
     MANIFEST_NAME,
     PATCHES_DIR_NAME,
     UPDATE_CACHE_FILENAME,
+    build_runtime_managed_mcp_servers,
     compile_markdown_for_runtime,
     compute_path_prefix,
     convert_tool_references_in_body,
     get_global_dir,
-    hook_python_interpreter,
     install_gpd_content,
     parse_jsonc,
     prune_empty_ancestors,
     remove_empty_json_object_file,
     remove_stale_agents,
     render_markdown_frontmatter,
-    rewrite_gpd_cli_invocations_to_runtime_bridge,
+    runtime_managed_mcp_server_keys,
     split_markdown_frontmatter,
 )
 from gpd.adapters.install_utils import (
@@ -45,8 +59,7 @@ from gpd.adapters.install_utils import (
 )
 from gpd.adapters.runtime_catalog import get_manifest_metadata_list_policy_key, get_runtime_descriptor
 from gpd.adapters.tool_names import build_runtime_alias_map, reference_translation_map, translate_for_runtime
-from gpd.command_labels import validated_public_command_prefix
-from gpd.mcp import managed_integrations as _managed_integrations
+from gpd.command_labels import rewrite_runtime_command_surfaces_to_public, validated_public_command_prefix
 
 logger = logging.getLogger(__name__)
 
@@ -91,9 +104,19 @@ _COLOR_NAME_TO_HEX: dict[str, str] = {
     "grey": "#808080",
 }
 
-_HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{3}$|^#[0-9a-fA-F]{6}$")
-_GPD_SLASH_COMMAND_RE = re.compile(r"(?<![A-Za-z0-9/_.-])/gpd:(?P<command>[A-Za-z][A-Za-z0-9-]*)\b")
-_GPD_BARE_COMMAND_RE = re.compile(r"(?<![A-Za-z0-9_./$-])gpd:([a-z0-9-]+)\b")
+_OPENCODE_UNQUOTED_HEX_COLOR_RE = re.compile(r"(?m)^(\s*color:\s*)(#[0-9a-fA-F]{3}(?:[0-9a-fA-F]{3})?)(\r?)$")
+_OPENCODE_FRONTMATTER_POLICY = FrontmatterProjectionPolicy(
+    runtime="opencode",
+    surface="markdown",
+    tools=ToolFieldProjection(target_shape="yaml-bool-map"),
+    name=FieldProjection("drop"),
+    color=FieldProjection(
+        "map_color_name_to_hex",
+        color_name_map=_COLOR_NAME_TO_HEX,
+        preserve_valid_hex=True,
+    ),
+    icon=FieldProjection("preserve"),
+)
 _OPENCODE_PERMISSION_DECISIONS = frozenset({"allow", "ask", "deny"})
 _OPENCODE_YOLO_PERMISSION = "allow"
 _GPD_OPENCODE_COMMAND_MARKER = "<!-- Managed by Get Physics Done (GPD). -->"
@@ -129,6 +152,16 @@ def _manifest_opencode_generated_command_files_key() -> str:
     )
 
 
+_OPENCODE_FLAT_COMMAND_SURFACE = FlatCommandSurfacePolicy(
+    runtime="opencode",
+    command_dir_name="command",
+    source_prefix="gpd",
+    file_prefix="gpd-",
+    file_suffix=".md",
+    manifest_metadata_key=_manifest_opencode_generated_command_files_key(),
+)
+
+
 # ---------------------------------------------------------------------------
 # Tool name conversion
 # ---------------------------------------------------------------------------
@@ -143,27 +176,28 @@ def convert_tool_name(tool_name: str) -> str:
     return mapped if mapped is not None else tool_name
 
 
-def _project_managed_mcp_servers(
-    env: Mapping[str, str] | None = None,
-    *,
-    cwd: Path | None = None,
-    python_path: str | None = None,
-) -> dict[str, dict[str, object]]:
-    """Project shared optional integrations into OpenCode's neutral MCP shape."""
-    python_path = python_path or hook_python_interpreter()
-    return _managed_integrations.projected_managed_optional_mcp_servers(env, cwd=cwd, python_path=python_path)
-
-
-def _managed_mcp_server_keys() -> frozenset[str]:
-    """Return GPD-managed OpenCode MCP server keys, including optional integrations."""
-    from gpd.mcp.builtin_servers import GPD_MCP_SERVER_KEYS
-
-    return frozenset(set(GPD_MCP_SERVER_KEYS) | set(_managed_integrations.managed_optional_mcp_server_keys()))
-
-
 # ---------------------------------------------------------------------------
 # Frontmatter conversion
 # ---------------------------------------------------------------------------
+
+
+def _quote_unquoted_opencode_hex_colors(content: str) -> str:
+    """Normalize legacy ``color: #RRGGBB`` values into YAML string values."""
+    preamble, frontmatter, separator, body = split_markdown_frontmatter(content)
+    if not frontmatter:
+        return content
+    normalized_frontmatter = _OPENCODE_UNQUOTED_HEX_COLOR_RE.sub(r'\1"\2"\3', frontmatter)
+    if normalized_frontmatter == frontmatter:
+        return content
+    return render_markdown_frontmatter(preamble, normalized_frontmatter, separator, body)
+
+
+def _translate_opencode_markdown_content(content: str) -> str:
+    converted = convert_tool_references_in_body(content, _TOOL_REFERENCE_MAP)
+    public_prefix = validated_public_command_prefix(get_runtime_descriptor("opencode"))
+    converted = converted.replace("`gpd:`", f"`{public_prefix}`")
+    converted = rewrite_runtime_command_surfaces_to_public(converted, public_prefix=public_prefix)
+    return _quote_unquoted_opencode_hex_colors(converted)
 
 
 def convert_claude_to_opencode_frontmatter(content: str, path_prefix: str | None = None) -> str:
@@ -177,93 +211,34 @@ def convert_claude_to_opencode_frontmatter(content: str, path_prefix: str | None
       - Convert color names to hex
       - Convert allowed-tools: YAML array to tools: object with {tool: true}
     """
-    converted = content
-    converted = convert_tool_references_in_body(converted, _TOOL_REFERENCE_MAP)
-    public_prefix = validated_public_command_prefix(get_runtime_descriptor("opencode"))
-    converted = converted.replace("`gpd:`", f"`{public_prefix}`")
-    converted = _GPD_SLASH_COMMAND_RE.sub(r"/gpd-\g<command>", converted)
-    converted = _GPD_BARE_COMMAND_RE.sub(r"gpd-\1", converted)
-
-    preamble, frontmatter, separator, body = split_markdown_frontmatter(converted)
-    if not frontmatter:
-        return converted
-
-    lines = frontmatter.split("\n")
-    new_lines: list[str] = []
-    in_allowed_tools = False
-    allowed_tools: list[str] = []
-
-    for line in lines:
-        trimmed = line.strip()
-
-        # Detect start of allowed-tools array
-        if trimmed.startswith("allowed-tools:"):
-            in_allowed_tools = True
-            continue
-
-        # Detect inline tools: field (comma-separated string)
-        if trimmed.startswith("tools:"):
-            tools_value = trimmed[6:].strip()
-            if tools_value:
-                tools = [t.strip() for t in tools_value.split(",") if t.strip()]
-                allowed_tools.extend(tools)
-            else:
-                in_allowed_tools = True
-            continue
-
-        # Remove name: field — OpenCode uses filename for command name
-        if trimmed.startswith("name:"):
-            continue
-
-        # Convert color names to hex for OpenCode
-        if trimmed.startswith("color:"):
-            color_raw = trimmed[6:].strip()
-            color_value = color_raw.lower()
-            hex_color = _COLOR_NAME_TO_HEX.get(color_value)
-            if hex_color:
-                new_lines.append(f'color: "{hex_color}"')
-            elif color_value.startswith("#"):
-                if _HEX_COLOR_RE.match(color_value):
-                    new_lines.append(f'color: "{color_raw}"')
-                # Skip invalid hex colors
-            # Skip unknown color names
-            continue
-
-        # Collect allowed-tools items
-        if in_allowed_tools:
-            if trimmed.startswith("- "):
-                allowed_tools.append(trimmed[2:].strip())
-                continue
-            elif trimmed and not trimmed.startswith("-"):
-                in_allowed_tools = False
-
-        if not in_allowed_tools:
-            new_lines.append(line)
-
-    # Add tools object if we had allowed-tools or tools
-    if allowed_tools:
-        new_lines.append("tools:")
-        for tool in allowed_tools:
-            new_lines.append(f"  {convert_tool_name(tool)}: true")
-
-    new_frontmatter = "\n".join(new_lines).strip()
-    return render_markdown_frontmatter(preamble, new_frontmatter, separator, body)
+    del path_prefix  # OpenCode intentionally preserves foreign-runtime paths in markdown bodies.
+    return project_markdown_frontmatter(
+        content,
+        policy=_OPENCODE_FRONTMATTER_POLICY,
+        translate_tool_name=convert_tool_name,
+        content_transform=_translate_opencode_markdown_content,
+    )
 
 
 def _rewrite_gpd_cli_invocations(content: str, bridge_command: str) -> str:
     """Rewrite fenced-shell command-position ``gpd`` calls to the runtime bridge."""
-    return rewrite_gpd_cli_invocations_to_runtime_bridge(
-        content,
-        bridge_command,
-        shell_fence_languages=DEFAULT_RUNTIME_BRIDGE_SHELL_FENCE_LANGUAGES,
-    )
+    return rewrite_projection_shell_bridge(content, bridge_command)
 
 
 def _render_opencode_command_markdown(content: str, *, path_prefix: str, bridge_command: str | None = None) -> str:
     """Render one canonical command markdown source into OpenCode command content."""
     if bridge_command:
-        content = _rewrite_gpd_cli_invocations(content, bridge_command)
+        content = render_projected_command_shell_fences(content, bridge_command=bridge_command)
     return _inject_opencode_command_marker(convert_claude_to_opencode_frontmatter(content, path_prefix))
+
+
+def _render_opencode_flat_command(content: str, context: FlatCommandRenderContext) -> str:
+    """Render one shared flat-command copy result into OpenCode markdown."""
+    return _render_opencode_command_markdown(
+        content,
+        path_prefix=context.path_prefix,
+        bridge_command=context.bridge_command,
+    )
 
 
 def _inject_opencode_command_marker(content: str) -> str:
@@ -302,60 +277,20 @@ def copy_flattened_commands(
 
     Returns the count of files written.
     """
-    if not src_dir.exists():
-        return 0
-
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    manifest_root = workflow_target_dir or dest_dir.parent
-    tracked_command_files = set(_load_manifest_opencode_command_files(manifest_root))
-    # Remove only previously generated command files before copying new ones.
-    if tracked_command_files:
-        for name in tracked_command_files:
-            command_path = dest_dir / name
-            if command_path.is_file():
-                command_path.unlink()
-
-    count = 0
-    for entry in sorted(src_dir.iterdir()):
-        if entry.is_dir():
-            count += copy_flattened_commands(
-                entry,
-                dest_dir,
-                f"{prefix}-{entry.name}",
-                path_prefix,
-                workflow_target_dir,
-                gpd_src_root,
-                install_scope,
-                bridge_command,
-                explicit_target=explicit_target,
-                managed_command_files=managed_command_files,
-            )
-        elif entry.name.endswith(".md"):
-            base_name = entry.stem
-            dest_name = f"{prefix}-{base_name}.md"
-            dest_path = dest_dir / dest_name
-
-            content = compile_markdown_for_runtime(
-                entry.read_text(encoding="utf-8"),
-                runtime="opencode",
-                path_prefix=path_prefix,
-                install_scope=install_scope,
-                src_root=gpd_src_root,
-                workflow_target_dir=workflow_target_dir,
-                explicit_target=explicit_target,
-            )
-            content = _render_opencode_command_markdown(
-                content,
-                path_prefix=path_prefix,
-                bridge_command=bridge_command,
-            )
-
-            dest_path.write_text(content, encoding="utf-8")
-            if managed_command_files is not None and dest_name.startswith("gpd-"):
-                managed_command_files.add(dest_name)
-            count += 1
-
-    return count
+    return _copy_flattened_command_surface(
+        src_dir,
+        dest_dir,
+        _OPENCODE_FLAT_COMMAND_SURFACE,
+        path_prefix=path_prefix,
+        workflow_target_dir=workflow_target_dir,
+        gpd_src_root=gpd_src_root,
+        install_scope=install_scope,
+        bridge_command=bridge_command,
+        explicit_target=explicit_target,
+        managed_command_files=managed_command_files,
+        prefix=prefix,
+        render_command=_render_opencode_flat_command,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -447,56 +382,20 @@ def _read_opencode_config_state(config_dir: Path) -> tuple[dict[str, object] | N
 
 def _load_manifest_opencode_generated_command_files(target_dir: Path) -> tuple[str, ...]:
     """Return tracked OpenCode command filenames from the local manifest metadata."""
-    manifest_path = target_dir / MANIFEST_NAME
-    if not manifest_path.exists():
-        return ()
-
-    try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError, UnicodeDecodeError):
-        return ()
-
-    if not isinstance(manifest, dict):
-        return ()
-
-    command_files = manifest.get(_manifest_opencode_generated_command_files_key())
-    if not isinstance(command_files, list):
-        return ()
-
-    tracked: list[str] = []
-    for entry in command_files:
-        if isinstance(entry, str) and entry.startswith("gpd-") and entry.endswith(".md"):
-            tracked.append(entry)
-    return tuple(dict.fromkeys(tracked))
+    return load_tracked_generated_command_files(
+        target_dir,
+        _OPENCODE_FLAT_COMMAND_SURFACE,
+        include_manifest_files_fallback=False,
+    )
 
 
 def _load_manifest_opencode_command_files(target_dir: Path) -> tuple[str, ...]:
     """Return tracked OpenCode command filenames from all manifest-backed surfaces."""
-    tracked = list(_load_manifest_opencode_generated_command_files(target_dir))
-
-    manifest_path = target_dir / MANIFEST_NAME
-    if not manifest_path.exists():
-        return tuple(dict.fromkeys(tracked))
-
-    try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError, UnicodeDecodeError):
-        return tuple(dict.fromkeys(tracked))
-
-    if not isinstance(manifest, dict):
-        return tuple(dict.fromkeys(tracked))
-
-    manifest_files = manifest.get("files")
-    if not isinstance(manifest_files, dict):
-        return tuple(dict.fromkeys(tracked))
-
-    for rel_path in manifest_files:
-        if not isinstance(rel_path, str) or not rel_path.startswith("command/"):
-            continue
-        name = rel_path.removeprefix("command/")
-        if name.startswith("gpd-") and name.endswith(".md"):
-            tracked.append(name)
-    return tuple(dict.fromkeys(tracked))
+    return load_tracked_generated_command_files(
+        target_dir,
+        _OPENCODE_FLAT_COMMAND_SURFACE,
+        include_manifest_files_fallback=True,
+    )
 
 
 def _opencode_flat_command_has_managed_marker(command_path: Path) -> bool:
@@ -683,7 +582,7 @@ def write_manifest(
                 sorted(
                     entry.name
                     for entry in command_dir.iterdir()
-                    if entry.is_file() and entry.name.startswith("gpd-") and entry.suffix == ".md"
+                    if entry.is_file() and _OPENCODE_FLAT_COMMAND_SURFACE.is_generated_file_name(entry.name)
                 )
             )
             if command_dir.exists()
@@ -695,7 +594,7 @@ def write_manifest(
             {
                 name
                 for name in managed_command_file_names
-                if isinstance(name, str) and name.startswith("gpd-") and name.endswith(".md")
+                if isinstance(name, str) and _OPENCODE_FLAT_COMMAND_SURFACE.is_generated_file_name(name)
             }
         )
     return _shared_write_manifest(
@@ -805,7 +704,7 @@ def uninstall_opencode(
         if oc_config_parse_error is not None:
             oc_mcp = None
         if isinstance(oc_mcp, dict) and isinstance(oc_mcp.get("mcp"), dict):
-            gpd_keys = [k for k in oc_mcp["mcp"] if k in _managed_mcp_server_keys()]
+            gpd_keys = [k for k in oc_mcp["mcp"] if k in runtime_managed_mcp_server_keys()]
             for k in gpd_keys:
                 del oc_mcp["mcp"][k]
             if gpd_keys:
@@ -956,10 +855,9 @@ class OpenCodeAdapter(RuntimeAdapter):
         return _render_opencode_command_markdown(content, path_prefix=path_prefix, bridge_command=bridge_command)
 
     def translate_shared_command_references(self, content: str) -> str:
-        result = content.replace("/gpd:", self.public_command_surface_prefix)
-        result = result.replace("`gpd:`", f"`{self.public_command_surface_prefix}`")
-        result = _GPD_BARE_COMMAND_RE.sub(r"gpd-\1", result)
-        return result
+        public_prefix = self.public_command_surface_prefix
+        content = content.replace("`gpd:`", f"`{public_prefix}`")
+        return rewrite_runtime_command_surfaces_to_public(content, public_prefix=public_prefix)
 
     def get_commit_attribution(self, *, explicit_config_dir: str | None = None) -> str | None:
         """OpenCode opts out when `disable_ai_attribution` is enabled."""
@@ -999,29 +897,7 @@ class OpenCodeAdapter(RuntimeAdapter):
     def missing_install_artifacts(self, target_dir: Path) -> tuple[str, ...]:
         """Return missing OpenCode install artifacts, including the command surface."""
         missing = list(super().missing_install_artifacts(target_dir))
-        command_dir = target_dir / "command"
-        tracked_command_files = _load_manifest_opencode_command_files(target_dir)
-
-        if not tracked_command_files:
-            missing.append("command/gpd-*.md")
-            return tuple(dict.fromkeys(missing))
-
-        missing_command_files: list[str] = []
-        for name in tracked_command_files:
-            command_path = command_dir / name
-            try:
-                if not command_path.is_file():
-                    missing_command_files.append(f"command/{name}")
-            except OSError:
-                missing_command_files.append(f"command/{name}")
-
-        if not command_dir.is_dir():
-            missing_command_files.append("command/gpd-*.md")
-
-        if missing_command_files and "command/gpd-*.md" not in missing_command_files:
-            missing_command_files.append("command/gpd-*.md")
-
-        missing.extend(missing_command_files)
+        missing.extend(missing_flat_command_artifacts(target_dir, _OPENCODE_FLAT_COMMAND_SURFACE))
         return tuple(dict.fromkeys(missing))
 
     def _install_commands(self, gpd_root: Path, target_dir: Path, path_prefix: str, failures: list[str]) -> int:
@@ -1109,14 +985,8 @@ class OpenCodeAdapter(RuntimeAdapter):
         _, self._opencode_permission_restore_state = _configure_opencode_permissions_with_restore(target_dir)
 
         # Wire MCP servers into opencode.json.
-        from gpd.mcp.builtin_servers import build_mcp_servers_dict
-
-        python_path = hook_python_interpreter()
-        mcp_servers = build_mcp_servers_dict(python_path=python_path)
-        project_cwd = None if is_global or getattr(self, "_install_explicit_target", False) else target_dir.parent
-        managed_mcp_servers = _project_managed_mcp_servers(cwd=project_cwd, python_path=python_path)
-        if managed_mcp_servers:
-            mcp_servers.update(managed_mcp_servers)
+        project_cwd = self._project_cwd_for_runtime_config(target_dir, is_global)
+        mcp_servers = build_runtime_managed_mcp_servers(cwd=project_cwd)
         mcp_count = 0
         if mcp_servers:
             mcp_count = _write_mcp_servers_opencode(target_dir, mcp_servers)

@@ -8,6 +8,16 @@ allowed-tools:
   - file_write
   - shell
   - find_files
+help:
+  group: Tangents, memory, and exports
+  order: 590
+  compact_description: Export observability logs
+  display_signature: gpd:export-logs [--format jsonl|json|markdown] [--session <id>] [--last N] [--command <label>] [--phase <phase>] [--category <name>] [--no-traces] [--output-dir <path>]
+  examples:
+    - gpd:export-logs --command execute-phase --phase 3 --category workflow
+  notes:
+    - Exports observability logs with passthrough filters such as --command <label>, --phase <phase>, and --category <name>.
+    - 'Empty result payloads report empty_export: true.'
 ---
 
 

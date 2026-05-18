@@ -6,7 +6,6 @@
       "planner_model",
       "checker_model",
       "verifier_model",
-      "commit_docs",
       "autonomy",
       "research_mode",
       "project_root",
@@ -17,16 +16,90 @@
       "phase_name",
       "has_verification",
       "has_validation",
+      "active_verification_sessions",
+      "verification_report_path",
+      "verification_report_status",
+      "verification_session_status",
+      "verification_report_status_payload",
       "phase_proof_review_status"
     ],
-    "project_contract_core": [
-      "project_contract"
+    "inventory_phase_target_context": [
+      "project_root",
+      "phase_found",
+      "phase_dir_abs",
+      "phase_number",
+      "phase_proof_review_status"
     ],
     "contract_gate_status": [
       "project_contract_load_info",
       "project_contract_validation",
       "project_contract_gate"
+    ],
+    "reference_handle_context": [
+      "effective_reference_intake",
+      "citation_source_files",
+      "citation_source_warnings",
+      "active_references"
+    ],
+    "protocol_bundle_handles": [
+      "selected_protocol_bundle_ids",
+      "protocol_bundle_count",
+      "protocol_bundle_load_manifest",
+      "protocol_bundle_verifier_extensions"
+    ],
+    "gap_repair_targeted_reference_context": [
+      "contract_intake",
+      "effective_reference_intake",
+      "selected_protocol_bundle_ids",
+      "protocol_bundle_load_manifest",
+      "protocol_bundle_verifier_extensions",
+      "reference_artifact_files"
     ]
+  },
+  "authority_groups": {
+    "verify_proof_redteam_deep_deferrals": [
+      "references/verification/core/proof-redteam-protocol.md",
+      "templates/proof-redteam-schema.md",
+      "references/verification/core/verification-core.md",
+      "references/verification/meta/verification-independence.md",
+      "references/protocols/error-propagation-protocol.md",
+      "references/shared/canonical-schema-discipline.md",
+      "templates/research-verification.md",
+      "templates/verification-report.md",
+      "templates/contract-results-schema.md"
+    ],
+    "verify_schema_report_deferrals": [
+      "references/protocols/error-propagation-protocol.md",
+      "references/shared/canonical-schema-discipline.md",
+      "templates/research-verification.md",
+      "templates/verification-report.md",
+      "templates/contract-results-schema.md"
+    ],
+    "verify_report_template_deferrals": [
+      "templates/research-verification.md",
+      "templates/verification-report.md",
+      "templates/contract-results-schema.md",
+      "templates/planner-subagent-prompt.md"
+    ]
+  },
+  "stage_defaults": {
+    "required_init_field_groups": [
+      "phase_target_base",
+      "contract_gate_status"
+    ],
+    "conditional_authorities": [],
+    "must_not_eager_load_groups": [
+      "verify_proof_redteam_deep_deferrals"
+    ],
+    "allowed_tools": [
+      "ask_user",
+      "file_read",
+      "find_files",
+      "search_files",
+      "shell",
+      "task"
+    ],
+    "writes_allowed": []
   },
   "stages": [
     {
@@ -34,37 +107,31 @@
       "order": 1,
       "purpose": "session discovery, check selection, and fail-closed preflight routing",
       "mode_paths": [
-        "workflows/verify-work.md"
+        "workflows/verify-work/session-router.md"
       ],
       "required_init_field_groups": [
-        "phase_target_base",
         "contract_gate_status"
       ],
       "required_init_fields": [
+        "project_root",
+        "phase_found",
+        "phase_dir_abs",
+        "active_verification_sessions",
+        "verification_report_status_payload",
+        "phase_proof_review_status",
         "platform"
       ],
       "loaded_authorities": [
-        "workflows/verify-work.md"
+        "workflows/verify-work/session-router.md"
       ],
-      "conditional_authorities": [],
       "must_not_eager_load": [
-        "references/verification/core/verification-core.md",
-        "references/verification/meta/verification-independence.md",
-        "references/protocols/error-propagation-protocol.md",
-        "references/shared/canonical-schema-discipline.md",
-        "templates/research-verification.md",
-        "templates/verification-report.md",
-        "templates/contract-results-schema.md"
+        "workflows/verify-work.md",
+        "workflows/verify-work/phase-bootstrap.md",
+        "workflows/verify-work/inventory-build.md",
+        "workflows/verify-work/interactive-validation.md",
+        "workflows/verify-work/gap-repair.md",
+        "references/verification/core/proof-redteam-workflow-gate.md"
       ],
-      "allowed_tools": [
-        "ask_user",
-        "file_read",
-        "find_files",
-        "search_files",
-        "shell",
-        "task"
-      ],
-      "writes_allowed": [],
       "produced_state": [
         "session routing state",
         "verification preflight state"
@@ -83,37 +150,23 @@
       "order": 2,
       "purpose": "proof gate resolution and bootstrap-only verification setup",
       "mode_paths": [
-        "workflows/verify-work.md"
-      ],
-      "required_init_field_groups": [
-        "phase_target_base",
-        "contract_gate_status"
+        "workflows/verify-work/phase-bootstrap.md"
       ],
       "required_init_fields": [
-        "platform"
+        "platform",
+        "proof_redteam_finalizer_bridge"
       ],
       "loaded_authorities": [
-        "workflows/verify-work.md"
+        "workflows/verify-work/phase-bootstrap.md",
+        "references/verification/core/proof-redteam-workflow-gate.md"
       ],
-      "conditional_authorities": [],
       "must_not_eager_load": [
-        "references/verification/core/verification-core.md",
-        "references/verification/meta/verification-independence.md",
-        "references/protocols/error-propagation-protocol.md",
-        "references/shared/canonical-schema-discipline.md",
-        "templates/research-verification.md",
-        "templates/verification-report.md",
-        "templates/contract-results-schema.md"
+        "workflows/verify-work.md",
+        "workflows/verify-work/session-router.md",
+        "workflows/verify-work/inventory-build.md",
+        "workflows/verify-work/interactive-validation.md",
+        "workflows/verify-work/gap-repair.md"
       ],
-      "allowed_tools": [
-        "ask_user",
-        "file_read",
-        "find_files",
-        "search_files",
-        "shell",
-        "task"
-      ],
-      "writes_allowed": [],
       "produced_state": [
         "proof gate state",
         "bootstrap verification state"
@@ -131,48 +184,45 @@
       "order": 3,
       "purpose": "delegated verifier handoff, anchor context loading, and report sync",
       "mode_paths": [
-        "workflows/verify-work.md"
+        "workflows/verify-work/inventory-build.md"
       ],
       "required_init_field_groups": [
-        "phase_target_base",
-        "project_contract_core",
-        "contract_gate_status"
+        "inventory_phase_target_context",
+        "contract_gate_status",
+        "reference_handle_context",
+        "protocol_bundle_handles"
       ],
       "required_init_fields": [
         "contract_intake",
-        "effective_reference_intake",
-        "derived_active_references",
-        "derived_active_reference_count",
-        "citation_source_files",
-        "citation_source_count",
-        "citation_source_warnings",
-        "derived_citation_sources",
-        "derived_citation_source_count",
-        "active_references",
-        "active_reference_count",
         "convention_lock",
         "convention_lock_count",
         "derived_convention_lock",
         "derived_convention_lock_count",
-        "selected_protocol_bundle_ids",
-        "protocol_bundle_count",
-        "protocol_bundle_context",
-        "protocol_bundle_verifier_extensions",
-        "active_reference_context",
+        "verification_report_finalizer_bridge",
         "verification_report_skeleton_bridge"
       ],
       "loaded_authorities": [
-        "workflows/verify-work.md",
-        "references/verification/meta/verification-independence.md"
+        "workflows/verify-work/inventory-build.md"
       ],
-      "conditional_authorities": [],
+      "conditional_authorities": [
+        {
+          "when": "full_independence_policy_check",
+          "authorities": [
+            "references/verification/meta/verification-independence.md"
+          ]
+        }
+      ],
       "must_not_eager_load": [
+        "workflows/verify-work.md",
+        "workflows/verify-work/interactive-validation.md",
+        "workflows/verify-work/gap-repair.md",
         "references/verification/core/verification-core.md",
+        "references/verification/meta/verification-independence.md",
         "references/shared/canonical-schema-discipline.md",
-        "references/protocols/error-propagation-protocol.md",
-        "templates/research-verification.md",
-        "templates/verification-report.md",
-        "templates/contract-results-schema.md"
+        "references/protocols/error-propagation-protocol.md"
+      ],
+      "must_not_eager_load_groups": [
+        "verify_report_template_deferrals"
       ],
       "allowed_tools": [
         "ask_user",
@@ -185,7 +235,6 @@
         "mcp__gpd_verification__suggest_contract_checks",
         "mcp__gpd_verification__run_contract_check"
       ],
-      "writes_allowed": [],
       "produced_state": [
         "delegated verification state",
         "anchor context",
@@ -205,34 +254,44 @@
       "order": 4,
       "purpose": "writer-stage session overlay and researcher response capture",
       "mode_paths": [
-        "workflows/verify-work.md"
-      ],
-      "required_init_field_groups": [
-        "phase_target_base",
-        "project_contract_core",
-        "contract_gate_status"
+        "workflows/verify-work/interactive-validation.md"
       ],
       "required_init_fields": [
         "contract_intake",
-        "selected_protocol_bundle_ids",
-        "protocol_bundle_count",
-        "protocol_bundle_context",
-        "protocol_bundle_verifier_extensions",
-        "active_reference_context",
         "reference_artifact_files"
       ],
       "loaded_authorities": [
-        "workflows/verify-work.md",
-        "templates/research-verification.md",
-        "templates/verification-report.md",
-        "templates/contract-results-schema.md",
-        "references/shared/canonical-schema-discipline.md"
+        "workflows/verify-work/interactive-validation.md"
       ],
-      "conditional_authorities": [],
+      "conditional_authorities": [
+        {
+          "when": "session_overlay_write_or_repair",
+          "authorities": [
+            "templates/research-verification.md",
+            "templates/verification-report.md",
+            "templates/contract-results-schema.md",
+            "references/shared/canonical-schema-discipline.md"
+          ]
+        },
+        {
+          "when": "custom_verifier_continuation",
+          "authorities": [
+            "templates/verification-report.md",
+            "templates/contract-results-schema.md",
+            "references/shared/canonical-schema-discipline.md"
+          ]
+        }
+      ],
       "must_not_eager_load": [
+        "workflows/verify-work.md",
+        "workflows/verify-work/gap-repair.md",
         "references/protocols/error-propagation-protocol.md",
         "references/verification/core/verification-core.md",
-        "references/verification/meta/verification-independence.md"
+        "references/verification/meta/verification-independence.md",
+        "references/shared/canonical-schema-discipline.md"
+      ],
+      "must_not_eager_load_groups": [
+        "verify_report_template_deferrals"
       ],
       "allowed_tools": [
         "ask_user",
@@ -257,7 +316,7 @@
       ],
       "checkpoints": [
         "verification file can be written",
-        "writer-stage schema is visible",
+        "writer-stage schema deferral barrier is visible",
         "check results remain contract-backed"
       ]
     },
@@ -266,33 +325,39 @@
       "order": 5,
       "purpose": "diagnosis, gap planning, and verified closeout after failed checks",
       "mode_paths": [
-        "workflows/verify-work.md"
+        "workflows/verify-work/gap-repair.md"
       ],
       "required_init_field_groups": [
         "phase_target_base",
-        "project_contract_core",
-        "contract_gate_status"
-      ],
-      "required_init_fields": [
-        "contract_intake",
-        "effective_reference_intake",
-        "active_reference_context",
-        "selected_protocol_bundle_ids",
-        "protocol_bundle_context",
-        "protocol_bundle_verifier_extensions",
-        "reference_artifact_files",
-        "reference_artifacts_content"
+        "contract_gate_status",
+        "gap_repair_targeted_reference_context"
       ],
       "loaded_authorities": [
-        "workflows/verify-work.md",
-        "templates/research-verification.md",
-        "templates/verification-report.md",
-        "templates/contract-results-schema.md",
-        "references/shared/canonical-schema-discipline.md",
-        "references/protocols/error-propagation-protocol.md"
+        "workflows/verify-work/gap-repair.md"
       ],
-      "conditional_authorities": [],
-      "must_not_eager_load": [],
+      "conditional_authorities": [
+        {
+          "when": "gap_report_write_or_schema_repair",
+          "authorities": [
+            "templates/research-verification.md",
+            "templates/verification-report.md",
+            "templates/contract-results-schema.md",
+            "references/shared/canonical-schema-discipline.md"
+          ]
+        },
+        {
+          "when": "error_propagation_gap",
+          "authorities": [
+            "references/protocols/error-propagation-protocol.md"
+          ]
+        }
+      ],
+      "must_not_eager_load": [
+        "workflows/verify-work.md"
+      ],
+      "must_not_eager_load_groups": [
+        "verify_schema_report_deferrals"
+      ],
       "allowed_tools": [
         "ask_user",
         "file_read",

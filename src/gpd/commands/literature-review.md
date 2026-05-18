@@ -32,6 +32,16 @@ allowed-tools:
   - web_search
   - web_fetch
   - ask_user
+help:
+  group: Writing and publication
+  order: 440
+  compact_description: Create a structured literature review under `GPD/literature/` in the current workspace
+  display_signature: gpd:literature-review [topic or research question]
+  examples:
+    - gpd:literature-review "holographic superconductors"
+  notes:
+    - 'Runs on the current project or an explicit topic: a physics research topic or research question, and writes under GPD/literature/ in the current workspace.'
+  root_detail_order: 250
 ---
 <objective>
 Run the literature-review workflow as a thin wrapper around the staged review pipeline for an explicit topic or research question. Produce `GPD/literature/{slug}-REVIEW.md` and the matching `GPD/literature/{slug}-CITATION-SOURCES.json` sidecar under `GPD/literature/` rooted at the current workspace. In project-backed mode that is the resolved project root's `GPD/literature/`; in standalone mode it is `./GPD/literature/` in the invoking workspace.
@@ -40,7 +50,7 @@ Run the literature-review workflow as a thin wrapper around the staged review pi
 </objective>
 
 <execution_context>
-@{GPD_INSTALL_DIR}/workflows/literature-review.md
+@{GPD_INSTALL_DIR}/workflows/literature-review/review-bootstrap.md
 </execution_context>
 
 <context>
@@ -56,6 +66,6 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Follow the included literature-review workflow exactly. The workflow owns staged loading, scope fixing, artifact gating, and citation verification.
+Read the included literature-review bootstrap authority first. The staged workflow owns scope fixing, artifact gating, citation verification, and later authority loading.
 If the invocation is empty in project-backed mode, ask one focused question to set the review topic before handing off. Standalone empty invocations should already have failed preflight.
 </process>

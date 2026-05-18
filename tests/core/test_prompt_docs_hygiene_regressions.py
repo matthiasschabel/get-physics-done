@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
+
+from tests.assertion_taxonomy_support import assert_prompt_contracts, fragment_count, semantic_concept
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 AGENTS_DIR = REPO_ROOT / "src" / "gpd" / "agents"
@@ -66,6 +69,22 @@ def test_runtime_delegation_fallback_boilerplate_stays_single_sourced() -> None:
     assert offenders == {}
 
 
+def test_workflow_shell_stop_comments_use_short_form() -> None:
+    verbose_stop_comment = re.compile(
+        r"# STOP\s+(?:-|--|—)\s+display the error to the user and do not proceed"
+        r"(?: with the workflow)?\."
+    )
+
+    offenders: dict[str, list[str]] = {}
+    for path in sorted(WORKFLOWS_DIR.glob("*.md")):
+        text = path.read_text(encoding="utf-8")
+        hits = verbose_stop_comment.findall(text)
+        if hits:
+            offenders[path.relative_to(REPO_ROOT).as_posix()] = hits
+
+    assert offenders == {}
+
+
 def test_workflows_loading_runtime_delegation_note_do_not_duplicate_shortform_pointers() -> None:
     include = "@{GPD_INSTALL_DIR}/references/orchestration/runtime-delegation-note.md"
     repeated_reference = "Apply the canonical runtime delegation convention already loaded above."
@@ -89,9 +108,30 @@ def test_workflows_loading_runtime_delegation_note_do_not_duplicate_shortform_po
 
 
 def test_new_project_minimal_scope_block_delegates_missing_anchor_examples_to_schema() -> None:
-    text = (WORKFLOWS_DIR / "new-project.md").read_text(encoding="utf-8")
+    text = (WORKFLOWS_DIR / "new-project" / "scope-approval.md").read_text(encoding="utf-8")
+    grounding_linkage = (SPECS_DIR / "templates" / "project-contract-grounding-linkage.md").read_text(
+        encoding="utf-8"
+    )
 
-    assert "Use the schema's grounding-linkage rules for accepted missing-anchor wording." in text
-    assert "Prefer explicit missing-anchor wording such as" not in text
-    assert "Accepted shorthand like `need grounding`" not in text
-    assert text.count("Missing-anchor notes preserve uncertainty, but they do not satisfy approval on their own.") == 1
+    assert_prompt_contracts(
+        text,
+        *semantic_concept(
+            "scope approval delegates missing anchor examples",
+            required=(
+                "explicit missing-anchor uncertainty",
+                "concrete anchor, reference, prior-output constraint, or baseline",
+            ),
+            forbidden=(
+                "Prefer explicit missing-anchor wording such as",
+                "Accepted shorthand like `need grounding`",
+            ),
+        ),
+    )
+    assert_prompt_contracts(
+        grounding_linkage,
+        fragment_count(
+            "grounding linkage uncertainty note remains single sourced",
+            "explicit missing-anchor notes preserve uncertainty but do not satisfy approval on their own",
+            expected_count=1,
+        ),
+    )

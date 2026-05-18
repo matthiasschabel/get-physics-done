@@ -11,6 +11,13 @@ allowed-tools:
   - search_files
   - file_write
   - task
+help:
+  group: Starter commands
+  order: 60
+  compact_description: Map an existing research folder before planning
+  display_signature: gpd:map-research
+  detail_signature: gpd:map-research
+  root_detail_order: 20
 ---
 
 <objective>
@@ -20,7 +27,7 @@ Orchestrator role: validate the focus area, then hand off to the workflow-owned 
 </objective>
 
 <execution_context>
-@{GPD_INSTALL_DIR}/workflows/map-research.md
+@{GPD_INSTALL_DIR}/workflows/map-research/map-bootstrap.md
 </execution_context>
 
 <context>
@@ -30,6 +37,5 @@ Project state is loaded by the workflow from the current workspace or its neares
 </context>
 
 <process>
-Follow the included map-research workflow.
-Do not duplicate staged init, mapper fanout, or return routing here.
+Follow the included map-research bootstrap authority. Mapper authoring and artifact routing are manifest-owned by the active workflow stages; do not duplicate staged init, mapper fanout, or return routing here.
 </process>

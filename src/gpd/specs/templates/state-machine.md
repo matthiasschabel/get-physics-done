@@ -65,7 +65,7 @@ Disk status values (from `roadmap_analyze`): `no_directory`, `empty`, `discussed
 - **Planned → Executing**: `gpd:execute-phase` starts (STATE.md Status set to "Ready to execute", Current Plan set to 1)
 - **Executing → Phase complete**: `gpd state advance` when `currentPlan >= totalPlans` (Status set to "Phase complete — ready for verification")
 - **Phase complete → Verified**: `gpd:verify-work` completes (`{NN}-VERIFICATION.md` and/or `{NN}-VALIDATION.md` created), then `gpd state record-verification --phase {NN}` atomically sets Status to `Verified` (or `Blocked` on a failed verifier)
-- **Verified → Complete**: `gpd phase complete {N}` (ROADMAP checkbox marked `[x]`, STATE.md advances to next phase)
+- **Verified → Complete**: read-only `gpd --raw phase closeout-readiness {N} --require-verification` reports ready, then `gpd phase complete {N}` mutates ROADMAP/STATE (ROADMAP checkbox marked `[x]`, STATE.md advances to next phase)
 - **Executing → Blocked**: Dependency not met or failure encountered (blocker added via `gpd state add-blocker`)
 - **Blocked → Executing**: Blocker resolved via `gpd state resolve-blocker`
 
@@ -174,7 +174,7 @@ Active → Audited → Complete → Archived
 | Plan: complete | Executor creates SUMMARY.md | `{NN}-{plan}-SUMMARY.md` created |
 | Phase: → Phase complete | `gpd state advance` (last plan) | STATE.md (Status = "Phase complete — ready for verification") |
 | Phase: → Verified | `gpd:verify-work` | `{NN}-VERIFICATION.md` and/or `{NN}-VALIDATION.md` created |
-| Phase: Verified → Complete | `gpd phase complete {N}` | ROADMAP.md (checkbox), STATE.md (next phase), progress updated |
+| Phase: Verified → Complete | `gpd --raw phase closeout-readiness {N} --require-verification`, then `gpd phase complete {N}` | ROADMAP.md (checkbox), STATE.md (next phase), progress updated |
 | Milestone: → Audited | `gpd:audit-milestone` | `{version}-MILESTONE-AUDIT.md` created |
 | Milestone: → Archived | `gpd:complete-milestone` | MILESTONES.md updated, files archived to `milestones/` |
 | Decision recorded | `gpd state add-decision` | STATE.md (Decisions section), state.json synced |

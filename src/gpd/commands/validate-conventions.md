@@ -9,6 +9,11 @@ allowed-tools:
   - search_files
   - find_files
   - task
+help:
+  group: Validation and analysis
+  order: 360
+  compact_description: Check notation and convention consistency
+  display_signature: gpd:validate-conventions [phase]
 ---
 
 

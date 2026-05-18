@@ -11,36 +11,37 @@ import builtins
 import json
 import logging
 import os
-import re
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock, MagicMock, call, patch
 
 import pytest
-from typer.testing import CliRunner
 
 import gpd.cli as cli_module
 import gpd.runtime_cli as runtime_cli
+import tests.helpers.cli as cli_helpers
 from gpd.adapters import get_adapter, list_runtimes
+from gpd.adapters.runtime_catalog import iter_runtime_descriptors
 from gpd.cli import app
 from gpd.core import cli_args as cli_args_module
-from gpd.core.constants import STATE_JSON_BACKUP_FILENAME, ProjectLayout
+from gpd.core.command_preflight import (
+    _command_managed_output_root,
+    command_supports_project_reentry,
+    resolve_registry_command,
+)
+from gpd.core.command_subjects import (
+    ResolvedCommandSubject,
+    _build_resolved_command_subject,
+    _command_explicit_manuscript_subject_uses_supported_roots,
+    _command_explicit_manuscript_suffixes,
+    _command_requires_compiled_manuscript,
+    _resolve_review_preflight_manuscript,
+)
+from gpd.core.constants import ProjectLayout
 from gpd.core.costs import (
-    CostBudgetThresholdSummary,
-    CostProjectSummary,
-    CostSessionSummary,
-    CostSummary,
     _profile_tier_mix,
 )
 from gpd.core.frontmatter import FrontmatterParseError, extract_frontmatter, validate_frontmatter
-from gpd.core.health import (
-    CheckStatus,
-    DoctorReport,
-    HealthCheck,
-    HealthSummary,
-    UnattendedReadinessCheck,
-    UnattendedReadinessResult,
-)
 from gpd.core.project_reentry import resolve_project_reentry
 from gpd.core.public_surface_contract import (
     local_cli_bridge_commands,
@@ -55,8 +56,8 @@ from gpd.core.public_surface_contract import (
     local_cli_validate_command_context_command,
 )
 from gpd.core.recent_projects import record_recent_project
-from gpd.core.reproducibility import compute_sha256
 from gpd.core.resume_surface import RESUME_BACKEND_ONLY_FIELDS
+from gpd.core.return_contract import RETURN_STATUS_ORDER
 from gpd.core.state import default_state_dict, generate_state_markdown, save_state_json, save_state_markdown
 from tests.latex_test_support import latex_capability_payload as _latex_capability_payload
 from tests.latex_test_support import toolchain_capability as _toolchain_capability
@@ -70,24 +71,55 @@ from tests.runtime_test_support import (
     runtime_with_permissions_surface,
 )
 
+_PermissionsTargetAdapter = cli_helpers.PermissionsTargetAdapter
+_artifact_manifest_payload = cli_helpers.artifact_manifest_payload
+_assert_forbidden_verification_fields_absent = cli_helpers.assert_forbidden_verification_fields_absent
+_assert_no_top_level_resume_aliases = cli_helpers.assert_no_top_level_resume_aliases
+_bootstrap_publication_project = cli_helpers.bootstrap_publication_project
+_compact_plan_with_missing_must_surface_benchmark = cli_helpers.compact_plan_with_missing_must_surface_benchmark
+_make_checkout = cli_helpers.make_checkout
+_mark_verified_project_root = cli_helpers.mark_verified_project_root
+_normalize_cli_output = cli_helpers.normalize_cli_output
+_proof_redteam_markdown = cli_helpers.proof_redteam_markdown
+_raw_payload_from_result = cli_helpers.raw_payload_from_result
+_return_skeleton_error_payload = cli_helpers.return_skeleton_error_payload
+_sample_cost_summary = cli_helpers.sample_cost_summary
+_valid_checkpoint_return_markdown = cli_helpers.valid_checkpoint_return_markdown
+_write_install_manifest = cli_helpers.write_install_manifest
+_write_managed_publication_manuscript = cli_helpers.write_managed_publication_manuscript
+_write_markdown_recoverable_result_state = cli_helpers.write_markdown_recoverable_result_state
+_write_recoverable_result_state = cli_helpers.write_recoverable_result_state
+_write_stale_refresh_skeleton_plan = cli_helpers.write_stale_refresh_skeleton_plan
+_write_verification_body_file = cli_helpers.write_verification_body_file
+_write_write_paper_authoring_input = cli_helpers.write_write_paper_authoring_input
+assert_cli_human_contract = cli_helpers.assert_cli_human_contract
+assert_cli_help_contract = cli_helpers.assert_cli_help_contract
+assert_cli_success = cli_helpers.assert_cli_success
+assert_no_traceback = cli_helpers.assert_no_traceback
+assert_result_exit = cli_helpers.assert_result_exit
+invoke_help_text = cli_helpers.invoke_help_text
+json_output_from_result = cli_helpers.json_output_from_result
 
-class _StableCliRunner(CliRunner):
-    def invoke(self, *args, **kwargs):
-        kwargs.setdefault("color", False)
-        return super().invoke(*args, **kwargs)
+runner = cli_helpers.StableCliRunner()
 
 
-runner = _StableCliRunner()
-
-_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
-
-
-def _normalize_cli_output(text: str) -> str:
-    return " ".join(_ANSI_ESCAPE_RE.sub("", text).split())
+def _help_text(*args: str, expect_exit: int = 0, **kwargs) -> str:
+    return invoke_help_text(runner, app, args, expect_exit=expect_exit, **kwargs)
 
 
 def _has_warning_with_fragments(warnings: list[str], *fragments: str) -> bool:
     return any(all(fragment in warning for fragment in fragments) for warning in warnings)
+
+
+def _assert_contains_all(text: str, *fragments: str) -> None:
+    assert not (missing := [fragment for fragment in fragments if fragment not in text]), (
+        f"missing fragments: {missing}"
+    )
+
+
+def _assert_contains_lines(text: str, fragments: str) -> None:
+    raw_fragments = fragments.split(" | ") if " | " in fragments else fragments.splitlines()
+    _assert_contains_all(text, *(fragment.strip() for fragment in raw_fragments if fragment.strip()))
 
 
 _COST_TEST_RUNTIME = "runtime-under-test"
@@ -96,175 +128,6 @@ _CONFIG_FILE_RUNTIME = runtime_with_permissions_surface("config-file")
 _CONFIG_FILE_PROMPT_FREE_MODE = runtime_prompt_free_mode_value(_CONFIG_FILE_RUNTIME)
 _LAUNCH_WRAPPER_RUNTIME = runtime_with_permissions_surface("launch-wrapper")
 FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "stage0"
-
-
-def _assert_no_top_level_resume_aliases(payload: dict[str, object]) -> None:
-    for key in RESUME_BACKEND_ONLY_FIELDS:
-        assert key not in payload
-
-
-def _make_checkout(tmp_path: Path, version: str = "9.9.9") -> Path:
-    """Create a minimal GPD source checkout for CLI version tests."""
-    repo_root = tmp_path / "checkout"
-    repo_root.mkdir(parents=True, exist_ok=True)
-    (repo_root / "package.json").write_text(
-        json.dumps(
-            {
-                "name": "get-physics-done",
-                "version": version,
-                "gpdPythonVersion": version,
-            }
-        ),
-        encoding="utf-8",
-    )
-    (repo_root / "pyproject.toml").write_text(
-        f'[project]\nname = "get-physics-done"\nversion = "{version}"\n',
-        encoding="utf-8",
-    )
-    gpd_root = repo_root / "src" / "gpd"
-    for subdir in ("commands", "agents", "hooks", "specs"):
-        (gpd_root / subdir).mkdir(parents=True, exist_ok=True)
-    return repo_root
-
-
-def _artifact_manifest_payload(
-    manuscript: Path,
-    *,
-    title: str = "Curvature Flow Bounds",
-    journal: str = "prl",
-    artifact_id: str = "tex-paper",
-    artifact_path: str | None = None,
-) -> dict[str, object]:
-    digest = compute_sha256(manuscript)
-    return {
-        "version": 1,
-        "paper_title": title,
-        "journal": journal,
-        "created_at": "2026-04-02T00:00:00+00:00",
-        "manuscript_sha256": digest,
-        "manuscript_mtime_ns": manuscript.stat().st_mtime_ns,
-        "artifacts": [
-            {
-                "artifact_id": artifact_id,
-                "category": "tex",
-                "path": artifact_path or manuscript.name,
-                "sha256": digest,
-                "produced_by": "test",
-                "sources": [],
-                "metadata": {},
-            }
-        ],
-    }
-
-
-def _write_managed_publication_manuscript(
-    project_root: Path,
-    *,
-    subject_slug: str = "curvature-flow",
-    stem: str = "managed_manuscript",
-) -> Path:
-    manuscript_dir = project_root / "GPD" / "publication" / subject_slug / "manuscript"
-    manuscript_dir.mkdir(parents=True, exist_ok=True)
-    manuscript = manuscript_dir / f"{stem}.tex"
-    manuscript.write_text("\\documentclass{article}\\begin{document}Hello\\end{document}\n", encoding="utf-8")
-    (manuscript_dir / "PAPER-CONFIG.json").write_text(
-        json.dumps(
-            {
-                "title": "Managed Manuscript",
-                "output_filename": stem,
-                "authors": [{"name": "A. Researcher"}],
-                "abstract": "Abstract.",
-                "sections": [{"title": "Intro", "content": "Hello."}],
-                "figures": [],
-            }
-        ),
-        encoding="utf-8",
-    )
-    return manuscript
-
-
-def _bootstrap_publication_project(project_root: Path) -> None:
-    planning = project_root / "GPD"
-    planning.mkdir(parents=True, exist_ok=True)
-    state = default_state_dict()
-    save_state_json(project_root, state)
-    save_state_markdown(project_root, generate_state_markdown(state))
-    (planning / "PROJECT.md").write_text("# Project\n", encoding="utf-8")
-    (planning / "CONVENTIONS.md").write_text("# Conventions\n", encoding="utf-8")
-
-
-def _mark_verified_project_root(project_root: Path) -> None:
-    planning = project_root / "GPD"
-    planning.mkdir(parents=True, exist_ok=True)
-    save_state_json(project_root, default_state_dict())
-    (planning / "PROJECT.md").write_text("# Project\n", encoding="utf-8")
-
-
-def _write_write_paper_authoring_input(
-    workspace: Path,
-    *,
-    file_name: str = "write-paper-authoring-input.json",
-    subject_slug: str = "external-authoring-test",
-) -> Path:
-    intake_path = workspace / file_name
-    intake_path.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "title": "External Authoring Bounds",
-                "authors": [{"name": "A. Researcher"}],
-                "target_journal": "prl",
-                "subject_slug": subject_slug,
-                "central_claim": "The controlled benchmark supports a stable external-authoring draft.",
-                "claims": [
-                    {
-                        "id": "CLM-main",
-                        "statement": "The benchmarked bound is stable across the resolved regime.",
-                        "evidence": {
-                            "source_note_ids": ["NOTE-main"],
-                            "result_ids": ["RES-main"],
-                            "figure_ids": ["FIG-main"],
-                            "citation_source_ids": ["cite-main"],
-                        },
-                    }
-                ],
-                "source_notes": [
-                    {
-                        "id": "NOTE-main",
-                        "path": "notes/main-result.md",
-                        "summary": "Summarizes the decisive benchmark and fit stability.",
-                    }
-                ],
-                "results": [
-                    {
-                        "id": "RES-main",
-                        "summary": "Main fitted bound with uncertainty band.",
-                        "source_note_ids": ["NOTE-main"],
-                    }
-                ],
-                "figures": [
-                    {
-                        "id": "FIG-main",
-                        "path": "figures/main-bound.pdf",
-                        "caption": "Benchmark comparison supporting the main bound.",
-                        "source_note_ids": ["NOTE-main"],
-                    }
-                ],
-                "citation_sources": [
-                    {
-                        "source_type": "paper",
-                        "reference_id": "cite-main",
-                        "title": "Benchmark Recovery in a Controlled Regime",
-                        "authors": ["A. Author"],
-                        "year": "2024",
-                    }
-                ],
-            },
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
-    return intake_path
 
 
 class _ExecutionSnapshot(SimpleNamespace):
@@ -280,14 +143,12 @@ class _ExecutionSnapshot(SimpleNamespace):
 
 def test_version():
     result = runner.invoke(app, ["--version"])
-    assert result.exit_code == 0
-    assert "gpd" in result.output
+    assert_cli_human_contract(result, required_all=("gpd",))
 
 
 def test_version_subcommand():
     result = runner.invoke(app, ["version"])
-    assert result.exit_code == 0
-    assert "gpd" in result.output
+    assert_cli_human_contract(result, required_all=("gpd",))
 
 
 def test_version_subcommand_prefers_checkout_version(tmp_path: Path):
@@ -295,20 +156,17 @@ def test_version_subcommand_prefers_checkout_version(tmp_path: Path):
 
     result = runner.invoke(app, ["--cwd", str(checkout), "version"])
 
-    assert result.exit_code == 0
-    assert "9.9.9" in result.output
+    assert_cli_human_contract(result, required_all=("9.9.9",))
 
 
 def test_raw_version_option_outputs_json():
     result = runner.invoke(app, ["--raw", "--version"])
-    assert result.exit_code == 0
-    assert json.loads(result.output)["result"].startswith("gpd ")
+    assert json_output_from_result(result)["result"].startswith("gpd ")
 
 
 def test_raw_version_subcommand_outputs_json():
     result = runner.invoke(app, ["--raw", "version"])
-    assert result.exit_code == 0
-    assert json.loads(result.output)["result"].startswith("gpd ")
+    assert json_output_from_result(result)["result"].startswith("gpd ")
 
 
 def test_entrypoint_reexecs_from_checkout_when_running_outside_checkout(tmp_path: Path, monkeypatch) -> None:
@@ -352,69 +210,79 @@ def test_entrypoint_reexecs_from_checkout_when_running_outside_checkout(tmp_path
 
 def test_help_surfaces_core_and_auxiliary_commands() -> None:
     result = runner.invoke(app, ["--help"])
-    assert result.exit_code == 0
-    assert "observe" in result.output
-    assert "state" in result.output
-    assert "phase" in result.output
-    assert "health" in result.output
-    assert "paper-build" in result.output
-    assert "doctor" in result.output
-    assert "Check GPD installation and environment health" in result.output
-    assert "inspect runtime readiness" in result.output
-    assert "install" in result.output
-    assert "Install GPD skills, agents, and hooks into runtime" in result.output
-    assert "uninstall" in result.output
-    assert "Remove GPD skills, agents, and hooks from runtime" in result.output
-    assert "init" in result.output
-    assert "validate" in result.output
-    assert "readiness" in result.output
-    assert "observability" in result.output
-    normalized_output = _normalize_cli_output(result.output)
-    assert "permissions" in normalized_output
-    assert "Runtime permission readiness and sync" in normalized_output
-    assert "gpd doctor" in normalized_output
-    assert local_cli_unattended_readiness_command() in normalized_output
-    assert local_cli_permissions_status_command() in normalized_output
-    assert local_cli_permissions_sync_command() in normalized_output
-    assert "gpd observe execution" in normalized_output
-
-    assert local_cli_resume_recent_command() in normalized_output
-    assert local_cli_install_local_example_command() in normalized_output
-    assert local_cli_doctor_local_command() in normalized_output
-    assert local_cli_validate_command_context_command() in normalized_output
+    # fmt: off
+    normalized_output = assert_cli_help_contract(
+        result,
+        commands=("observe", "state", "phase", "health", "paper-build", "doctor", "install", "uninstall", "init", "validate", "readiness", "observability"),
+        sections=("Check GPD installation and environment health", "inspect runtime readiness", "Install GPD skills, agents, and hooks into runtime", "Remove GPD skills, agents, and hooks from runtime"),
+    )
+    # fmt: on
+    # fmt: off
+    _assert_contains_lines(normalized_output, f"permissions | Runtime permission readiness and sync | gpd doctor | {local_cli_unattended_readiness_command()} | {local_cli_permissions_status_command()} | {local_cli_permissions_sync_command()} | gpd observe execution | {local_cli_resume_recent_command()} | {local_cli_install_local_example_command()} | {local_cli_doctor_local_command()} | {local_cli_validate_command_context_command()} | presets | Workflow presets for local CLI preview | application | integrations | Optional shared capability integrations")
+    # fmt: on
 
     for command in local_cli_bridge_commands():
         assert command in normalized_output
-    assert "presets" in normalized_output
-    assert "Workflow presets for local CLI preview" in normalized_output
-    assert "application" in normalized_output
-    assert "integrations" in normalized_output
-    assert "Optional shared capability integrations" in normalized_output
 
 
-def test_install_help_uses_public_surface_examples() -> None:
-    result = runner.invoke(app, ["install", "--help"])
+def _help_case(
+    args: str,
+    expected: str,
+    forbidden: str = "",
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    return tuple(args.split()), tuple(expected.split(" | ")), tuple(forbidden.split(" | ")) if forbidden else ()
 
-    assert result.exit_code == 0
-    normalized_output = _normalize_cli_output(result.output)
-    assert local_cli_install_local_example_command() in normalized_output
-    assert "gpd install <runtime> # single runtime, local" not in normalized_output
+
+# fmt: off
+_HELP_FRAGMENT_CASES = [
+    _help_case("install", local_cli_install_local_example_command(), "gpd install <runtime> # single runtime, local"),
+    _help_case("presets apply", "--dry-run | Show a diff-oriented preview without writing it"),
+    _help_case("cost", "Show machine-local usage and cost summaries | --last-sessions | Show the most recent N recorded usage | [default: 5]"),
+    _help_case("observe execution", "Show the current local execution status without modifying project state.", "possibly stalled"),
+    _help_case("observe", "event/export are the subcommands that write files"),
+    _help_case("observe event", "Record one local observability event (writes session logs)."),
+    _help_case("observe show", "without modifying project state"),
+    _help_case("trace", "show is read-only | start/log/stop write trace state"),
+    _help_case("trace show", "Inspect trace events with optional filters without modifying project state."),
+    _help_case("trace stop", "writes trace and observability state"),
+    _help_case("doctor", "Check GPD installation and environment health | inspect runtime readiness | --live-executable-probes | --runtime | --local | --global | --target-dir"),
+    _help_case("permissions", "Runtime permission readiness and sync | status | ready for unattended use | sync | active runtime's `settings` command"),
+    _help_case("permissions status", "ready for unattended use | requested autonomy | --runtime | --autonomy | --target-dir"),
+    _help_case("permissions sync", "persist runtime-owned permission settings | active runtime's `settings` command | --runtime | --autonomy | --target-dir"),
+    _help_case("config set-tier-models", "Update model_overrides for one runtime | --runtime | --tier-1 | --tier-2 | --tier-3 | --clear"),
+    _help_case("init", "Assemble context for AI agent workflows | new-project | resume | map-research | verify-work"),
+    _help_case("resume", "--recent | Summarize local recovery state or list machine-local recent projects."),
+    _help_case("command", "Read-only command-context metadata | field-access"),
+    _help_case("command field-access", "Expose selected command-context field access metadata. | Command registry key or gpd:name | --style"),
+    _help_case("validate", "Validation checks | command-context | plan-preflight | review-preflight | project-contract | proof-redteam"),
+    _help_case("validate project-contract", "Validate a project-scoping contract before downstream artifact generation | proof-obligation observables"),
+    _help_case("validate verification-contract", "Validate VERIFICATION frontmatter and contract-result alignment | stale proof-audit blockers when recorded | oracle evidence"),
+    _help_case("validate comparison-contract", "Validate standalone comparison artifact frontmatter and comparison_verdicts | GPD/comparisons/*-COMPARISON.md"),
+    _help_case("validate command-context", "Run centralized command-context preflight based on command metadata. | Command registry key or gpd:name"),
+    _help_case("state", "load | get | update"),
+    _help_case("phase", "list | add | complete"),
+    _help_case("result", "show | downstream | Show a canonical result | direct/transitive"),
+    _help_case("result show", "Show a canonical result and its direct/transitive dependency chain. | RESULT_ID | Canonical result ID [required]"),
+    _help_case("result downstream", "Show the direct and transitive dependents of a canonical result. | RESULT_ID | Canonical result ID [required]"),
+    _help_case("init resume", "Usage: gpd init resume | Assemble context for resuming previous work."),
+    _help_case("paper-build", "--minimal", "--with-provenance | --with-audits | --with-review-sidecars"),
+]
+# fmt: on
 
 
-def test_workflow_presets_help_surfaces_apply_command() -> None:
-    result = runner.invoke(app, ["presets", "apply", "--help"])
-    assert result.exit_code == 0
-    normalized_output = _normalize_cli_output(result.output)
-    assert "--dry-run" in normalized_output
-    assert "Show a diff-oriented preview without writing it" in normalized_output
+@pytest.mark.parametrize(("help_args", "expected", "forbidden"), _HELP_FRAGMENT_CASES)
+def test_help_surfaces_public_fragments(
+    help_args: tuple[str, ...], expected: tuple[str, ...], forbidden: tuple[str, ...]
+) -> None:
+    normalized_output = _help_text(*help_args)
+    _assert_contains_all(normalized_output, *expected)
+    for fragment in forbidden:
+        assert fragment not in normalized_output
 
 
 def test_workflow_presets_surface_lists_catalog() -> None:
     result = runner.invoke(app, ["presets", "list"])
-    assert result.exit_code == 0
-    assert "Workflow Presets" in result.output
-    assert "core-research" in result.output
-    assert "Core research" in result.output
+    assert_cli_human_contract(result, required_all=("Workflow Presets", "core-research", "Core research"))
 
 
 def test_integrations_status_reports_effective_project_local_state_and_plan_readiness(tmp_path: Path) -> None:
@@ -423,8 +291,7 @@ def test_integrations_status_reports_effective_project_local_state_and_plan_read
     (project_root / "GPD").mkdir()
 
     result = runner.invoke(app, ["--cwd", str(project_root), "--raw", "integrations", "status", "wolfram"])
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["integration"] == "wolfram"
     assert payload["configured"] is False
     assert payload["enabled"] is True
@@ -443,8 +310,7 @@ def test_integrations_enable_and_disable_wolfram_persist_project_local_config(tm
     (project_root / "GPD").mkdir()
 
     enable_result = runner.invoke(app, ["--cwd", str(project_root), "--raw", "integrations", "enable", "wolfram"])
-    assert enable_result.exit_code == 0
-    enable_payload = json.loads(enable_result.output)
+    enable_payload = json_output_from_result(enable_result)
     assert enable_payload["enabled"] is True
     assert enable_payload["scope"] == "project-local"
 
@@ -454,13 +320,11 @@ def test_integrations_enable_and_disable_wolfram_persist_project_local_config(tm
     assert saved["wolfram"] == {"enabled": True}
 
     disable_result = runner.invoke(app, ["--cwd", str(project_root), "--raw", "integrations", "disable", "wolfram"])
-    assert disable_result.exit_code == 0
-    disable_payload = json.loads(disable_result.output)
+    disable_payload = json_output_from_result(disable_result)
     assert disable_payload["enabled"] is False
 
     status_result = runner.invoke(app, ["--cwd", str(project_root), "--raw", "integrations", "status", "wolfram"])
-    assert status_result.exit_code == 0
-    status_payload = json.loads(status_result.output)
+    status_payload = json_output_from_result(status_result)
     assert status_payload["enabled"] is False
     assert status_payload["state"] == "disabled"
     saved = json.loads(config_path.read_text(encoding="utf-8"))
@@ -471,8 +335,7 @@ def test_integrations_enable_and_disable_wolfram_persist_project_local_config(tm
 def test_integrations_commands_fail_outside_real_project(tmp_path: Path, command: str) -> None:
     result = runner.invoke(app, ["--cwd", str(tmp_path), "--raw", "integrations", command, "wolfram"])
 
-    assert result.exit_code == 1
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result, expect_exit=1)
     assert "real GPD project root" in payload["error"]
     assert not (tmp_path / "GPD").exists()
 
@@ -487,8 +350,7 @@ def test_integrations_commands_use_project_root_config_from_nested_workspace(tmp
 
     status_result = runner.invoke(app, ["--cwd", str(nested_workspace), "--raw", "integrations", "status", "wolfram"])
 
-    assert status_result.exit_code == 0
-    status_payload = json.loads(status_result.output)
+    status_payload = json_output_from_result(status_result)
     assert status_payload["enabled"] is False
     assert status_payload["config_path"] == str(config_path)
 
@@ -511,7 +373,11 @@ def test_integrations_status_rejects_unsupported_api_key_env_field(tmp_path: Pat
     result = runner.invoke(app, ["--cwd", str(tmp_path), "--raw", "integrations", "status", "wolfram"])
 
     assert result.exit_code != 0
-    assert "integrations.wolfram contains unsupported keys: api_key_env" in _normalize_cli_output(result.output)
+    assert_cli_human_contract(
+        result,
+        required_all=("integrations.wolfram contains unsupported keys: api_key_env",),
+        expect_exit=None,
+    )
 
 
 @pytest.mark.parametrize(
@@ -532,8 +398,7 @@ def test_integrations_status_fails_closed_for_invalid_project_config(
 
     result = runner.invoke(app, ["--cwd", str(tmp_path), "--raw", "integrations", "status", "wolfram"])
 
-    assert result.exit_code == 1
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result, expect_exit=1)
     assert expected_error in payload["error"]
 
 
@@ -546,16 +411,14 @@ def test_integrations_toggle_fails_closed_for_invalid_project_config(tmp_path: P
 
     result = runner.invoke(app, ["--cwd", str(tmp_path), "--raw", "integrations", command, "wolfram"])
 
-    assert result.exit_code == 1
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result, expect_exit=1)
     assert payload["error"] == "integrations.wolfram.enabled must be a boolean"
     assert config_path.read_text(encoding="utf-8") == before
 
 
 def test_workflow_preset_show_raw_outputs_central_contract() -> None:
     result = runner.invoke(app, ["--raw", "presets", "show", "core-research"])
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["id"] == "core-research"
     assert payload["label"] == "Core research"
     assert payload["required_checks"] == []
@@ -584,8 +447,7 @@ def test_workflow_preset_apply_dry_run_previews_changed_knobs(tmp_path: Path) ->
 
     result = runner.invoke(app, ["--cwd", str(tmp_path), "--raw", "presets", "apply", "core-research", "--dry-run"])
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["preset"] == "core-research"
     assert payload["label"] == "Core research"
     assert payload["dry_run"] is True
@@ -658,8 +520,7 @@ def test_workflow_preset_apply_writes_merged_config(tmp_path: Path) -> None:
 
     result = runner.invoke(app, ["--cwd", str(tmp_path), "--raw", "presets", "apply", "publication-manuscript"])
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["preset"] == "publication-manuscript"
     assert payload["dry_run"] is False
     assert payload["updated"] is True
@@ -729,8 +590,7 @@ def test_workflow_preset_apply_uses_ancestor_config_from_nested_workspace(tmp_pa
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["config_path"] == str(config_path)
     written = json.loads(config_path.read_text(encoding="utf-8"))
     assert written["research_mode"] == "exploit"
@@ -746,79 +606,8 @@ def test_workflow_preset_apply_dry_run_projectless_does_not_create_gpd_dir(tmp_p
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0, result.output
+    assert_cli_success(result)
     assert not (tmp_path / "GPD").exists()
-
-
-def _sample_cost_summary(workspace: Path) -> CostSummary:
-    workspace_text = str(workspace)
-    project = CostProjectSummary(
-        project_root=workspace_text,
-        record_count=2,
-        usage_status="measured",
-        cost_status="unavailable",
-        interpretation="tokens measured; USD unavailable",
-        input_tokens=1200,
-        output_tokens=300,
-        total_tokens=1500,
-        cost_usd=None,
-        last_recorded_at="2026-03-27T00:00:00+00:00",
-        runtimes=[_COST_TEST_RUNTIME],
-        models=[_COST_TEST_MODEL],
-    )
-    current_session = CostSessionSummary(
-        session_id="session-123",
-        project_root=workspace_text,
-        record_count=1,
-        usage_status="measured",
-        cost_status="unavailable",
-        interpretation="tokens measured; USD unavailable",
-        input_tokens=800,
-        output_tokens=200,
-        total_tokens=1000,
-        cost_usd=None,
-        last_recorded_at="2026-03-27T00:00:00+00:00",
-        runtimes=[_COST_TEST_RUNTIME],
-        models=[_COST_TEST_MODEL],
-    )
-    return CostSummary(
-        project_root=workspace_text,
-        active_runtime=_COST_TEST_RUNTIME,
-        active_runtime_capabilities={
-            "permissions_surface": "config-file",
-            "statusline_surface": "none",
-            "notify_surface": "explicit",
-            "telemetry_source": "notify-hook",
-            "telemetry_completeness": "best-effort",
-        },
-        model_profile="review",
-        runtime_model_selection="runtime defaults",
-        profile_tier_mix=_profile_tier_mix("review"),
-        current_session_id="session-123",
-        project=project,
-        current_session=current_session,
-        recent_sessions=[current_session],
-        budget_thresholds=[
-            CostBudgetThresholdSummary(
-                scope="project",
-                config_key="project_usd_budget",
-                budget_usd=1.0,
-                spent_usd=0.85,
-                remaining_usd=0.15,
-                percent_used=85.0,
-                cost_status="measured",
-                comparison_exact=True,
-                state="near_budget",
-                message=(
-                    "Configured project USD budget is nearing budget based on measured local USD telemetry; "
-                    "it stays advisory only and never stops work automatically."
-                ),
-            )
-        ],
-        guidance=[
-            f"Current model posture: profile `review` with {_COST_TEST_RUNTIME} runtime defaults. Use `gpd:set-tier-models` to pin explicit tier-1, tier-2, and tier-3 model IDs.",
-        ],
-    )
 
 
 def _assert_cost_posture_semantics(output: str) -> None:
@@ -830,25 +619,14 @@ def _assert_cost_posture_semantics(output: str) -> None:
     assert "set-tier-models" in output
 
 
-def test_cost_help_surfaces_machine_local_advisory_role() -> None:
-    result = runner.invoke(app, ["cost", "--help"])
-    assert result.exit_code == 0
-    normalized_output = _normalize_cli_output(result.output)
-    assert "Show machine-local usage and cost summaries" in normalized_output
-    assert "--last-sessions" in normalized_output
-    assert "Show the most recent N recorded usage" in normalized_output
-    assert "[default: 5]" in normalized_output
-
-
 def test_cost_raw_outputs_summary_payload(tmp_path: Path) -> None:
     summary = _sample_cost_summary(tmp_path)
 
     with patch("gpd.core.costs.build_cost_summary", return_value=summary) as mock_build:
         result = runner.invoke(app, ["--cwd", str(tmp_path), "--raw", "cost", "--last-sessions", "2"])
 
-    assert result.exit_code == 0
+    payload = json_output_from_result(result)
     mock_build.assert_called_once_with(tmp_path, last_sessions=2)
-    payload = json.loads(result.output)
     assert payload["project_root"] == str(tmp_path)
     assert "workspace_root" not in payload
     assert payload["active_runtime"] == _COST_TEST_RUNTIME
@@ -885,23 +663,27 @@ def test_cost_human_output_stays_read_only_and_advisory(tmp_path: Path) -> None:
     with patch("gpd.core.costs.build_cost_summary", return_value=summary):
         result = runner.invoke(app, ["--cwd", str(tmp_path), "cost", "--last-sessions", "1"])
 
-    assert result.exit_code == 0
-    assert "Cost Summary" in result.output
-    assert "Read-only machine-local usage/cost summary." in result.output
-    assert "clearly labels estimates or unavailable values" in result.output
-    assert "best-effort via notify-hook" in result.output
-    assert "Scope" in result.output
-    assert "Used" in result.output
-    assert "85.00%" in result.output
-    assert "Configured project USD budget is nearing budget" in result.output
-    assert "Pricing snapshot" in result.output
-    assert "not configured" in result.output
-    assert "Current project" in result.output
-    assert "Recent sessions" in result.output
-    assert "Interpretation" in result.output
-    assert "tokens measured; USD unavailable" in result.output
-    assert "Measured tokens are available, but no pricing snapshot is configured" not in result.output
-    _assert_cost_posture_semantics(result.output)
+    output = assert_cli_human_contract(
+        result,
+        required_all=(
+            "Cost Summary",
+            "Read-only machine-local usage/cost summary.",
+            "clearly labels estimates or unavailable values",
+            "best-effort via notify-hook",
+            "Scope",
+            "Used",
+            "85.00%",
+            "Configured project USD budget is nearing budget",
+            "Pricing snapshot",
+            "not configured",
+            "Current project",
+            "Recent sessions",
+            "Interpretation",
+            "tokens measured; USD unavailable",
+        ),
+        forbidden=("Measured tokens are available, but no pricing snapshot is configured",),
+    )
+    _assert_cost_posture_semantics(output)
 
 
 def test_permissions_status_raw_includes_runtime_capabilities(tmp_path: Path) -> None:
@@ -934,109 +716,11 @@ def test_permissions_status_raw_includes_runtime_capabilities(tmp_path: Path) ->
             ["--raw", "permissions", "status", "--runtime", runtime, "--autonomy", "yolo"],
         )
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["readiness"] == "relaunch-required"
     assert payload["capabilities"]["permissions_surface"] == "launch-wrapper"
     assert payload["capabilities"]["statusline_surface"] == "explicit"
     assert payload["capabilities"]["telemetry_completeness"] == "none"
-
-
-def test_observe_help_surfaces_read_only_execution_snapshot_command() -> None:
-    result = runner.invoke(app, ["observe", "execution", "--help"])
-    assert result.exit_code == 0
-    assert "Show the current local execution status without modifying project state." in _normalize_cli_output(
-        result.output
-    )
-
-
-def test_observe_and_trace_help_label_read_only_and_writing_subcommands() -> None:
-    observe_help = runner.invoke(app, ["observe", "--help"])
-    assert observe_help.exit_code == 0
-    observe_output = _normalize_cli_output(observe_help.output)
-    assert "event/export are the subcommands that write files" in observe_output
-
-    observe_event_help = runner.invoke(app, ["observe", "event", "--help"])
-    assert observe_event_help.exit_code == 0
-    assert "Record one local observability event (writes session logs)." in observe_event_help.output
-
-    observe_show_help = runner.invoke(app, ["observe", "show", "--help"])
-    assert observe_show_help.exit_code == 0
-    assert "without modifying project state" in _normalize_cli_output(observe_show_help.output)
-
-    trace_help = runner.invoke(app, ["trace", "--help"])
-    assert trace_help.exit_code == 0
-    trace_output = _normalize_cli_output(trace_help.output)
-    assert "show is read-only" in trace_output
-    assert "start/log/stop write trace state" in trace_output
-
-    trace_show_help = runner.invoke(app, ["trace", "show", "--help"])
-    assert trace_show_help.exit_code == 0
-    assert "Inspect trace events with optional filters without modifying project state." in _normalize_cli_output(
-        trace_show_help.output
-    )
-
-    trace_stop_help = runner.invoke(app, ["trace", "stop", "--help"])
-    assert trace_stop_help.exit_code == 0
-    assert "writes trace and observability state" in _normalize_cli_output(trace_stop_help.output)
-
-
-def test_doctor_help_surfaces_runtime_readiness_mode() -> None:
-    result = runner.invoke(app, ["doctor", "--help"])
-    normalized_output = _normalize_cli_output(result.output)
-    assert result.exit_code == 0
-    assert "Check GPD installation and environment health" in normalized_output
-    assert "inspect runtime readiness" in normalized_output
-    assert "--live-executable-probes" in normalized_output
-    assert "--runtime" in normalized_output
-    assert "--local" in normalized_output
-    assert "--global" in normalized_output
-    assert "--target-dir" in normalized_output
-
-
-def test_permissions_help_surfaces_status_and_sync_roles() -> None:
-    result = runner.invoke(app, ["permissions", "--help"])
-    assert result.exit_code == 0
-    assert "Runtime permission readiness and sync" in result.output
-    assert "status" in result.output
-    assert "ready for unattended use" in result.output
-    assert "sync" in result.output
-    assert "active runtime's `settings` command" in result.output
-
-
-def test_permissions_status_help_surfaces_readiness_options() -> None:
-    result = runner.invoke(app, ["permissions", "status", "--help"])
-    normalized_output = _normalize_cli_output(result.output)
-    assert result.exit_code == 0
-    assert "ready for unattended use" in normalized_output
-    assert "requested autonomy" in normalized_output
-    assert "--runtime" in normalized_output
-    assert "--autonomy" in normalized_output
-    assert "--target-dir" in normalized_output
-
-
-def test_permissions_sync_help_surfaces_guided_runtime_changes() -> None:
-    result = runner.invoke(app, ["permissions", "sync", "--help"])
-    normalized_output = _normalize_cli_output(result.output)
-    assert result.exit_code == 0
-    assert "persist runtime-owned permission settings" in normalized_output
-    assert "active runtime's `settings` command" in normalized_output
-    assert "--runtime" in normalized_output
-    assert "--autonomy" in normalized_output
-    assert "--target-dir" in normalized_output
-
-
-def test_config_set_tier_models_help_surfaces_targeted_runtime_options() -> None:
-    result = runner.invoke(app, ["config", "set-tier-models", "--help"])
-    normalized_output = _normalize_cli_output(result.output)
-
-    assert result.exit_code == 0
-    assert "Update model_overrides for one runtime" in normalized_output
-    assert "--runtime" in normalized_output
-    assert "--tier-1" in normalized_output
-    assert "--tier-2" in normalized_output
-    assert "--tier-3" in normalized_output
-    assert "--clear" in normalized_output
 
 
 def test_active_runtime_settings_command_falls_back_to_runtime_neutral_reference(
@@ -1096,8 +780,7 @@ def test_permissions_status_surfaces_runtime_capabilities_and_config_scope() -> 
     ):
         result = runner.invoke(app, ["--raw", "permissions", "status", "--runtime", runtime, "--autonomy", "balanced"])
 
-    assert result.exit_code == 0
-    parsed = json.loads(result.output)
+    parsed = json_output_from_result(result)
     assert parsed["capabilities"]["contract_source"] == "runtime-catalog"
     assert parsed["capabilities"]["permissions_surface"] == "config-file"
     assert parsed["requested_surface"] == "ordinary-unattended"
@@ -1137,8 +820,7 @@ def test_permissions_status_marks_known_more_permissive_runtime_not_ready() -> N
             ["--raw", "permissions", "status", "--runtime", runtime, "--autonomy", "balanced"],
         )
 
-    assert result.exit_code == 0
-    parsed = json.loads(result.output)
+    parsed = json_output_from_result(result)
     assert parsed["capabilities"]["permissions_surface"] == "config-file"
     assert parsed["more_permissive_than_requested"] is True
     assert parsed["readiness"] == "not-ready"
@@ -1186,66 +868,6 @@ def test_runtime_permissions_sync_payload_surfaces_launch_wrapper_scope() -> Non
     assert payload["current_session_verified"] is False
 
 
-def _write_install_manifest(
-    config_dir: Path, *, runtime: str, install_scope: str = "local", raw: str | None = None
-) -> None:
-    config_dir.mkdir(parents=True, exist_ok=True)
-    manifest_path = config_dir / "gpd-file-manifest.json"
-    if raw is not None:
-        manifest_path.write_text(raw, encoding="utf-8")
-        return
-    manifest_path.write_text(
-        json.dumps(
-            {
-                "runtime": runtime,
-                "install_scope": install_scope,
-                "explicit_target": False,
-            }
-        ),
-        encoding="utf-8",
-    )
-
-
-class _PermissionsTargetAdapter:
-    def __init__(
-        self,
-        *,
-        local_target: Path,
-        global_target: Path,
-        missing_install_artifacts: tuple[str, ...] = (),
-    ) -> None:
-        self.runtime_name = PRIMARY_RUNTIME
-        self.display_name = runtime_display_name(PRIMARY_RUNTIME)
-        self._local_target = local_target
-        self._global_target = global_target
-        self._missing_install_artifacts = missing_install_artifacts
-
-    def resolve_target_dir(self, is_global: bool, cwd: Path) -> Path:
-        return self._global_target if is_global else self._local_target
-
-    def validate_target_runtime(self, target_dir: Path, *, action: str) -> None:
-        return None
-
-    def missing_install_artifacts(self, target_dir: Path) -> tuple[str, ...]:
-        if target_dir == self._local_target:
-            return self._missing_install_artifacts
-        return ()
-
-    def runtime_permissions_status(self, target_dir: Path, *, autonomy: str) -> dict[str, object]:
-        return {
-            "runtime": self.runtime_name,
-            "desired_mode": autonomy,
-            "configured_mode": "default",
-            "config_aligned": True,
-            "requires_relaunch": False,
-            "managed_by_gpd": False,
-            "message": "configured",
-        }
-
-    def sync_runtime_permissions(self, target_dir: Path, *, autonomy: str) -> dict[str, object]:
-        return self.runtime_permissions_status(target_dir, autonomy=autonomy)
-
-
 def test_permissions_status_reports_incomplete_owned_install_instead_of_generic_missing(
     tmp_path: Path,
 ) -> None:
@@ -1270,8 +892,7 @@ def test_permissions_status_reports_incomplete_owned_install_instead_of_generic_
             app, ["--raw", "permissions", "status", "--runtime", PRIMARY_RUNTIME, "--autonomy", "balanced"]
         )
 
-    assert result.exit_code == 1
-    parsed = json.loads(result.output)
+    parsed = json_output_from_result(result, expect_exit=1)
     assert "incomplete GPD install" in parsed["error"]
     assert "Missing artifacts:" in parsed["error"]
     assert "No GPD install found" not in parsed["error"]
@@ -1302,8 +923,7 @@ def test_permissions_status_reports_foreign_install_explicitly(tmp_path: Path) -
             ],
         )
 
-    assert result.exit_code == 1
-    parsed = json.loads(result.output)
+    parsed = json_output_from_result(result, expect_exit=1)
     assert f"belongs to runtime '{FOREIGN_RUNTIME}'" in parsed["error"]
     assert "No GPD install found" not in parsed["error"]
 
@@ -1333,28 +953,9 @@ def test_permissions_sync_reports_untrusted_manifest_explicitly(tmp_path: Path) 
             ],
         )
 
-    assert result.exit_code == 1
-    parsed = json.loads(result.output)
+    parsed = json_output_from_result(result, expect_exit=1)
     assert "manifest state is 'corrupt'" in parsed["error"]
     assert "No GPD install found" not in parsed["error"]
-
-
-def test_init_help_surfaces_local_onboarding_entrypoints() -> None:
-    result = runner.invoke(app, ["init", "--help"])
-    assert result.exit_code == 0
-    assert "Assemble context for AI agent workflows" in result.output
-    assert "new-project" in result.output
-    assert "resume" in result.output
-    assert "map-research" in result.output
-    assert "verify-work" in result.output
-
-
-def test_resume_help_surfaces_read_only_local_recovery_role() -> None:
-    result = runner.invoke(app, ["resume", "--help"])
-    assert result.exit_code == 0
-    normalized = _normalize_cli_output(result.output)
-    assert "--recent" in normalized
-    assert "Summarize local recovery state or list machine-local recent projects." in normalized
 
 
 def test_resume_recovery_advice_uses_resolved_runtime_commands(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1462,7 +1063,7 @@ def test_resume_recent_raw_surfaces_machine_local_recent_projects(tmp_path: Path
     monkeypatch.delenv("GPD_DATA_DIR", raising=False)
 
     result = runner.invoke(app, ["--raw", "resume", "--recent"])
-    parsed = json.loads(result.output)
+    parsed = json_output_from_result(result)
 
     assert parsed["count"] == 2
     assert parsed["projects"][0]["project_root"] == resumable_root.as_posix()
@@ -1500,20 +1101,22 @@ def test_resume_recent_human_output_surfaces_command_and_missing_projects(tmp_pa
 
     result = runner.invoke(app, ["resume", "--recent"])
 
-    assert result.exit_code == 0
-    normalized = " ".join(result.output.split())
-    assert "Recent Projects" in result.output
-    assert "Next here" in result.output
-    assert "Resume:" in result.output
-    assert "gpd --cwd" in result.output
-    assert "continue there with `resume-work`" in result.output
-    assert "resume-work" in result.output
-    assert "suggest-next" in result.output
-    assert "Why shown: shown because it still has a usable handoff target" in result.output
-    assert "ready to reopen" in result.output
-    assert "Inspect:" not in result.output
-    assert "inspect the selected workspace" not in normalized
-    assert "project root missing" in result.output or "project unavailable on this machine" in result.output
+    assert_cli_human_contract(
+        result,
+        required_all=(
+            "Recent Projects",
+            "Next here",
+            "Resume:",
+            "gpd --cwd",
+            "continue there with `resume-work`",
+            "resume-work",
+            "suggest-next",
+            "Why shown: shown because it still has a usable handoff target",
+            "ready to reopen",
+        ),
+        required_any=("project root missing", "project unavailable on this machine"),
+        forbidden=("Inspect:", "inspect the selected workspace"),
+    )
 
 
 def test_resume_recent_human_output_tolerates_path_resolution_permission_errors(
@@ -1554,9 +1157,7 @@ def test_resume_recent_human_output_tolerates_path_resolution_permission_errors(
 
     result = runner.invoke(app, ["resume", "--recent"])
 
-    assert result.exit_code == 0
-    assert "project unavailable on this machine" in result.output
-    assert "gpd --cwd" in result.output
+    assert_cli_human_contract(result, required_all=("project unavailable on this machine", "gpd --cwd"))
 
 
 def test_resume_recent_raw_downgrades_missing_handoff_rows_to_non_resumable(tmp_path: Path, monkeypatch) -> None:
@@ -1587,7 +1188,7 @@ def test_resume_recent_raw_downgrades_missing_handoff_rows_to_non_resumable(tmp_
     monkeypatch.delenv("GPD_DATA_DIR", raising=False)
 
     result = runner.invoke(app, ["--raw", "resume", "--recent"])
-    parsed = json.loads(result.output)
+    parsed = json_output_from_result(result)
 
     assert parsed["count"] == 1
     assert parsed["projects"][0]["project_root"] == project_root.as_posix()
@@ -1620,9 +1221,10 @@ def test_resume_plain_output_hints_recent_when_workspace_is_missing(tmp_path: Pa
 
     result = runner.invoke(app, ["resume"])
 
-    assert result.exit_code == 0
-    assert "No GPD planning directory" in result.output
-    assert local_cli_resume_recent_command() in result.output
+    assert_cli_human_contract(
+        result,
+        required_all=("No GPD planning directory", local_cli_resume_recent_command()),
+    )
 
 
 def test_resume_plain_output_surfaces_ambiguous_recent_project_reason(tmp_path: Path, monkeypatch) -> None:
@@ -1676,11 +1278,14 @@ def test_resume_plain_output_surfaces_ambiguous_recent_project_reason(tmp_path: 
 
     result = runner.invoke(app, ["resume"])
 
-    assert result.exit_code == 0
-    output = _normalize_cli_output(result.output)
-    assert "GPD found 2 recoverable recent projects on this machine, so you need to choose one." in output
-    assert "2 recoverable choices require explicit selection" in output
-    assert local_cli_resume_recent_command() in output
+    assert_cli_human_contract(
+        result,
+        required_all=(
+            "GPD found 2 recoverable recent projects on this machine, so you need to choose one.",
+            "2 recoverable choices require explicit selection",
+            local_cli_resume_recent_command(),
+        ),
+    )
 
 
 def test_resume_plain_output_surfaces_auto_selected_recent_project(tmp_path: Path, monkeypatch) -> None:
@@ -1743,12 +1348,16 @@ def test_resume_plain_output_surfaces_auto_selected_recent_project(tmp_path: Pat
 
     result = runner.invoke(app, ["resume"])
 
-    assert result.exit_code == 0
-    assert "Project" in result.output
-    assert "Project label" in result.output
-    assert "Project summary" in result.output
-    assert "auto-selected recent project" in result.output
-    assert "machine-local recent-project index" in result.output
+    assert_cli_human_contract(
+        result,
+        required_all=(
+            "Project",
+            "Project label",
+            "Project summary",
+            "auto-selected recent project",
+            "machine-local recent-project index",
+        ),
+    )
 
 
 def test_resume_plain_output_keeps_recent_project_selection_explicit_when_not_auto_selected(
@@ -1804,10 +1413,11 @@ def test_resume_plain_output_keeps_recent_project_selection_explicit_when_not_au
 
     result = runner.invoke(app, ["resume"])
 
-    assert result.exit_code == 0
-    assert "Project" in result.output
-    assert "auto-selected recent project" not in result.output
-    assert "recent project selected explicitly" in result.output
+    assert_cli_human_contract(
+        result,
+        required_all=("Project", "recent project selected explicitly"),
+        forbidden=("auto-selected recent project",),
+    )
 
 
 def test_load_recent_projects_rows_returns_canonical_display_rows(tmp_path: Path, monkeypatch) -> None:
@@ -2002,8 +1612,7 @@ def test_resume_recent_surfaces_recovery_error_annotation_when_introspection_fai
 
     result = runner.invoke(app, ["--raw", "resume", "--recent"])
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     project = payload["projects"][0]
     assert project["recovery_status"] == "recovery-error"
     assert project["recovery_status_label"] == "Recovery error"
@@ -2042,14 +1651,14 @@ def test_resume_and_command_context_resume_work_do_not_migrate_root_planning_fil
     )
 
     resume_result = runner.invoke(app, ["--raw", "--cwd", str(workspace), "resume"], catch_exceptions=False)
-    assert resume_result.exit_code == 0, resume_result.output
+    assert_cli_success(resume_result)
 
     command_context_result = runner.invoke(
         app,
         ["--raw", "--cwd", str(workspace), "validate", "command-context", "resume-work"],
         catch_exceptions=False,
     )
-    assert command_context_result.exit_code == 1, command_context_result.output
+    assert_result_exit(command_context_result, 1)
 
     assert not (workspace / "GPD" / "PROJECT.md").exists()
     assert not (workspace / "GPD" / "ROADMAP.md").exists()
@@ -2093,9 +1702,9 @@ def test_read_only_state_progress_and_suggest_resolve_ancestor_without_migration
             catch_exceptions=False,
         )
 
-    assert snapshot_result.exit_code == 0, snapshot_result.output
-    assert progress_result.exit_code == 0, progress_result.output
-    assert suggest_result.exit_code == 0, suggest_result.output
+    assert_cli_success(snapshot_result)
+    assert_cli_success(progress_result)
+    assert_cli_success(suggest_result)
     mock_snapshot.assert_called_once_with(project_root.resolve())
     mock_progress.assert_called_once_with(project_root.resolve(), "json")
     mock_suggest.assert_called_once_with(project_root.resolve())
@@ -2173,12 +1782,15 @@ def test_resume_plain_output_surfaces_session_handoff_status(tmp_path: Path, mon
 
     result = runner.invoke(app, ["resume"])
 
-    assert result.exit_code == 0
-    normalized = " ".join(result.output.split())
-    assert "A continuity handoff is available" in normalized
-    assert "continuity_handoff" in result.output
-    assert "no resumable bounded segment is currently active." in normalized
-    assert "Recovery context is available, but no live bounded segment is currently resumable." not in result.output
+    assert_cli_human_contract(
+        result,
+        required_all=(
+            "A continuity handoff is available",
+            "continuity_handoff",
+            "no resumable bounded segment is currently active.",
+        ),
+        forbidden=("Recovery context is available, but no live bounded segment is currently resumable.",),
+    )
 
 
 def test_resume_candidate_rerun_anchor_uses_last_result_id() -> None:
@@ -2268,12 +1880,15 @@ def test_resume_plain_output_surfaces_hydrated_last_result_context(
 
     result = runner.invoke(app, ["resume"])
 
-    assert result.exit_code == 0
-    normalized = " ".join(result.output.split())
-    assert "Resume Summary" in result.output
-    assert "Benchmark reproduction" in result.output
-    assert "R-bridge-01" in result.output
-    assert "A continuity handoff is available" in normalized
+    assert_cli_human_contract(
+        result,
+        required_all=(
+            "Resume Summary",
+            "Benchmark reproduction",
+            "R-bridge-01",
+            "A continuity handoff is available",
+        ),
+    )
 
 
 def test_resume_plain_output_surfaces_bounded_segment_status_from_canonical_resume_mode(
@@ -2319,11 +1934,14 @@ def test_resume_plain_output_surfaces_bounded_segment_status_from_canonical_resu
 
     result = runner.invoke(app, ["resume"])
 
-    assert result.exit_code == 0
-    normalized = " ".join(result.output.split())
-    assert "A bounded segment is resumable from the current workspace state." in normalized
-    assert "resume-work" in result.output
-    assert "suggest-next" in result.output
+    assert_cli_human_contract(
+        result,
+        required_all=(
+            "A bounded segment is resumable from the current workspace state.",
+            "resume-work",
+            "suggest-next",
+        ),
+    )
 
 
 def test_resume_plain_output_surfaces_canonical_bounded_segment_without_live_snapshot(
@@ -2369,11 +1987,14 @@ def test_resume_plain_output_surfaces_canonical_bounded_segment_without_live_sna
 
     result = runner.invoke(app, ["resume"])
 
-    assert result.exit_code == 0
-    normalized = " ".join(result.output.split())
-    assert "A bounded segment is resumable from the current workspace state." in normalized
-    assert "resume-work" in result.output
-    assert "suggest-next" in result.output
+    assert_cli_human_contract(
+        result,
+        required_all=(
+            "A bounded segment is resumable from the current workspace state.",
+            "resume-work",
+            "suggest-next",
+        ),
+    )
 
 
 def test_resume_plain_output_surfaces_interrupted_agent_status_from_candidate(tmp_path: Path, monkeypatch) -> None:
@@ -2403,9 +2024,10 @@ def test_resume_plain_output_surfaces_interrupted_agent_status_from_candidate(tm
 
     result = runner.invoke(app, ["resume"])
 
-    assert result.exit_code == 0
-    normalized = " ".join(result.output.split())
-    assert "An interrupted agent marker is present, but no bounded resume segment is active." in normalized
+    assert_cli_human_contract(
+        result,
+        required_all=("An interrupted agent marker is present, but no bounded resume segment is active.",),
+    )
 
 
 def test_resume_plain_output_surfaces_machine_change_as_advisory_status(tmp_path: Path, monkeypatch) -> None:
@@ -2432,14 +2054,19 @@ def test_resume_plain_output_surfaces_machine_change_as_advisory_status(tmp_path
 
     result = runner.invoke(app, ["resume"])
 
-    assert result.exit_code == 0
-    normalized = " ".join(result.output.split())
-    assert "A machine change was detected" in normalized
-    assert "the project state is portable and does not require repair." in normalized
-    assert "Rerun the installer" in normalized
-    assert "resume-work" not in result.output
-    assert "suggest-next" not in result.output
-    assert "No recent local recovery target is currently recorded." not in result.output
+    assert_cli_human_contract(
+        result,
+        required_all=(
+            "A machine change was detected",
+            "the project state is portable and does not require repair.",
+            "Rerun the installer",
+        ),
+        forbidden=(
+            "resume-work",
+            "suggest-next",
+            "No recent local recovery target is currently recorded.",
+        ),
+    )
 
 
 def test_resume_plain_output_keeps_machine_change_notice_when_session_handoff_is_primary(
@@ -2482,13 +2109,16 @@ def test_resume_plain_output_keeps_machine_change_notice_when_session_handoff_is
 
     result = runner.invoke(app, ["resume"])
 
-    assert result.exit_code == 0
-    normalized = " ".join(result.output.split())
-    assert "A continuity handoff is available" in normalized
-    assert "continuity_handoff" in result.output
-    assert "Rerun the installer" in normalized
-    assert "resume-work" in result.output
-    assert "suggest-next" in result.output
+    assert_cli_human_contract(
+        result,
+        required_all=(
+            "A continuity handoff is available",
+            "continuity_handoff",
+            "Rerun the installer",
+            "resume-work",
+            "suggest-next",
+        ),
+    )
 
 
 def test_resume_plain_output_surfaces_advisory_live_execution_status(tmp_path: Path, monkeypatch) -> None:
@@ -2516,12 +2146,14 @@ def test_resume_plain_output_surfaces_advisory_live_execution_status(tmp_path: P
 
     result = runner.invoke(app, ["resume"])
 
-    assert result.exit_code == 0
-    normalized = " ".join(result.output.split())
-    assert "A live execution snapshot exists" in normalized
-    assert "it is advisory only and does not expose a portable bounded-segment target." in normalized
-    assert "resume-work" not in result.output
-    assert "suggest-next" not in result.output
+    assert_cli_human_contract(
+        result,
+        required_all=(
+            "A live execution snapshot exists",
+            "it is advisory only and does not expose a portable bounded-segment target.",
+        ),
+        forbidden=("resume-work", "suggest-next"),
+    )
 
 
 def test_resume_plain_output_surfaces_missing_handoff_status(tmp_path: Path, monkeypatch) -> None:
@@ -2554,13 +2186,15 @@ def test_resume_plain_output_surfaces_missing_handoff_status(tmp_path: Path, mon
 
     result = runner.invoke(app, ["resume"])
 
-    assert result.exit_code == 0
-    normalized = " ".join(result.output.split())
-    assert "Canonical recovery metadata exists" in normalized
-    assert "continuity_handoff" in result.output
-    assert "the continuity handoff file is missing." in normalized
-    assert "resume-work" not in result.output
-    assert "suggest-next" not in result.output
+    assert_cli_human_contract(
+        result,
+        required_all=(
+            "Canonical recovery metadata exists",
+            "continuity_handoff",
+            "the continuity handoff file is missing.",
+        ),
+        forbidden=("resume-work", "suggest-next"),
+    )
 
 
 def test_resume_raw_adds_canonical_recovery_projection_fields(tmp_path: Path, monkeypatch) -> None:
@@ -2597,8 +2231,7 @@ def test_resume_raw_adds_canonical_recovery_projection_fields(tmp_path: Path, mo
 
     result = runner.invoke(app, ["--raw", "resume"])
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     _assert_no_top_level_resume_aliases(payload)
     assert payload["recovery_advice"]["resume_surface_schema_version"] == 1
     assert "resume_surface" not in payload["recovery_advice"]
@@ -2664,8 +2297,7 @@ def test_resume_raw_keeps_derived_execution_head_origin_when_only_live_snapshot_
 
     result = runner.invoke(app, ["--raw", "resume"])
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     _assert_no_top_level_resume_aliases(payload)
     assert payload["active_resume_kind"] == "bounded_segment"
     assert payload["active_resume_origin"] == "derived_execution_head"
@@ -2725,8 +2357,7 @@ def test_resume_raw_keeps_derived_execution_head_origin_when_active_bounded_segm
 
     result = runner.invoke(app, ["--raw", "resume"])
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     _assert_no_top_level_resume_aliases(payload)
     assert payload["active_resume_origin"] == "derived_execution_head"
     assert payload["resume_candidates"][0]["origin"] == "derived_execution_head"
@@ -2771,8 +2402,7 @@ def test_resume_raw_drops_malformed_resume_candidates_from_public_output(tmp_pat
 
     result = runner.invoke(app, ["--raw", "resume"])
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     _assert_no_top_level_resume_aliases(payload)
     assert payload["resume_candidates"] == [
         {
@@ -2798,187 +2428,416 @@ def test_resume_raw_drops_malformed_resume_candidates_from_public_output(tmp_pat
 
 def test_command_supports_project_reentry_prefers_explicit_metadata() -> None:
     assert (
-        cli_module._command_supports_project_reentry(
+        command_supports_project_reentry(
             SimpleNamespace(name="gpd:custom", context_mode="project-required", project_reentry_capable=True)
         )
         is True
     )
     assert (
-        cli_module._command_supports_project_reentry(
+        command_supports_project_reentry(
             SimpleNamespace(name="gpd:progress", context_mode="project-required", project_reentry_capable=False)
         )
         is False
     )
     assert (
-        cli_module._command_supports_project_reentry(
-            SimpleNamespace(name="gpd:progress", context_mode="project-required")
-        )
-        is False
+        command_supports_project_reentry(SimpleNamespace(name="gpd:progress", context_mode="project-required")) is False
     )
 
 
 def test_command_supports_project_reentry_requires_explicit_positive_metadata() -> None:
     assert (
-        cli_module._command_supports_project_reentry(
-            SimpleNamespace(name="gpd:plan-phase", context_mode="project-required")
-        )
+        command_supports_project_reentry(SimpleNamespace(name="gpd:plan-phase", context_mode="project-required"))
         is False
     )
 
 
-def test_observe_execution_help_surfaces_read_only_local_status_role() -> None:
-    result = runner.invoke(app, ["observe", "execution", "--help"])
-    assert result.exit_code == 0
-    assert "Show the current local execution status without modifying project state." in result.output
-    assert "possibly stalled" not in result.output.lower()
+def test_validate_proof_redteam_calls_public_validator(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "GPD").mkdir()
+    (tmp_path / "GPD" / "state.json").write_text("{}\n", encoding="utf-8")
+    (tmp_path / "GPD" / "PROJECT.md").write_text("# Project\n", encoding="utf-8")
+    artifact_path = tmp_path / "PROOF-REDTEAM.md"
+    artifact_path.write_text("# Proof Redteam\n", encoding="utf-8")
+    calls: dict[str, object] = {}
 
+    def fake_validator(path: Path, *, project_root: Path) -> dict[str, object]:
+        calls["path"] = path
+        calls["project_root"] = project_root
+        return {
+            "valid": True,
+            "status": "gaps_found",
+            "errors": [],
+            "artifact_path": str(path),
+        }
 
-def test_validate_help_surfaces_command_context_preflight_entrypoint() -> None:
-    result = runner.invoke(app, ["validate", "--help"])
-    assert result.exit_code == 0
-    assert "Validation checks" in result.output
-    assert "command-context" in result.output
-    assert "plan-preflight" in result.output
-    assert "review-preflight" in result.output
-    assert "project-contract" in result.output
+    monkeypatch.setattr("gpd.core.proof_redteam.validate_proof_redteam_artifact", fake_validator)
 
-
-def test_validate_project_contract_help_surfaces_proof_obligation_visibility() -> None:
-    result = runner.invoke(app, ["validate", "project-contract", "--help"])
-
-    assert result.exit_code == 0
-    normalized_output = _normalize_cli_output(result.output)
-    assert "Validate a project-scoping contract before downstream artifact generation" in normalized_output
-    assert "proof-obligation observables" in normalized_output
-
-
-def test_validate_verification_contract_help_surfaces_stale_proof_gate_visibility() -> None:
-    result = runner.invoke(app, ["validate", "verification-contract", "--help"])
-
-    assert result.exit_code == 0
-    normalized_output = _normalize_cli_output(result.output)
-    assert "Validate VERIFICATION frontmatter and contract-result alignment" in normalized_output
-    assert "stale proof-audit blockers when recorded" in normalized_output
-    assert "oracle evidence" in normalized_output
-
-
-def test_validate_comparison_contract_help_surfaces_verdict_ledger_visibility() -> None:
-    result = runner.invoke(app, ["validate", "comparison-contract", "--help"])
-
-    assert result.exit_code == 0
-    normalized_output = _normalize_cli_output(result.output)
-    assert "Validate standalone comparison artifact frontmatter and comparison_verdicts" in normalized_output
-    assert "GPD/comparisons/*-COMPARISON.md" in normalized_output
-
-
-def _compact_plan_with_missing_must_surface_benchmark() -> str:
-    return (
-        "---\n"
-        "phase: 01-baseline\n"
-        "plan: 01\n"
-        "type: execute\n"
-        "wave: 1\n"
-        "depends_on: []\n"
-        "files_modified: []\n"
-        "interactive: false\n"
-        "conventions:\n"
-        "  units: natural\n"
-        "contract:\n"
-        "  schema_version: 1\n"
-        "  scope:\n"
-        "    question: Verify the fresh result against the decisive benchmark.\n"
-        "    in_scope: [stale verification refresh]\n"
-        "  context_intake:\n"
-        "    must_read_refs: [ref-stale-verification-benchmark]\n"
-        "    must_include_prior_outputs: [GPD/phases/00-baseline/00-SUMMARY.md]\n"
-        "    context_gaps: [The decisive benchmark artifact is intentionally absent.]\n"
-        "  claims:\n"
-        "    - id: claim-stale-verification\n"
-        "      statement: Current result agrees with the decisive benchmark.\n"
-        "      deliverables: [deliv-stale-verification-data]\n"
-        "      acceptance_tests: [test-stale-verification-decisive]\n"
-        "      references: [ref-stale-verification-benchmark]\n"
-        "  deliverables:\n"
-        "    - id: deliv-stale-verification-data\n"
-        "      kind: data\n"
-        "      path: artifacts/phase4/result.json\n"
-        "      description: Fresh numerical result to compare against the benchmark.\n"
-        "  references:\n"
-        "    - id: ref-stale-verification-benchmark\n"
-        "      kind: dataset\n"
-        "      locator: artifacts/benchmark/reference.json\n"
-        "      role: benchmark\n"
-        "      why_it_matters: Decisive benchmark for stale verification detection.\n"
-        "      applies_to: [claim-stale-verification]\n"
-        "      must_surface: true\n"
-        "      required_actions: [read, compare]\n"
-        "  acceptance_tests:\n"
-        "    - id: test-stale-verification-decisive\n"
-        "      subject: claim-stale-verification\n"
-        "      kind: benchmark\n"
-        "      procedure: Read and compare the decisive benchmark reference.\n"
-        "      pass_condition: Current result matches the benchmark within tolerance.\n"
-        "      evidence_required: [deliv-stale-verification-data, ref-stale-verification-benchmark]\n"
-        "  forbidden_proxies:\n"
-        "    - id: fp-stale-verification-prose-only\n"
-        "      subject: claim-stale-verification\n"
-        "      proxy: Prose-only pass without reading the decisive benchmark.\n"
-        "      reason: Would miss stale or absent benchmark evidence.\n"
-        "  uncertainty_markers:\n"
-        "    weakest_anchors: [Missing benchmark reference]\n"
-        "    disconfirming_observations: [Benchmark file is absent]\n"
-        "---\n\n"
-        "Plan body.\n"
+    result = runner.invoke(
+        app,
+        ["--raw", "validate", "proof-redteam", str(artifact_path)],
+        catch_exceptions=False,
     )
 
-
-def _assert_forbidden_verification_fields_absent(value: object) -> None:
-    forbidden_fields = {"runtime", "computational_oracle", "gpd_return"}
-    if isinstance(value, dict):
-        assert not forbidden_fields.intersection(value)
-        for child in value.values():
-            _assert_forbidden_verification_fields_absent(child)
-    elif isinstance(value, list):
-        for child in value:
-            _assert_forbidden_verification_fields_absent(child)
+    assert result.exit_code == 0, result.output
+    payload = _raw_payload_from_result(result)
+    assert payload["valid"] is True
+    assert payload["status"] == "gaps_found"
+    assert payload["artifact_path"] == str(artifact_path)
+    assert calls["path"] == artifact_path
+    assert calls["project_root"] == tmp_path
 
 
-def _write_stale_refresh_skeleton_plan(project_root: Path) -> Path:
-    phase_dir = project_root / "GPD" / "phases" / "01-baseline"
-    phase_dir.mkdir(parents=True)
-    baseline_dir = project_root / "GPD" / "phases" / "00-baseline"
-    baseline_dir.mkdir(parents=True)
-    (baseline_dir / "00-SUMMARY.md").write_text("prior baseline", encoding="utf-8")
-    plan_path = phase_dir / "01-PLAN.md"
-    plan_path.write_text(_compact_plan_with_missing_must_surface_benchmark(), encoding="utf-8")
-    return plan_path
+def test_validate_proof_redteam_exits_nonzero_when_validator_reports_invalid(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "GPD").mkdir()
+    (tmp_path / "GPD" / "state.json").write_text("{}\n", encoding="utf-8")
+    (tmp_path / "GPD" / "PROJECT.md").write_text("# Project\n", encoding="utf-8")
+    artifact_path = tmp_path / "PROOF-REDTEAM.md"
+    artifact_path.write_text("# Proof Redteam\n", encoding="utf-8")
+
+    def fake_validator(path: Path, *, project_root: Path) -> dict[str, object]:
+        del project_root
+        return {
+            "valid": False,
+            "status": "invalid",
+            "errors": [f"{path.name} is missing required proof inventory"],
+        }
+
+    monkeypatch.setattr("gpd.core.proof_redteam.validate_proof_redteam_artifact", fake_validator)
+
+    result = runner.invoke(
+        app,
+        ["--raw", "validate", "proof-redteam", str(artifact_path)],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 1, result.output
+    payload = _raw_payload_from_result(result)
+    assert payload["valid"] is False
+    assert payload["errors"] == ["PROOF-REDTEAM.md is missing required proof inventory"]
 
 
-def _write_verification_body_file(tmp_path: Path, body: str, *, name: str = "verification-body.md") -> Path:
-    body_path = tmp_path / name
-    body_path.write_text(body, encoding="utf-8")
-    return body_path
+def test_proof_redteam_skeleton_raw_uses_builder_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: dict[str, object] = {}
+
+    def fake_builder(*, claim_id: str, claim_text: str | None, status: str) -> dict[str, object]:
+        calls["claim_id"] = claim_id
+        calls["claim_text"] = claim_text
+        calls["status"] = status
+        rendered_claim_text = claim_text or "<fill exact claim>"
+        return {
+            "frontmatter": {
+                "status": status,
+                "claim_ids": [claim_id],
+            },
+            "markdown_draft": _proof_redteam_markdown(
+                claim_id=claim_id,
+                claim_text=rendered_claim_text,
+                status=status,
+            ),
+            "target_artifact_ref": "GPD/publication/demo/review/PROOF-REDTEAM.md",
+            "warnings": ["Skeleton is non-passing until the audit is completed."],
+        }
+
+    monkeypatch.setattr("gpd.core.proof_redteam.build_proof_redteam_skeleton", fake_builder)
+
+    result = runner.invoke(
+        app,
+        [
+            "--raw",
+            "proof-redteam",
+            "skeleton",
+            "--claim-id",
+            "CLM-001",
+            "--claim-text",
+            "For every r_0 > 0, the target annulus is reached.",
+            "--status",
+            "human_needed",
+        ],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = _raw_payload_from_result(result)
+    assert payload["claim_id"] == "CLM-001"
+    assert payload["claim_text"] == "For every r_0 > 0, the target annulus is reached."
+    assert payload["target_status"] == "human_needed"
+    assert payload["frontmatter"]["status"] == "human_needed"
+    assert "Exact claim / theorem text: For every r_0 > 0" in payload["markdown_draft"]
+    assert payload["validation_commands"] == ["gpd validate proof-redteam GPD/publication/demo/review/PROOF-REDTEAM.md"]
+    assert payload["warnings"] == ["Skeleton is non-passing until the audit is completed."]
+    assert calls == {
+        "claim_id": "CLM-001",
+        "claim_text": "For every r_0 > 0, the target annulus is reached.",
+        "status": "human_needed",
+    }
 
 
-def _raw_payload_from_result(result) -> dict[str, object]:
-    candidates = [result.output]
-    try:
-        stderr = result.stderr
-    except ValueError:
-        stderr = ""
-    if stderr:
-        candidates.append(stderr)
-    for candidate in candidates:
-        text = candidate.strip()
-        if not text:
-            continue
-        try:
-            payload = json.loads(text)
-        except json.JSONDecodeError:
-            continue
-        assert isinstance(payload, dict)
-        return payload
-    raise AssertionError(f"result did not contain a JSON object:\n{result.output}")
+def test_proof_redteam_skeleton_rejects_passed_status_before_builder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unexpected_builder(**kwargs):
+        raise AssertionError(f"proof-redteam skeleton builder should not run for invalid status: {kwargs}")
+
+    monkeypatch.setattr("gpd.core.proof_redteam.build_proof_redteam_skeleton", unexpected_builder)
+
+    result = runner.invoke(
+        app,
+        ["--raw", "proof-redteam", "skeleton", "--claim-id", "CLM-001", "--status", "passed"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 1
+    payload = _raw_payload_from_result(result)
+    assert "gaps_found, human_needed" in str(payload["error"])
+
+
+def test_proof_redteam_skeleton_write_refuses_existing_without_force(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target_path = tmp_path / "PROOF-REDTEAM.md"
+    target_path.write_text("existing audit\n", encoding="utf-8")
+
+    def fake_builder(*, claim_id: str, claim_text: str | None, status: str) -> dict[str, object]:
+        del claim_text
+        return {
+            "markdown_draft": _proof_redteam_markdown(
+                claim_id=claim_id,
+                claim_text="For every r_0 > 0, the target annulus is reached.",
+                status=status,
+            )
+        }
+
+    monkeypatch.setattr("gpd.core.proof_redteam.build_proof_redteam_skeleton", fake_builder)
+
+    result = runner.invoke(
+        app,
+        [
+            "proof-redteam",
+            "skeleton",
+            "--claim-id",
+            "CLM-001",
+            "--write",
+            "--output",
+            str(target_path),
+        ],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 1, result.output
+    payload = _raw_payload_from_result(result)
+    assert payload["written"] is False
+    assert payload["target_path"] == str(target_path)
+    assert "--force" in payload["error"]
+    assert target_path.read_text(encoding="utf-8") == "existing audit\n"
+
+
+def test_proof_redteam_skeleton_write_force_overwrites_target(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target_path = tmp_path / "PROOF-REDTEAM.md"
+    target_path.write_text("existing audit\n", encoding="utf-8")
+
+    def fake_builder(*, claim_id: str, claim_text: str | None, status: str) -> dict[str, object]:
+        return {
+            "markdown_draft": _proof_redteam_markdown(
+                claim_id=claim_id,
+                claim_text=claim_text or "For every r_0 > 0, the target annulus is reached.",
+                status=status,
+            )
+        }
+
+    monkeypatch.setattr("gpd.core.proof_redteam.build_proof_redteam_skeleton", fake_builder)
+
+    result = runner.invoke(
+        app,
+        [
+            "--raw",
+            "proof-redteam",
+            "skeleton",
+            "--claim-id",
+            "CLM-001",
+            "--claim-text",
+            "For every r_0 > 0, the target annulus is reached.",
+            "--write",
+            "--output",
+            str(target_path),
+            "--force",
+        ],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = _raw_payload_from_result(result)
+    assert payload["written"] is True
+    assert payload["replaced"] is True
+    assert payload["target_path"] == str(target_path)
+    assert payload["validation_commands"] == [f"gpd validate proof-redteam {target_path}"]
+    content = target_path.read_text(encoding="utf-8")
+    assert content.startswith("---\nstatus: gaps_found")
+    assert "Exact claim / theorem text: For every r_0 > 0" in content
+
+
+def test_proof_redteam_skeleton_write_can_validate_with_bound_proof_artifact(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "GPD" / "review").mkdir(parents=True)
+    (tmp_path / "GPD" / "state.json").write_text("{}\n", encoding="utf-8")
+    (tmp_path / "GPD" / "PROJECT.md").write_text("# Project\n", encoding="utf-8")
+    proof_path = tmp_path / "paper" / "main.tex"
+    proof_path.parent.mkdir(parents=True)
+    proof_path.write_text("\\begin{theorem}Demo.\\end{theorem}\n", encoding="utf-8")
+    target_path = tmp_path / "GPD" / "review" / "PROOF-REDTEAM.md"
+
+    write_result = runner.invoke(
+        app,
+        [
+            "--raw",
+            "proof-redteam",
+            "skeleton",
+            "--claim-id",
+            "CLM-001",
+            "--claim-text",
+            "For every r_0 > 0, the target annulus is reached.",
+            "--proof-artifact-path",
+            "paper/main.tex",
+            "--write",
+            "--output",
+            str(target_path),
+        ],
+        catch_exceptions=False,
+    )
+
+    assert write_result.exit_code == 0, write_result.output
+    write_payload = _raw_payload_from_result(write_result)
+    assert write_payload["written"] is True
+    content = target_path.read_text(encoding="utf-8")
+    assert "proof_artifact_paths:\n- paper/main.tex" in content
+    assert "reviewer: gpd-check-proof" in content
+
+    validate_result = runner.invoke(
+        app,
+        ["--raw", "validate", "proof-redteam", str(target_path)],
+        catch_exceptions=False,
+    )
+
+    assert validate_result.exit_code == 0, validate_result.output
+    validate_payload = _raw_payload_from_result(validate_result)
+    assert validate_payload["valid"] is True
+    assert validate_payload["status"] == "gaps_found"
+
+
+def test_proof_redteam_finalize_writes_and_prints_raw_payload(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "GPD" / "review").mkdir(parents=True)
+    (tmp_path / "GPD" / "state.json").write_text("{}\n", encoding="utf-8")
+    (tmp_path / "GPD" / "PROJECT.md").write_text("# Project\n", encoding="utf-8")
+    proof_path = tmp_path / "paper" / "main.tex"
+    proof_path.parent.mkdir(parents=True)
+    proof_path.write_text("\\begin{proof}Done.\\end{proof}\n", encoding="utf-8")
+    draft_path = tmp_path / "GPD" / "review" / "PROOF-REDTEAM-DRAFT.md"
+    draft_path.write_text("# Draft\n", encoding="utf-8")
+    target_path = tmp_path / "GPD" / "review" / "PROOF-REDTEAM.md"
+    calls: dict[str, object] = {}
+
+    def fake_finalizer(**kwargs):
+        calls.update(kwargs)
+        return {
+            "valid": True,
+            "status": "passed",
+            "markdown": "---\nstatus: passed\n---\n\n# Proof Redteam\n",
+            "proof_audit": {
+                "completeness": "complete",
+                "reviewer": "gpd-check-proof",
+                "proof_artifact_path": "paper/main.tex",
+            },
+        }
+
+    monkeypatch.setattr("gpd.core.proof_redteam.finalize_proof_redteam_artifact", fake_finalizer)
+
+    result = runner.invoke(
+        app,
+        [
+            "--raw",
+            "proof-redteam",
+            "finalize",
+            str(draft_path),
+            "--claim-id",
+            "CLM-001",
+            "--claim-text",
+            "Every admissible orbit closes.",
+            "--proof-artifact-path",
+            "paper/main.tex",
+            "--reviewed-at",
+            "2026-05-07T12:00:00Z",
+            "--output",
+            str(target_path),
+        ],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = _raw_payload_from_result(result)
+    assert payload["written"] is True
+    assert payload["target_path"] == str(target_path)
+    assert payload["status"] == "passed"
+    assert payload["proof_audit"]["reviewer"] == "gpd-check-proof"
+    assert payload["validation_commands"][0] == "gpd validate proof-redteam GPD/review/PROOF-REDTEAM.md"
+    assert target_path.read_text(encoding="utf-8").startswith("---\nstatus: passed")
+    assert calls["path"] == draft_path
+    assert calls["claim_statement"] == "Every admissible orbit closes."
+    assert calls["proof_artifact_path"] == "paper/main.tex"
+    assert calls["write"] is False
+
+
+def test_proof_redteam_finalize_rejects_missing_proof_artifact(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "GPD" / "review").mkdir(parents=True)
+    (tmp_path / "GPD" / "state.json").write_text("{}\n", encoding="utf-8")
+    (tmp_path / "GPD" / "PROJECT.md").write_text("# Project\n", encoding="utf-8")
+    draft_path = tmp_path / "GPD" / "review" / "PROOF-REDTEAM-DRAFT.md"
+    draft_path.write_text("# Draft\n", encoding="utf-8")
+
+    def unexpected_finalizer(**kwargs):
+        raise AssertionError(f"proof finalizer should not run for missing proof artifact: {kwargs}")
+
+    monkeypatch.setattr("gpd.core.proof_redteam.finalize_proof_redteam_artifact", unexpected_finalizer)
+
+    result = runner.invoke(
+        app,
+        [
+            "--raw",
+            "proof-redteam",
+            "finalize",
+            str(draft_path),
+            "--claim-id",
+            "CLM-001",
+            "--claim-text",
+            "Every admissible orbit closes.",
+            "--proof-artifact-path",
+            "paper/missing.tex",
+        ],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 1
+    payload = _raw_payload_from_result(result)
+    assert "proof-artifact-path" in str(payload["error"])
+    assert "paper/missing.tex" in str(payload["error"])
 
 
 def _colon_rich_verification_body() -> str:
@@ -3004,148 +2863,170 @@ def _body_without_oracle_evidence() -> str:
     )
 
 
-def test_verification_report_skeleton_raw_uses_plan_contract_and_builder_payload(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    phase_dir = tmp_path / "GPD" / "phases" / "01-baseline"
+_BASELINE_PLAN_REF = "GPD/phases/01-baseline/01-PLAN.md#/contract"
+_BASELINE_REPORT_REF = "GPD/phases/01-baseline/01-VERIFICATION.md"
+_BASELINE_VALIDATE_COMMANDS = [
+    f"gpd frontmatter validate {_BASELINE_REPORT_REF} --schema verification",
+    f"gpd validate verification-contract {_BASELINE_REPORT_REF}",
+]
+
+
+def _write_baseline_plan_project(project_root: Path, *, phase: str = "01-baseline") -> Path:
+    phase_dir = project_root / "GPD" / "phases" / phase
     phase_dir.mkdir(parents=True)
-    baseline_dir = tmp_path / "GPD" / "phases" / "00-baseline"
+    baseline_dir = project_root / "GPD" / "phases" / "00-baseline"
     baseline_dir.mkdir(parents=True)
     (baseline_dir / "00-SUMMARY.md").write_text("prior baseline", encoding="utf-8")
     plan_path = phase_dir / "01-PLAN.md"
     plan_path.write_text(_compact_plan_with_missing_must_surface_benchmark(), encoding="utf-8")
+    return plan_path
+
+
+def _fake_skeleton_payload(
+    *,
+    plan_contract_ref: str,
+    status: str = "gaps_found",
+    phase: str = "01-baseline",
+    target_report_path: str | None = None,
+    target_report_ref: str | None = None,
+    authoring_rule: str = "Use the generated frontmatter as the starting YAML.",
+    include_validation_commands: bool = True,
+) -> dict[str, object]:
+    validation_ref = target_report_ref or _BASELINE_REPORT_REF
+    payload: dict[str, object] = {
+        "frontmatter": {"phase": phase, "status": status, "plan_contract_ref": plan_contract_ref},
+        "frontmatter_yaml": f"---\nphase: {phase}\nstatus: {status}\nplan_contract_ref: {plan_contract_ref}\n---\n",
+        "markdown_draft": (
+            f"---\nphase: {phase}\nstatus: {status}\nplan_contract_ref: {plan_contract_ref}\n---\n\n"
+            "# Verification\n\n"
+            "## Validation Commands\n\n"
+            "```bash\n"
+            f"gpd validate verification-contract {validation_ref}\n"
+            "```\n"
+        ),
+        "authoring_rules": [authoring_rule],
+    }
+    if include_validation_commands:
+        payload["validation_commands"] = [f"gpd validate verification-contract {validation_ref}"]
+    if target_report_path is not None:
+        payload["target_report_path"] = target_report_path
+    if target_report_ref is not None:
+        payload["target_report_ref"] = target_report_ref
+    return payload
+
+
+def _invoke_verification_skeleton(plan_path: Path, *args: str, raw: bool = False):
+    command = [*(["--raw"] if raw else []), "verification-report", "skeleton", str(plan_path), *args]
+    return runner.invoke(app, command, catch_exceptions=False)
+
+
+def _invoke_verification_skeleton_write(
+    plan_path: Path,
+    target_path: Path,
+    *args: str,
+    raw: bool = True,
+    force: bool = False,
+    validate: str = "frontmatter",
+):
+    write_args = [
+        *(["--force"] if force else []),
+        "--write",
+        "--output",
+        str(target_path),
+        *args,
+        "--validate",
+        validate,
+    ]
+    return _invoke_verification_skeleton(plan_path, *write_args, raw=raw)
+
+
+def _write_verification_patch(tmp_path: Path, *, status: str = "gaps_found") -> Path:
+    patch_path = tmp_path / "patch.json"
+    patch_path.write_text(json.dumps({"status": status}) + "\n", encoding="utf-8")
+    return patch_path
+
+
+def _invoke_verification_finalize(
+    plan_path: Path,
+    patch_path: Path,
+    body_path: Path,
+    target_path: Path,
+    *,
+    raw: bool = True,
+    validate: str = "contract",
+    force: bool = False,
+):
+    command = [
+        *(["--raw"] if raw else []),
+        "verification-report",
+        "finalize",
+        str(plan_path),
+        "--patch",
+        str(patch_path),
+        "--body-file",
+        str(body_path),
+        "--output",
+        str(target_path),
+        "--validate",
+        validate,
+        *(["--force"] if force else []),
+    ]
+    return runner.invoke(app, command, catch_exceptions=False)
+
+
+def _verification_validation_payload(
+    *,
+    mode: str = "contract",
+    valid: bool = True,
+    errors: list[str] | None = None,
+    oracle_evidence_count: int = 1,
+) -> dict[str, object]:
+    return {
+        "mode": mode,
+        "status": "valid" if valid else "invalid",
+        "valid": valid,
+        "missing": [],
+        "present": ["status"],
+        "errors": list(errors or []),
+        "schema_name": "verification",
+        "oracle_evidence_count": oracle_evidence_count,
+    }
+
+
+def test_verification_report_skeleton_raw_uses_plan_contract_and_builder_payload(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan_path = _write_baseline_plan_project(tmp_path)
     calls: dict[str, object] = {}
 
     def fake_builder(*, contract, plan_path, plan_contract_ref, status, **kwargs):
         del kwargs
-        reference = contract.references[0]
-        claim = contract.claims[0]
-        test = contract.acceptance_tests[0]
         calls["contract"] = contract
         calls["plan_path"] = plan_path
         calls["plan_contract_ref"] = plan_contract_ref
         calls["status"] = status
-        return {
-            "frontmatter": {
-                "phase": "01-baseline",
-                "verified": "<fill-me>",
-                "status": status,
-                "score": "<fill-me>",
-                "plan_contract_ref": plan_contract_ref,
-                "contract_results": {
-                    "claims": {
-                        claim.id: {
-                            "status": "blocked",
-                            "summary": f"Blocked until {reference.id} is read and compared.",
-                        }
-                    },
-                    "deliverables": {},
-                    "acceptance_tests": {
-                        test.id: {
-                            "status": "blocked",
-                            "summary": f"Blocked until {reference.id} is available.",
-                        }
-                    },
-                    "references": {
-                        reference.id: {
-                            "status": "missing",
-                            "completed_actions": [],
-                            "missing_actions": list(reference.required_actions),
-                            "summary": f"Required benchmark artifact {reference.locator} is absent.",
-                        }
-                    },
-                    "forbidden_proxies": {},
-                    "uncertainty_markers": {
-                        "weakest_anchors": ["Missing benchmark reference"],
-                        "disconfirming_observations": ["Benchmark file is absent"],
-                    },
-                },
-                "comparison_verdicts": [
-                    {
-                        "subject_id": claim.id,
-                        "subject_kind": "claim",
-                        "subject_role": "decisive",
-                        "reference_id": reference.id,
-                        "comparison_kind": "benchmark",
-                        "metric": "reference_availability",
-                        "threshold": "benchmark artifact exists and is compared",
-                        "verdict": "inconclusive",
-                        "recommended_action": f"Restore {reference.locator} and rerun the comparison.",
-                    }
-                ],
-                "suggested_contract_checks": [
-                    {
-                        "check": "contract.benchmark_reproduction",
-                        "reason": f"{reference.id} is missing required read and compare actions.",
-                        "suggested_subject_kind": "acceptance_test",
-                        "suggested_subject_id": test.id,
-                        "evidence_path": "GPD/phases/01-baseline/01-VERIFICATION.md",
-                    }
-                ],
-            },
-            "frontmatter_yaml": (
-                "---\n"
-                "phase: 01-baseline\n"
-                "status: gaps_found\n"
-                f"plan_contract_ref: {plan_contract_ref}\n"
-                "contract_results:\n"
-                "  claims: {}\n"
-                "---\n"
-            ),
-            "markdown_draft": (
-                "---\n"
-                "phase: 01-baseline\n"
-                "status: gaps_found\n"
-                f"plan_contract_ref: {plan_contract_ref}\n"
-                "---\n\n"
-                "# Verification\n\n"
-                "## Validation Commands\n\n"
-                "```bash\n"
-                "gpd validate verification-contract GPD/phases/01-baseline/01-VERIFICATION.md\n"
-                "```\n"
-            ),
-            "validation_commands": [
-                "gpd validate verification-contract GPD/phases/01-baseline/01-VERIFICATION.md",
-            ],
-            "authoring_rules": ["Use the generated frontmatter as the starting YAML."],
-        }
+        return _fake_skeleton_payload(plan_contract_ref=plan_contract_ref, status=status)
 
-    monkeypatch.setattr(cli_module, "_load_verification_report_skeleton_builder", lambda: fake_builder)
+    monkeypatch.setattr("gpd.core.verification_report.build_verification_report_skeleton", fake_builder)
 
-    result = runner.invoke(
-        app,
-        ["--raw", "verification-report", "skeleton", str(plan_path), "--status", "gaps_found"],
-        catch_exceptions=False,
-    )
+    result = _invoke_verification_skeleton(plan_path, "--status", "gaps_found", raw=True)
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     frontmatter = payload["frontmatter"]
-    references = frontmatter["contract_results"]["references"]
     assert payload["plan_path"] == str(plan_path)
-    assert payload["plan_contract_ref"] == "GPD/phases/01-baseline/01-PLAN.md#/contract"
+    assert payload["plan_contract_ref"] == _BASELINE_PLAN_REF
     assert payload["target_status"] == "gaps_found"
     assert frontmatter["plan_contract_ref"] == payload["plan_contract_ref"]
-    assert references["ref-stale-verification-benchmark"] == {
-        "status": "missing",
-        "completed_actions": [],
-        "missing_actions": ["read", "compare"],
-        "summary": "Required benchmark artifact artifacts/benchmark/reference.json is absent.",
-    }
-    assert frontmatter["comparison_verdicts"][0]["reference_id"] == "ref-stale-verification-benchmark"
-    assert frontmatter["suggested_contract_checks"][0]["check"] == "contract.benchmark_reproduction"
     assert payload["frontmatter_yaml"].startswith("---\nphase: 01-baseline")
     assert payload["markdown_draft"].startswith("---\nphase: 01-baseline")
-    assert payload["validation_commands"] == [
-        "gpd validate verification-contract GPD/phases/01-baseline/01-VERIFICATION.md",
-    ]
+    assert payload["validation_commands"] == [_BASELINE_VALIDATE_COMMANDS[1]]
     assert payload["authoring_rules"] == ["Use the generated frontmatter as the starting YAML."]
     assert calls["plan_path"] == plan_path
     assert calls["plan_contract_ref"] == payload["plan_contract_ref"]
     assert calls["status"] == "gaps_found"
     assert calls["contract"].references[0].must_surface is True
-    assert not (phase_dir / "01-VERIFICATION.md").exists()
+    assert not (plan_path.parent / "01-VERIFICATION.md").exists()
     _assert_forbidden_verification_fields_absent(payload)
 
 
@@ -3154,98 +3035,36 @@ def test_verification_report_skeleton_uses_project_local_ref_when_outer_director
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     project_root = tmp_path / "outer" / "GPD" / "project"
-    phase_dir = project_root / "GPD" / "phases" / "01-baseline"
-    phase_dir.mkdir(parents=True)
-    baseline_dir = project_root / "GPD" / "phases" / "00-baseline"
-    baseline_dir.mkdir(parents=True)
-    (baseline_dir / "00-SUMMARY.md").write_text("prior baseline", encoding="utf-8")
-    plan_path = phase_dir / "01-PLAN.md"
-    plan_path.write_text(_compact_plan_with_missing_must_surface_benchmark(), encoding="utf-8")
+    plan_path = _write_baseline_plan_project(project_root)
 
     def fake_builder(*, contract, plan_path, plan_contract_ref, status, **kwargs):
         del contract, plan_path, kwargs
-        return {
-            "frontmatter": {
-                "phase": "01-baseline",
-                "verified": "1970-01-01T00:00:00Z",
-                "status": status,
-                "score": "gap skeleton",
-                "plan_contract_ref": plan_contract_ref,
-            },
-            "target_report_path": str(phase_dir / "01-VERIFICATION.md"),
-        }
+        return _fake_skeleton_payload(
+            plan_contract_ref=plan_contract_ref,
+            status=status,
+            target_report_path=str(project_root / _BASELINE_REPORT_REF),
+            include_validation_commands=False,
+        )
 
-    monkeypatch.setattr(cli_module, "_load_verification_report_skeleton_builder", lambda: fake_builder)
+    monkeypatch.setattr("gpd.core.verification_report.build_verification_report_skeleton", fake_builder)
 
-    result = runner.invoke(
-        app,
-        ["--raw", "verification-report", "skeleton", str(plan_path)],
-        catch_exceptions=False,
-    )
+    result = _invoke_verification_skeleton(plan_path, raw=True)
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
-    assert payload["plan_contract_ref"] == "GPD/phases/01-baseline/01-PLAN.md#/contract"
-    assert payload["frontmatter"]["plan_contract_ref"] == "GPD/phases/01-baseline/01-PLAN.md#/contract"
-    assert payload["validation_commands"] == [
-        "gpd frontmatter validate GPD/phases/01-baseline/01-VERIFICATION.md --schema verification",
-        "gpd validate verification-contract GPD/phases/01-baseline/01-VERIFICATION.md",
-    ]
-
-
-def test_verification_report_output_target_resolves_payload_relative_paths_by_scope(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    phase_dir = tmp_path / "GPD" / "phases" / "01-baseline"
-    phase_dir.mkdir(parents=True)
-    plan_path = phase_dir / "01-PLAN.md"
-    launch_dir = tmp_path / "launch"
-    launch_dir.mkdir()
-    monkeypatch.setattr(cli_module, "_get_cwd", lambda: launch_dir)
-
-    builder_target = cli_module._verification_report_output_target(
-        None,
-        payload={"target_report_path": "custom-VERIFICATION.md"},
-        plan_path=plan_path,
-    )
-    explicit_target = cli_module._verification_report_output_target(
-        "explicit-VERIFICATION.md",
-        payload={"target_report_path": "custom-VERIFICATION.md"},
-        plan_path=plan_path,
-    )
-    project_target = cli_module._verification_report_output_target(
-        None,
-        payload={"target_report_path": "GPD/phases/01-baseline/01-VERIFICATION.md"},
-        plan_path=plan_path,
-    )
-
-    assert builder_target == (phase_dir / "custom-VERIFICATION.md").resolve(strict=False)
-    assert explicit_target == (launch_dir / "explicit-VERIFICATION.md").resolve(strict=False)
-    assert project_target == (tmp_path / "GPD" / "phases" / "01-baseline" / "01-VERIFICATION.md").resolve(
-        strict=False
-    )
+    payload = json_output_from_result(result)
+    assert payload["plan_contract_ref"] == _BASELINE_PLAN_REF
+    assert payload["frontmatter"]["plan_contract_ref"] == _BASELINE_PLAN_REF
+    assert payload["validation_commands"] == _BASELINE_VALIDATE_COMMANDS
 
 
 def test_verification_report_skeleton_raw_uses_real_builder(tmp_path: Path) -> None:
-    phase_dir = tmp_path / "GPD" / "phases" / "01-baseline"
-    phase_dir.mkdir(parents=True)
-    baseline_dir = tmp_path / "GPD" / "phases" / "00-baseline"
-    baseline_dir.mkdir(parents=True)
-    (baseline_dir / "00-SUMMARY.md").write_text("prior baseline", encoding="utf-8")
-    plan_path = phase_dir / "01-PLAN.md"
-    plan_path.write_text(_compact_plan_with_missing_must_surface_benchmark(), encoding="utf-8")
+    plan_path = _write_baseline_plan_project(tmp_path)
+    phase_dir = plan_path.parent
 
-    result = runner.invoke(
-        app,
-        ["--raw", "verification-report", "skeleton", str(plan_path), "--status", "gaps_found"],
-        catch_exceptions=False,
-    )
+    result = _invoke_verification_skeleton(plan_path, "--status", "gaps_found", raw=True)
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     frontmatter = payload["frontmatter"]
-    assert payload["plan_contract_ref"] == "GPD/phases/01-baseline/01-PLAN.md#/contract"
+    assert payload["plan_contract_ref"] == _BASELINE_PLAN_REF
     assert payload["target_report_path"] == str(phase_dir / "01-VERIFICATION.md")
     assert frontmatter["status"] == "gaps_found"
     assert frontmatter["contract_results"]["claims"]["claim-stale-verification"]["status"] == "blocked"
@@ -3269,43 +3088,19 @@ def test_verification_report_skeleton_default_prints_markdown_draft_not_rich_tab
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    phase_dir = tmp_path / "GPD" / "phases" / "01-baseline"
-    phase_dir.mkdir(parents=True)
-    baseline_dir = tmp_path / "GPD" / "phases" / "00-baseline"
-    baseline_dir.mkdir(parents=True)
-    (baseline_dir / "00-SUMMARY.md").write_text("prior baseline", encoding="utf-8")
-    plan_path = phase_dir / "01-PLAN.md"
-    plan_path.write_text(_compact_plan_with_missing_must_surface_benchmark(), encoding="utf-8")
+    plan_path = _write_baseline_plan_project(tmp_path)
 
     def fake_builder(*, contract, plan_path, plan_contract_ref, status, **kwargs):
-        del kwargs
-        del contract, plan_path
-        return {
-            "frontmatter": {"phase": "01-baseline", "status": status, "plan_contract_ref": plan_contract_ref},
-            "frontmatter_yaml": (
-                f"---\nphase: 01-baseline\nstatus: gaps_found\nplan_contract_ref: {plan_contract_ref}\n---\n"
-            ),
-            "markdown_draft": (
-                "---\n"
-                "phase: 01-baseline\n"
-                "status: gaps_found\n"
-                f"plan_contract_ref: {plan_contract_ref}\n"
-                "---\n\n"
-                "# Verification\n\n"
-                "## Validation Commands\n\n"
-                "```bash\n"
-                "gpd validate verification-contract GPD/phases/01-baseline/01-VERIFICATION.md\n"
-                "```\n"
-            ),
-            "validation_commands": [
-                "gpd validate verification-contract GPD/phases/01-baseline/01-VERIFICATION.md",
-            ],
-            "authoring_rules": ["Do not hand-convert raw JSON."],
-        }
+        del contract, plan_path, kwargs
+        return _fake_skeleton_payload(
+            plan_contract_ref=plan_contract_ref,
+            status=status,
+            authoring_rule="Do not hand-convert raw JSON.",
+        )
 
-    monkeypatch.setattr(cli_module, "_load_verification_report_skeleton_builder", lambda: fake_builder)
+    monkeypatch.setattr("gpd.core.verification_report.build_verification_report_skeleton", fake_builder)
 
-    result = runner.invoke(app, ["verification-report", "skeleton", str(plan_path)], catch_exceptions=False)
+    result = _invoke_verification_skeleton(plan_path)
 
     assert result.exit_code == 0, result.output
     assert result.output.startswith("---\nphase: 01-baseline")
@@ -3320,37 +3115,23 @@ def test_verification_report_skeleton_fallback_validation_commands_quote_report_
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    phase_dir = tmp_path / "GPD" / "phases" / "01 with space"
-    phase_dir.mkdir(parents=True)
-    baseline_dir = tmp_path / "GPD" / "phases" / "00-baseline"
-    baseline_dir.mkdir(parents=True)
-    (baseline_dir / "00-SUMMARY.md").write_text("prior baseline", encoding="utf-8")
-    plan_path = phase_dir / "01-PLAN.md"
-    plan_path.write_text(_compact_plan_with_missing_must_surface_benchmark(), encoding="utf-8")
+    plan_path = _write_baseline_plan_project(tmp_path, phase="01 with space")
 
     def fake_builder(*, contract, plan_path, plan_contract_ref, status, **kwargs):
         del contract, plan_path, kwargs
-        return {
-            "frontmatter": {
-                "phase": "01 with space",
-                "verified": "1970-01-01T00:00:00Z",
-                "status": status,
-                "score": "gap skeleton",
-                "plan_contract_ref": plan_contract_ref,
-            },
-            "target_report_ref": "GPD/phases/01 with space/01-VERIFICATION.md",
-        }
+        return _fake_skeleton_payload(
+            phase="01 with space",
+            plan_contract_ref=plan_contract_ref,
+            status=status,
+            target_report_ref="GPD/phases/01 with space/01-VERIFICATION.md",
+            include_validation_commands=False,
+        )
 
-    monkeypatch.setattr(cli_module, "_load_verification_report_skeleton_builder", lambda: fake_builder)
+    monkeypatch.setattr("gpd.core.verification_report.build_verification_report_skeleton", fake_builder)
 
-    result = runner.invoke(
-        app,
-        ["--raw", "verification-report", "skeleton", str(plan_path)],
-        catch_exceptions=False,
-    )
+    result = _invoke_verification_skeleton(plan_path, raw=True)
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["validation_commands"] == [
         "gpd frontmatter validate 'GPD/phases/01 with space/01-VERIFICATION.md' --schema verification",
         "gpd validate verification-contract 'GPD/phases/01 with space/01-VERIFICATION.md'",
@@ -3361,12 +3142,8 @@ def test_verification_report_skeleton_rejects_non_plan_frontmatter_before_builde
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    phase_dir = tmp_path / "GPD" / "phases" / "01-baseline"
-    phase_dir.mkdir(parents=True)
-    baseline_dir = tmp_path / "GPD" / "phases" / "00-baseline"
-    baseline_dir.mkdir(parents=True)
-    (baseline_dir / "00-SUMMARY.md").write_text("prior baseline", encoding="utf-8")
-    summary_path = phase_dir / "01-SUMMARY.md"
+    plan_path = _write_baseline_plan_project(tmp_path)
+    summary_path = plan_path.with_name("01-SUMMARY.md")
     summary_path.write_text(
         _compact_plan_with_missing_must_surface_benchmark().replace(
             "type: execute\n",
@@ -3379,13 +3156,9 @@ def test_verification_report_skeleton_rejects_non_plan_frontmatter_before_builde
     def unexpected_builder(**kwargs):
         raise AssertionError(f"verification skeleton builder should not run for invalid PLAN input: {kwargs}")
 
-    monkeypatch.setattr(cli_module, "_load_verification_report_skeleton_builder", lambda: unexpected_builder)
+    monkeypatch.setattr("gpd.core.verification_report.build_verification_report_skeleton", unexpected_builder)
 
-    result = runner.invoke(
-        app,
-        ["--raw", "verification-report", "skeleton", str(summary_path)],
-        catch_exceptions=False,
-    )
+    result = _invoke_verification_skeleton(summary_path, raw=True)
 
     assert result.exit_code == 1
     payload = _raw_payload_from_result(result)
@@ -3394,19 +3167,9 @@ def test_verification_report_skeleton_rejects_non_plan_frontmatter_before_builde
 
 
 def test_verification_report_skeleton_frontmatter_format_prints_yaml_only(tmp_path: Path) -> None:
-    phase_dir = tmp_path / "GPD" / "phases" / "01-baseline"
-    phase_dir.mkdir(parents=True)
-    baseline_dir = tmp_path / "GPD" / "phases" / "00-baseline"
-    baseline_dir.mkdir(parents=True)
-    (baseline_dir / "00-SUMMARY.md").write_text("prior baseline", encoding="utf-8")
-    plan_path = phase_dir / "01-PLAN.md"
-    plan_path.write_text(_compact_plan_with_missing_must_surface_benchmark(), encoding="utf-8")
+    plan_path = _write_baseline_plan_project(tmp_path)
 
-    result = runner.invoke(
-        app,
-        ["verification-report", "skeleton", str(plan_path), "--format", "frontmatter"],
-        catch_exceptions=False,
-    )
+    result = _invoke_verification_skeleton(plan_path, "--format", "frontmatter")
 
     assert result.exit_code == 0, result.output
     assert result.output.startswith("---\n")
@@ -3421,22 +3184,11 @@ def test_verification_report_skeleton_frontmatter_format_prints_yaml_only(tmp_pa
 
 
 def test_verification_report_skeleton_format_json_outputs_json_without_raw(tmp_path: Path) -> None:
-    phase_dir = tmp_path / "GPD" / "phases" / "01-baseline"
-    phase_dir.mkdir(parents=True)
-    baseline_dir = tmp_path / "GPD" / "phases" / "00-baseline"
-    baseline_dir.mkdir(parents=True)
-    (baseline_dir / "00-SUMMARY.md").write_text("prior baseline", encoding="utf-8")
-    plan_path = phase_dir / "01-PLAN.md"
-    plan_path.write_text(_compact_plan_with_missing_must_surface_benchmark(), encoding="utf-8")
+    plan_path = _write_baseline_plan_project(tmp_path)
 
-    result = runner.invoke(
-        app,
-        ["verification-report", "skeleton", str(plan_path), "--format", "json"],
-        catch_exceptions=False,
-    )
+    result = _invoke_verification_skeleton(plan_path, "--format", "json")
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["frontmatter"]["status"] == "gaps_found"
     assert payload["target_status"] == "gaps_found"
     assert "frontmatter_yaml" in payload
@@ -3451,20 +3203,7 @@ def test_verification_report_skeleton_write_refuses_existing_without_force(tmp_p
     original = "existing verification report\n"
     target_path.write_text(original, encoding="utf-8")
 
-    result = runner.invoke(
-        app,
-        [
-            "verification-report",
-            "skeleton",
-            str(plan_path),
-            "--write",
-            "--output",
-            str(target_path),
-            "--validate",
-            "frontmatter",
-        ],
-        catch_exceptions=False,
-    )
+    result = _invoke_verification_skeleton_write(plan_path, target_path, raw=False)
 
     assert result.exit_code == 1, result.output
     assert "exists" in result.output.lower()
@@ -3477,24 +3216,13 @@ def test_verification_report_skeleton_write_creates_target_with_generated_yaml(t
     target_path = plan_path.with_name("01-VERIFICATION.md")
     colon_rich_score = "Freshness check failed: stale pass unsupported because benchmark is missing"
 
-    result = runner.invoke(
-        app,
-        [
-            "--raw",
-            "verification-report",
-            "skeleton",
-            str(plan_path),
-            "--write",
-            "--output",
-            str(target_path),
-            "--verified",
-            "2026-05-04T03:21:16Z",
-            "--score",
-            colon_rich_score,
-            "--validate",
-            "frontmatter",
-        ],
-        catch_exceptions=False,
+    result = _invoke_verification_skeleton_write(
+        plan_path,
+        target_path,
+        "--verified",
+        "2026-05-04T03:21:16Z",
+        "--score",
+        colon_rich_score,
     )
 
     assert result.exit_code == 0, result.output
@@ -3507,7 +3235,7 @@ def test_verification_report_skeleton_write_creates_target_with_generated_yaml(t
     assert frontmatter["status"] == "gaps_found"
     assert frontmatter["verified"] == "2026-05-04T03:21:16Z"
     assert frontmatter["score"] == colon_rich_score
-    assert frontmatter["plan_contract_ref"] == "GPD/phases/01-baseline/01-PLAN.md#/contract"
+    assert frontmatter["plan_contract_ref"] == _BASELINE_PLAN_REF
     assert "gpd_return" not in frontmatter
     assert "# Verification" in body
     validation = validate_frontmatter(content, "verification", source_path=target_path)
@@ -3519,23 +3247,7 @@ def test_verification_report_skeleton_write_body_file_keeps_colon_text_out_of_ya
     target_path = plan_path.with_name("01-VERIFICATION.md")
     body_path = _write_verification_body_file(tmp_path, _colon_rich_verification_body())
 
-    result = runner.invoke(
-        app,
-        [
-            "--raw",
-            "verification-report",
-            "skeleton",
-            str(plan_path),
-            "--write",
-            "--output",
-            str(target_path),
-            "--body-file",
-            str(body_path),
-            "--validate",
-            "frontmatter",
-        ],
-        catch_exceptions=False,
-    )
+    result = _invoke_verification_skeleton_write(plan_path, target_path, "--body-file", str(body_path))
 
     assert result.exit_code == 0, result.output
     payload = _raw_payload_from_result(result)
@@ -3558,23 +3270,7 @@ def test_verification_report_skeleton_write_rejects_body_file_frontmatter(tmp_pa
         "---\nstatus: passed\n---\n\n# Verification Body\n",
     )
 
-    result = runner.invoke(
-        app,
-        [
-            "--raw",
-            "verification-report",
-            "skeleton",
-            str(plan_path),
-            "--write",
-            "--output",
-            str(target_path),
-            "--body-file",
-            str(body_path),
-            "--validate",
-            "frontmatter",
-        ],
-        catch_exceptions=False,
-    )
+    result = _invoke_verification_skeleton_write(plan_path, target_path, "--body-file", str(body_path))
 
     assert result.exit_code == 1
     payload = _raw_payload_from_result(result)
@@ -3589,23 +3285,13 @@ def test_verification_report_skeleton_write_contract_validation_blocks_replace_o
     target_path.write_text(original, encoding="utf-8")
     body_path = _write_verification_body_file(tmp_path, _body_without_oracle_evidence())
 
-    result = runner.invoke(
-        app,
-        [
-            "--raw",
-            "verification-report",
-            "skeleton",
-            str(plan_path),
-            "--write",
-            "--force",
-            "--output",
-            str(target_path),
-            "--body-file",
-            str(body_path),
-            "--validate",
-            "contract",
-        ],
-        catch_exceptions=False,
+    result = _invoke_verification_skeleton_write(
+        plan_path,
+        target_path,
+        "--body-file",
+        str(body_path),
+        force=True,
+        validate="contract",
     )
 
     assert result.exit_code == 1, result.output
@@ -3639,22 +3325,12 @@ def test_verification_report_skeleton_write_contract_validation_passes_with_orac
     target_path = plan_path.with_name("01-VERIFICATION.md")
     body_path = _write_verification_body_file(tmp_path, _oracle_evidence_body())
 
-    result = runner.invoke(
-        app,
-        [
-            "--raw",
-            "verification-report",
-            "skeleton",
-            str(plan_path),
-            "--write",
-            "--output",
-            str(target_path),
-            "--body-file",
-            str(body_path),
-            "--validate",
-            "contract",
-        ],
-        catch_exceptions=False,
+    result = _invoke_verification_skeleton_write(
+        plan_path,
+        target_path,
+        "--body-file",
+        str(body_path),
+        validate="contract",
     )
 
     assert result.exit_code == 0, result.output
@@ -3676,21 +3352,7 @@ def test_verification_report_skeleton_raw_write_reports_validation_and_warnings(
     plan_path = _write_stale_refresh_skeleton_plan(tmp_path)
     target_path = plan_path.with_name("01-VERIFICATION.md")
 
-    result = runner.invoke(
-        app,
-        [
-            "--raw",
-            "verification-report",
-            "skeleton",
-            str(plan_path),
-            "--write",
-            "--output",
-            str(target_path),
-            "--validate",
-            "frontmatter",
-        ],
-        catch_exceptions=False,
-    )
+    result = _invoke_verification_skeleton_write(plan_path, target_path)
 
     assert result.exit_code == 0, result.output
     payload = _raw_payload_from_result(result)
@@ -3704,6 +3366,190 @@ def test_verification_report_skeleton_raw_write_reports_validation_and_warnings(
     assert isinstance(payload["warnings"], list) and payload["warnings"]
     assert any("frontmatter" in warning.lower() for warning in payload["warnings"])
     assert any("gpd_return" in warning for warning in payload["warnings"])
+
+
+def test_verification_report_finalize_writes_only_after_validation_passes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan_path = _write_stale_refresh_skeleton_plan(tmp_path)
+    patch_path = _write_verification_patch(tmp_path)
+    body_path = _write_verification_body_file(tmp_path, _oracle_evidence_body())
+    target_path = plan_path.with_name("01-VERIFICATION.md")
+    calls: dict[str, object] = {}
+
+    def fake_finalizer(**kwargs):
+        calls.update(kwargs)
+        return {
+            "markdown": "---\nstatus: gaps_found\n---\n\n# Verification\n",
+            "validation": {"mode": "contract", "valid": True, "errors": []},
+            "warnings": ["finalizer-owned frontmatter"],
+        }
+
+    def fake_validate(content: str, *, source_path: Path, mode: str) -> dict[str, object]:
+        assert content.startswith("---\nstatus: gaps_found")
+        assert source_path == target_path
+        assert mode == "contract"
+        assert not target_path.exists()
+        return _verification_validation_payload(mode=mode)
+
+    monkeypatch.setattr("gpd.core.verification_report.finalize_verification_report", fake_finalizer)
+    monkeypatch.setattr(cli_module, "_validate_verification_report_candidate", fake_validate)
+
+    result = _invoke_verification_finalize(plan_path, patch_path, body_path, target_path)
+
+    assert result.exit_code == 0, result.output
+    payload = _raw_payload_from_result(result)
+    assert payload["written"] is True
+    assert payload["validation"]["valid"] is True
+    assert payload["warnings"] == ["finalizer-owned frontmatter"]
+    assert target_path.read_text(encoding="utf-8").startswith("---\nstatus: gaps_found")
+    assert calls["outcome_patch"] == {"status": "gaps_found"}
+    assert calls["target_report_ref"] == _BASELINE_REPORT_REF
+
+
+def test_verification_report_finalize_refuses_existing_without_force(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan_path = _write_stale_refresh_skeleton_plan(tmp_path)
+    patch_path = _write_verification_patch(tmp_path)
+    body_path = _write_verification_body_file(tmp_path, _oracle_evidence_body())
+    target_path = plan_path.with_name("01-VERIFICATION.md")
+    target_path.write_text("existing verification\n", encoding="utf-8")
+
+    def unexpected_finalizer(**kwargs):
+        raise AssertionError(f"verification finalizer should not run for existing output: {kwargs}")
+
+    monkeypatch.setattr("gpd.core.verification_report.finalize_verification_report", unexpected_finalizer)
+
+    result = _invoke_verification_finalize(plan_path, patch_path, body_path, target_path)
+
+    assert result.exit_code == 1
+    payload = _raw_payload_from_result(result)
+    assert payload["written"] is False
+    assert "--force" in payload["validation"]["errors"][0]
+    assert target_path.read_text(encoding="utf-8") == "existing verification\n"
+
+
+def test_verification_report_finalize_rejects_body_file_frontmatter(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan_path = _write_stale_refresh_skeleton_plan(tmp_path)
+    patch_path = _write_verification_patch(tmp_path)
+    body_path = _write_verification_body_file(
+        tmp_path,
+        "---\nstatus: passed\n---\n\n# Verification Body\n",
+    )
+    target_path = plan_path.with_name("01-VERIFICATION.md")
+
+    def unexpected_finalizer(**kwargs):
+        raise AssertionError(f"verification finalizer should not run for body frontmatter: {kwargs}")
+
+    monkeypatch.setattr("gpd.core.verification_report.finalize_verification_report", unexpected_finalizer)
+
+    result = _invoke_verification_finalize(plan_path, patch_path, body_path, target_path)
+
+    assert result.exit_code == 1
+    payload = _raw_payload_from_result(result)
+    assert "body-only Markdown" in str(payload["error"])
+    assert not target_path.exists()
+
+
+def test_verification_report_finalize_validation_failure_preserves_existing_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan_path = _write_stale_refresh_skeleton_plan(tmp_path)
+    patch_path = _write_verification_patch(tmp_path, status="passed")
+    body_path = _write_verification_body_file(tmp_path, _body_without_oracle_evidence())
+    target_path = plan_path.with_name("01-VERIFICATION.md")
+    target_path.write_text("existing canonical report\n", encoding="utf-8")
+
+    def fake_finalizer(**kwargs):
+        del kwargs
+        return {
+            "markdown": "---\nstatus: passed\n---\n\n# Verification\n",
+            "validation": {"mode": "contract", "valid": True, "errors": []},
+        }
+
+    def fake_validate(content: str, *, source_path: Path, mode: str) -> dict[str, object]:
+        del content, source_path
+        return _verification_validation_payload(
+            mode=mode,
+            valid=False,
+            errors=["executed oracle evidence is required"],
+            oracle_evidence_count=0,
+        )
+
+    monkeypatch.setattr("gpd.core.verification_report.finalize_verification_report", fake_finalizer)
+    monkeypatch.setattr(cli_module, "_validate_verification_report_candidate", fake_validate)
+
+    result = _invoke_verification_finalize(plan_path, patch_path, body_path, target_path, force=True)
+
+    assert result.exit_code == 1
+    payload = _raw_payload_from_result(result)
+    assert payload["written"] is False
+    assert payload["validation"]["valid"] is False
+    assert payload["validation"]["errors"] == ["executed oracle evidence is required"]
+    assert (
+        payload["recovery"]["safe_next_step"]
+        == "Edit only the typed patch or body file, then rerun the finalizer command."
+    )
+    assert target_path.read_text(encoding="utf-8") == "existing canonical report\n"
+
+
+def test_verification_report_finalize_raw_output_includes_validation_and_commands(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan_path = _write_stale_refresh_skeleton_plan(tmp_path)
+    patch_path = _write_verification_patch(tmp_path)
+    body_path = _write_verification_body_file(tmp_path, _oracle_evidence_body())
+    target_path = plan_path.with_name("01-VERIFICATION.md")
+
+    def fake_finalizer(**kwargs):
+        del kwargs
+        return {
+            "markdown": "---\nstatus: gaps_found\n---\n\n# Verification\n",
+            "validation": {"mode": "contract", "valid": True, "errors": []},
+            "frontmatter_yaml": "---\nstatus: gaps_found\n---\n",
+        }
+
+    def fake_validate(content: str, *, source_path: Path, mode: str) -> dict[str, object]:
+        del content, source_path
+        return _verification_validation_payload(mode=mode)
+
+    monkeypatch.setattr("gpd.core.verification_report.finalize_verification_report", fake_finalizer)
+    monkeypatch.setattr(cli_module, "_validate_verification_report_candidate", fake_validate)
+
+    result = _invoke_verification_finalize(plan_path, patch_path, body_path, target_path)
+
+    assert result.exit_code == 0, result.output
+    payload = _raw_payload_from_result(result)
+    assert payload["validation"] == _verification_validation_payload()
+    assert payload["validation_commands"] == _BASELINE_VALIDATE_COMMANDS
+    assert payload["frontmatter_yaml"] == "---\nstatus: gaps_found\n---\n"
+
+
+def test_verification_report_finalize_uses_real_core_finalizer_for_gap_report(tmp_path: Path) -> None:
+    plan_path = _write_stale_refresh_skeleton_plan(tmp_path)
+    patch_path = _write_verification_patch(tmp_path)
+    body_path = _write_verification_body_file(tmp_path, _oracle_evidence_body())
+    target_path = plan_path.with_name("01-VERIFICATION.md")
+
+    result = _invoke_verification_finalize(plan_path, patch_path, body_path, target_path)
+
+    assert result.exit_code == 0, result.output
+    payload = _raw_payload_from_result(result)
+    assert payload["written"] is True
+    assert payload["validation"]["valid"] is True
+    content = target_path.read_text(encoding="utf-8")
+    frontmatter, body = extract_frontmatter(content)
+    assert frontmatter["status"] == "gaps_found"
+    assert frontmatter["plan_contract_ref"] == _BASELINE_PLAN_REF
+    assert "FAIL: relative error exceeds the benchmark tolerance." in body
 
 
 def _write_benchmark_contract_phase(project_root: Path) -> Path:
@@ -3853,8 +3699,7 @@ def test_validate_verification_contract_accepts_explicit_missing_reference_gap(t
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["valid"] is True
     assert payload["errors"] == []
 
@@ -3880,8 +3725,7 @@ def test_validate_verification_contract_rejects_live_row_mistakes_from_product_v
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 1, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result, expect_exit=1)
     assert payload["valid"] is False
     assert payload["missing"] == schema_result.missing
     assert payload["present"] == schema_result.present
@@ -3899,25 +3743,130 @@ def test_validate_verification_contract_rejects_live_row_mistakes_from_product_v
     )
 
 
-def test_validate_command_context_help_surfaces_registry_argument_name() -> None:
-    result = runner.invoke(app, ["validate", "command-context", "--help"])
-    assert result.exit_code == 0
-    assert "Run centralized command-context preflight based on command metadata." in result.output
-    assert "Command registry key or gpd:name" in result.output
-
-
-def test_validate_command_context_unknown_command_surfaces_user_facing_error(tmp_path: Path) -> None:
+def test_validate_command_context_unknown_command_surfaces_user_facing_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("gpd.cli.detect_runtime_for_gpd_use", lambda cwd=None: None)
     result = runner.invoke(
         app,
         ["--raw", "--cwd", str(tmp_path), "validate", "command-context", "not-a-real-command"],
     )
 
-    assert result.exit_code == 1
-    assert isinstance(result.exception, cli_module.GPDError)
-    assert "Unknown GPD command: gpd:not-a-real-command" in str(result.exception)
-    assert "Internal error" not in str(result.exception)
+    payload = json_output_from_result(result, expect_exit=1)
+    assert payload["ok"] is False
+    assert payload["passed"] is False
+    assert payload["error"] == "unknown_command"
+    assert payload["requested_command"] == "not-a-real-command"
+    assert payload["normalized_command"] == "not-a-real-command"
+    assert payload["canonical_command"] == "gpd:not-a-real-command"
+    assert payload["known_command"] is False
+    assert "gpd:help" in payload["allowed_preview"]
+    assert isinstance(payload["primary_action"], dict)
+    assert "primary_actions" not in payload
+    assert payload["primary_action"]["command"] == "gpd --raw help --all"
+    assert payload["safe_alternatives"]
+    assert payload["debug_actions"]
     assert "Internal error" not in result.output
     assert "Internal error" not in result.stderr
+
+
+def test_validate_command_context_unknown_command_suggests_close_match(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        ["--raw", "--cwd", str(tmp_path), "validate", "command-context", "verfy-work"],
+    )
+
+    payload = json_output_from_result(result, expect_exit=1)
+    assert payload["error"] == "unknown_command"
+    assert payload["canonical_command"] == "gpd:verfy-work"
+    assert any(suggestion["canonical_command"] == "gpd:verify-work" for suggestion in payload["suggestions"])
+    assert payload["debug_actions"][0]["command"] == "gpd --raw validate command-context gpd:verfy-work"
+
+
+def test_raw_command_field_access_json_is_deterministic_for_command_context() -> None:
+    result = runner.invoke(
+        app,
+        ["--raw", "command", "field-access", "compare-experiment", "--style", "json"],
+        catch_exceptions=False,
+        color=False,
+    )
+
+    payload = json_output_from_result(result)
+    assert payload["command"] == "gpd:compare-experiment"
+    assert payload["style"] == "json"
+    assert payload["read_only"] is True
+    assert payload["source"] == {
+        "type": "command_context_preflight_result",
+        "validator": "validate command-context",
+    }
+    assert payload["selected_fields"][:4] == ["command", "context_mode", "passed", "project_exists"]
+    assert "instructions" not in payload
+    assert "shell_bindings" not in payload
+
+
+def test_raw_command_field_access_instruction_is_shell_free() -> None:
+    result = runner.invoke(
+        app,
+        ["--raw", "command", "field-access", "dimensional-analysis"],
+        catch_exceptions=False,
+        color=False,
+    )
+
+    payload = json_output_from_result(result)
+    instruction_text = "\n".join(payload["instructions"])
+    assert payload["command"] == "gpd:dimensional-analysis"
+    assert "gpd json get" not in instruction_text
+    assert "$(" not in instruction_text
+    assert "CONTEXT=" not in instruction_text
+    for descriptor in iter_runtime_descriptors():
+        assert descriptor.display_name not in instruction_text
+
+
+def test_raw_command_field_access_is_read_only_and_does_not_run_preflight(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "PROJECT.md").write_text("# Root project note\n", encoding="utf-8")
+    (workspace / "ROADMAP.md").write_text("# Root roadmap note\n", encoding="utf-8")
+    monkeypatch.setattr(
+        cli_module,
+        "_migrate_planning_files",
+        lambda _cwd: (_ for _ in ()).throw(AssertionError("command field-access must be read-only")),
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "_build_command_context_preflight",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("command field-access must not execute preflight")
+        ),
+    )
+
+    result = runner.invoke(
+        app,
+        ["--raw", "--cwd", str(workspace), "command", "field-access", "explain", "--style", "json"],
+        catch_exceptions=False,
+        color=False,
+    )
+
+    payload = json_output_from_result(result)
+    assert payload["command"] == "gpd:explain"
+    assert not (workspace / "GPD").exists()
+
+
+def test_raw_command_field_access_rejects_unknown_command() -> None:
+    result = runner.invoke(
+        app,
+        ["--raw", "command", "field-access", "not-a-real-command"],
+        catch_exceptions=False,
+        color=False,
+    )
+
+    payload = json_output_from_result(result, expect_exit=1)
+    assert "Unknown GPD command: gpd:not-a-real-command" in payload["error"]
+    assert "Allowed commands include:" in payload["error"]
 
 
 @patch("gpd.core.contract_validation.validate_project_contract")
@@ -4009,8 +3958,7 @@ def test_validate_project_contract_accepts_proof_obligation_observable_fixture(t
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["valid"] is True
     assert payload["question"] == contract["scope"]["question"]
     assert payload["mode"] == "approved"
@@ -4034,8 +3982,7 @@ def test_validate_project_contract_raw_failure_surfaces_schema_reference(tmp_pat
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 1, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result, expect_exit=1)
     assert payload["valid"] is False
     assert payload["schema_reference"].endswith("project-contract-schema.md")
     assert any(
@@ -4097,8 +4044,7 @@ def test_validate_plan_preflight_passes_when_no_specialized_tools_are_declared(t
 
     result = runner.invoke(app, ["--raw", "validate", "plan-preflight", str(plan_path)])
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["passed"] is True
     assert payload["requirements"] == []
     assert payload["guidance"] == "No machine-checkable specialized tool requirements declared."
@@ -4134,8 +4080,7 @@ def test_validate_plan_preflight_rejects_invalid_frontmatter_before_tool_checks(
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 1, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result, expect_exit=1)
     assert payload["validation_passed"] is False
     assert payload["passed"] is False
     assert payload["requirements"] == []
@@ -4162,8 +4107,7 @@ def test_validate_plan_preflight_blocks_on_missing_required_wolfram(
 
     result = runner.invoke(app, ["--raw", "validate", "plan-preflight", str(plan_path)])
 
-    assert result.exit_code == 1
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result, expect_exit=1)
     assert payload["passed"] is False
     assert payload["requirements"][0]["tool"] == "wolfram"
     assert payload["requirements"][0]["blocking"] is True
@@ -4190,8 +4134,7 @@ def test_validate_plan_preflight_allows_missing_optional_wolfram_with_fallback(
 
     result = runner.invoke(app, ["--raw", "validate", "plan-preflight", str(plan_path)])
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["passed"] is True
     assert payload["requirements"][0]["tool"] == "wolfram"
     assert payload["requirements"][0]["blocking"] is False
@@ -4211,8 +4154,7 @@ def test_validate_plan_preflight_warns_on_missing_knowledge_dependency(
 
     result = runner.invoke(app, ["--raw", "validate", "plan-preflight", str(plan_path)])
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["knowledge_gate"] == "warn"
     assert payload["passed"] is True
     assert payload["knowledge_dependency_checks"][0]["status"] == "missing"
@@ -4233,8 +4175,7 @@ def test_validate_plan_preflight_blocks_on_missing_knowledge_dependency(
 
     result = runner.invoke(app, ["--raw", "validate", "plan-preflight", str(plan_path)])
 
-    assert result.exit_code == 1
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result, expect_exit=1)
     assert payload["knowledge_gate"] == "block"
     assert payload["passed"] is False
     assert payload["knowledge_dependency_checks"][0]["status"] == "missing"
@@ -4242,30 +4183,10 @@ def test_validate_plan_preflight_blocks_on_missing_knowledge_dependency(
 
 
 def test_resolve_model_help_lists_supported_runtime_ids():
-    result = runner.invoke(app, ["resolve-model", "--help"])
-    assert result.exit_code == 0
-    normalized_output = _normalize_cli_output(result.output)
+    normalized_output = _help_text("resolve-model")
     assert "--explain" in normalized_output
     for runtime_name in list_runtimes():
         assert runtime_name in normalized_output
-
-
-def test_state_help():
-    result = runner.invoke(app, ["state", "--help"])
-    assert result.exit_code == 0
-    output = _normalize_cli_output(result.output)
-    assert "load" in output
-    assert "get" in output
-    assert "update" in output
-
-
-def test_phase_help():
-    result = runner.invoke(app, ["phase", "--help"])
-    assert result.exit_code == 0
-    output = _normalize_cli_output(result.output)
-    assert "list" in output
-    assert "add" in output
-    assert "complete" in output
 
 
 def test_session_command_is_not_exposed():
@@ -4345,8 +4266,7 @@ def test_state_get_include_returns_structured_sections_from_canonical_state(tmp_
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["position"]["current_phase"] == "03"
     assert payload["session"]["hostname"] == "workstation"
     assert payload["session"]["resume_file"] == "NEXT.md"
@@ -4390,8 +4310,7 @@ def test_state_active_hypothesis(mock_get):
 
     result = runner.invoke(app, ["--raw", "state", "active-hypothesis"])
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload == {
         "found": True,
         "branch": "hypothesis/alt-method",
@@ -4409,8 +4328,7 @@ def test_state_active_hypothesis_missing_section(mock_get):
 
     result = runner.invoke(app, ["--raw", "state", "active-hypothesis"])
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["found"] is False
     assert payload["branch"] is None
     assert payload["branch_slug"] is None
@@ -4879,13 +4797,13 @@ def test_raw_json_output(mock_load):
 def test_raw_json_get_outputs_literal_json_value():
     result = runner.invoke(app, ["--raw", "json", "get", ".x"], input='{"x": 1}\n')
     assert result.exit_code == 0
-    assert json.loads(result.output) == "1"
+    assert json_output_from_result(result) == "1"
 
 
 def test_raw_json_get_error_outputs_json():
     result = runner.invoke(app, ["--raw", "json", "get", ".x"], input="not json\n")
     assert result.exit_code == 1
-    assert "Invalid JSON input" in json.loads(result.output)["error"]
+    assert "Invalid JSON input" in json_output_from_result(result, expect_exit=1)["error"]
 
 
 def test_normalize_global_cli_options_moves_trailing_root_options(tmp_path: Path) -> None:
@@ -4984,6 +4902,7 @@ def test_app_call_accepts_trailing_raw_and_cwd(
 def test_progress_uses_workspace_cwd_when_no_project_root_is_verified(
     mock_progress,
     tmp_path: Path,
+    capsys,
 ) -> None:
     workspace_cwd = tmp_path / "wrong-folder"
     workspace_cwd.mkdir()
@@ -4993,10 +4912,13 @@ def test_progress_uses_workspace_cwd_when_no_project_root_is_verified(
         patch("gpd.cli.resolve_project_root", return_value=None),
         patch("gpd.cli._status_command_cwd", side_effect=AssertionError("unexpected reentry lookup")),
     ):
-        result = runner.invoke(app, ["--cwd", str(workspace_cwd), "--raw", "progress", "bar"])
+        try:
+            cli_module.app(args=["--cwd", str(workspace_cwd), "--raw", "progress", "bar"])
+        except SystemExit as exc:
+            assert exc.code == 0
 
-    assert result.exit_code == 0
-    assert json.loads(result.output)["bar"] == "ok"
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["bar"] == "ok"
     mock_progress.assert_called_once_with(workspace_cwd.resolve(), "bar")
 
 
@@ -5022,8 +4944,7 @@ def test_validate_command_context_accepts_tokenized_standalone_arguments(tmp_pat
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["command"] == "gpd:discover"
     assert payload["context_mode"] == "project-aware"
     assert payload["passed"] is True
@@ -5046,8 +4967,7 @@ def test_validate_command_context_accepts_inline_arguments_in_command_label(tmp_
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["command"] == "gpd:discover"
     assert payload["context_mode"] == "project-aware"
     assert payload["passed"] is True
@@ -5064,8 +4984,7 @@ def test_validate_command_context_normalizes_inline_new_project_labels(label: st
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["command"] == "gpd:new-project"
     assert payload["context_mode"] == "projectless"
 
@@ -5128,8 +5047,7 @@ def test_validate_command_context_sync_state_accepts_partial_state_workspace(tmp
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["command"] == "gpd:sync-state"
     assert payload["passed"] is True
     assert payload["project_exists"] is False
@@ -5164,8 +5082,7 @@ def test_validate_command_context_sync_state_does_not_auto_select_recent_project
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 1, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result, expect_exit=1)
     assert payload["passed"] is False
     assert not any("auto-selected recoverable recent project" in check["detail"] for check in payload["checks"])
     assert any(
@@ -5186,8 +5103,7 @@ def test_validate_command_context_resume_work_accepts_partial_roadmap_workspace(
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["command"] == "gpd:resume-work"
     assert payload["passed"] is True
     assert payload["project_exists"] is False
@@ -5213,8 +5129,7 @@ def test_validate_command_context_accepts_tokenized_explain_arguments(tmp_path: 
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["command"] == "gpd:explain"
     assert payload["context_mode"] == "project-aware"
     assert payload["passed"] is True
@@ -5242,8 +5157,7 @@ def test_validate_command_context_accepts_negative_parameter_sweep_range(tmp_pat
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["command"] == "gpd:parameter-sweep"
     assert payload["context_mode"] == "project-aware"
     assert payload["passed"] is True
@@ -5260,8 +5174,7 @@ def test_pre_commit_check_recurses_into_directory_inputs(tmp_path: Path) -> None
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["passed"] is True
     assert payload["files_checked"] == 1
     assert payload["details"][0]["file"].endswith("docs/state.md")
@@ -5278,8 +5191,7 @@ def test_pre_commit_check_fails_for_unreadable_inputs(tmp_path: Path) -> None:
             catch_exceptions=False,
         )
 
-    assert result.exit_code == 1, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result, expect_exit=1)
     assert payload["passed"] is False
     assert payload["details"][0]["readable"] is False
 
@@ -5400,8 +5312,7 @@ def test_result_search_raw_outputs_json_list(mock_search):
         ["--raw", "result", "search", "--text", "derived", "--unverified"],
     )
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload == {
         "matches": [
             {
@@ -5419,52 +5330,6 @@ def test_result_search_raw_outputs_json_list(mock_search):
     _, kwargs = mock_search.call_args
     assert kwargs["text"] == "derived"
     assert kwargs["unverified"] is True
-
-
-def test_result_help_surfaces_show_command_and_dependency_chain() -> None:
-    result = runner.invoke(app, ["result", "--help"])
-
-    assert result.exit_code == 0
-    normalized_output = " ".join(result.output.split())
-    assert "show" in normalized_output
-    assert "downstream" in normalized_output
-    assert "Show a canonical result" in normalized_output
-    assert "direct/transitive" in normalized_output
-
-
-def test_result_show_help_surfaces_required_result_id_argument() -> None:
-    result = runner.invoke(app, ["result", "show", "--help"])
-
-    assert result.exit_code == 0
-    normalized_output = _normalize_cli_output(result.output)
-    assert "Show a canonical result and its direct/transitive dependency chain." in normalized_output
-    assert "RESULT_ID" in normalized_output
-    assert "Canonical result ID [required]" in normalized_output
-
-
-def test_result_downstream_help_surfaces_required_result_id_argument() -> None:
-    result = runner.invoke(app, ["result", "downstream", "--help"])
-
-    assert result.exit_code == 0
-    normalized_output = _normalize_cli_output(result.output)
-    assert "Show the direct and transitive dependents of a canonical result." in normalized_output
-    assert "RESULT_ID" in normalized_output
-    assert "Canonical result ID [required]" in normalized_output
-
-
-def _write_recoverable_result_state(tmp_path: Path, state: dict[str, object]) -> None:
-    planning = tmp_path / "GPD"
-    planning.mkdir(parents=True, exist_ok=True)
-    (planning / "state.json").write_text("{not valid json", encoding="utf-8")
-    (planning / STATE_JSON_BACKUP_FILENAME).write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
-
-
-def _write_markdown_recoverable_result_state(tmp_path: Path, state: dict[str, object]) -> None:
-    save_state_json(tmp_path, state)
-    save_state_markdown(tmp_path, generate_state_markdown(state))
-    planning = tmp_path / "GPD"
-    (planning / "state.json").write_text("{not valid json", encoding="utf-8")
-    (planning / STATE_JSON_BACKUP_FILENAME).write_text("{also not valid json", encoding="utf-8")
 
 
 @patch("gpd.core.results.result_upsert", create=True)
@@ -5658,8 +5523,7 @@ def test_result_upsert_projects_execution_visibility_after_save(
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["action"] == "updated"
     assert payload["updated_fields"] == ["description"]
     assert payload["result"]["id"] == "R-02"
@@ -5722,8 +5586,7 @@ def test_result_upsert_continues_when_visibility_projection_fails(
             catch_exceptions=False,
         )
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["action"] == "updated"
     assert payload["result"]["id"] == "R-02"
     assert payload["result"]["description"] == "Canonical quantity"
@@ -5776,6 +5639,62 @@ def test_result_verify_recovers_from_malformed_primary_state(mock_verify, tmp_pa
     assert state_arg["intermediate_results"][0]["id"] == "R-08"
 
 
+def _mock_persisted_result(
+    *,
+    result_id: str = "R-02",
+    description: str = "Canonical quantity",
+    phase: str = "2",
+    depends_on: list[str] | None = None,
+) -> MagicMock:
+    mock_result = MagicMock()
+    mock_result.model_dump.return_value = {
+        "status": "persisted",
+        "result": {
+            "id": result_id,
+            "equation": "a = b + c",
+            "description": description,
+            "phase": phase,
+            "depends_on": ["R-01"] if depends_on is None else depends_on,
+            "verified": False,
+        },
+        "updated_fields": ["equation", "description"],
+    }
+    return mock_result
+
+
+def _persist_derived_args(
+    cwd: Path,
+    *,
+    raw: bool = False,
+    description: str = "Canonical quantity",
+    phase: str = "2",
+    depends_on: bool = False,
+) -> list[str]:
+    args = [
+        *(["--raw"] if raw else []),
+        "--cwd",
+        str(cwd),
+        "result",
+        "persist-derived",
+        "--equation",
+        "a = b + c",
+        "--description",
+        description,
+        "--phase",
+        phase,
+    ]
+    if depends_on:
+        args.extend(["--depends-on", "R-01"])
+    args.extend(["--derivation-slug", "effective-mass"])
+    return args
+
+
+def _write_empty_gpd_state(project_root: Path) -> None:
+    planning = project_root / "GPD"
+    planning.mkdir()
+    (planning / "state.json").write_text("{}", encoding="utf-8")
+
+
 @patch("gpd.cli._resolve_derived_result_id")
 @patch("gpd.core.state.state_carry_forward_continuation_last_result_id")
 @patch("gpd.core.observability.sync_execution_visibility_from_canonical_continuation", create=True)
@@ -5787,49 +5706,15 @@ def test_result_persist_derived_forwards_parsed_options_and_derivation_slug(
     mock_resolve,
     tmp_path: Path,
 ):
-    mock_result = MagicMock()
-    mock_result.model_dump.return_value = {
-        "status": "persisted",
-        "result": {
-            "id": "R-02",
-            "equation": "a = b + c",
-            "description": "Canonical quantity",
-            "phase": "2",
-            "depends_on": ["R-01"],
-            "verified": False,
-        },
-        "updated_fields": ["equation", "description"],
-    }
-    mock_upsert_derived.return_value = mock_result
+    mock_upsert_derived.return_value = _mock_persisted_result()
     mock_carry_forward.return_value = MagicMock(updated=False)
     mock_resolve.return_value = "R-02-effective-mass"
     ordered_calls = MagicMock()
     ordered_calls.attach_mock(mock_carry_forward, "carry")
     ordered_calls.attach_mock(mock_sync_visibility, "sync")
-    planning = tmp_path / "GPD"
-    planning.mkdir()
-    (planning / "state.json").write_text("{}", encoding="utf-8")
+    _write_empty_gpd_state(tmp_path)
 
-    result = runner.invoke(
-        app,
-        [
-            "--cwd",
-            str(tmp_path),
-            "result",
-            "persist-derived",
-            "--equation",
-            "a = b + c",
-            "--description",
-            "Canonical quantity",
-            "--phase",
-            "2",
-            "--depends-on",
-            "R-01",
-            "--derivation-slug",
-            "effective-mass",
-        ],
-        catch_exceptions=False,
-    )
+    result = runner.invoke(app, _persist_derived_args(tmp_path, depends_on=True), catch_exceptions=False)
 
     assert result.exit_code == 0, result.output
     mock_resolve.assert_called_once()
@@ -5873,48 +5758,14 @@ def test_result_persist_derived_auto_seeds_continuity_anchor_from_actual_result_
     mock_resolve,
     tmp_path: Path,
 ):
-    mock_result = MagicMock()
-    mock_result.model_dump.return_value = {
-        "status": "persisted",
-        "result": {
-            "id": "R-01",
-            "equation": "a = b + c",
-            "description": "Canonical quantity",
-            "phase": "2",
-            "depends_on": ["R-01"],
-            "verified": False,
-        },
-        "updated_fields": ["equation", "description"],
-    }
-    mock_upsert_derived.return_value = mock_result
+    mock_upsert_derived.return_value = _mock_persisted_result(result_id="R-01")
     mock_carry_forward.return_value = MagicMock(updated=True)
     mock_resolve.return_value = "R-02-effective-mass"
-    planning = tmp_path / "GPD"
-    planning.mkdir()
-    (planning / "state.json").write_text("{}", encoding="utf-8")
+    _write_empty_gpd_state(tmp_path)
 
-    result = runner.invoke(
-        app,
-        [
-            "--raw",
-            "--cwd",
-            str(tmp_path),
-            "result",
-            "persist-derived",
-            "--equation",
-            "a = b + c",
-            "--description",
-            "Canonical quantity",
-            "--phase",
-            "2",
-            "--derivation-slug",
-            "effective-mass",
-        ],
-        catch_exceptions=False,
-    )
+    result = runner.invoke(app, _persist_derived_args(tmp_path, raw=True), catch_exceptions=False)
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["requested_result_id"] == "R-02-effective-mass"
     assert payload["result_id"] == "R-01"
     assert payload["requested_result_redirected"] is True
@@ -5937,25 +5788,7 @@ def test_result_persist_derived_uses_resolved_result_id_for_real_state_write(
 ) -> None:
     cwd = state_project_factory(tmp_path, current_phase="02", status="Executing")
 
-    first = runner.invoke(
-        app,
-        [
-            "--raw",
-            "--cwd",
-            str(cwd),
-            "result",
-            "persist-derived",
-            "--equation",
-            "a = b + c",
-            "--description",
-            "Canonical quantity",
-            "--phase",
-            "2",
-            "--derivation-slug",
-            "effective-mass",
-        ],
-        catch_exceptions=False,
-    )
+    first = runner.invoke(app, _persist_derived_args(cwd, raw=True), catch_exceptions=False)
 
     assert first.exit_code == 0, first.output
     first_payload = json.loads(first.output)
@@ -5964,25 +5797,7 @@ def test_result_persist_derived_uses_resolved_result_id_for_real_state_write(
     assert first_payload["requested_result_redirected"] is False
     assert first_payload["result"]["id"] == "R-02-effective-mass"
 
-    second = runner.invoke(
-        app,
-        [
-            "--raw",
-            "--cwd",
-            str(cwd),
-            "result",
-            "persist-derived",
-            "--equation",
-            "a = b + c",
-            "--description",
-            "Canonical quantity",
-            "--phase",
-            "2",
-            "--derivation-slug",
-            "effective-mass",
-        ],
-        catch_exceptions=False,
-    )
+    second = runner.invoke(app, _persist_derived_args(cwd, raw=True), catch_exceptions=False)
 
     assert second.exit_code == 0, second.output
     second_payload = json.loads(second.output)
@@ -6009,37 +5824,16 @@ def test_result_persist_derived_recovers_from_markdown_when_json_and_backup_are_
     recovered_state["position"]["status"] = "Executing"
     _write_markdown_recoverable_result_state(tmp_path, recovered_state)
 
-    mock_result = MagicMock()
-    mock_result.model_dump.return_value = {
-        "status": "persisted",
-        "result": {
-            "id": "R-11-effective-mass",
-            "equation": "a = b + c",
-            "description": "Markdown recovery",
-            "phase": "11",
-            "depends_on": [],
-            "verified": False,
-        },
-        "updated_fields": ["equation", "description"],
-    }
-    mock_upsert_derived.return_value = mock_result
+    mock_upsert_derived.return_value = _mock_persisted_result(
+        result_id="R-11-effective-mass",
+        description="Markdown recovery",
+        phase="11",
+        depends_on=[],
+    )
 
     result = runner.invoke(
         app,
-        [
-            "--cwd",
-            str(tmp_path),
-            "result",
-            "persist-derived",
-            "--equation",
-            "a = b + c",
-            "--description",
-            "Markdown recovery",
-            "--phase",
-            "11",
-            "--derivation-slug",
-            "effective-mass",
-        ],
+        _persist_derived_args(tmp_path, description="Markdown recovery", phase="11"),
         catch_exceptions=False,
     )
 
@@ -6253,8 +6047,7 @@ def test_result_update_projects_execution_visibility_after_save(
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     mock_result_update.assert_called_once()
     assert payload["id"] == "R-02"
     assert payload["description"] == "Updated quantity"
@@ -6295,8 +6088,7 @@ def test_result_persist_derived_raw_skips_cleanly_without_project_state(tmp_path
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["status"] == "skipped"
     assert payload["reason"] == "no_recoverable_project_state"
     assert payload["state_exists"] is False
@@ -6394,7 +6186,7 @@ def test_doctor_live_executable_probes_pass_through(monkeypatch: pytest.MonkeyPa
     result = runner.invoke(app, ["--cwd", str(tmp_path), "--raw", "doctor", "--live-executable-probes"])
 
     assert result.exit_code == 0
-    assert json.loads(result.output) == {"mode": "runtime-readiness", "overall": "ok"}
+    assert json_output_from_result(result) == {"mode": "runtime-readiness", "overall": "ok"}
     assert captured["kwargs"] == {
         "specs_dir": SPECS_DIR,
         "version": None,
@@ -6417,7 +6209,7 @@ def test_doctor_runtime_mode_uses_run_doctor(mock_doctor, tmp_path: Path) -> Non
     result = runner.invoke(app, ["--cwd", str(tmp_path), "--raw", "doctor", "--runtime", PRIMARY_RUNTIME, "--local"])
 
     assert result.exit_code == 0
-    assert json.loads(result.output) == {"mode": "runtime-readiness", "overall": "ok"}
+    assert json_output_from_result(result) == {"mode": "runtime-readiness", "overall": "ok"}
     mock_doctor.assert_called_once_with(
         specs_dir=SPECS_DIR,
         runtime=PRIMARY_RUNTIME,
@@ -6440,7 +6232,7 @@ def test_doctor_runtime_readiness_mode(mock_doctor, tmp_path: Path):
     result = runner.invoke(app, ["--cwd", str(tmp_path), "--raw", "doctor", "--runtime", runtime_name, "--global"])
 
     assert result.exit_code == 0
-    assert json.loads(result.output) == {"mode": "runtime-readiness", "overall": "ok"}
+    assert json_output_from_result(result) == {"mode": "runtime-readiness", "overall": "ok"}
     mock_doctor.assert_called_once_with(
         specs_dir=SPECS_DIR,
         runtime=runtime_name,
@@ -6468,7 +6260,7 @@ def test_doctor_target_dir_infers_install_scope(mock_doctor, tmp_path: Path) -> 
         )
 
     assert result.exit_code == 0
-    assert json.loads(result.output) == {"mode": "runtime-readiness", "overall": "ok"}
+    assert json_output_from_result(result) == {"mode": "runtime-readiness", "overall": "ok"}
     mock_matches_global.assert_called_once_with(runtime_name, str(target_dir), action="doctor")
     mock_doctor.assert_called_once_with(
         specs_dir=SPECS_DIR,
@@ -6497,7 +6289,7 @@ def test_doctor_target_dir_stays_local_when_target_is_not_global(mock_doctor, tm
         )
 
     assert result.exit_code == 0
-    assert json.loads(result.output) == {"mode": "runtime-readiness", "overall": "ok"}
+    assert json_output_from_result(result) == {"mode": "runtime-readiness", "overall": "ok"}
     mock_matches_global.assert_called_once_with(runtime_name, str(target_dir), action="doctor")
     mock_doctor.assert_called_once_with(
         specs_dir=SPECS_DIR,
@@ -6526,7 +6318,7 @@ def test_doctor_runtime_mode_defaults_to_local_target_when_scope_is_unspecified(
         result = runner.invoke(app, ["--cwd", str(tmp_path), "--raw", "doctor", "--runtime", runtime_name])
 
     assert result.exit_code == 0
-    assert json.loads(result.output) == {"mode": "runtime-readiness", "overall": "ok"}
+    assert json_output_from_result(result) == {"mode": "runtime-readiness", "overall": "ok"}
     mock_doctor.assert_called_once_with(
         specs_dir=SPECS_DIR,
         runtime=runtime_name,
@@ -6549,497 +6341,6 @@ def test_doctor_rejects_target_dir_without_runtime(tmp_path: Path) -> None:
 
     assert result.exit_code == 1
     assert "--runtime is required" in result.output
-
-
-def test_validate_unattended_readiness_requires_runtime() -> None:
-    result = runner.invoke(app, ["validate", "unattended-readiness"])
-
-    assert result.exit_code != 0
-    assert "--runtime" in _normalize_cli_output(result.output)
-
-
-def test_validate_unattended_readiness_wires_local_runtime_scope_through_health_builder(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    from gpd.specs import SPECS_DIR
-
-    runtime_name = list_runtimes()[0]
-    expected_target = get_adapter(runtime_name).resolve_target_dir(False, tmp_path)
-    captured: dict[str, object] = {}
-    doctor_report = DoctorReport(
-        overall=CheckStatus.WARN,
-        version="0.1.0",
-        runtime=runtime_name,
-        install_scope="local",
-        target=str(expected_target),
-        summary=HealthSummary(ok=1, warn=1, fail=0, total=2),
-        checks=[
-            HealthCheck(status=CheckStatus.OK, label="Runtime Launcher"),
-            HealthCheck(status=CheckStatus.WARN, label="LaTeX Toolchain", warnings=["LaTeX toolchain is partial."]),
-        ],
-    )
-    permissions_payload = {
-        "runtime": runtime_name,
-        "target": str(expected_target),
-        "autonomy": "balanced",
-        "readiness": "ready",
-        "ready": True,
-        "readiness_message": "Runtime permissions are ready for unattended use.",
-        "next_step": "",
-        "status_scope": "config-only",
-        "current_session_verified": False,
-    }
-    expected_result = UnattendedReadinessResult(
-        runtime=runtime_name,
-        autonomy="balanced",
-        install_scope="local",
-        target=str(expected_target),
-        readiness="ready",
-        ready=True,
-        passed=True,
-        readiness_message="Runtime permissions are ready for unattended use.",
-        live_executable_probes=False,
-        checks=[
-            UnattendedReadinessCheck(
-                name="permissions",
-                passed=True,
-                blocking=False,
-                detail="Runtime permissions are ready for unattended use.",
-            )
-        ],
-        blocking_conditions=[],
-        warnings=["LaTeX toolchain is partial."],
-        status_scope="config-only",
-        current_session_verified=False,
-        validated_surface="runtime-surface-test",
-    )
-
-    def fake_run_doctor(
-        *,
-        specs_dir: Path | None = None,
-        version: str | None = None,
-        runtime: str | None = None,
-        install_scope: str | None = None,
-        target_dir: str | Path | None = None,
-        cwd: Path | None = None,
-        live_executable_probes: bool = False,
-    ) -> MagicMock:
-        captured["doctor_kwargs"] = {
-            "specs_dir": specs_dir,
-            "version": version,
-            "runtime": runtime,
-            "install_scope": install_scope,
-            "target_dir": target_dir,
-            "cwd": cwd,
-            "live_executable_probes": live_executable_probes,
-        }
-        return doctor_report
-
-    def fake_permissions_status_payload(
-        *, runtime: str | None, autonomy: str | None, target_dir: str | None
-    ) -> dict[str, object]:
-        captured["permissions_kwargs"] = {
-            "runtime": runtime,
-            "autonomy": autonomy,
-            "target_dir": target_dir,
-        }
-        return permissions_payload
-
-    def fake_build_unattended_readiness_result(**kwargs) -> UnattendedReadinessResult:
-        captured["builder_kwargs"] = kwargs
-        return expected_result
-
-    monkeypatch.setattr("gpd.core.health.run_doctor", fake_run_doctor)
-    monkeypatch.setattr("gpd.core.health.build_unattended_readiness_result", fake_build_unattended_readiness_result)
-    monkeypatch.setattr(cli_module, "_permissions_status_payload", fake_permissions_status_payload)
-    monkeypatch.setattr(cli_module, "_validated_runtime_surface", lambda cwd=None: "runtime-surface-test")
-    result = runner.invoke(
-        app,
-        ["--cwd", str(tmp_path), "--raw", "validate", "unattended-readiness", "--runtime", runtime_name, "--local"],
-    )
-
-    assert result.exit_code == 0
-    assert json.loads(result.output) == {
-        "runtime": runtime_name,
-        "autonomy": "balanced",
-        "install_scope": "local",
-        "target": str(expected_target),
-        "readiness": "ready",
-        "ready": True,
-        "passed": True,
-        "readiness_message": "Runtime permissions are ready for unattended use.",
-        "live_executable_probes": False,
-        "checks": [
-            {
-                "name": "permissions",
-                "passed": True,
-                "blocking": False,
-                "detail": "Runtime permissions are ready for unattended use.",
-            }
-        ],
-        "blocking_conditions": [],
-        "warnings": ["LaTeX toolchain is partial."],
-        "next_step": "",
-        "status_scope": "config-only",
-        "current_session_verified": False,
-        "validated_surface": "runtime-surface-test",
-    }
-    assert captured["doctor_kwargs"] == {
-        "specs_dir": SPECS_DIR,
-        "version": None,
-        "runtime": runtime_name,
-        "install_scope": "local",
-        "target_dir": None,
-        "cwd": tmp_path,
-        "live_executable_probes": False,
-    }
-    assert captured["permissions_kwargs"] == {
-        "runtime": runtime_name,
-        "autonomy": None,
-        "target_dir": str(expected_target),
-    }
-    assert captured["builder_kwargs"] == {
-        "runtime": runtime_name,
-        "autonomy": None,
-        "install_scope": "local",
-        "target_dir": None,
-        "doctor_report": doctor_report,
-        "permissions_payload": permissions_payload,
-        "live_executable_probes": False,
-        "validated_surface": "runtime-surface-test",
-    }
-
-
-def test_validate_unattended_readiness_uses_detected_installed_target_when_scope_is_unspecified(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    from gpd.specs import SPECS_DIR
-
-    runtime_name = list_runtimes()[0]
-    detected_target = tmp_path / "runtime-global-target"
-    doctor_report = DoctorReport(
-        overall=CheckStatus.OK,
-        version="0.1.0",
-        runtime=runtime_name,
-        install_scope="global",
-        target=str(detected_target),
-        summary=HealthSummary(ok=2, warn=0, fail=0, total=2),
-        checks=[
-            HealthCheck(status=CheckStatus.OK, label="Runtime Launcher"),
-            HealthCheck(status=CheckStatus.OK, label="Runtime Config Target"),
-        ],
-    )
-    permissions_payload = {
-        "runtime": runtime_name,
-        "target": str(detected_target),
-        "autonomy": "balanced",
-        "readiness": "ready",
-        "ready": True,
-        "readiness_message": "Runtime permissions are ready for unattended use.",
-        "next_step": "",
-        "status_scope": "config-only",
-        "current_session_verified": False,
-    }
-    expected_result = UnattendedReadinessResult(
-        runtime=runtime_name,
-        autonomy="balanced",
-        install_scope="global",
-        target=str(detected_target),
-        readiness="ready",
-        ready=True,
-        passed=True,
-        readiness_message="Runtime permissions are ready for unattended use.",
-        live_executable_probes=False,
-        checks=[
-            UnattendedReadinessCheck(
-                name="permissions",
-                passed=True,
-                blocking=False,
-                detail="Runtime permissions are ready for unattended use.",
-            )
-        ],
-        blocking_conditions=[],
-        warnings=[],
-        next_step="",
-        status_scope="config-only",
-        current_session_verified=False,
-        validated_surface="runtime-surface-test",
-    )
-
-    captured: dict[str, object] = {}
-
-    def fake_run_doctor(
-        *,
-        specs_dir: Path | None = None,
-        version: str | None = None,
-        runtime: str | None = None,
-        install_scope: str | None = None,
-        target_dir: str | Path | None = None,
-        cwd: Path | None = None,
-        live_executable_probes: bool = False,
-    ) -> MagicMock:
-        captured["doctor_kwargs"] = {
-            "specs_dir": specs_dir,
-            "version": version,
-            "runtime": runtime,
-            "install_scope": install_scope,
-            "target_dir": target_dir,
-            "cwd": cwd,
-            "live_executable_probes": live_executable_probes,
-        }
-        return doctor_report
-
-    def fake_permissions_status_payload(
-        *, runtime: str | None, autonomy: str | None, target_dir: str | None
-    ) -> dict[str, object]:
-        captured["permissions_kwargs"] = {
-            "runtime": runtime,
-            "autonomy": autonomy,
-            "target_dir": target_dir,
-        }
-        return permissions_payload
-
-    def fake_build_unattended_readiness_result(**kwargs) -> UnattendedReadinessResult:
-        captured["builder_kwargs"] = kwargs
-        return expected_result
-
-    monkeypatch.setattr("gpd.core.health.run_doctor", fake_run_doctor)
-    monkeypatch.setattr("gpd.core.health.build_unattended_readiness_result", fake_build_unattended_readiness_result)
-    monkeypatch.setattr(cli_module, "_permissions_status_payload", fake_permissions_status_payload)
-    monkeypatch.setattr(cli_module, "_validated_runtime_surface", lambda cwd=None: "runtime-surface-test")
-
-    with patch(
-        "gpd.hooks.runtime_detect.detect_runtime_install_target",
-        return_value=SimpleNamespace(config_dir=detected_target, install_scope="global"),
-    ):
-        result = runner.invoke(
-            app,
-            ["--cwd", str(tmp_path), "--raw", "validate", "unattended-readiness", "--runtime", runtime_name],
-        )
-
-    assert result.exit_code == 0
-    assert json.loads(result.output) == {
-        "runtime": runtime_name,
-        "autonomy": "balanced",
-        "install_scope": "global",
-        "target": str(detected_target),
-        "readiness": "ready",
-        "ready": True,
-        "passed": True,
-        "readiness_message": "Runtime permissions are ready for unattended use.",
-        "live_executable_probes": False,
-        "checks": [
-            {
-                "name": "permissions",
-                "passed": True,
-                "blocking": False,
-                "detail": "Runtime permissions are ready for unattended use.",
-            }
-        ],
-        "blocking_conditions": [],
-        "warnings": [],
-        "next_step": "",
-        "status_scope": "config-only",
-        "current_session_verified": False,
-        "validated_surface": "runtime-surface-test",
-    }
-    assert captured["doctor_kwargs"] == {
-        "specs_dir": SPECS_DIR,
-        "version": None,
-        "runtime": runtime_name,
-        "install_scope": "global",
-        "target_dir": detected_target,
-        "cwd": tmp_path,
-        "live_executable_probes": False,
-    }
-    assert captured["permissions_kwargs"] == {
-        "runtime": runtime_name,
-        "autonomy": None,
-        "target_dir": str(detected_target),
-    }
-    assert captured["builder_kwargs"] == {
-        "runtime": runtime_name,
-        "autonomy": None,
-        "install_scope": "global",
-        "target_dir": detected_target,
-        "doctor_report": doctor_report,
-        "permissions_payload": permissions_payload,
-        "live_executable_probes": False,
-        "validated_surface": "runtime-surface-test",
-    }
-
-
-def test_validate_unattended_readiness_infers_global_target_scope_and_propagates_failed_result(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    from gpd.specs import SPECS_DIR
-
-    runtime_name = list_runtimes()[0]
-    target_dir = tmp_path / ".gpd-target"
-    resolved_target = target_dir.resolve(strict=False)
-    captured: dict[str, object] = {}
-    doctor_report = DoctorReport(
-        overall=CheckStatus.FAIL,
-        version="0.1.0",
-        runtime=runtime_name,
-        install_scope="global",
-        target=str(resolved_target),
-        live_executable_probes=True,
-        summary=HealthSummary(ok=0, warn=1, fail=1, total=2),
-        checks=[
-            HealthCheck(
-                status=CheckStatus.FAIL, label="Runtime Launcher", issues=["Runtime launcher not found on PATH"]
-            ),
-            HealthCheck(status=CheckStatus.WARN, label="LaTeX Toolchain", warnings=["LaTeX toolchain is partial."]),
-        ],
-    )
-    permissions_payload = {
-        "runtime": runtime_name,
-        "target": str(resolved_target),
-        "autonomy": "balanced",
-        "readiness": "ready",
-        "ready": True,
-        "readiness_message": "Runtime permissions are ready for unattended use.",
-        "next_step": "",
-        "status_scope": "config-only",
-        "current_session_verified": False,
-    }
-    expected_result = UnattendedReadinessResult(
-        runtime=runtime_name,
-        autonomy="balanced",
-        install_scope="global",
-        target=str(resolved_target),
-        readiness="ready",
-        ready=True,
-        passed=False,
-        readiness_message="Runtime permissions are ready for unattended use.",
-        live_executable_probes=True,
-        checks=[
-            UnattendedReadinessCheck(
-                name="doctor",
-                passed=False,
-                blocking=True,
-                detail="Runtime launcher not found on PATH",
-            )
-        ],
-        blocking_conditions=["Runtime launcher not found on PATH"],
-        warnings=["LaTeX toolchain is partial."],
-        next_step="Inspect the runtime-specific doctor output before retrying unattended use.",
-        status_scope="config-only",
-        current_session_verified=False,
-        validated_surface="runtime-surface-test",
-    )
-
-    def fake_run_doctor(
-        *,
-        specs_dir: Path | None = None,
-        version: str | None = None,
-        runtime: str | None = None,
-        install_scope: str | None = None,
-        target_dir: str | Path | None = None,
-        cwd: Path | None = None,
-        live_executable_probes: bool = False,
-    ) -> MagicMock:
-        captured["doctor_kwargs"] = {
-            "specs_dir": specs_dir,
-            "version": version,
-            "runtime": runtime,
-            "install_scope": install_scope,
-            "target_dir": target_dir,
-            "cwd": cwd,
-            "live_executable_probes": live_executable_probes,
-        }
-        return doctor_report
-
-    def fake_permissions_status_payload(
-        *, runtime: str | None, autonomy: str | None, target_dir: str | None
-    ) -> dict[str, object]:
-        captured["permissions_kwargs"] = {
-            "runtime": runtime,
-            "autonomy": autonomy,
-            "target_dir": target_dir,
-        }
-        return permissions_payload
-
-    def fake_build_unattended_readiness_result(**kwargs) -> UnattendedReadinessResult:
-        captured["builder_kwargs"] = kwargs
-        return expected_result
-
-    monkeypatch.setattr("gpd.core.health.run_doctor", fake_run_doctor)
-    monkeypatch.setattr("gpd.core.health.build_unattended_readiness_result", fake_build_unattended_readiness_result)
-    monkeypatch.setattr(cli_module, "_permissions_status_payload", fake_permissions_status_payload)
-    monkeypatch.setattr(cli_module, "_validated_runtime_surface", lambda cwd=None: "runtime-surface-test")
-    with patch("gpd.cli._target_dir_matches_global", return_value=True) as mock_matches_global:
-        result = runner.invoke(
-            app,
-            [
-                "--cwd",
-                str(tmp_path),
-                "--raw",
-                "validate",
-                "unattended-readiness",
-                "--runtime",
-                runtime_name,
-                "--target-dir",
-                str(target_dir),
-                "--live-executable-probes",
-            ],
-        )
-
-    assert result.exit_code == 1
-    mock_matches_global.assert_called_once_with(runtime_name, str(target_dir), action="validate unattended-readiness")
-    assert json.loads(result.output) == {
-        "runtime": runtime_name,
-        "autonomy": "balanced",
-        "install_scope": "global",
-        "target": str(resolved_target),
-        "readiness": "ready",
-        "ready": True,
-        "passed": False,
-        "readiness_message": "Runtime permissions are ready for unattended use.",
-        "live_executable_probes": True,
-        "checks": [
-            {
-                "name": "doctor",
-                "passed": False,
-                "blocking": True,
-                "detail": "Runtime launcher not found on PATH",
-            }
-        ],
-        "blocking_conditions": ["Runtime launcher not found on PATH"],
-        "warnings": ["LaTeX toolchain is partial."],
-        "next_step": "Inspect the runtime-specific doctor output before retrying unattended use.",
-        "status_scope": "config-only",
-        "current_session_verified": False,
-        "validated_surface": "runtime-surface-test",
-    }
-    assert captured["doctor_kwargs"] == {
-        "specs_dir": SPECS_DIR,
-        "version": None,
-        "runtime": runtime_name,
-        "install_scope": "global",
-        "target_dir": resolved_target,
-        "cwd": tmp_path,
-        "live_executable_probes": True,
-    }
-    assert captured["permissions_kwargs"] == {
-        "runtime": runtime_name,
-        "autonomy": None,
-        "target_dir": str(resolved_target),
-    }
-    assert captured["builder_kwargs"] == {
-        "runtime": runtime_name,
-        "autonomy": None,
-        "install_scope": "global",
-        "target_dir": resolved_target,
-        "doctor_report": doctor_report,
-        "permissions_payload": permissions_payload,
-        "live_executable_probes": True,
-        "validated_surface": "runtime-surface-test",
-    }
 
 
 def test_runtime_surface_helpers_track_the_active_runtime_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -7155,8 +6456,7 @@ def test_observe_sessions_reads_local_metadata(tmp_path: Path) -> None:
 
     result = runner.invoke(app, ["--raw", "--cwd", str(tmp_path), "observe", "sessions"])
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["count"] >= 1
     assert any(session["session_id"] == "cli-session-1" for session in payload["sessions"])
     assert any(session.get("command") == "timestamp" for session in payload["sessions"])
@@ -7181,8 +6481,7 @@ def test_observe_execution_raw_reads_local_visibility_snapshot(tmp_path: Path) -
 
     result = runner.invoke(app, ["--raw", "--cwd", str(tmp_path), "observe", "execution"])
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["found"] is True
     assert payload["status_classification"] == "active"
     assert payload["assessment"] == "possibly stalled"
@@ -7227,8 +6526,7 @@ def test_observe_execution_raw_prefers_lineage_head_over_stale_current_execution
     with patch("gpd.core.observability.get_current_execution", return_value=head_snapshot):
         result = runner.invoke(app, ["--raw", "--cwd", str(tmp_path), "observe", "execution"])
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["status_classification"] == "blocked"
     assert payload["current_task"] == "Lineage head task"
     assert payload["current_execution"]["current_task"] == "Lineage head task"
@@ -7310,8 +6608,7 @@ def test_observe_execution_raw_surfaces_tangent_proposal_without_replacing_prima
 
     result = runner.invoke(app, ["--raw", "--cwd", str(tmp_path), "observe", "execution"])
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["status_classification"] == "waiting"
     assert payload["tangent_summary"] == "Check whether the 2D case is degenerate"
     assert payload["tangent_decision"] == "branch_later"
@@ -7397,8 +6694,7 @@ def test_observe_show_filters_events(tmp_path: Path) -> None:
         ["--raw", "--cwd", str(tmp_path), "observe", "show", "--category", "cli", "--command", "timestamp"],
     )
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["count"] == 1
     assert payload["events"][0]["category"] == "cli"
     assert payload["events"][0]["command"] == "timestamp"
@@ -7494,8 +6790,7 @@ def test_observe_event_appends_event(tmp_path: Path) -> None:
         ],
     )
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["category"] == "workflow"
     assert payload["name"] == "wave-start"
     assert payload["data"]["wave"] == 2
@@ -7579,7 +6874,7 @@ def test_suggest_forwards_limit_and_serializes_raw_output_from_nested_cwd(mock_s
     assert result.exit_code == 0
     mock_suggest.assert_called_once_with(project_root.resolve(), limit=2)
     mock_result.model_dump.assert_called_once_with(mode="json", by_alias=True)
-    assert json.loads(result.output) == payload
+    assert json_output_from_result(result) == payload
 
 
 @patch("gpd.core.suggest.suggest_next")
@@ -7658,10 +6953,9 @@ def test_init_execute_phase_forwards_stage_option(mock_init):
 def test_init_execute_phase_raw_invalid_stage_reports_clean_json_error(mock_init):
     result = runner.invoke(app, ["--raw", "init", "execute-phase", "42", "--stage", "bad"])
 
-    assert result.exit_code == 1
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result, expect_exit=1)
     assert payload["error"] == "Unknown execute-phase stage 'bad'."
-    assert "Traceback" not in result.output
+    assert_no_traceback(result)
     mock_init.assert_called_once()
 
 
@@ -7823,15 +7117,6 @@ def test_init_plan_phase_rejects_invalid_stage(monkeypatch: pytest.MonkeyPatch) 
     assert "Unknown plan-phase stage 'bogus'" in result.output
 
 
-def test_init_resume_help_surfaces_recovery_snapshot_entrypoint() -> None:
-    result = runner.invoke(app, ["init", "resume", "--help"])
-
-    assert result.exit_code == 0
-    normalized_output = _normalize_cli_output(result.output)
-    assert "Usage: gpd init resume" in normalized_output
-    assert "Assemble context for resuming previous work." in normalized_output
-
-
 @patch("gpd.core.context.init_resume")
 def test_init_resume(mock_init):
     mock_result = MagicMock()
@@ -7927,8 +7212,7 @@ def test_paper_build_uses_default_config_surface(tmp_path: Path):
     ):
         result = runner.invoke(app, ["--raw", "--cwd", str(nested_cwd), "paper-build"], catch_exceptions=False)
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["config_path"] == "../paper/PAPER-CONFIG.json"
     assert payload["output_dir"] == "../paper"
     assert payload["tex_path"] == "../paper/configured_paper.tex"
@@ -7984,8 +7268,7 @@ def test_paper_build_bare_discovers_unique_managed_publication_config(tmp_path: 
     with patch("gpd.mcp.paper.compiler.build_paper", new=AsyncMock(return_value=result_payload)) as mock_build:
         result = runner.invoke(app, ["--raw", "--cwd", str(tmp_path), "paper-build"], catch_exceptions=False)
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["config_path"] == "./GPD/publication/curvature-flow/manuscript/PAPER-CONFIG.json"
     assert payload["output_dir"] == "./GPD/publication/curvature-flow/manuscript"
     assert payload["tex_path"] == "./GPD/publication/curvature-flow/manuscript/managed_manuscript.tex"
@@ -8026,8 +7309,7 @@ def test_paper_build_emits_manifest_and_audit_sidecars_by_default(tmp_path: Path
             catch_exceptions=False,
         )
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["manifest_path"] == "./paper/ARTIFACT-MANIFEST.json"
     assert payload["bibliography_audit_path"] == "./paper/BIBLIOGRAPHY-AUDIT.json"
     assert payload["mode"] == {"minimal": False, "sidecar_root": None}
@@ -8073,8 +7355,7 @@ def test_paper_build_minimal_suppresses_manifest_and_audit_sidecars(tmp_path: Pa
             catch_exceptions=False,
         )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["manifest_path"] == ""
     assert payload["bibliography_audit_path"] == ""
     assert payload["mode"]["minimal"] is True
@@ -8096,17 +7377,6 @@ def test_paper_build_rejects_legacy_sidecar_flags(legacy_flag: str, tmp_path: Pa
     assert "No such option" in normalized_output
     assert legacy_flag in normalized_output
     mock_build.assert_not_called()
-
-
-def test_paper_build_help_omits_legacy_sidecar_flags() -> None:
-    result = runner.invoke(app, ["paper-build", "--help"])
-
-    normalized_output = _normalize_cli_output(result.output)
-    assert result.exit_code == 0
-    assert "--minimal" in normalized_output
-    assert "--with-provenance" not in normalized_output
-    assert "--with-audits" not in normalized_output
-    assert "--with-review-sidecars" not in normalized_output
 
 
 def test_paper_build_rejects_ambiguous_supported_config_roots_without_a_resolved_manuscript(tmp_path: Path) -> None:
@@ -8352,8 +7622,7 @@ def test_validate_reproducibility_manifest_check_paths_uses_manifest_file_root(t
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["valid"] is True
     assert payload["reproducibility_ready"] is True
 
@@ -8447,8 +7716,7 @@ def test_paper_build_allows_explicit_legacy_hidden_paper_config_as_normal_path(t
             catch_exceptions=False,
         )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["config_path"] == "./.gpd/paper/PAPER-CONFIG.json"
     assert payload["output_dir"] == "./.gpd/paper"
     assert any("custom project directory" in warning for warning in payload["warnings"])
@@ -8496,8 +7764,7 @@ def test_paper_build_preserves_explicit_relative_config_path_from_nested_cwd(tmp
             catch_exceptions=False,
         )
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["config_path"] == "../paper/PAPER-CONFIG.json"
     assert payload["output_dir"] == "../paper"
     assert mock_build.await_args.args[1] == paper_dir.resolve(strict=False)
@@ -8551,8 +7818,7 @@ def test_paper_build_prefers_config_dir_bibliography_before_output_and_reference
             catch_exceptions=False,
         )
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["bibliography_source"] == "./paper/references.bib"
     assert payload["bibliography_audit_path"] == "./output/BIBLIOGRAPHY-AUDIT.json"
     assert "configsource" in mock_build.await_args.kwargs["bib_data"].entries
@@ -8657,9 +7923,9 @@ def test_build_resolved_command_subject_treats_managed_publication_manuscript_la
     (tmp_path / "GPD").mkdir()
     (tmp_path / "GPD" / "PROJECT.md").write_text("# Project\n", encoding="utf-8")
     manuscript = _write_managed_publication_manuscript(tmp_path)
-    command, _ = cli_module._resolve_registry_command("arxiv-submission")
+    command, _ = resolve_registry_command("arxiv-submission")
 
-    resolved_subject = cli_module._build_resolved_command_subject(
+    resolved_subject = _build_resolved_command_subject(
         tmp_path,
         command,
         "GPD/publication/curvature-flow/manuscript/managed_manuscript.tex",
@@ -8679,8 +7945,8 @@ def test_build_resolved_command_subject_treats_managed_publication_manuscript_la
 def test_command_managed_output_root_binds_subject_slug_for_managed_publication_lane(tmp_path: Path) -> None:
     (tmp_path / "GPD").mkdir()
     manuscript = _write_managed_publication_manuscript(tmp_path)
-    command, _ = cli_module._resolve_registry_command("arxiv-submission")
-    resolved_subject = cli_module.ResolvedCommandSubject(
+    command, _ = resolve_registry_command("arxiv-submission")
+    resolved_subject = ResolvedCommandSubject(
         command="gpd:arxiv-submission",
         workspace_root=tmp_path,
         resolved_project_root=tmp_path,
@@ -8695,7 +7961,7 @@ def test_command_managed_output_root_binds_subject_slug_for_managed_publication_
         detail="explicit managed manuscript subject",
     )
 
-    managed_output_root = cli_module._command_managed_output_root(
+    managed_output_root = _command_managed_output_root(
         command,
         project_root=tmp_path,
         resolved_subject=resolved_subject,
@@ -8710,9 +7976,9 @@ def test_build_resolved_command_subject_write_paper_external_intake_bootstraps_m
     workspace = tmp_path / "external-authoring"
     workspace.mkdir()
     intake_path = _write_write_paper_authoring_input(workspace)
-    command, _ = cli_module._resolve_registry_command("write-paper")
+    command, _ = resolve_registry_command("write-paper")
 
-    resolved_subject = cli_module._build_resolved_command_subject(
+    resolved_subject = _build_resolved_command_subject(
         workspace,
         command,
         f"--intake {intake_path.name}",
@@ -8751,9 +8017,9 @@ def test_build_resolved_command_subject_write_paper_external_intake_reports_sche
         ),
         encoding="utf-8",
     )
-    command, _ = cli_module._resolve_registry_command("write-paper")
+    command, _ = resolve_registry_command("write-paper")
 
-    resolved_subject = cli_module._build_resolved_command_subject(
+    resolved_subject = _build_resolved_command_subject(
         workspace,
         command,
         f"--intake {intake_path.name}",
@@ -8772,9 +8038,9 @@ def test_build_resolved_command_subject_write_paper_external_intake_reports_sche
 
 def test_command_managed_output_root_normalizes_gpd_root_policy(tmp_path: Path) -> None:
     (tmp_path / "GPD").mkdir()
-    command, _ = cli_module._resolve_registry_command("respond-to-referees")
+    command, _ = resolve_registry_command("respond-to-referees")
 
-    managed_output_root = cli_module._command_managed_output_root(command, project_root=tmp_path)
+    managed_output_root = _command_managed_output_root(command, project_root=tmp_path)
 
     assert managed_output_root == (tmp_path / "GPD").resolve(strict=False)
 
@@ -8802,8 +8068,7 @@ def test_review_preflight_respond_to_referees_accepts_explicit_manuscript_and_re
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     checks = {check["name"]: check for check in payload["checks"]}
     assert checks["manuscript"]["passed"] is True
     assert "GPD/publication/curvature-flow/manuscript/managed_manuscript.tex" in checks["manuscript"]["detail"]
@@ -8855,8 +8120,7 @@ def test_review_preflight_arxiv_submission_rejects_review_ledger_round_mismatch(
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 1, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result, expect_exit=1)
     checks = {check["name"]: check for check in payload["checks"]}
     assert checks["review_ledger"]["passed"] is True
     assert checks["review_ledger_valid"]["passed"] is False
@@ -8885,8 +8149,7 @@ def test_validate_review_preflight_accepts_inline_peer_review_subject(tmp_path: 
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     checks = {check["name"]: check for check in payload["checks"]}
     assert payload["command"] == "gpd:peer-review"
     assert payload["passed"] is True
@@ -8904,7 +8167,7 @@ def test_resolve_review_preflight_manuscript_directory_uses_manifest_declared_en
         encoding="utf-8",
     )
 
-    resolved, detail = cli_module._resolve_review_preflight_manuscript(
+    resolved, detail = _resolve_review_preflight_manuscript(
         tmp_path,
         "paper",
         allow_markdown=True,
@@ -8926,7 +8189,7 @@ def test_resolve_review_preflight_manuscript_reports_ambiguous_project_state(tmp
             encoding="utf-8",
         )
 
-    resolved, detail = cli_module._resolve_review_preflight_manuscript(
+    resolved, detail = _resolve_review_preflight_manuscript(
         tmp_path,
         None,
         allow_markdown=True,
@@ -8950,7 +8213,7 @@ def test_resolve_review_preflight_manuscript_explicit_supported_root_bypasses_pr
             encoding="utf-8",
         )
 
-    resolved, detail = cli_module._resolve_review_preflight_manuscript(
+    resolved, detail = _resolve_review_preflight_manuscript(
         tmp_path,
         "paper",
         allow_markdown=True,
@@ -8985,7 +8248,7 @@ def test_resolve_review_preflight_manuscript_explicit_supported_file_requires_ma
         encoding="utf-8",
     )
 
-    resolved, detail = cli_module._resolve_review_preflight_manuscript(
+    resolved, detail = _resolve_review_preflight_manuscript(
         tmp_path,
         "paper/curvature_flow_bounds.tex",
         allow_markdown=True,
@@ -9011,7 +8274,7 @@ def test_resolve_review_preflight_manuscript_uses_workspace_cwd_for_relative_tar
         encoding="utf-8",
     )
 
-    resolved, detail = cli_module._resolve_review_preflight_manuscript(
+    resolved, detail = _resolve_review_preflight_manuscript(
         tmp_path,
         "../paper/curvature_flow_bounds.tex",
         allow_markdown=True,
@@ -9037,7 +8300,7 @@ def test_resolve_review_preflight_manuscript_nested_supported_directory_resolves
         encoding="utf-8",
     )
 
-    resolved, detail = cli_module._resolve_review_preflight_manuscript(
+    resolved, detail = _resolve_review_preflight_manuscript(
         tmp_path,
         "paper/sections",
         allow_markdown=True,
@@ -9062,7 +8325,7 @@ def test_resolve_review_preflight_manuscript_rejects_nested_supported_directory_
         encoding="utf-8",
     )
 
-    resolved, detail = cli_module._resolve_review_preflight_manuscript(
+    resolved, detail = _resolve_review_preflight_manuscript(
         tmp_path,
         "paper/sections",
         allow_markdown=True,
@@ -9076,7 +8339,7 @@ def test_resolve_review_preflight_manuscript_rejects_nested_supported_directory_
 def test_resolve_review_preflight_manuscript_rejects_missing_out_of_root_target_before_existence_check(
     tmp_path: Path,
 ) -> None:
-    resolved, detail = cli_module._resolve_review_preflight_manuscript(
+    resolved, detail = _resolve_review_preflight_manuscript(
         tmp_path,
         "submission/missing.tex",
         allow_markdown=True,
@@ -9111,7 +8374,7 @@ def test_resolve_review_preflight_manuscript_reports_inconsistent_project_state(
         encoding="utf-8",
     )
 
-    resolved, detail = cli_module._resolve_review_preflight_manuscript(
+    resolved, detail = _resolve_review_preflight_manuscript(
         tmp_path,
         None,
         allow_markdown=True,
@@ -9154,7 +8417,7 @@ def test_resolve_review_preflight_manuscript_rejects_unsupported_explicit_target
     explicit_target = submission_dir / "curvature_flow_bounds.tex"
     explicit_target.write_text("\\documentclass{article}\\begin{document}Hello\\end{document}", encoding="utf-8")
 
-    resolved, detail = cli_module._resolve_review_preflight_manuscript(
+    resolved, detail = _resolve_review_preflight_manuscript(
         tmp_path,
         "submission/curvature_flow_bounds.tex",
         allow_markdown=False,
@@ -9172,8 +8435,8 @@ def test_resolve_review_preflight_manuscript_accepts_peer_review_only_external_s
     tmp_path: Path,
     suffix: str,
 ) -> None:
-    peer_review_command, _ = cli_module._resolve_registry_command("peer-review")
-    allowed_suffixes = cli_module._command_explicit_manuscript_suffixes(peer_review_command)
+    peer_review_command, _ = resolve_registry_command("peer-review")
+    allowed_suffixes = _command_explicit_manuscript_suffixes(peer_review_command)
     artifact = tmp_path / f"standalone{suffix}"
     if suffix in {".docx", ".xlsx"}:
         artifact.write_bytes(b"PK\x03\x04\x14\x00\x00\x00binary-ooxml")
@@ -9182,7 +8445,7 @@ def test_resolve_review_preflight_manuscript_accepts_peer_review_only_external_s
 
     assert suffix in allowed_suffixes
 
-    resolved, detail = cli_module._resolve_review_preflight_manuscript(
+    resolved, detail = _resolve_review_preflight_manuscript(
         tmp_path,
         artifact.name,
         allow_markdown=True,
@@ -9200,8 +8463,8 @@ def test_resolve_review_preflight_manuscript_rejects_peer_review_only_external_s
     tmp_path: Path,
     suffix: str,
 ) -> None:
-    arxiv_submission_command, _ = cli_module._resolve_registry_command("arxiv-submission")
-    allowed_suffixes = cli_module._command_explicit_manuscript_suffixes(arxiv_submission_command)
+    arxiv_submission_command, _ = resolve_registry_command("arxiv-submission")
+    allowed_suffixes = _command_explicit_manuscript_suffixes(arxiv_submission_command)
     paper_dir = tmp_path / "paper"
     paper_dir.mkdir()
     artifact = paper_dir / f"submission{suffix}"
@@ -9212,13 +8475,11 @@ def test_resolve_review_preflight_manuscript_rejects_peer_review_only_external_s
 
     assert suffix not in allowed_suffixes
 
-    resolved, detail = cli_module._resolve_review_preflight_manuscript(
+    resolved, detail = _resolve_review_preflight_manuscript(
         tmp_path,
         artifact.relative_to(tmp_path).as_posix(),
-        allow_markdown=not cli_module._command_requires_compiled_manuscript(arxiv_submission_command),
-        restrict_to_supported_roots=cli_module._command_explicit_manuscript_subject_uses_supported_roots(
-            arxiv_submission_command
-        ),
+        allow_markdown=not _command_requires_compiled_manuscript(arxiv_submission_command),
+        restrict_to_supported_roots=_command_explicit_manuscript_subject_uses_supported_roots(arxiv_submission_command),
         allowed_suffixes=allowed_suffixes,
         workspace_cwd=tmp_path,
     )
@@ -9265,8 +8526,7 @@ def test_paper_build_without_bibliography_does_not_import_pybtex(tmp_path: Path,
     with patch("gpd.mcp.paper.compiler.build_paper", new=AsyncMock(return_value=result_payload)) as mock_build:
         result = runner.invoke(app, ["--raw", "--cwd", str(tmp_path), "paper-build"], catch_exceptions=False)
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["bibliography_source"] == ""
     assert payload["reference_bibtex_bridge"] == []
     assert mock_build.await_args.kwargs["bib_data"] is None
@@ -9321,8 +8581,7 @@ def test_paper_build_auto_discovers_bound_literature_citation_sources_sidecar(tm
     ):
         result = runner.invoke(app, ["--raw", "--cwd", str(nested_cwd), "paper-build"], catch_exceptions=False)
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["bibliography_source"] == ""
     assert payload["citation_sources_path"] == "../GPD/literature/configured_paper-CITATION-SOURCES.json"
     assert any("temporary directory" in warning for warning in payload["warnings"])
@@ -9379,8 +8638,7 @@ def test_paper_build_ignores_unbound_single_literature_citation_sources_sidecar(
     ):
         result = runner.invoke(app, ["--raw", "--cwd", str(nested_cwd), "paper-build"], catch_exceptions=False)
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["citation_sources_path"] == ""
     assert any(
         "Ignoring unbound literature-review citation-source sidecar" in warning for warning in payload["warnings"]
@@ -9439,8 +8697,7 @@ def test_paper_build_ignores_research_citation_sources_sidecar_when_literature_i
     ):
         result = runner.invoke(app, ["--raw", "--cwd", str(nested_cwd), "paper-build"], catch_exceptions=False)
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["citation_sources_path"] == ""
     assert any("temporary directory" in warning for warning in payload["warnings"])
     assert mock_build.await_args.kwargs["citation_sources"] is None
@@ -9493,8 +8750,7 @@ def test_paper_build_warns_when_multiple_literature_citation_sidecars_exist(tmp_
     ):
         result = runner.invoke(app, ["--raw", "--cwd", str(tmp_path), "paper-build"], catch_exceptions=False)
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["citation_sources_path"] == ""
     assert any(
         "Multiple literature-review citation-source sidecars found" in warning for warning in payload["warnings"]
@@ -9641,8 +8897,7 @@ def test_paper_build_surfaces_toolchain_failure_details(tmp_path: Path) -> None:
     ):
         result = runner.invoke(app, ["--raw", "--cwd", str(tmp_path), "paper-build"], catch_exceptions=False)
 
-    assert result.exit_code == 1
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result, expect_exit=1)
     assert payload["success"] is False
     assert payload["errors"] == ["Compiler 'pdflatex' not found."]
     assert payload["toolchain"]["available"] is False
@@ -9698,8 +8953,7 @@ def test_paper_build_surfaces_partial_toolchain_warnings(tmp_path: Path) -> None
     ):
         result = runner.invoke(app, ["--raw", "--cwd", str(tmp_path), "paper-build"], catch_exceptions=False)
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["toolchain"]["paper_build_ready"] is True
     assert payload["toolchain"]["arxiv_submission_ready"] is False
     toolchain_warnings = payload["toolchain"]["warnings"]
@@ -9803,6 +9057,191 @@ def test_sync_phase_checkpoints_uses_ancestor_project_root_from_nested_cwd(mock_
     mock_sync.assert_called_once_with(project_root.resolve())
 
 
+def test_return_skeleton_default_prints_markdown_not_rich_table() -> None:
+    result = runner.invoke(app, ["return", "skeleton", "--role", "executor", "--status", "completed"])
+
+    assert result.exit_code == 0, result.output
+    assert result.output.startswith("```yaml\n")
+    assert "gpd_return:" in result.output
+    assert "status: completed" in result.output
+    assert "recorded_at" not in result.output
+    assert "┏" not in result.output
+
+
+def test_return_skeleton_yaml_format_outputs_raw_yaml() -> None:
+    result = runner.invoke(
+        app,
+        ["return", "skeleton", "--role", "checker", "--status", "checkpoint", "--format", "yaml"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert result.output.startswith("gpd_return:\n")
+    assert "```" not in result.output
+    assert "status: checkpoint" in result.output
+
+
+def test_return_skeleton_json_format_outputs_payload() -> None:
+    result = runner.invoke(
+        app,
+        ["return", "skeleton", "--role", "verifier", "--status", "blocked", "--format", "json"],
+    )
+
+    payload = json_output_from_result(result)
+    assert payload["profile_id"] == "verifier"
+    assert payload["status"] == "blocked"
+    assert payload["envelope"]["status"] == "blocked"
+    assert payload["markdown"].startswith("```yaml\n")
+    assert "validation_commands" in payload
+
+
+def test_return_skeleton_raw_outputs_payload() -> None:
+    result = runner.invoke(app, ["--raw", "return", "skeleton", "--role", "researcher", "--status", "failed"])
+
+    payload = json_output_from_result(result)
+    assert payload["profile_id"] == "researcher"
+    assert payload["status"] == "failed"
+    assert payload["envelope"]["status"] == "failed"
+    assert payload["envelope"]["files_written"] == []
+
+
+def test_return_status_help_lists_come_from_return_contract() -> None:
+    expected_statuses = ", ".join(RETURN_STATUS_ORDER)
+
+    assert cli_module._return_status_help_list() == expected_statuses
+    assert cli_module._return_status_help_list(include_any=True) == f"{expected_statuses}, any"
+
+
+def test_return_skeleton_checkpoint_intent_flags_render_child_owned_intent() -> None:
+    result = runner.invoke(
+        app,
+        [
+            "--raw",
+            "return",
+            "skeleton",
+            "--role",
+            "executor",
+            "--status",
+            "checkpoint",
+            "--include-checkpoint-intent",
+            "--checkpoint-reason",
+            "pre_fanout",
+            "--checkpoint-waiting-reason",
+            "Review the first result before dependent fanout.",
+            "--phase",
+            "01",
+            "--plan",
+            "02",
+        ],
+    )
+
+    payload = json_output_from_result(result)
+    assert payload["status"] == "checkpoint"
+    assert payload["applicator_ready"] is False
+    assert payload["envelope"]["checkpoint_intent"] == {
+        "checkpoint_reason": "pre_fanout",
+        "waiting_reason": "Review the first result before dependent fanout.",
+        "phase": "01",
+        "plan": "02",
+    }
+    assert "continuation_update" not in payload["envelope"]
+    assert "resume_file" not in json.dumps(payload["envelope"], sort_keys=True)
+
+
+def test_return_profiles_raw_lists_role_metadata() -> None:
+    result = runner.invoke(app, ["--raw", "return", "profiles"])
+
+    payload = json_output_from_result(result)
+    assert payload["mutated"] is False
+    assert payload["mutates"] is False
+    profile_ids = {profile["profile_id"] for profile in payload["profiles"]}
+    assert {"executor", "planner", "checker", "verifier", "referee", "researcher", "debugger"} <= profile_ids
+    executor = next(profile for profile in payload["profiles"] if profile["profile_id"] == "executor")
+    assert "completed" in executor["statuses"]
+    assert "status" in executor["required_fields"]
+    assert "known_fields" in payload["field_registry"]
+    assert "confidence" in payload["field_registry"]["known_fields"]
+    assert "checkpoint_intent" in payload["field_registry"]["status_allowed_fields"]["checkpoint"]
+    assert "checkpoint_intent" not in payload["field_registry"]["status_allowed_fields"]["completed"]
+
+
+def test_return_profiles_raw_filters_role_and_status() -> None:
+    result = runner.invoke(app, ["--raw", "return", "profiles", "--role", "executor", "--status", "checkpoint"])
+
+    payload = json_output_from_result(result)
+    assert [profile["profile_id"] for profile in payload["profiles"]] == ["executor"]
+    assert set(payload["profiles"][0]["statuses"]) == {"checkpoint"}
+    assert "blockers" in payload["profiles"][0]["statuses"]["checkpoint"]["role_fields"]
+
+
+def test_return_classify_raw_stdin_reports_missing_return_without_mutation() -> None:
+    result = runner.invoke(app, ["--raw", "return", "classify", "-"], input="# Report\n\nNo return block here.\n")
+
+    payload = json_output_from_result(result, expect_exit=1)
+    assert payload["passed"] is False
+    assert payload["mutated"] is False
+    assert any(token in json.dumps(payload) for token in ("return_missing", "missing_block", "missing_gpd_return"))
+    assert "No gpd_return YAML block found" in payload["errors"]
+
+
+def test_return_classify_default_accepts_checkpoint_status_without_required_gate() -> None:
+    result = runner.invoke(app, ["--raw", "return", "classify", "-"], input=_valid_checkpoint_return_markdown())
+
+    payload = json_output_from_result(result)
+    assert payload["passed"] is True
+    assert payload["accepted_for_success"] is True
+    assert payload["status"] == "checkpoint"
+    assert payload["required_status"] is None
+    assert payload["mutated"] is False
+
+
+def test_return_classify_require_status_checkpoint_accepts_checkpoint_status() -> None:
+    result = runner.invoke(
+        app,
+        ["--raw", "return", "classify", "--require-status", " CHECKPOINT ", "-"],
+        input=_valid_checkpoint_return_markdown(),
+    )
+
+    payload = json_output_from_result(result)
+    assert payload["accepted_for_success"] is True
+    assert payload["status"] == "checkpoint"
+    assert payload["required_status"] == "checkpoint"
+
+
+def test_return_classify_require_status_any_maps_to_no_required_status() -> None:
+    result = runner.invoke(
+        app,
+        ["--raw", "return", "classify", "--require-status", "any", "-"],
+        input=_valid_checkpoint_return_markdown(),
+    )
+
+    payload = json_output_from_result(result)
+    assert payload["accepted_for_success"] is True
+    assert payload["status"] == "checkpoint"
+    assert payload["required_status"] is None
+
+
+def test_return_skeleton_rejects_unknown_role_before_rendering() -> None:
+    result = runner.invoke(
+        app,
+        ["--raw", "return", "skeleton", "--role", "bogus", "--status", "completed"],
+    )
+
+    assert result.exit_code == 1
+    payload = _return_skeleton_error_payload(result)
+    assert "unknown gpd_return role profile" in payload["error"]
+
+
+def test_return_skeleton_rejects_unknown_status_before_rendering() -> None:
+    result = runner.invoke(
+        app,
+        ["--raw", "return", "skeleton", "--role", "executor", "--status", "done"],
+    )
+
+    assert result.exit_code == 1
+    payload = _return_skeleton_error_payload(result)
+    assert "unknown gpd_return status" in payload["error"]
+
+
 @patch("gpd.core.commands.cmd_validate_return")
 def test_validate_return_prefers_launch_cwd_relative_file_from_nested_cwd(mock_validate, tmp_path: Path) -> None:
     project_root, nested_cwd = _nested_project_root(tmp_path)
@@ -9853,6 +9292,42 @@ def test_apply_return_updates_uses_project_root_and_project_relative_file_from_n
 
     assert result.exit_code == 0, result.output
     mock_apply.assert_called_once_with(project_root.resolve(), project_return.resolve())
+
+
+def test_apply_return_updates_threads_checkpoint_resume_file_when_core_accepts_kwarg(tmp_path: Path) -> None:
+    project_root, nested_cwd = _nested_project_root(tmp_path)
+    project_return = project_root / "GPD" / "phases" / "01" / "RETURN.md"
+    project_return.parent.mkdir(parents=True, exist_ok=True)
+    project_return.write_text("project return\n", encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    def fake_apply(cwd: Path, file_path: Path, *, checkpoint_resume_file: str | None = None):
+        captured["cwd"] = cwd
+        captured["file_path"] = file_path
+        captured["checkpoint_resume_file"] = checkpoint_resume_file
+        result = _cli_model_result({"passed": True, "status": "checkpoint"})
+        result.passed = True
+        return result
+
+    with patch("gpd.core.commands.cmd_apply_return_updates", new=fake_apply):
+        result = runner.invoke(
+            app,
+            [
+                "--cwd",
+                str(nested_cwd),
+                "apply-return-updates",
+                "GPD/phases/01/RETURN.md",
+                "--checkpoint-resume-file",
+                "GPD/phases/01/.continue-here.md",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert captured == {
+        "cwd": project_root.resolve(),
+        "file_path": project_return.resolve(),
+        "checkpoint_resume_file": "GPD/phases/01/.continue-here.md",
+    }
 
 
 @patch("gpd.core.commands.cmd_regression_check")

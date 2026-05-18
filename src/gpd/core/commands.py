@@ -19,7 +19,12 @@ from gpd.contracts import (
     parse_comparison_verdicts_data_strict,
     parse_contract_results_data_artifact,
 )
-from gpd.core.child_return_application import ApplyChildReturnResult, apply_child_return_updates
+from gpd.core.child_return_application import (
+    RETURN_MALFORMED_BLOCKING_FAILURE_CLASS,
+    ApplyChildReturnFailure,
+    ApplyChildReturnResult,
+    apply_child_return_updates,
+)
 from gpd.core.constants import (
     PHASES_DIR_NAME,
     PLAN_SUFFIX,
@@ -36,7 +41,13 @@ from gpd.core.frontmatter import (
     validate_frontmatter,
 )
 from gpd.core.observability import instrument_gpd_function
-from gpd.core.return_contract import validate_gpd_return_markdown
+from gpd.core.return_contract import GpdReturnValidationResult, validate_gpd_return_markdown
+from gpd.core.return_repair_classifier import (
+    REPAIRABLE_RETURN_CLASSES,
+    return_failure_class_from_repair_class,
+    return_repair_class_from_validation_error,
+    return_repair_hint,
+)
 from gpd.core.utils import (
     compare_phase_numbers,
     generate_slug,
@@ -824,7 +835,12 @@ def cmd_validate_return(file_path: Path) -> ValidateReturnResult:
 
 
 @instrument_gpd_function("commands.apply_return_updates")
-def cmd_apply_return_updates(cwd: Path, file_path: Path) -> ApplyChildReturnResult:
+def cmd_apply_return_updates(
+    cwd: Path,
+    file_path: Path,
+    *,
+    checkpoint_resume_file: str | Path | None = None,
+) -> ApplyChildReturnResult:
     """Validate and apply the durable subset of one ``gpd_return`` envelope."""
     content = safe_read_file(file_path)
     if content is None:
@@ -832,17 +848,65 @@ def cmd_apply_return_updates(cwd: Path, file_path: Path) -> ApplyChildReturnResu
 
     validation = validate_gpd_return_markdown(content)
     if not validation.passed or validation.envelope is None:
-        return ApplyChildReturnResult(
-            passed=False,
-            status="failed",
-            errors=list(validation.errors),
-            warnings=list(validation.warnings),
-        )
+        return _return_validation_failure_result(validation, content)
 
-    result = apply_child_return_updates(cwd, validation.envelope)
+    result = apply_child_return_updates(cwd, validation.envelope, checkpoint_resume_file=checkpoint_resume_file)
     if validation.warnings:
         result.warnings.extend(warning for warning in validation.warnings if warning not in result.warnings)
     return result
+
+
+def _return_validation_failure_result(
+    validation: GpdReturnValidationResult,
+    content: str,
+) -> ApplyChildReturnResult:
+    failures = [_apply_failure_from_return_validation_error(error, content=content) for error in validation.errors]
+    errors = list(validation.errors)
+    warnings = list(validation.warnings)
+    if not failures and errors:
+        failures = [
+            ApplyChildReturnFailure(
+                failure_class=RETURN_MALFORMED_BLOCKING_FAILURE_CLASS,
+                code=RETURN_MALFORMED_BLOCKING_FAILURE_CLASS,
+                message=error,
+                repairable=False,
+                repair_hint=return_repair_hint("field_shape_error"),
+            )
+            for error in errors
+        ]
+    failure_classes = _failure_classes_from_apply_failures(failures)
+    return ApplyChildReturnResult(
+        passed=False,
+        status="failed",
+        errors=errors,
+        warnings=warnings,
+        primary_failure_class=failure_classes[0] if failure_classes else None,
+        failure_classes=failure_classes,
+        failures=failures,
+    )
+
+
+def _apply_failure_from_return_validation_error(
+    error: str,
+    *,
+    content: str,
+) -> ApplyChildReturnFailure:
+    repair_class = return_repair_class_from_validation_error(error, content=content)
+    return ApplyChildReturnFailure(
+        failure_class=return_failure_class_from_repair_class(repair_class),
+        code=repair_class,
+        message=error,
+        repairable=repair_class in REPAIRABLE_RETURN_CLASSES,
+        repair_hint=return_repair_hint(repair_class),
+    )
+
+
+def _failure_classes_from_apply_failures(failures: list[ApplyChildReturnFailure]) -> list[str]:
+    failure_classes: list[str] = []
+    for failure in failures:
+        if failure.failure_class not in failure_classes:
+            failure_classes.append(failure.failure_class)
+    return failure_classes
 
 
 _MISSING = object()

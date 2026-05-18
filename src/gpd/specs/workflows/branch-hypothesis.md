@@ -15,7 +15,7 @@ Load project context:
 INIT=$(gpd --raw init phase-op --include state,config "${PHASE_ARG:-}")
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd initialization failed: $INIT"
-  # STOP — display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 ```
 
@@ -191,7 +191,7 @@ CURRENT_PHASE_NUM="${current_phase.number}"
 PHASE_DIR=$(gpd --raw phase find "$CURRENT_PHASE_NUM")
 if [ $? -ne 0 ]; then
   echo "ERROR: Could not find phase directory for phase $CURRENT_PHASE_NUM"
-  # STOP — display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 ```
 

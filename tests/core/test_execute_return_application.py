@@ -2,12 +2,16 @@
 
 from pathlib import Path
 
+from tests.workflow_authority_support import workflow_authority_text
+
 ROOT = Path(__file__).resolve().parents[2]
 EXECUTE_PHASE = ROOT / "src" / "gpd" / "specs" / "workflows" / "execute-phase.md"
 EXECUTE_PLAN = ROOT / "src" / "gpd" / "specs" / "workflows" / "execute-plan.md"
 
 
 def _read(path: Path) -> str:
+    if path == EXECUTE_PHASE:
+        return workflow_authority_text(ROOT / "src/gpd/specs/workflows", "execute-phase")
     return path.read_text(encoding="utf-8")
 
 
@@ -17,6 +21,10 @@ def _section(text: str, start_marker: str, end_marker: str | None = None) -> str
         return text[start:]
     end = text.index(end_marker, start)
     return text[start:end]
+
+
+def _contains_text(text: str, fragment: str) -> bool:
+    return fragment in text
 
 
 def test_execute_phase_uses_canonical_apply_return_updates_path() -> None:
@@ -67,3 +75,15 @@ def test_execute_plan_routes_state_application_through_canonical_applicator() ->
     assert "gpd apply-return-updates" in text
     assert "contract_updates:" in text
     assert "continuation_update:" in text
+
+
+def test_execute_plan_checkpoint_pause_keeps_bounded_segment_parent_owned() -> None:
+    text = _read(EXECUTE_PLAN)
+    section = _section(text, "<step name=\"execute\">", "</step>")
+
+    assert _contains_text(section, "return checkpoint intent plus the matching `execution_segment`")
+    assert _contains_text(
+        section,
+        "persists `continuation.bounded_segment` through `gpd apply-return-updates --checkpoint-resume-file`",
+    )
+    assert not _contains_text(section, "persist the matching `execution_segment` as `continuation.bounded_segment`")

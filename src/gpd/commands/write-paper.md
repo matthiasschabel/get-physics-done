@@ -104,6 +104,20 @@ allowed-tools:
   - task
   - web_search
   - ask_user
+help:
+  group: Writing and publication
+  order: 450
+  compact_description: Draft a paper from current project results or one explicit external-authoring intake manifest into the resolved manuscript lane
+  display_signature: gpd:write-paper [--intake path/to/write-paper-authoring-input.json]
+  examples:
+    - gpd:write-paper
+    - gpd:write-paper --intake intake/write-paper-authoring-input.json
+  notes:
+    - Uses a bounded external-authoring lane driven by an explicit intake manifest only.
+    - GPD-authored outputs live under `GPD/publication/{subject_slug}/...`; `GPD/publication/{subject_slug}/intake/` stores intake/provenance state only.
+    - It does not mine arbitrary folders, and embedded external staged-review parity is out of scope.
+    - Project-backed review/response/package outputs remain in the resolved GPD manuscript lane.
+  root_detail_order: 260
 ---
 
 
@@ -116,29 +130,29 @@ Keep the wrapper thin and let the workflow own the full pipeline.
 </objective>
 
 <execution_context>
-@{GPD_INSTALL_DIR}/workflows/write-paper.md
+@{GPD_INSTALL_DIR}/workflows/write-paper/paper-bootstrap.md
 </execution_context>
 
 <context>
 Project manuscript context or intake: $ARGUMENTS
 
-This wrapper supports two truthful lanes only:
-- project-backed authoring from the current GPD project and its resolved manuscript subject
-- bounded external authoring from `--intake path/to/write-paper-authoring-input.json`
-
-The workflow normalizes either lane before calling `validate command-context` or `validate review-preflight`. External authoring is fail-closed and intake-manifest driven: no generic workspace mining, no positional-folder discovery, and no reuse of `PAPER-CONFIG.json` as the intake contract. See `{GPD_INSTALL_DIR}/references/publication/publication-pipeline-modes.md` for the canonical publication boundary.
-All durable external-authoring state lives under `GPD/publication/{subject_slug}/...`: `GPD/publication/{subject_slug}/intake/` for intake/provenance only, and `GPD/publication/{subject_slug}/manuscript/` as the only authoritative manuscript/build root.
-Project-backed runs may use the `paper/` root or a managed project manuscript lane such as `GPD/publication/{subject_slug}/manuscript`; GPD-owned review/response auxiliaries stay under `GPD/`.
+Use only the two frontmatter-authorized lanes: project-backed authoring, or the
+explicit `--intake path/to/write-paper-authoring-input.json` external-authoring
+manifest. External authoring is fail-closed: no workspace mining,
+positional-folder discovery, or `PAPER-CONFIG.json` as intake. Boundary
+reference: `{GPD_INSTALL_DIR}/references/publication/publication-pipeline-modes.md`.
+Stage 1 owns validation, manuscript-root binding, and durable
+`GPD/publication/{subject_slug}/...` routing; `.../intake/` is provenance only.
 </context>
 
 <process>
-Follow the included workflow file exactly.
+Follow the included first-stage authority exactly. Later stage loading is
+manifest-owned. The root workflow index is only a staged-file map.
 </process>
 
 <success_criteria>
-- [ ] Workflow ran end to end
-- [ ] Final manuscript artifacts exist on disk
-- [ ] Project-backed lane: final review artifacts exist on disk when embedded staged review runs
-- [ ] External-authoring lane: manuscript-root artifacts were produced and the workflow routed to standalone `gpd:peer-review`
+- [ ] Workflow completed or returned a typed Stage 1 blocker
+- [ ] Review-contract outputs and evidence are satisfied for the active scope
+- [ ] External-authoring runs produced manuscript-root artifacts and routed review to standalone `gpd:peer-review`
 - [ ] Theorem-bearing manuscripts retain the proof-redteam gate
 </success_criteria>

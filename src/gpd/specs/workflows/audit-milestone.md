@@ -16,17 +16,16 @@ Read all files referenced by the invoking prompt's execution_context before star
 INIT=$(gpd --raw init milestone-op)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd initialization failed: $INIT"
-  # STOP — display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 ```
 
 Extract from init JSON: `milestone_version`, `milestone_name`, `phase_count`, `completed_phases`, `commit_docs`, `project_exists`, `project_contract`, `project_contract_gate`, `project_contract_load_info`, `project_contract_validation`, `active_reference_context`.
 
-Keep `project_contract`, `project_contract_load_info`, `project_contract_validation`, and `active_reference_context` visible while auditing:
+Keep `project_contract`, `project_contract_load_info`, `project_contract_validation`, and `active_reference_context` visible while auditing.
+`{GPD_INSTALL_DIR}/references/orchestration/contract-authority-gate.md`
 
-- Treat `project_contract` as authoritative only when `project_contract_gate.authoritative` is true.
-- If that contract gate is blocked, keep the contract visible as context but record contract repair as a blocker in the audit instead of silently substituting prose-only scope.
-- If contract repair is still pending, do not mark the milestone `passed` and do not trust mock peer-review publishability judgments as approval to submit.
+Apply the shared contract authority gate: `project_contract` is approved milestone scope only when `project_contract_gate.authoritative` is true. If repair is pending, record it as an audit blocker, do not substitute prose-only scope, do not mark the milestone `passed`, and do not treat mock peer-review publishability judgments as approval to submit.
 
 **Read mode settings:**
 
@@ -246,7 +245,7 @@ Evaluate across all 10 dimensions:
 9. Presentation quality -- organization, figures
 10. Publishability -- overall assessment
 
-Treat `project_contract` as approved milestone scope only when `project_contract_gate.authoritative` is true. If the contract gate is blocked, keep it visible as context but call out the blocker explicitly instead of relying on it as approved scope.
+Use `project_contract` as approved milestone scope only when `project_contract_gate.authoritative` is true; if blocked, keep it as diagnostic context and call out the gate blocker.
 
 Write `GPD/v{milestone_version}-MILESTONE-REFEREE-REPORT.md` and the matching `GPD/v{milestone_version}-MILESTONE-REFEREE-REPORT.tex` companion.
 

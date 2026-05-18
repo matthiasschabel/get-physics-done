@@ -72,6 +72,20 @@ allowed-tools:
   - find_files
   - task
   - ask_user
+help:
+  group: Writing and publication
+  order: 470
+  compact_description: Draft referee responses and revise the resolved manuscript root
+  display_signature: gpd:respond-to-referees [--manuscript PATH --report PATH | report path | paste]
+  detail_signature: gpd:respond-to-referees [--manuscript PATH --report PATH | report path | paste]
+  examples:
+    - gpd:respond-to-referees --manuscript paper/main.tex --report reports/referee-report.md
+    - gpd:respond-to-referees reports/referee-report.md
+    - gpd:respond-to-referees paste
+  notes:
+    - Uses a bounded external-authoring lane when an explicit intake manifest or subject is allowed by command policy.
+    - Manuscript edits stay beside the resolved manuscript; GPD-authored response artifacts use the selected GPD roots (`GPD/` and `GPD/review/` for project-backed response rounds, or `GPD/publication/{subject_slug}` plus its `review/` subtree for managed/external subjects).
+  root_detail_order: 280
 ---
 <objective>
 Structure a point-by-point response to referee reports and revise the manuscript accordingly.
@@ -81,8 +95,7 @@ Keep the wrapper focused on referee triage, revision routing, and synchronized r
 </objective>
 
 <execution_context>
-@{GPD_INSTALL_DIR}/workflows/respond-to-referees.md
-@{GPD_INSTALL_DIR}/references/publication/publication-review-wrapper-guidance.md
+@{GPD_INSTALL_DIR}/workflows/respond-to-referees/bootstrap.md
 </execution_context>
 
 <context>
@@ -92,7 +105,7 @@ The workflow resolves the manuscript root, review artifacts, and revision target
 </context>
 
 <process>
-Follow the included respond-to-referees workflow exactly.
+Follow the included first-stage authority exactly. Later stages are loaded by the workflow manifest through staged init; the root workflow index is only a staged-file map.
 </process>
 
 <success_criteria>

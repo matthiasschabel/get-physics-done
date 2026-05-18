@@ -45,6 +45,7 @@ def test_runtime_cli_allows_help_passthrough_as_root_flag(
     monkeypatch.setattr("gpd.runtime_cli._maybe_reexec_from_checkout", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(adapter, "missing_install_artifacts", lambda target_dir: ())
     monkeypatch.setattr("gpd.runtime_cli.get_adapter", lambda runtime_name: adapter)
+    monkeypatch.setattr("gpd.hooks.install_metadata.get_adapter", lambda runtime_name: adapter)
     monkeypatch.setattr("gpd.cli.entrypoint", fake_entrypoint)
 
     exit_code = runtime_cli.main(
@@ -95,6 +96,7 @@ def test_runtime_cli_allows_version_passthrough_as_root_flag(
     monkeypatch.setattr("gpd.runtime_cli._maybe_reexec_from_checkout", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(adapter, "missing_install_artifacts", lambda target_dir: ())
     monkeypatch.setattr("gpd.runtime_cli.get_adapter", lambda runtime_name: adapter)
+    monkeypatch.setattr("gpd.hooks.install_metadata.get_adapter", lambda runtime_name: adapter)
     monkeypatch.setattr("gpd.cli.entrypoint", fake_entrypoint)
 
     exit_code = runtime_cli.main(
@@ -233,7 +235,11 @@ def test_runtime_cli_repair_command_projection_respects_env_overridden_global_ta
     home_dir = tmp_path / "home"
     home_dir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr("gpd.runtime_cli.Path.home", lambda: home_dir)
-    env_var = descriptor.global_config.env_var or descriptor.global_config.env_dir_var or descriptor.global_config.env_file_var
+    env_var = (
+        descriptor.global_config.env_var
+        or descriptor.global_config.env_dir_var
+        or descriptor.global_config.env_file_var
+    )
     assert env_var is not None
     monkeypatch.setenv(env_var, str(override_dir))
 
@@ -293,6 +299,20 @@ def test_runtime_cli_repair_command_projection_respects_env_overridden_global_ta
             "GPD runtime bridge mismatch",
         ),
         (
+            {
+                "runtime": next(
+                    item.runtime_name
+                    for item in iter_runtime_descriptors()
+                    if item.runtime_name != _BRIDGE_RUNTIME_DESCRIPTOR.runtime_name
+                ),
+                "install_scope": "workspace",
+                "explicit_target": False,
+            },
+            None,
+            runtime_cli._BridgeFailureKind.RUNTIME_MISMATCH,
+            "GPD runtime bridge mismatch",
+        ),
+        (
             {"runtime": _BRIDGE_RUNTIME_DESCRIPTOR.runtime_name, "install_scope": "local", "explicit_target": False},
             ("missing-artifact.txt",),
             runtime_cli._BridgeFailureKind.MISSING_INSTALL_ARTIFACTS,
@@ -322,17 +342,8 @@ def test_runtime_cli_classifies_bridge_failures_with_stable_kinds(
     monkeypatch.setattr("gpd.runtime_cli._maybe_reexec_from_checkout", lambda *_args, **_kwargs: None)
     monkeypatch.chdir(tmp_path)
 
-    manifest_status, _manifest_payload, manifest_runtime = runtime_cli.load_install_manifest_runtime_status(config_dir)
-    manifest_scope_status, manifest_scope_payload, manifest_install_scope = runtime_cli.load_install_manifest_scope_status(
-        config_dir
-    )
-    manifest_explicit_target_status, _manifest_explicit_target_payload, _manifest_explicit_target = (
-        runtime_cli.load_install_manifest_explicit_target_status(config_dir)
-    )
-    if manifest_scope_status == "ok":
-        manifest_install_scope = manifest_scope_payload.get("install_scope")
-        if not isinstance(manifest_install_scope, str):
-            manifest_install_scope = None
+    manifest = runtime_cli.load_install_manifest_snapshot(config_dir)
+    assessment = runtime_cli.assess_install_target(config_dir, expected_runtime=runtime_name, manifest=manifest)
 
     failure = runtime_cli._classify_bridge_failure(
         runtime=runtime_name,
@@ -340,18 +351,23 @@ def test_runtime_cli_classifies_bridge_failures_with_stable_kinds(
         install_scope="local",
         explicit_target=False,
         cli_cwd=tmp_path,
-        manifest_status=manifest_status,
-        manifest_runtime=manifest_runtime,
-        manifest_scope_status=manifest_scope_status,
-        manifest_install_scope=manifest_install_scope,
-        manifest_explicit_target_status=manifest_explicit_target_status,
-        missing=artifact_override,
-        has_managed_install_markers=runtime_cli.config_dir_has_managed_install_markers(config_dir),
+        manifest=manifest,
+        assessment=assessment,
+        missing=None,
     )
 
     assert failure is not None
     assert failure.kind is expected_kind
+    assert failure.exit_code == 127
+    assert failure.details["kind"] == expected_kind.value
+    assert failure.details["exit_code"] == 127
+    assert failure.details["readiness_state"] == "blocked"
     assert expected_phrase in failure.message
+    if expected_kind is runtime_cli._BridgeFailureKind.MISSING_INSTALL_ARTIFACTS:
+        assert failure.repairable_by_install is True
+        assert failure.repair_command is not None
+    else:
+        assert failure.repairable_by_install is False
 
 
 @pytest.mark.parametrize(

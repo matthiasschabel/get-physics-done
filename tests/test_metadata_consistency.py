@@ -250,19 +250,25 @@ def test_public_package_keywords_do_not_hand_maintain_runtime_names() -> None:
         assert leaked == [], f"{source} should not hand-maintain runtime catalog names in package keywords"
 
 
+def _mcp_server_modules_with_main(repo_root: Path) -> list[Path]:
+    """Return server modules that expose a ``main`` entrypoint (public CLI surface)."""
+
+    candidates = [
+        p
+        for p in (repo_root / "src" / "gpd" / "mcp" / "servers").glob("*.py")
+        if p.name != "__init__.py" and not p.name.startswith("_")
+    ]
+    main_pattern = re.compile(r"^(?:async\s+)?def\s+main\s*\(", re.MULTILINE)
+    return [p for p in candidates if main_pattern.search(p.read_text(encoding="utf-8"))]
+
+
 def test_canonical_registry_skill_inventory_counts_match_repo_contents() -> None:
     repo_root = _repo_root()
     commands_count = len(list((repo_root / "src" / "gpd" / "commands").glob("*.md")))
     agents_count = len(list((repo_root / "src" / "gpd" / "agents").glob("*.md")))
     content_registry.invalidate_cache()
     canonical_skills_count = len(content_registry.list_skills())
-    mcp_server_count = len(
-        [
-            p
-            for p in (repo_root / "src" / "gpd" / "mcp" / "servers").glob("*.py")
-            if p.name != "__init__.py" and not p.name.startswith("_")
-        ]
-    )
+    mcp_server_count = len(_mcp_server_modules_with_main(repo_root))
     mcp_script_count = sum(1 for line in _project_script_lines(repo_root) if line.startswith('"gpd-mcp-'))
     managed_integration_script_count = sum(
         1 for name in _project_script_targets(repo_root) if name == "gpd-mcp-wolfram"
@@ -319,13 +325,7 @@ def test_mcp_server_count_matches_public_entrypoints() -> None:
     from gpd.mcp.managed_integrations import WOLFRAM_BRIDGE_COMMAND
 
     repo_root = _repo_root()
-    mcp_server_count = len(
-        [
-            p
-            for p in (repo_root / "src" / "gpd" / "mcp" / "servers").glob("*.py")
-            if p.name != "__init__.py" and not p.name.startswith("_")
-        ]
-    )
+    mcp_server_count = len(_mcp_server_modules_with_main(repo_root))
     builtin_mcp_script_count = sum(
         1
         for name in _project_script_targets(repo_root)
@@ -430,6 +430,7 @@ def test_arxiv_descriptor_tracks_optional_dependency_surface() -> None:
     assert set(optional["arxiv"]) == {
         "arxiv-mcp-server[pdf]>=0.4.11",
         "arxiv>=2.4.1",
+        "httpx>=0.27",
         "cairosvg>=2.7.0",
         "pypdf>=5.0",
     }

@@ -52,6 +52,10 @@ arxiv = [
     # Direct arxiv API client (used by the bridge's GCS fallback to look
     # up paper metadata without round-tripping through arxiv-mcp-server).
     "arxiv>=2.4.1",
+    # Used directly by the OpenAlex translator and GCS PDF fetcher. While
+    # arxiv-mcp-server already depends on httpx, we declare it explicitly
+    # so the gpd-mcp-arxiv entrypoint never relies on a transitive resolve.
+    "httpx>=0.27",
     "cairosvg>=2.7.0",
     "pypdf>=5.0",
 ]

@@ -144,11 +144,11 @@ def _validate_inner(tool: str, data: dict[str, object]) -> tuple[bool, bool, lis
             types_ok = False
             notes.append("papers_not_list")
         else:
-            for p in data["papers"]:
-                if set(p.keys()) < CONTRACT_PAPER_KEYS:
+            for index, p in enumerate(data["papers"]):
+                missing = sorted(CONTRACT_PAPER_KEYS - set(p.keys()))
+                if missing:
                     types_ok = False
-                    notes.append(f"paper_keys_missing:{sorted(CONTRACT_PAPER_KEYS - set(p.keys()))}")
-                    break
+                    notes.append(f"paper_keys_missing[{index}]:{missing}")
     elif tool == "get_abstract":
         if data.get("status") not in {"success", "error"}:
             types_ok = False

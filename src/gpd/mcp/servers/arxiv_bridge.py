@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import sys
+import tempfile
 from collections import deque
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -231,7 +232,11 @@ class ArxivBridge:
             return await self._call_with_retry(name, args)
 
         if name == "get_abstract":
-            cached_payload = await _arxiv_cache.get("get_abstract", args)
+            try:
+                cached_payload = await _arxiv_cache.get("get_abstract", args)
+            except Exception as exc:
+                logger.warning("get_abstract cache read failed: %s", exc)
+                cached_payload = None
             if cached_payload is not None:
                 return types.CallToolResult(
                     content=[types.TextContent(type="text", text=cached_payload)],
@@ -240,13 +245,19 @@ class ArxivBridge:
             if openalex_result is not None:
                 payload = _first_text_payload(openalex_result)
                 if payload is not None:
-                    await _arxiv_cache.set("get_abstract", args, payload, ttl_days=30)
+                    try:
+                        await _arxiv_cache.set("get_abstract", args, payload, ttl_days=30)
+                    except Exception as exc:
+                        logger.warning("get_abstract cache write failed: %s", exc)
                 return openalex_result
             result = await self._call_with_retry(name, args)
             if _is_success(result) and result.content:
                 payload = _first_text_payload(result)
                 if payload is not None:
-                    await _arxiv_cache.set("get_abstract", args, payload, ttl_days=30)
+                    try:
+                        await _arxiv_cache.set("get_abstract", args, payload, ttl_days=30)
+                    except Exception as exc:
+                        logger.warning("get_abstract cache write failed: %s", exc)
             return result
 
         return await self._call_with_retry(name, args)
@@ -371,9 +382,32 @@ class ArxivBridge:
         return args
 
     def _safe_write(self, path: Path, content: str) -> None:
+        # Write to a sibling temp file then atomically replace, so concurrent
+        # readers either see the previous file or the full new content — never
+        # a truncated/partial cache hit.
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(content, encoding="utf-8")
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=str(path.parent),
+                prefix=f".{path.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as tmp:
+                tmp.write(content)
+                tmp.flush()
+                os.fsync(tmp.fileno())
+                tmp_path = Path(tmp.name)
+            try:
+                tmp_path.replace(path)
+            except OSError:
+                # Best-effort cleanup of the stranded temp file.
+                try:
+                    tmp_path.unlink()
+                except OSError:
+                    pass
+                raise
         except OSError as exc:
             logger.warning("cache write failed %s: %s", path, exc)
 
@@ -507,14 +541,22 @@ def _is_success(result: types.CallToolResult) -> bool:
     return True
 
 
-_RATE_LIMIT_PATTERNS = ("429", "rate limit", "rate-limit", "too many requests", "throttl")
+_TRANSIENT_FAILURE_PATTERNS = (
+    "429",
+    "rate limit",
+    "rate-limit",
+    "too many requests",
+    "throttl",
+    "timeout",
+    "timed out",
+)
 
 
 def _is_rate_limit_or_timeout(result: types.CallToolResult) -> bool:
     if result.isError:
         text = _first_text_payload(result) or ""
         lower = text.lower()
-        return any(p in lower for p in _RATE_LIMIT_PATTERNS) or "timeout" in lower
+        return any(p in lower for p in _TRANSIENT_FAILURE_PATTERNS)
 
     text = _first_text_payload(result)
     if text is None:
@@ -531,7 +573,7 @@ def _is_rate_limit_or_timeout(result: types.CallToolResult) -> bool:
     if not isinstance(message, str):
         return False
     lower = message.lower()
-    return any(p in lower for p in _RATE_LIMIT_PATTERNS)
+    return any(p in lower for p in _TRANSIENT_FAILURE_PATTERNS)
 
 
 def _coerce_rate_limit_to_error(result: types.CallToolResult) -> types.CallToolResult:

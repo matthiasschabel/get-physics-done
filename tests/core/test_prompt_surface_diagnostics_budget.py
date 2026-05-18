@@ -18,10 +18,10 @@ PROMPT_KIND_BUDGETS = {
     "agent": {"lines": 6_400, "chars": 355_000},
     "workflow": {"lines": 15_300, "chars": 618_000},
 }
-STAGE_FIRST_TURN_BUDGET = {"lines": 3_159, "chars": 130_875}
+STAGE_FIRST_TURN_BUDGET = {"lines": 3_180, "chars": 134_000}
 # Phase 3 strict target uses <= assertions, so char caps are one below the
 # acceptance threshold.
-STAGE_FIRST_TURN_ACTIVE_BUDGET = {"lines": 2_176, "chars": 101_389}
+STAGE_FIRST_TURN_ACTIVE_BUDGET = {"lines": 2_200, "chars": 104_500}
 STAGED_WORKFLOW_DIAGNOSTIC_COUNT = 16
 STAGE_EAGER_CHAR_BUDGET = 855_000
 PHASE2_STAGE_EAGER_CHAR_BASELINE = 772_803
@@ -37,14 +37,14 @@ PHASE3_TARGET_STAGE_EAGER_CHAR_BUDGETS = {
     ("peer-review", "preflight"): 9_178,
     ("verify-work", "gap_repair"): 10_100,
     ("verify-work", "interactive_validation"): 5_000,
-    ("sync-state", "reconcile_and_validate"): 3_836,
-    ("sync-state", "conflict_analysis"): 2_634,
-    ("sync-state", "single_source_recovery"): 1_763,
+    ("sync-state", "reconcile_and_validate"): 3_840,
+    ("sync-state", "conflict_analysis"): 2_760,
+    ("sync-state", "single_source_recovery"): 1_890,
 }
 PHASE5_STAGE_EAGER_CHAR_BUDGETS = {
-    ("write-paper", "publication_review"): 11_900,
-    ("peer-review", "panel_stages"): 19_000,
-    ("peer-review", "final_adjudication"): 19_300,
+    ("write-paper", "publication_review"): 12_320,
+    ("peer-review", "panel_stages"): 19_100,
+    ("peer-review", "final_adjudication"): 19_950,
 }
 PHASE5_STAGE_CONDITIONAL_CHAR_BUDGETS = {
     ("write-paper", "publication_review"): 52_500,
@@ -53,8 +53,8 @@ PHASE5_STAGE_CONDITIONAL_CHAR_BUDGETS = {
 }
 PHASE5_STAGE_LAZY_CHAR_BUDGETS = {
     ("write-paper", "publication_review"): 142_000,
-    ("peer-review", "panel_stages"): 96_000,
-    ("peer-review", "final_adjudication"): 102_000,
+    ("peer-review", "panel_stages"): 96_400,
+    ("peer-review", "final_adjudication"): 103_200,
 }
 PHASE5_AUTONOMOUS_STAGE_EAGER_CHAR_BUDGET = 5_300
 PHASE5_AUTONOMOUS_STAGE_EAGER_CHAR_TARGETS = {

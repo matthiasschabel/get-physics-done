@@ -235,6 +235,31 @@ def test_lifecycle_decision_missing_verification_routes_to_runtime_verify_work(t
     assert route.rendered_markdown == "## > Next Up\nPrimary: `gpd:verify-work 02`"
 
 
+def test_lifecycle_decision_verification_opt_out_is_not_mutation_ready(tmp_path: Path) -> None:
+    _write_phase_project(tmp_path, verification_status=None, state_status="Phase complete - ready for verification")
+
+    decision = phase_lifecycle_decision(tmp_path, "02", require_verification=False)
+
+    assert decision.decision == "needs_verification"
+    assert decision.closeout_ready is False
+    assert decision.primary_command == "gpd:verify-work 02"
+    assert decision.closeout_readiness.require_verification is False
+    assert decision.closeout_readiness.mutation_allowed is False
+    assert decision.closeout_readiness.closeout_command is None
+    assert any("advisory only" in warning for warning in decision.closeout_warnings)
+    route = decision.lifecycle_next_up
+    assert route is not None
+    _assert_route(
+        route,
+        status_class="needs_verification",
+        transition_owner="runtime",
+        current_blocking_gate="verification_missing",
+        primary_runtime_command="gpd:verify-work 02",
+        local_transition_command=None,
+        after_local_runtime_command=None,
+    )
+
+
 def test_lifecycle_decision_non_passing_verification_routes_to_runtime_verify_work(tmp_path: Path) -> None:
     _write_phase_project(tmp_path, verification_status="gaps_found", state_status="Blocked")
     before_roadmap = (tmp_path / "GPD" / "ROADMAP.md").read_text(encoding="utf-8")
@@ -479,7 +504,7 @@ def test_lifecycle_decision_closed_phase_without_next_context_routes_to_discuss_
     assert "gpd phase complete 02" not in route.rendered_markdown
 
 
-def test_lifecycle_decision_closed_phase_with_next_context_routes_to_plan_first(tmp_path: Path) -> None:
+def test_lifecycle_decision_closed_phase_with_planned_next_context_routes_to_execute_first(tmp_path: Path) -> None:
     _write_phase_project(
         tmp_path,
         state_current_phase="03",
@@ -496,7 +521,7 @@ def test_lifecycle_decision_closed_phase_with_next_context_routes_to_plan_first(
     assert decision.roadmap_complete is True
     assert decision.next_phase == "03"
     assert decision.closeout_ready is False
-    assert decision.primary_command == "gpd:plan-phase 03"
+    assert decision.primary_command == "gpd:execute-phase 03"
     assert decision.primary_owner == "runtime"
     route = decision.lifecycle_next_up
     assert route is not None
@@ -505,13 +530,13 @@ def test_lifecycle_decision_closed_phase_with_next_context_routes_to_plan_first(
         status_class="closed_ready_next_phase",
         transition_owner="runtime",
         current_blocking_gate="none",
-        primary_runtime_command="gpd:plan-phase 03",
+        primary_runtime_command="gpd:execute-phase 03",
         local_transition_command=None,
         after_local_runtime_command=None,
-        secondary_runtime_commands=("gpd:discuss-phase 03", "gpd:suggest-next"),
+        secondary_runtime_commands=("gpd:plan-phase 03", "gpd:discuss-phase 03", "gpd:suggest-next"),
         next_phase_context_class="planned",
     )
-    assert route.primary.action == "plan-phase"
+    assert route.primary.action == "execute-phase"
     assert route.stage_stop_next_runtime_command == _command_text(route.primary_runtime_command)
     assert "gpd phase complete 02" not in route.rendered_markdown
 

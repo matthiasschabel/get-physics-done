@@ -4,8 +4,14 @@ Create missing phase context by delegating to the dedicated discussion workflow.
 </purpose>
 
 <load>
-Load this stage with `gpd --raw init autonomous --stage discuss_delegate`, then
-refresh the phase operation state:
+Load this stage:
+
+```sh
+DISCUSS_DELEGATE_INIT=$(gpd --raw init autonomous --stage discuss_delegate)
+```
+
+Apply `DISCUSS_DELEGATE_INIT.staged_loading.field_access_instruction` before
+reading `DISCUSS_DELEGATE_INIT`. Refresh the phase operation state:
 
 ```sh
 PHASE_STATE=$(gpd --raw init phase-op ${PHASE_NUM})

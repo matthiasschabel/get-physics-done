@@ -28,6 +28,9 @@ VERIFY_STATUS_PAYLOAD=$(echo "$VERIFY_PAYLOAD" | gpd json get .verification_repo
 VERIFY_SCORE=$(echo "$VERIFY_STATUS_PAYLOAD" | gpd json get .score --default "")
 ```
 
+Apply `VERIFY_PAYLOAD.staged_loading.field_access_instruction` before reading
+`VERIFY_PAYLOAD`.
+
 Use `verification_report_status_payload` for child-produced issue summaries and next-command hints. Never replace it with presentation text.
 </step>
 

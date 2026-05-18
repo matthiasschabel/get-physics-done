@@ -14,15 +14,22 @@ Load the staged consistency/reference payload before notation checks,
 bibliography verification, or reproducibility manifest work:
 
 ```bash
-CONSISTENCY_INIT=$(gpd --raw init write-paper --stage consistency_and_references -- "${WRITE_PAPER_ARGUMENTS:-}")
-if [ $? -ne 0 ]; then
-  echo "ERROR: write-paper consistency/reference init failed: $CONSISTENCY_INIT"
-  # STOP; surface the error.
-fi
+if [ -n "${ARGUMENTS:-}" ]; then CONSISTENCY_INIT=$(gpd --raw init write-paper --stage consistency_and_references -- "$ARGUMENTS"); else CONSISTENCY_INIT=$(gpd --raw init write-paper --stage consistency_and_references); fi
+if [ $? -ne 0 ]; then echo "ERROR: write-paper consistency/reference init failed: $CONSISTENCY_INIT"; fi
 INIT="$CONSISTENCY_INIT"
 ```
 
 Apply `CONSISTENCY_INIT.staged_loading.field_access_instruction` before reading `CONSISTENCY_INIT`.
+
+```bash
+WRITE_PAPER_ARGUMENTS=$(echo "$INIT" | gpd json get .write_paper_argument_input --default "")
+PAPER_DIR=$(echo "$INIT" | gpd json get .publication_bootstrap_root --default "")
+PAPER_DIR="${PAPER_DIR:-$(echo "$INIT" | gpd json get .manuscript_root --default "")}"
+MANUSCRIPT_ENTRYPOINT=$(echo "$INIT" | gpd json get .manuscript_entrypoint --default "")
+MANUSCRIPT_BASENAME="${MANUSCRIPT_ENTRYPOINT##*/}"
+AUTONOMY=$(echo "$INIT" | gpd json get .autonomy --default balanced)
+RESEARCH_MODE=$(echo "$INIT" | gpd json get .research_mode --default balanced)
+```
 
 This stage receives manuscript paths, citation-source context, reference artifact
 handles, protocol load manifests, and manuscript reference/proof status. It does
@@ -179,6 +186,6 @@ When notation, placeholder, reference, bibliography-audit, and reproducibility
 gates pass, reload:
 
 ```bash
-PUBLICATION_REVIEW_INIT=$(gpd --raw init write-paper --stage publication_review -- "${WRITE_PAPER_ARGUMENTS:-}")
+if [ -n "$WRITE_PAPER_ARGUMENTS" ]; then PUBLICATION_REVIEW_INIT=$(gpd --raw init write-paper --stage publication_review -- "$WRITE_PAPER_ARGUMENTS"); else PUBLICATION_REVIEW_INIT=$(gpd --raw init write-paper --stage publication_review); fi
 ```
 </handoff>

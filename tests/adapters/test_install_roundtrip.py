@@ -919,7 +919,8 @@ def test_installed_gemini_toml_policy_and_shell_fence_classification(real_instal
     assert rule["toolName"] == "run_shell_command"
     assert rule["decision"] == "allow"
     assert rule["modes"] == ["autoEdit"]
-    assert rule["allow_redirection"] is True
+    assert rule["allowRedirection"] is True
+    assert "allow_redirection" not in rule
 
     raw_policy_prefixes = rule["commandPrefix"]
     assert isinstance(raw_policy_prefixes, list)

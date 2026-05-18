@@ -20,7 +20,11 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Use `single_source_recovery.required_init_fields` from `SINGLE_SOURCE_RECOVERY_INIT`.
+Apply `SINGLE_SOURCE_RECOVERY_INIT.staged_loading.field_access_instruction`
+before reading `SINGLE_SOURCE_RECOVERY_INIT`.
+
+Use `SINGLE_SOURCE_RECOVERY_INIT.staged_loading.required_init_fields` from the
+payload.
 These fields are compact status and loader fields only. Do not request raw
 `STATE.md`, `state.json`, or `state.json.bak` bodies, and do not load the state
 JSON schema before repair; the backend repair command owns source selection and

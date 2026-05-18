@@ -17,14 +17,19 @@ selected publication/review roots later stages must use.
 Run staged init before any review decision:
 
 ```bash
-BOOTSTRAP_INIT=$(gpd --raw init peer-review "$ARGUMENTS" --stage bootstrap)
-if [ $? -ne 0 ]; then
-  echo "ERROR: gpd peer-review bootstrap init failed: $BOOTSTRAP_INIT"
-  # STOP; surface the error.
-fi
+if [ -n "${ARGUMENTS:-}" ]; then BOOTSTRAP_INIT=$(gpd --raw init peer-review --stage bootstrap -- "$ARGUMENTS"); else BOOTSTRAP_INIT=$(gpd --raw init peer-review --stage bootstrap); fi
+if [ $? -ne 0 ]; then echo "ERROR: gpd peer-review bootstrap init failed: $BOOTSTRAP_INIT"; fi
+INIT="$BOOTSTRAP_INIT"
 ```
 
 Apply `BOOTSTRAP_INIT.staged_loading.field_access_instruction` before reading `BOOTSTRAP_INIT`; keep `project_contract_gate`, `project_contract_load_info`, and `project_contract_validation` visible.
+
+```bash
+REVIEW_TARGET=$(echo "$INIT" | gpd json get .review_target_input --default "")
+PUBLICATION_ROOT=$(echo "$INIT" | gpd json get .selected_publication_root --default GPD)
+REVIEW_ROOT=$(echo "$INIT" | gpd json get .selected_review_root --default "")
+REVIEW_ROOT="${REVIEW_ROOT:-${PUBLICATION_ROOT}/review}"
+```
 
 AUTONOMY=$(echo "$BOOTSTRAP_INIT" | gpd json get .autonomy --default balanced)
 RESEARCH_MODE=$(echo "$BOOTSTRAP_INIT" | gpd json get .research_mode --default balanced)
@@ -96,7 +101,11 @@ Preserve these stage ids:
 When bootstrap target routing is resolved, reload before strict checks:
 
 ```bash
-PREFLIGHT_INIT=$(gpd --raw init peer-review "$REVIEW_TARGET" --stage preflight)
+if [ -n "$REVIEW_TARGET" ]; then
+  PREFLIGHT_INIT=$(gpd --raw init peer-review --stage preflight -- "$REVIEW_TARGET")
+else
+  PREFLIGHT_INIT=$(gpd --raw init peer-review --stage preflight)
+fi
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd peer-review preflight init failed: $PREFLIGHT_INIT"
   # STOP; surface the error.

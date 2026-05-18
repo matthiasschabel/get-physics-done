@@ -1991,9 +1991,13 @@ function printHelp() {
   console.log(` ${cyan}--uninstall${reset}             Uninstall from selected runtime config`);
   console.log(` ${cyan}--reinstall${reset}             Reinstall \${GPD_HOME:-~/.gpd}/venv from the PyPI pinned release, with tagged GitHub fallback`);
   console.log(` ${cyan}--upgrade${reset}               Upgrade \${GPD_HOME:-~/.gpd}/venv from the latest unreleased GitHub main source`);
-  for (const runtime of ALL_RUNTIMES) {
-    const flags = runtimeSelectionFlagList(runtime).join(", ");
-    const padding = " ".repeat(Math.max(0, 24 - flags.length));
+  const runtimeFlagRows = ALL_RUNTIMES.map((runtime) => [
+    runtime,
+    runtimeSelectionFlagList(runtime).join(", "),
+  ]);
+  const runtimeFlagColumnWidth = Math.max(...runtimeFlagRows.map(([, flags]) => flags.length)) + 1;
+  for (const [runtime, flags] of runtimeFlagRows) {
+    const padding = " ".repeat(runtimeFlagColumnWidth - flags.length);
     console.log(` ${cyan}${flags}${reset}${padding}Select ${runtimeDisplayName(runtime)} only`);
   }
   console.log(` ${cyan}--all${reset}                  Select all supported runtimes`);

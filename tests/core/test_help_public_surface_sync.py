@@ -87,6 +87,13 @@ def _render_quick_start(renderer: object) -> str:
     return _rendered_markdown(_call_with_supported_kwargs(render_quick_start, public_prefix="gpd:"))
 
 
+def _render_default_help(renderer: object) -> str:
+    render_default_help = getattr(renderer, "render_default_help", None)
+    if render_default_help is None:
+        pytest.fail("gpd.core.help_renderer must expose render_default_help()")
+    return _rendered_markdown(_call_with_supported_kwargs(render_default_help, public_prefix="gpd:"))
+
+
 def _render_command_index(renderer: object) -> str:
     render_command_index = getattr(renderer, "render_command_index", None)
     if render_command_index is None:
@@ -149,12 +156,13 @@ def test_help_wrapper_extraction_contract_uses_exact_marker_anchors() -> None:
     for marker_pair in marker_pairs:
         assert marker_pair in help_command
 
-    quick_start_start, quick_start_end = help_surface_markers("quick-start")
+    default_start, default_end = help_surface_markers("default")
+    quick_start_start, _quick_start_end = help_surface_markers("quick-start")
     _, command_index_end = help_surface_markers("command-index")
     extraction_rules = (
         "Return marker contents only; never print the HTML marker comments themselves.",
         "Visible headings inside marker ranges are output labels only.",
-        f"Extract from `{quick_start_start}` through `{quick_start_end}`.",
+        f"Extract from `{default_start}` through `{default_end}`.",
         f"Extract from `{quick_start_start}` through `{command_index_end}`.",
         "whose visible heading is `## Detailed Command Reference`.",
     )
@@ -183,6 +191,14 @@ def test_help_quick_start_marker_matches_renderer_output() -> None:
 
     checked_in_quick_start = _normalized_block(extract_help_surface_region(workflow_help, "quick-start"))
     assert checked_in_quick_start == _render_quick_start(renderer)
+
+
+def test_help_default_marker_matches_renderer_output() -> None:
+    renderer = _help_renderer()
+    workflow_help = _read_workflow_help()
+
+    checked_in_default = _normalized_block(extract_help_surface_region(workflow_help, "default"))
+    assert checked_in_default == _render_default_help(renderer)
 
 
 def test_help_command_index_marker_matches_renderer_output() -> None:

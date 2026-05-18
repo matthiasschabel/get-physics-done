@@ -28,17 +28,9 @@ Reload the planning stage before authoring so classification and artifacts share
 the same staged authority order:
 
 ```bash
-if [ -n "${PREFLIGHT_ARGUMENTS:-}" ]; then
-  REVISION_PLANNING_INIT=$(gpd --raw init respond-to-referees --stage revision_planning -- "$PREFLIGHT_ARGUMENTS")
-elif [ -n "${ARGUMENTS:-}" ]; then
-  REVISION_PLANNING_INIT=$(gpd --raw init respond-to-referees --stage revision_planning -- "$ARGUMENTS")
-else
-  REVISION_PLANNING_INIT=$(gpd --raw init respond-to-referees --stage revision_planning)
-fi
-if [ $? -ne 0 ]; then
-  echo "ERROR: respond-to-referees revision-planning init failed: $REVISION_PLANNING_INIT"
-  # STOP; surface the error.
-fi
+if [ -n "${ARGUMENTS:-}" ]; then REVISION_PLANNING_INIT=$(gpd --raw init respond-to-referees --stage revision_planning -- "$ARGUMENTS"); else REVISION_PLANNING_INIT=$(gpd --raw init respond-to-referees --stage revision_planning); fi
+if [ $? -ne 0 ]; then echo "ERROR: respond-to-referees revision-planning init failed: $REVISION_PLANNING_INIT"; fi
+INIT="$REVISION_PLANNING_INIT"
 ```
 
 <field_access>
@@ -48,22 +40,30 @@ Apply `REVISION_PLANNING_INIT.staged_loading.field_access_instruction` before re
 Load response-authoring before any response artifact or manuscript write:
 
 ```bash
-if [ -n "${PREFLIGHT_ARGUMENTS:-}" ]; then
-  RESPONSE_AUTHORING_INIT=$(gpd --raw init respond-to-referees --stage response_authoring -- "$PREFLIGHT_ARGUMENTS")
-elif [ -n "${ARGUMENTS:-}" ]; then
-  RESPONSE_AUTHORING_INIT=$(gpd --raw init respond-to-referees --stage response_authoring -- "$ARGUMENTS")
-else
-  RESPONSE_AUTHORING_INIT=$(gpd --raw init respond-to-referees --stage response_authoring)
-fi
-if [ $? -ne 0 ]; then
-  echo "ERROR: respond-to-referees response-authoring init failed: $RESPONSE_AUTHORING_INIT"
-  # STOP; surface the error.
-fi
+if [ -n "${ARGUMENTS:-}" ]; then RESPONSE_AUTHORING_INIT=$(gpd --raw init respond-to-referees --stage response_authoring -- "$ARGUMENTS"); else RESPONSE_AUTHORING_INIT=$(gpd --raw init respond-to-referees --stage response_authoring); fi
+if [ $? -ne 0 ]; then echo "ERROR: respond-to-referees response-authoring init failed: $RESPONSE_AUTHORING_INIT"; fi
+INIT="$RESPONSE_AUTHORING_INIT"
 ```
 
 <field_access>
 Apply `RESPONSE_AUTHORING_INIT.staged_loading.field_access_instruction` before reading `RESPONSE_AUTHORING_INIT`. Use hydrated bodies only for selected evidence-dependent comments.
 </field_access>
+
+```bash
+RESPONSE_ARGUMENTS=$(echo "$INIT" | gpd json get .response_intake_input --default "")
+PAPER_DIR=$(echo "$INIT" | gpd json get .manuscript_root --default "")
+MANUSCRIPT_ENTRYPOINT=$(echo "$INIT" | gpd json get .manuscript_entrypoint --default "")
+MANUSCRIPT_BASENAME="${MANUSCRIPT_ENTRYPOINT##*/}"
+RESPONSE_PUBLICATION_ROOT=$(echo "$INIT" | gpd json get .selected_publication_root --default GPD)
+RESPONSE_REVIEW_ROOT=$(echo "$INIT" | gpd json get .selected_review_root --default "")
+RESPONSE_REVIEW_ROOT="${RESPONSE_REVIEW_ROOT:-${RESPONSE_PUBLICATION_ROOT}/review}"
+ROUND_SUFFIX=$(echo "$INIT" | gpd json get .latest_response_round_suffix --default "")
+ROUND_SUFFIX="${ROUND_SUFFIX:-$(echo "$INIT" | gpd json get .latest_review_round_suffix --default "")}"
+RESPONSE_AUTHOR_PATH=$(echo "$INIT" | gpd json get .latest_author_response --default "")
+RESPONSE_AUTHOR_PATH="${RESPONSE_AUTHOR_PATH:-${RESPONSE_PUBLICATION_ROOT}/AUTHOR-RESPONSE${ROUND_SUFFIX}.md}"
+RESPONSE_REFEREE_PATH=$(echo "$INIT" | gpd json get .latest_referee_response --default "")
+RESPONSE_REFEREE_PATH="${RESPONSE_REFEREE_PATH:-${RESPONSE_REVIEW_ROOT}/REFEREE_RESPONSE${ROUND_SUFFIX}.md}"
+```
 
 Read `{GPD_INSTALL_DIR}/templates/paper/author-response.md`,
 `{GPD_INSTALL_DIR}/templates/paper/referee-response.md`, and the loaded

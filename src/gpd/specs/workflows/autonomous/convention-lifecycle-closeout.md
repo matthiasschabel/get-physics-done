@@ -45,6 +45,9 @@ VERIFY_PAYLOAD=$(gpd --raw init verify-work "${COMPLETE_PHASE}" --stage session_
 VERIFY_STATUS=$(echo "$VERIFY_PAYLOAD" | gpd json get .verification_report_status --default "missing")
 ```
 
+Apply `VERIFY_PAYLOAD.staged_loading.field_access_instruction` before reading
+`VERIFY_PAYLOAD`.
+
 Every completed phase must report `passed` before milestone audit or completion. If any phase reports `missing`, `missing_status`, `unparseable`, `unknown_status`, `gaps_found`, `human_needed`, `expert_needed`, or any other non-passing value, stop with primary `gpd:verify-work ${COMPLETE_PHASE}`.
 </step>
 

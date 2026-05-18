@@ -27,25 +27,33 @@ from manuscript edits, and track each change/new calculation/decision.
 Run staged init and enter the resolved project root:
 
 ```bash
-if [ -n "${ARGUMENTS:-}" ]; then
-  INIT=$(gpd --raw init respond-to-referees --stage bootstrap -- "$ARGUMENTS")
-else
-  INIT=$(gpd --raw init respond-to-referees --stage bootstrap)
-fi
-if [ $? -ne 0 ]; then
-  echo "ERROR: gpd initialization failed: $INIT"
-  # STOP; surface the error.
-fi
-PROJECT_ROOT=$(echo "$INIT" | gpd json get .project_root --default "")
-if [ -n "$PROJECT_ROOT" ]; then
-  cd "$PROJECT_ROOT" || { echo "ERROR: could not enter resolved project root: $PROJECT_ROOT"; exit 1; }
-fi
+if [ -n "${ARGUMENTS:-}" ]; then INIT=$(gpd --raw init respond-to-referees --stage bootstrap -- "$ARGUMENTS"); else INIT=$(gpd --raw init respond-to-referees --stage bootstrap); fi
+if [ $? -ne 0 ]; then echo "ERROR: gpd initialization failed: $INIT"; fi
 ```
 
 <field_access>
 Apply `INIT.staged_loading.field_access_instruction` before reading `INIT`.
 Reference bodies stay unavailable.
 </field_access>
+
+```bash
+PROJECT_ROOT=$(echo "$INIT" | gpd json get .project_root --default "")
+if [ -n "$PROJECT_ROOT" ]; then cd "$PROJECT_ROOT" || { echo "ERROR: could not enter resolved project root: $PROJECT_ROOT"; exit 1; }; fi
+RESPONSE_ARGUMENTS=$(echo "$INIT" | gpd json get .response_intake_input --default "")
+PREFLIGHT_ARGUMENTS="$RESPONSE_ARGUMENTS"
+PAPER_DIR=$(echo "$INIT" | gpd json get .manuscript_root --default "")
+MANUSCRIPT_ENTRYPOINT=$(echo "$INIT" | gpd json get .manuscript_entrypoint --default "")
+MANUSCRIPT_BASENAME="${MANUSCRIPT_ENTRYPOINT##*/}"
+RESPONSE_PUBLICATION_ROOT=$(echo "$INIT" | gpd json get .selected_publication_root --default GPD)
+RESPONSE_REVIEW_ROOT=$(echo "$INIT" | gpd json get .selected_review_root --default "")
+RESPONSE_REVIEW_ROOT="${RESPONSE_REVIEW_ROOT:-${RESPONSE_PUBLICATION_ROOT}/review}"
+ROUND_SUFFIX=$(echo "$INIT" | gpd json get .latest_response_round_suffix --default "")
+ROUND_SUFFIX="${ROUND_SUFFIX:-$(echo "$INIT" | gpd json get .latest_review_round_suffix --default "")}"
+RESPONSE_AUTHOR_PATH=$(echo "$INIT" | gpd json get .latest_author_response --default "")
+RESPONSE_AUTHOR_PATH="${RESPONSE_AUTHOR_PATH:-${RESPONSE_PUBLICATION_ROOT}/AUTHOR-RESPONSE${ROUND_SUFFIX}.md}"
+RESPONSE_REFEREE_PATH=$(echo "$INIT" | gpd json get .latest_referee_response --default "")
+RESPONSE_REFEREE_PATH="${RESPONSE_REFEREE_PATH:-${RESPONSE_REVIEW_ROOT}/REFEREE_RESPONSE${ROUND_SUFFIX}.md}"
+```
 
 For nested-cwd launches, use `project_root`, `selected_publication_root`,
 `selected_review_root`, and the resolved manuscript root from init/preflight as
@@ -132,8 +140,10 @@ contract text, wait for a later stage that selects it. Use
 manuscript-root `BIBLIOGRAPHY-AUDIT.json`, artifact manifest, review ledger, and
 proof-redteam artifacts stay authoritative for strict response decisions.
 
-Bind `PAPER_DIR` to the preflight-resolved manuscript root and
-`MANUSCRIPT_BASENAME` to the resolved entrypoint. Do not re-derive roots later.
+Bind `PAPER_DIR` to the current init payload's manuscript root and
+`MANUSCRIPT_BASENAME` to the current init payload's resolved entrypoint. Rebind
+these from each later stage's own init payload instead of carrying bootstrap
+shell variables forward.
 Resolved section files such as `${PAPER_DIR}/{section}.tex` remain rooted under
 the manuscript tree.
 
@@ -155,16 +165,11 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Use `selected_publication_root` and `selected_review_root` from the target-aware preflight as the response roots. Select response paths once:
+Use `selected_publication_root` and `selected_review_root` from the target-aware
+stage payload as the response roots. Later stages must rebind the response paths
+from their own payloads:
 
 ```bash
-RESPONSE_PUBLICATION_ROOT=$(echo "$CONTEXT" | gpd json get .selected_publication_root --default GPD)
-RESPONSE_REVIEW_ROOT=$(echo "$CONTEXT" | gpd json get .selected_review_root --default "")
-if [ -z "$RESPONSE_REVIEW_ROOT" ]; then
-  RESPONSE_REVIEW_ROOT="${RESPONSE_PUBLICATION_ROOT}/review"
-fi
-RESPONSE_AUTHOR_PATH="${RESPONSE_PUBLICATION_ROOT}/AUTHOR-RESPONSE{round_suffix}.md"
-RESPONSE_REFEREE_PATH="${RESPONSE_REVIEW_ROOT}/REFEREE_RESPONSE{round_suffix}.md"
 if [ -d "${RESPONSE_REVIEW_ROOT}" ]; then
   find "${RESPONSE_REVIEW_ROOT}" -maxdepth 1 -type f -name 'REFEREE_RESPONSE*.md' -print
   find "${RESPONSE_REVIEW_ROOT}" -maxdepth 1 -type f -name 'REVIEW-LEDGER*.json' -print

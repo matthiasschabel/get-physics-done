@@ -131,11 +131,15 @@ def test_help_wrapper_uses_stable_section_markers_for_extracts() -> None:
         ("quick-start", "## Quick Start"),
         ("command-index", "## Command Index"),
         ("detailed-command-reference", "## Detailed Command Reference"),
+        ("default", "## Quick Start"),
     )
     for marker_name, heading in marker_pairs:
         start_marker, end_marker = help_surface_markers(marker_name)
+        start_position = help_workflow.index(start_marker)
+        end_position = help_workflow.index(end_marker, start_position)
+        heading_position = help_workflow.index(heading, start_position)
         _assert_machine(help_workflow, f"help workflow {marker_name} markers", start_marker, end_marker)
-        assert help_workflow.index(start_marker) < help_workflow.index(heading) < help_workflow.index(end_marker)
+        assert start_position < heading_position < end_position
         _assert_machine(help_command, f"help command {marker_name} markers", start_marker, end_marker)
 
     _assert_semantic(

@@ -393,14 +393,14 @@ def test_peer_review_reliability_reference_matches_peer_review_workflow_invocati
         encoding="utf-8"
     )
 
-    expected = 'gpd validate review-preflight peer-review "$REVIEW_TARGET" --strict'
+    expected = 'gpd validate review-preflight peer-review --strict -- "$REVIEW_TARGET"'
 
     _assert_machine(workflow, "peer-review review-preflight strict command", expected)
     _assert_machine(reliability, "peer-review reliability review-preflight strict command", expected)
     _assert_forbidden(
         reliability,
         "peer-review reliability no targetless review-preflight strict command",
-        "gpd validate review-preflight peer-review --strict",
+        "gpd validate review-preflight peer-review --strict)",
     )
 
 

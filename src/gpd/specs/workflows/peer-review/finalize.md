@@ -22,11 +22,18 @@ Load the staged finalize payload before summarizing the report and routing the n
 action:
 
 ```bash
-FINALIZE_INIT=$(gpd --raw init peer-review "$REVIEW_TARGET" --stage finalize)
-if [ $? -ne 0 ]; then
-  echo "ERROR: gpd peer-review finalize init failed: $FINALIZE_INIT"
-  # STOP; surface the error.
-fi
+if [ -n "${ARGUMENTS:-}" ]; then FINALIZE_INIT=$(gpd --raw init peer-review --stage finalize -- "$ARGUMENTS"); else FINALIZE_INIT=$(gpd --raw init peer-review --stage finalize); fi
+if [ $? -ne 0 ]; then echo "ERROR: gpd peer-review finalize init failed: $FINALIZE_INIT"; fi
+INIT="$FINALIZE_INIT"
+```
+
+Apply `FINALIZE_INIT.staged_loading.field_access_instruction` before reading it.
+
+```bash
+REVIEW_TARGET=$(echo "$INIT" | gpd json get .review_target_input --default "")
+PUBLICATION_ROOT=$(echo "$INIT" | gpd json get .selected_publication_root --default GPD)
+REVIEW_ROOT=$(echo "$INIT" | gpd json get .selected_review_root --default "")
+REVIEW_ROOT="${REVIEW_ROOT:-${PUBLICATION_ROOT}/review}"
 ```
 
 Read the target-bound referee report for the active round:

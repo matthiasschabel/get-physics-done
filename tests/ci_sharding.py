@@ -55,6 +55,7 @@ CI_HOT_TEST_FILE_SPLITS = {
     "mcp/test_servers_integration.py": 3,
     "mcp/test_skills_server_tool_lists.py": 2,
     "mcp/test_server_regressions.py": 2,
+    "core/test_provider_free_persona_canary_acceptance.py": 2,
     "core/test_cli.py": 3,
     "core/test_contract_validation.py": 3,
     "core/test_frontmatter.py": 3,
@@ -90,6 +91,7 @@ CI_HOT_TEST_FILE_WEIGHT_MULTIPLIERS = {
     "mcp/test_servers_integration.py": 2.0,
     "mcp/test_skills_server_tool_lists.py": 1.5,
     "mcp/test_server_regressions.py": 1.5,
+    "core/test_provider_free_persona_canary_acceptance.py": 6.0,
 }
 
 

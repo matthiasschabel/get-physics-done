@@ -55,6 +55,9 @@ def test_write_paper_balanced_mode_keeps_outline_as_working_draft_and_threads_mo
             "If `autonomy=balanced`, treat the outline as a working draft",
             'WRITE_PAPER_ARGUMENTS="${ARGUMENTS:-}"',
             'gpd --raw init write-paper --stage paper_bootstrap -- "$WRITE_PAPER_ARGUMENTS"',
+            'WRITE_PAPER_ARGUMENTS=$(echo "$INIT" | gpd json get .write_paper_argument_input',
+            'PAPER_DIR=$(echo "$INIT" | gpd json get .publication_bootstrap_root',
+            'MANUSCRIPT_BASENAME="${MANUSCRIPT_ENTRYPOINT##*/}"',
         ),
     )
     for stage in (
@@ -63,7 +66,7 @@ def test_write_paper_balanced_mode_keeps_outline_as_working_draft_and_threads_mo
         "consistency_and_references",
         "publication_review",
     ):
-        assert f'gpd --raw init write-paper --stage {stage} -- "${{WRITE_PAPER_ARGUMENTS:-}}"' in workflow
+        assert f"gpd --raw init write-paper --stage {stage}" in workflow
     _assert_all_present(
         workflow,
         (
@@ -130,6 +133,7 @@ def test_peer_review_stage_six_requires_report_artifacts_and_threads_mode_contex
         (
             "BOOTSTRAP_INIT.staged_loading.field_access_instruction",
             "peer-review-stage-manifest.json",
+            'REVIEW_TARGET=$(echo "$INIT" | gpd json get .review_target_input --default "")',
             'RESEARCH_MODE=$(echo "$BOOTSTRAP_INIT" | gpd json get .research_mode --default balanced)',
             "<autonomy_mode>{AUTONOMY}</autonomy_mode>",
             "<research_mode>{RESEARCH_MODE}</research_mode>",

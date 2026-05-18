@@ -20,9 +20,35 @@ if [ $? -ne 0 ]; then
   echo "ERROR: arxiv-submission finalize init failed: $FINALIZE_INIT"
   exit 1
 fi
+INIT="$FINALIZE_INIT"
 ```
 
-Use `PACKAGE_VALIDATION` from `gpd --raw validate arxiv-package --materialize` as the authoritative tarball proof. If resuming at finalize, run the same validator without `--materialize` before reporting success. Present a final checklist with:
+Apply `FINALIZE_INIT.staged_loading.field_access_instruction` before reading `FINALIZE_INIT`.
+
+```bash
+SUBJECT_SLUG=$(echo "$INIT" | gpd json get .publication_subject_slug --default "")
+PUBLICATION_ROOT=$(echo "$INIT" | gpd json get .managed_publication_root --default "")
+[ -n "$PUBLICATION_ROOT" ] || [ -z "$SUBJECT_SLUG" ] || PUBLICATION_ROOT="GPD/publication/${SUBJECT_SLUG}"
+PACKAGE_ROOT="${PUBLICATION_ROOT}/arxiv"
+SUBMISSION_DIR="${PACKAGE_ROOT}/submission"
+PACKAGE_TARBALL="${PACKAGE_ROOT}/arxiv-submission.tar.gz"
+if [ -z "$SUBJECT_SLUG" ] || [ -z "$PUBLICATION_ROOT" ]; then
+  echo "ERROR: arxiv-submission finalize missing publication_subject_slug"
+  exit 1
+fi
+if [ -n "${ARGUMENTS:-}" ]; then
+  PACKAGE_VALIDATION=$(gpd --raw validate arxiv-package --submission-dir "$SUBMISSION_DIR" --tarball "$PACKAGE_TARBALL" -- "$ARGUMENTS")
+else
+  PACKAGE_VALIDATION=$(gpd --raw validate arxiv-package --submission-dir "$SUBMISSION_DIR" --tarball "$PACKAGE_TARBALL")
+fi
+VALIDATION_STATUS=$?
+echo "$PACKAGE_VALIDATION"
+if [ $VALIDATION_STATUS -ne 0 ]; then
+  exit 1
+fi
+```
+
+Use `PACKAGE_VALIDATION` from this finalize-stage non-materializing validator as the authoritative resume-safe tarball proof before reporting success. Package materialization must already have succeeded in the package stage. Present a final checklist with:
 
 - package path and size
 - figure count
@@ -34,7 +60,7 @@ Use `PACKAGE_VALIDATION` from `gpd --raw validate arxiv-package --materialize` a
 - TeX processing compatibility status
 - manual submission steps still required
 
-Do not treat prose-only success as complete. The tarball must be under `GPD/publication/${subject_slug}/arxiv/`, the executable arXiv package validator must pass, and manuscript-root / latest-review gates must hold.
+Do not treat prose-only success as complete. The tarball must be under `GPD/publication/${SUBJECT_SLUG}/arxiv/`, the executable arXiv package validator must pass, and manuscript-root / latest-review gates must hold.
 </step>
 
 <community_contribution>

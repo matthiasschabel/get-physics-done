@@ -27,6 +27,7 @@ Bridge command rule: run local CLI raw help for the requested mode, parse JSON, 
 
 Use the workflow-owned stable markers as the extraction boundaries for fallback mode:
 
+- `<!-- gpd-help:default:start -->` / `<!-- gpd-help:default:end -->`
 - `<!-- gpd-help:quick-start:start -->` / `<!-- gpd-help:quick-start:end -->`
 - `<!-- gpd-help:command-index:start -->` / `<!-- gpd-help:command-index:end -->`
 - `<!-- gpd-help:detailed-command-reference:start -->` / `<!-- gpd-help:detailed-command-reference:end -->`
@@ -59,7 +60,7 @@ gpd --raw help
 
 Workflow-owned reference fallback:
 
-- Extract from `<!-- gpd-help:quick-start:start -->` through `<!-- gpd-help:quick-start:end -->`.
+- Extract from `<!-- gpd-help:default:start -->` through `<!-- gpd-help:default:end -->`.
 - Exclude the marker comment lines themselves.
 - Do not output adapter-specific examples.
 - Append this one wrapper-owned line: `Run this help command with --all for the compact command index.`

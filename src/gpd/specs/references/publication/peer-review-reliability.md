@@ -68,14 +68,14 @@ Project-backed manuscript review:
 1. **Manuscript completeness.** All sections referenced in the paper structure are drafted. No placeholder or stub sections remain.
 2. **Artifact readiness.** In strict project-backed mode, `ARTIFACT-MANIFEST.json` and `BIBLIOGRAPHY-AUDIT.json` exist and pass validation. In that mode the bibliography audit must also clear `bibliography_audit_clean`, and the reproducibility manifest must clear `reproducibility_ready`. For explicit external artifact review, these manuscript-root publication artifacts are additive when present and only block when the strict intake mode actually requires them.
 3. **Verification coverage.** At least one verification report exists under `GPD/phases/` when reviewing the current GPD project manuscript. Explicit external artifact review should use supporting evidence when present, but missing project-local verification reports alone do not block that mode.
-4. **Preflight pass.** `gpd validate review-preflight peer-review "$REVIEW_TARGET" --strict` exits zero.
+4. **Preflight pass.** `gpd validate review-preflight peer-review --strict -- "$REVIEW_TARGET"` exits zero.
 
 Standalone explicit-artifact review:
 
 1. **Explicit target resolution.** One concrete manuscript or artifact path has been supplied and accepted by command-context preflight.
 2. **Text-surface readiness.** The explicit target is directly readable (`.tex`, `.md`, `.txt`, `.csv`, `.tsv`) or a valid extracted/companion text surface exists for `.pdf`, `.docx`, `.xlsx`, or `.xlsm`.
 3. **Additive artifact handling.** Nearby manuscript-root publication artifacts may be read when present, but they are not prerequisites by themselves.
-4. **Preflight pass.** `gpd validate review-preflight peer-review "$REVIEW_TARGET" --strict` exits zero.
+4. **Preflight pass.** `gpd validate review-preflight peer-review --strict -- "$REVIEW_TARGET"` exits zero.
 
 Verification coverage under `GPD/phases/` is required only for `project-backed manuscript review`.
 Artifact readiness requirements are strict project-backed gates, not `standalone explicit-artifact review` prerequisites.

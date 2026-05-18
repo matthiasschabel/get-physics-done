@@ -4,12 +4,10 @@ checks, and in-workflow revision/response artifacts.
 </purpose>
 
 <stage_boundary>
-This stage is a compact routing/finalization surface. It eagerly loads only the
-publication-review stage instructions and review-round artifact contract.
-Response authoring, recovery, paper-quality scoring, and reliability diagnostics
-are conditional branches. Peer-review panel execution, review-ledger schemas,
-referee-decision schemas, and proof-redteam details stay inside staged
-`gpd:peer-review` authorities and must not be inlined here.
+This compact router eagerly loads only this stage and the review-round contract.
+Response authoring, recovery, scoring, reliability diagnostics, panel execution,
+schemas, and proof-redteam details stay conditional or inside staged
+`gpd:peer-review`; do not inline them here.
 
 Start only after manuscript-root artifacts, fresh bibliography audit,
 reproducibility manifest, and claim/proof blockers are clear.
@@ -20,15 +18,22 @@ Load the staged publication-review payload before routing peer review or
 evaluating review-round artifacts:
 
 ```bash
-PUBLICATION_REVIEW_INIT=$(gpd --raw init write-paper --stage publication_review -- "${WRITE_PAPER_ARGUMENTS:-}")
-if [ $? -ne 0 ]; then
-  echo "ERROR: write-paper publication-review init failed: $PUBLICATION_REVIEW_INIT"
-  # STOP; surface the error.
-fi
+if [ -n "${ARGUMENTS:-}" ]; then PUBLICATION_REVIEW_INIT=$(gpd --raw init write-paper --stage publication_review -- "$ARGUMENTS"); else PUBLICATION_REVIEW_INIT=$(gpd --raw init write-paper --stage publication_review); fi
+if [ $? -ne 0 ]; then echo "ERROR: write-paper publication-review init failed: $PUBLICATION_REVIEW_INIT"; fi
 INIT="$PUBLICATION_REVIEW_INIT"
 ```
 
 Apply `PUBLICATION_REVIEW_INIT.staged_loading.field_access_instruction` before reading `PUBLICATION_REVIEW_INIT`.
+
+```bash
+PAPER_DIR=$(echo "$INIT" | gpd json get .publication_bootstrap_root --default "")
+PAPER_DIR="${PAPER_DIR:-$(echo "$INIT" | gpd json get .manuscript_root --default "")}"
+selected_publication_root=$(echo "$INIT" | gpd json get .selected_publication_root --default GPD)
+selected_review_root=$(echo "$INIT" | gpd json get .selected_review_root --default "")
+selected_review_root="${selected_review_root:-${selected_publication_root}/review}"
+AUTONOMY=$(echo "$INIT" | gpd json get .autonomy --default balanced)
+RESEARCH_MODE=$(echo "$INIT" | gpd json get .research_mode --default balanced)
+```
 </init>
 
 <pre_submission_review>
@@ -41,15 +46,12 @@ execution, final adjudication, review-ledger/referee-decision schemas, and any
 proof-redteam gate. Do not inline those authorities here.
 Load `proactive_critique_loop` when budget allows; log run/skip/failure.
 
-This write-paper stage may read review-round artifacts after peer review returns.
-Load the conditional `response_pair_authoring` authorities only when paired
-response artifacts are actually being drafted.
+After peer review, this stage may read review-round artifacts. Load the conditional `response_pair_authoring` authorities only when drafting the pair.
 
 Use `gpd-referee` only through the peer-review final-adjudication authority. Keep
 the project-contract gate fields, reference handles/statuses, citation-source
 context, and protocol load manifests visible. Read a specific reference or
-protocol source file only when a concrete review finding, response issue, or
-routing decision depends on its body.
+protocol file only for a concrete finding, response issue, or route.
 
 Read `${selected_review_root}/REFEREE-DECISION{round_suffix}.json` and
 `${selected_review_root}/REVIEW-LEDGER{round_suffix}.json` first when they
@@ -60,13 +62,10 @@ and assess the findings.
 Embedded `write-paper` review parity for the bounded external-authoring lane is deferred until the managed publication lineage is unified end to end.
 
 Instead, verify the bounded manuscript-root handoff under `${PAPER_DIR}`:
-
-- `${PAPER_DIR}/{topic_specific_stem}.tex`
-- `${PAPER_DIR}/PAPER-CONFIG.json`
-- `${PAPER_DIR}/ARTIFACT-MANIFEST.json`
-- `${PAPER_DIR}/BIBLIOGRAPHY-AUDIT.json`
-- `${PAPER_DIR}/reproducibility-manifest.json`
-- `${PAPER_DIR}/FIGURE_TRACKER.md` when the manuscript uses tracked figures
+`{topic_specific_stem}.tex`, `PAPER-CONFIG.json`, `ARTIFACT-MANIFEST.json`,
+`BIBLIOGRAPHY-AUDIT.json`, `reproducibility-manifest.json`, and
+`FIGURE_TRACKER.md` when figures are tracked.
+Required handoff paths include `${PAPER_DIR}/PAPER-CONFIG.json`, `${PAPER_DIR}/ARTIFACT-MANIFEST.json`, `${PAPER_DIR}/BIBLIOGRAPHY-AUDIT.json`, and `${PAPER_DIR}/reproducibility-manifest.json`.
 
 If any required manuscript-root artifact is missing, stop and fix it now.
 Otherwise, route the user to standalone `gpd:peer-review` against the resolved
@@ -76,23 +75,17 @@ here, and do not recommend `gpd:arxiv-submission` directly from this lane.
 
 <final_review>
 Before declaring the draft complete, run only decisive checks unless the user
-explicitly requested polish:
+explicitly requested polish: artifact manifest, bibliography audit,
+reproducibility manifest, target-bound review state, abstract/story consistency,
+introduction/conclusion contribution, equations/figures, page count, and
+reference formatting.
 
-- artifact manifest
-- bibliography audit
-- reproducibility manifest
-- target-bound review state
-- abstract/story consistency
-- introduction/conclusion contribution
-- equations and figures
-- page count and reference formatting
-
-Paper quality scoring is advisory and artifact-driven. Load the
-`advisory_paper_quality_scoring` authority only when the score is still
-decisive. Use
+Paper quality scoring is advisory and artifact-driven. Load
+`advisory_paper_quality_scoring` only when decisive. Use
 `${PAPER_DIR}/ARTIFACT-MANIFEST.json`, `${PAPER_DIR}/BIBLIOGRAPHY-AUDIT.json`,
-`${PAPER_DIR}/FIGURE_TRACKER.md`, `GPD/comparisons/*-COMPARISON.md`, and phase
-summary/verification `contract_results` and `comparison_verdicts`. Treat paper-support artifacts as scaffolding, not as proof that a claim is established.
+`${PAPER_DIR}/FIGURE_TRACKER.md`, `GPD/comparisons/*-COMPARISON.md`, and
+phase summary/verification `contract_results` / `comparison_verdicts`.
+Treat paper-support artifacts as scaffolding, not as proof that a claim is established.
 Missing decisive comparisons still block strong submission recommendations.
 Recommend `gpd:arxiv-submission` only when project-backed staged review already
 clears packaging.
@@ -109,11 +102,10 @@ requirements.
 </final_review>
 
 <paper_revision>
-For a dedicated referee response workflow, use `gpd:respond-to-referees`. This
-in-workflow revision loop applies only after project-backed embedded review. The
-bounded external-authoring lane exits earlier and should resume through
-standalone `gpd:peer-review` or `gpd:respond-to-referees` once review artifacts
-exist.
+For dedicated response work, use `gpd:respond-to-referees`. This in-workflow
+revision loop applies only after project-backed embedded review; the bounded
+external-authoring lane exits earlier and resumes through standalone
+`gpd:peer-review` or `gpd:respond-to-referees` once artifacts exist.
 
 When revising a paper in response to referee reports:
 

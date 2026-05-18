@@ -603,8 +603,8 @@ def test_referee_response_round_suffix_convention_is_consistent() -> None:
     assert "${selected_publication_root}/AUTHOR-RESPONSE{round_suffix}.md" in response_artifacts
     assert "`GPD/review/REFEREE_RESPONSE{round_suffix}.md`" in response_handoff
     assert "`GPD/AUTHOR-RESPONSE{round_suffix}.md`" in response_handoff
-    assert 'RESPONSE_REFEREE_PATH="${RESPONSE_REVIEW_ROOT}/REFEREE_RESPONSE{round_suffix}.md"' in respond
-    assert 'RESPONSE_AUTHOR_PATH="${RESPONSE_PUBLICATION_ROOT}/AUTHOR-RESPONSE{round_suffix}.md"' in respond
+    assert re.search(r"RESPONSE_REFEREE_PATH=.*REFEREE_RESPONSE\$\{ROUND_SUFFIX\}\.md", respond)
+    assert re.search(r"RESPONSE_AUTHOR_PATH=.*AUTHOR-RESPONSE\$\{ROUND_SUFFIX\}\.md", respond)
     assert "context_mode: project-aware" in respond_command
     assert "command-policy:" in respond_command
     assert "explicit_input_kinds:" in respond_command

@@ -20,15 +20,22 @@ Load the staged outline/scaffold payload before using outline-time publication
 scaffolding fields or paper schema authorities:
 
 ```bash
-OUTLINE_INIT=$(gpd --raw init write-paper --stage outline_and_scaffold -- "${WRITE_PAPER_ARGUMENTS:-}")
-if [ $? -ne 0 ]; then
-  echo "ERROR: write-paper outline/scaffold init failed: $OUTLINE_INIT"
-  # STOP; surface the error.
-fi
+if [ -n "${ARGUMENTS:-}" ]; then OUTLINE_INIT=$(gpd --raw init write-paper --stage outline_and_scaffold -- "$ARGUMENTS"); else OUTLINE_INIT=$(gpd --raw init write-paper --stage outline_and_scaffold); fi
+if [ $? -ne 0 ]; then echo "ERROR: write-paper outline/scaffold init failed: $OUTLINE_INIT"; fi
 INIT="$OUTLINE_INIT"
 ```
 
 Apply `OUTLINE_INIT.staged_loading.field_access_instruction` before reading `OUTLINE_INIT`. This stage is handle/status-first; read specific project, manuscript, or reference files by handle only after the paper target above is selected.
+
+```bash
+WRITE_PAPER_ARGUMENTS=$(echo "$INIT" | gpd json get .write_paper_argument_input --default "")
+PAPER_DIR=$(echo "$INIT" | gpd json get .publication_bootstrap_root --default "")
+PAPER_DIR="${PAPER_DIR:-$(echo "$INIT" | gpd json get .manuscript_root --default "")}"
+MANUSCRIPT_ENTRYPOINT=$(echo "$INIT" | gpd json get .manuscript_entrypoint --default "")
+MANUSCRIPT_BASENAME="${MANUSCRIPT_ENTRYPOINT##*/}"
+AUTONOMY=$(echo "$INIT" | gpd json get .autonomy --default balanced)
+RESEARCH_MODE=$(echo "$INIT" | gpd json get .research_mode --default balanced)
+```
 </init>
 
 <journal_formats>
@@ -163,6 +170,6 @@ Before handing off to authoring, confirm:
 Then reload:
 
 ```bash
-AUTHORING_INIT=$(gpd --raw init write-paper --stage figure_and_section_authoring -- "${WRITE_PAPER_ARGUMENTS:-}")
+if [ -n "$WRITE_PAPER_ARGUMENTS" ]; then AUTHORING_INIT=$(gpd --raw init write-paper --stage figure_and_section_authoring -- "$WRITE_PAPER_ARGUMENTS"); else AUTHORING_INIT=$(gpd --raw init write-paper --stage figure_and_section_authoring); fi
 ```
 </handoff>

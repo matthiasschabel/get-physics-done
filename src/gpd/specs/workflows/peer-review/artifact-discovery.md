@@ -13,19 +13,23 @@ proof-redteam protocol, adjudicate the recommendation, or route response authori
 Read staged init from:
 
 ```bash
-ARTIFACT_DISCOVERY_INIT=$(gpd --raw init peer-review "$REVIEW_TARGET" --stage artifact_discovery)
-if [ $? -ne 0 ]; then
-  echo "ERROR: gpd peer-review artifact-discovery init failed: $ARTIFACT_DISCOVERY_INIT"
-  # STOP; surface the error.
-fi
+if [ -n "${ARGUMENTS:-}" ]; then ARTIFACT_DISCOVERY_INIT=$(gpd --raw init peer-review --stage artifact_discovery -- "$ARGUMENTS"); else ARTIFACT_DISCOVERY_INIT=$(gpd --raw init peer-review --stage artifact_discovery); fi
+if [ $? -ne 0 ]; then echo "ERROR: gpd peer-review artifact-discovery init failed: $ARTIFACT_DISCOVERY_INIT"; fi
+INIT="$ARTIFACT_DISCOVERY_INIT"
 ```
 
-Load the manuscript target selected by preflight:
+Apply `ARTIFACT_DISCOVERY_INIT.staged_loading.field_access_instruction` before reading it, then bind the selected manuscript and roots:
 
-- `MANUSCRIPT_ROOT` from `manuscript_root`
-- `MANUSCRIPT_PATH` from `manuscript_entrypoint` or `resolved_review_target`
-- `PUBLICATION_ROOT` from `selected_publication_root`
-- `REVIEW_ROOT` from `selected_review_root`
+```bash
+REVIEW_TARGET=$(echo "$INIT" | gpd json get .review_target_input --default "")
+MANUSCRIPT_ROOT=$(echo "$INIT" | gpd json get .manuscript_root --default "")
+MANUSCRIPT_PATH=$(echo "$INIT" | gpd json get .manuscript_entrypoint --default "")
+MANUSCRIPT_PATH="${MANUSCRIPT_PATH:-$(echo "$INIT" | gpd json get .resolved_review_target --default "")}"
+RESOLVED_MANUSCRIPT="$MANUSCRIPT_PATH"
+PUBLICATION_ROOT=$(echo "$INIT" | gpd json get .selected_publication_root --default GPD)
+REVIEW_ROOT=$(echo "$INIT" | gpd json get .selected_review_root --default "")
+REVIEW_ROOT="${REVIEW_ROOT:-${PUBLICATION_ROOT}/review}"
+```
 
 After resolution, read only the selected manuscript surface and manuscript-local
 support artifacts from the same explicit manuscript directory. Do not discover a
@@ -107,7 +111,7 @@ Use the same `-R2` / `-R3` suffix convention for downstream response artifacts:
 After target artifacts and round state are resolved, reload before launching the panel:
 
 ```bash
-PANEL_INIT=$(gpd --raw init peer-review "$REVIEW_TARGET" --stage panel_stages)
+if [ -n "$REVIEW_TARGET" ]; then PANEL_INIT=$(gpd --raw init peer-review --stage panel_stages -- "$REVIEW_TARGET"); else PANEL_INIT=$(gpd --raw init peer-review --stage panel_stages); fi
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd peer-review panel init failed: $PANEL_INIT"
   # STOP; surface the error.

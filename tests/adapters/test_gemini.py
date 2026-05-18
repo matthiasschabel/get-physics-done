@@ -708,6 +708,22 @@ class TestGeminiCommandRuntimeNotes:
         assert "PROJECT_CONTRACT_JSON" not in rendered_allowlist
         assert "printf '%s\\n'" not in rendered_allowlist
 
+    def test_rendered_policy_rule_schema_uses_documented_redirection_key(self) -> None:
+        bridge_command = "/runtime/gpd-cli"
+        parsed_policy = tomllib.loads(_render_gemini_policy_toml(bridge_command))
+        rule = parsed_policy["rule"][0]
+
+        assert set(rule) == {
+            "toolName",
+            "commandPrefix",
+            "decision",
+            "priority",
+            "modes",
+            "allowRedirection",
+        }
+        assert rule["allowRedirection"] is True
+        assert "allow_redirection" not in rule
+
 
 class TestInstall:
     def test_install_creates_toml_commands(self, adapter: GeminiAdapter, gpd_root: Path, tmp_path: Path) -> None:
@@ -1172,7 +1188,7 @@ class TestInstall:
         policy = policy_path.read_text(encoding="utf-8")
         assert 'toolName = "run_shell_command"' in policy
         assert 'modes = ["autoEdit"]' in policy
-        assert "allow_redirection = true" in policy
+        assert "allowRedirection = true" in policy
 
         parsed_policy = tomllib.loads(policy)
         bridge = expected_gemini_bridge(target)

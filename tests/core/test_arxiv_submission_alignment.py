@@ -26,17 +26,10 @@ WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
 runner = CliRunner()
 
 _SHELL_VAR_REFERENCE_RE = re.compile(r"\$(?:\{([A-Za-z_][A-Za-z0-9_]*)(?::-[^}]*)?\}|([A-Za-z_][A-Za-z0-9_]*))")
-_SHELL_ASSIGNMENT_RE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=")
+_SHELL_ASSIGNMENT_RE = re.compile(r"(?:^\s*|[;&]\s*|then\s+)(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=")
 _ARXIV_STAGE_SHELL_AMBIENT = frozenset(
     {
         "ARGUMENTS",
-        # Bootstrap derives these names from strict review preflight before setting
-        # the durable package variables. Lowercase subject_slug remains a path
-        # template placeholder in staged publication prose.
-        "resolved_dir",
-        "resolved_main_tex",
-        "selected_review_root",
-        "subject_slug",
     }
 )
 
@@ -125,7 +118,7 @@ def _shell_variables_referenced(source: str) -> set[str]:
 
 
 def _shell_variables_assigned(source: str) -> set[str]:
-    return {match.group(1) for line in source.splitlines() if (match := _SHELL_ASSIGNMENT_RE.match(line))}
+    return {match.group(1) for line in source.splitlines() for match in _SHELL_ASSIGNMENT_RE.finditer(line)}
 
 
 def test_arxiv_submission_command_declares_manuscript_root_gates_without_first_match_discovery() -> None:
@@ -185,10 +178,14 @@ def test_arxiv_submission_workflow_resolves_manifest_based_manuscript_root_witho
     assert "executable_gate:" in workflow
     assert "id: arxiv_package_validator" in workflow
     assert "role: arxiv-package-validator" in workflow
-    assert "GPD/publication/${subject_slug}/arxiv/arxiv-submission.tar.gz" in workflow
+    assert "GPD/publication/${SUBJECT_SLUG}/arxiv/arxiv-submission.tar.gz" in workflow
     _assert_arxiv_package_gate_semantics(workflow)
     assert (
         'gpd --raw validate arxiv-package --materialize --submission-dir "$SUBMISSION_DIR" --tarball "$PACKAGE_TARBALL"'
+        in workflow
+    )
+    assert (
+        'gpd --raw validate arxiv-package --submission-dir "$SUBMISSION_DIR" --tarball "$PACKAGE_TARBALL"'
         in workflow
     )
     assert "latest-response discovery" in workflow

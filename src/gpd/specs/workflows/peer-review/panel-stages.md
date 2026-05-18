@@ -4,11 +4,10 @@ same-round proof-redteam review, and stage-artifact validation.
 </purpose>
 
 <stage_boundary>
-Panel stages start only after bootstrap, preflight, and artifact discovery have
-resolved target and round state. Each stage runs in a fresh subagent context and
-writes a compact artifact. Apply
-`{GPD_INSTALL_DIR}/references/publication/stage-recovery-gate.md` before any
-checkpoint continuation, retry, stale-output rejection, or sequential fallback.
+Panel stages start only after bootstrap, preflight, artifact discovery, target,
+and round state are resolved. Each stage runs in a fresh subagent context and
+writes a compact artifact. Apply `{GPD_INSTALL_DIR}/references/publication/stage-recovery-gate.md`
+before checkpoint continuation, retry, stale-output rejection, or sequential fallback.
 
 The manifest always loads `references/publication/peer-review-panel.md` for the
 machine contract. Load the conditional
@@ -16,11 +15,9 @@ machine contract. Load the conditional
 expanded rubric guidance, venue-fit judgment, claim-scope uncertainty, or panel
 child recovery needs it. Recovery/proof authorities are conditional. Bundle
 guidance enters as handles only: `selected_protocol_bundle_ids` and
-`protocol_bundle_load_manifest`.
-Reader-visible claims, surfaced evidence, `${MANUSCRIPT_ROOT}/FIGURE_TRACKER.md`,
-`GPD/comparisons/*-COMPARISON.md`, and review-support artifacts are first-class.
-Read reference files by handle only when targeted evidence is needed; do not
-hydrate broad rendered reference or protocol bodies into panel init.
+`protocol_bundle_load_manifest`. Reader-visible claims, surfaced evidence,
+`${MANUSCRIPT_ROOT}/FIGURE_TRACKER.md`, `GPD/comparisons/*-COMPARISON.md`, and review-support artifacts are first-class. Read reference files by handle only for targeted
+evidence; do not hydrate broad reference/protocol bodies into panel init.
 
 Handle-first review invariant: before a Stage 4-5 domain or method judgment,
 bind the claim or venue issue, choose the relevant selected asset from
@@ -34,11 +31,19 @@ Load the staged panel payload before launching Stage 1 through Stage 5 and the
 conditional proof audit:
 
 ```bash
-PANEL_INIT=$(gpd --raw init peer-review "$REVIEW_TARGET" --stage panel_stages)
-if [ $? -ne 0 ]; then
-  echo "ERROR: gpd peer-review panel init failed: $PANEL_INIT"
-  # STOP; surface the error.
-fi
+if [ -n "${ARGUMENTS:-}" ]; then PANEL_INIT=$(gpd --raw init peer-review --stage panel_stages -- "$ARGUMENTS"); else PANEL_INIT=$(gpd --raw init peer-review --stage panel_stages); fi
+if [ $? -ne 0 ]; then echo "ERROR: gpd peer-review panel init failed: $PANEL_INIT"; fi
+INIT="$PANEL_INIT"
+```
+
+Apply `PANEL_INIT.staged_loading.field_access_instruction` before reading it.
+
+```bash
+REVIEW_TARGET=$(echo "$INIT" | gpd json get .review_target_input --default "")
+MANUSCRIPT_ROOT=$(echo "$INIT" | gpd json get .manuscript_root --default "")
+PUBLICATION_ROOT=$(echo "$INIT" | gpd json get .selected_publication_root --default GPD)
+REVIEW_ROOT=$(echo "$INIT" | gpd json get .selected_review_root --default "")
+REVIEW_ROOT="${REVIEW_ROOT:-${PUBLICATION_ROOT}/review}"
 ```
 
 Before spawning any reviewer, announce the review with this concise stage map:
@@ -195,7 +200,7 @@ carry-forward inputs only.
 Reload before final adjudication:
 
 ```bash
-FINAL_ADJUDICATION_INIT=$(gpd --raw init peer-review "$REVIEW_TARGET" --stage final_adjudication)
+if [ -n "$REVIEW_TARGET" ]; then FINAL_ADJUDICATION_INIT=$(gpd --raw init peer-review --stage final_adjudication -- "$REVIEW_TARGET"); else FINAL_ADJUDICATION_INIT=$(gpd --raw init peer-review --stage final_adjudication); fi
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd peer-review final-adjudication init failed: $FINAL_ADJUDICATION_INIT"
   # STOP; surface the error.

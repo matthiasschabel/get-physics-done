@@ -22,49 +22,39 @@ before resolving the manuscript target.
 Load bootstrap and enter the resolved project root:
 
 ```bash
-if [ -n "${ARGUMENTS:-}" ]; then
-  BOOTSTRAP_INIT=$(gpd --raw init arxiv-submission --stage bootstrap -- "$ARGUMENTS")
-else
-  BOOTSTRAP_INIT=$(gpd --raw init arxiv-submission --stage bootstrap)
-fi
-if [ $? -ne 0 ]; then
-  echo "ERROR: arxiv-submission bootstrap init failed: $BOOTSTRAP_INIT"
-  exit 1
-fi
+if [ -n "${ARGUMENTS:-}" ]; then BOOTSTRAP_INIT=$(gpd --raw init arxiv-submission --stage bootstrap -- "$ARGUMENTS"); else BOOTSTRAP_INIT=$(gpd --raw init arxiv-submission --stage bootstrap); fi
+if [ $? -ne 0 ]; then echo "ERROR: arxiv-submission bootstrap init failed: $BOOTSTRAP_INIT"; exit 1; fi
 INIT="$BOOTSTRAP_INIT"
+```
+
+Apply `BOOTSTRAP_INIT.staged_loading.field_access_instruction` before reading `BOOTSTRAP_INIT`.
+
+```bash
 PROJECT_ROOT=$(echo "$INIT" | gpd json get .project_root --default "")
-if [ -n "$PROJECT_ROOT" ]; then
-  cd "$PROJECT_ROOT" || {
-    echo "ERROR: could not enter resolved project root: $PROJECT_ROOT"
-    exit 1
-  }
-fi
+if [ -n "$PROJECT_ROOT" ]; then cd "$PROJECT_ROOT" || { echo "ERROR: could not enter resolved project root: $PROJECT_ROOT"; exit 1; }; fi
+PAPER_DIR=$(echo "$INIT" | gpd json get .manuscript_root --default "")
+MAIN_SOURCE=$(echo "$INIT" | gpd json get .manuscript_entrypoint --default "")
+MAIN_BASENAME="${MAIN_SOURCE##*/}"
+MAIN_STEM="${MAIN_BASENAME%.*}"
+SUBJECT_SLUG=$(echo "$INIT" | gpd json get .publication_subject_slug --default "")
+PUBLICATION_ROOT=$(echo "$INIT" | gpd json get .managed_publication_root --default "")
+[ -n "$PUBLICATION_ROOT" ] || [ -z "$SUBJECT_SLUG" ] || PUBLICATION_ROOT="GPD/publication/${SUBJECT_SLUG}"
+REVIEW_ROOT=$(echo "$INIT" | gpd json get .selected_review_root --default GPD/review)
+PACKAGE_ROOT="${PUBLICATION_ROOT}/arxiv"
+SUBMISSION_DIR="${PACKAGE_ROOT}/submission"
+PACKAGE_TARBALL="${PACKAGE_ROOT}/arxiv-submission.tar.gz"
 ```
 
 Run centralized command context and strict review preflight:
 
 ```bash
-if [ -n "${ARGUMENTS:-}" ]; then
-  CONTEXT=$(gpd --raw validate command-context arxiv-submission -- "${ARGUMENTS}")
-else
-  CONTEXT=$(gpd --raw validate command-context arxiv-submission)
-fi
-if [ $? -ne 0 ]; then
-  echo "$CONTEXT"
-  exit 1
-fi
+if [ -n "${ARGUMENTS:-}" ]; then CONTEXT=$(gpd --raw validate command-context arxiv-submission -- "${ARGUMENTS}"); else CONTEXT=$(gpd --raw validate command-context arxiv-submission); fi
+if [ $? -ne 0 ]; then echo "$CONTEXT"; exit 1; fi
 ```
 
 ```bash
-if [ -n "${ARGUMENTS:-}" ]; then
-  REVIEW_PREFLIGHT=$(gpd --raw validate review-preflight arxiv-submission --strict -- "${ARGUMENTS}")
-else
-  REVIEW_PREFLIGHT=$(gpd --raw validate review-preflight arxiv-submission --strict)
-fi
-if [ $? -ne 0 ]; then
-  echo "$REVIEW_PREFLIGHT"
-  exit 1
-fi
+if [ -n "${ARGUMENTS:-}" ]; then REVIEW_PREFLIGHT=$(gpd --raw validate review-preflight arxiv-submission --strict -- "${ARGUMENTS}"); else REVIEW_PREFLIGHT=$(gpd --raw validate review-preflight arxiv-submission --strict); fi
+if [ $? -ne 0 ]; then echo "$REVIEW_PREFLIGHT"; exit 1; fi
 ```
 
 Parse `REVIEW_PREFLIGHT` for `publication_subject_slug`, `publication_lane_kind`,
@@ -111,21 +101,15 @@ Resolve manuscript target from raw preflight plus `$ARGUMENTS`:
    documented default roots.
 
 If latest review artifacts are missing, incomplete, stale, or blocked, or if
-manuscript-root gates fail, stop before packaging. Set `subject_slug` from
+manuscript-root gates fail, stop before packaging. Set `SUBJECT_SLUG` from
 `publication_subject_slug`; if missing, STOP. Package outputs are always rooted
-at `GPD/publication/${subject_slug}/arxiv/`; treat `selected_publication_root`
+at `GPD/publication/${SUBJECT_SLUG}/arxiv/`; treat `selected_publication_root`
 as validation context only. Do not write proof-review manifests, package staging
 trees, or tarballs beside the manuscript root itself.
 
-Set:
+The same-stage bindings above own the package paths:
 
 ```bash
-PAPER_DIR="${resolved_dir}"
-MAIN_SOURCE="${resolved_main_tex}"
-MAIN_BASENAME="$(basename "${MAIN_SOURCE}")"
-MAIN_STEM="${MAIN_BASENAME%.*}"
-PUBLICATION_ROOT="GPD/publication/${subject_slug}"
-REVIEW_ROOT="${selected_review_root:-GPD/review}"
 PACKAGE_ROOT="${PUBLICATION_ROOT}/arxiv"
 SUBMISSION_DIR="${PACKAGE_ROOT}/submission"
 PACKAGE_TARBALL="${PACKAGE_ROOT}/arxiv-submission.tar.gz"

@@ -173,10 +173,8 @@ def test_respond_to_referees_workflow_runs_centralized_review_preflight() -> Non
     assert 'gpd validate review-preflight respond-to-referees --strict -- "$PREFLIGHT_ARGUMENTS"' in workflow
     assert "gpd validate review-preflight respond-to-referees --strict" in workflow
     assert 'cd "$PROJECT_ROOT"' in workflow
-    assert 'gpd --raw init respond-to-referees --stage report_triage -- "$PREFLIGHT_ARGUMENTS"' in workflow
-    assert 'gpd --raw init respond-to-referees --stage revision_planning -- "$PREFLIGHT_ARGUMENTS"' in workflow
-    assert 'gpd --raw init respond-to-referees --stage response_authoring -- "$PREFLIGHT_ARGUMENTS"' in workflow
-    assert 'gpd --raw init respond-to-referees --stage finalize -- "$PREFLIGHT_ARGUMENTS"' in workflow
+    for stage_id in ("report_triage", "revision_planning", "response_authoring", "finalize"):
+        assert f'gpd --raw init respond-to-referees --stage {stage_id} -- "$ARGUMENTS"' in workflow
     _assert_semantic(
         workflow,
         "respond-to-referees intake and external subject preflight contract",
@@ -267,7 +265,7 @@ def test_arxiv_submission_workflow_runs_centralized_review_preflight() -> None:
         assert artifact_name in workflow
     assert "manuscript_entrypoint" in workflow
     assert "manuscript_root" in workflow
-    assert 'MAIN_SOURCE="${resolved_main_tex}"' in workflow
+    assert 'MAIN_SOURCE=$(echo "$INIT" | gpd json get .manuscript_entrypoint --default "")' in workflow
     assert 'PACKAGE_ROOT="${PUBLICATION_ROOT}/arxiv"' in workflow
     assert 'SUBMISSION_DIR="${PACKAGE_ROOT}/submission"' in workflow
     assert 'PACKAGE_TARBALL="${PACKAGE_ROOT}/arxiv-submission.tar.gz"' in workflow
@@ -283,8 +281,8 @@ def test_peer_review_workflow_runs_centralized_review_preflight_with_explicit_ar
     panel = _peer_review_stage_text("panel-stages.md")
     final = _peer_review_stage_text("final-adjudication.md")
 
-    assert 'gpd validate review-preflight peer-review "$REVIEW_TARGET" --strict' in preflight
-    assert "gpd validate review-preflight peer-review --strict" not in preflight
+    assert 'gpd validate review-preflight peer-review --strict -- "$REVIEW_TARGET"' in preflight
+    assert "gpd validate review-preflight peer-review --strict)" in preflight
     assert "stage-recovery-gate.md" in panel
     assert "checkpoint continuation" in panel
     gate = child_gate_from_text(final, "peer_review_stage6_referee")

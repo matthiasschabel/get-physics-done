@@ -33,6 +33,9 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
+Apply `BOOTSTRAP_INIT.staged_loading.field_access_instruction` before reading
+`BOOTSTRAP_INIT`.
+
 Extract from init JSON: `phase_dir`, `phase_number`, `phase_name`,
 `phase_found`, `autonomy`, `research_mode`, and the contract gate fields.
 
@@ -93,6 +96,11 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Read only `HANDOFF_INIT.staged_loading.eager_authorities`, primarily `workflows/research-phase/research-handoff.md`, plus the listed references. Do not continue from bootstrap memory into the researcher handoff.
+Apply `HANDOFF_INIT.staged_loading.field_access_instruction` before reading
+`HANDOFF_INIT`.
+
+Read only `HANDOFF_INIT.staged_loading.eager_authorities`, primarily
+`workflows/research-phase/research-handoff.md`, plus the listed references. Do
+not continue from bootstrap memory into the researcher handoff.
 
 </process>

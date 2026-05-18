@@ -29,7 +29,14 @@ export PROJECT_ROOT
 PROJECT_ROOT=$(echo "$SYNC_BOOTSTRAP_INIT" | gpd json get .project_root)
 ```
 
-Use `sync_bootstrap.required_init_fields` from `SYNC_BOOTSTRAP_INIT`. Use `project_root` from the init payload as the only write/read root; do not use the shell launch directory. `init_root_policy` and `project_reentry_guidance` are authoritative: sync-state is current-workspace-only and must not inspect or repair a recent project from another folder. Do not re-probe `GPD/STATE.md`, `GPD/state.json`, or `GPD/state.json.bak` by hand during routing.
+Apply `SYNC_BOOTSTRAP_INIT.staged_loading.field_access_instruction` before
+reading `SYNC_BOOTSTRAP_INIT`.
+
+Use `SYNC_BOOTSTRAP_INIT.staged_loading.required_init_fields` from the payload.
+Use `project_root` from the init payload as the only write/read root; do not use
+the shell launch directory. `init_root_policy` and `project_reentry_guidance`
+are authoritative: sync-state is current-workspace-only and must not inspect or repair a recent project from another folder. Do not re-probe `GPD/STATE.md`,
+`GPD/state.json`, or `GPD/state.json.bak` by hand during routing.
 
 If init reports `corrupt_state_bad_backup` / `unrecoverable_state_pair`, fail closed: stop in read-only diagnosis, writes none, no `state repair-sync`, backup promotion, or state rewrite. Offer only `gpd:health`, manual repair, and `gpd:export-logs`.
 

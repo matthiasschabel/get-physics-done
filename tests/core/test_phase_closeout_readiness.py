@@ -239,15 +239,29 @@ def test_closeout_readiness_missing_verification_blocks_by_default(tmp_path: Pat
     )
 
 
-def test_closeout_readiness_explicit_verification_opt_out_remains_warning_only(tmp_path: Path) -> None:
+def test_closeout_readiness_explicit_verification_opt_out_does_not_allow_mutation(tmp_path: Path) -> None:
     _write_phase_project(tmp_path, verification_status=None)
 
     result = phase_closeout_readiness(tmp_path, "02", require_verification=False)
 
-    assert result.ready is True
+    assert result.ready is False
+    assert result.mutation_allowed is False
     assert result.require_verification is False
-    assert result.closeout_command == "gpd phase complete 02"
+    assert result.closeout_command is None
     assert result.warnings[:1] == ["canonical verification status is 'missing'"]
+    assert any("advisory only" in warning for warning in result.warnings)
+    route = result.lifecycle_next_up
+    assert route is not None
+    _assert_route(
+        route,
+        status_class="needs_verification",
+        transition_owner="runtime",
+        current_blocking_gate="verification_missing",
+        primary_runtime_command="gpd:verify-work 02",
+        local_transition_command=None,
+        after_local_runtime_command=None,
+    )
+    assert route.primary.action == "verify-work"
 
 
 @pytest.mark.parametrize("status", ["gaps_found", "human_needed", "expert_needed"])
@@ -428,7 +442,7 @@ def test_phase_closeout_readiness_cli_blocks_missing_verification_by_default(tmp
     assert payload["blockers"] == ["canonical verification report missing"]
 
 
-def test_phase_closeout_readiness_cli_allows_explicit_verification_opt_out(tmp_path: Path) -> None:
+def test_phase_closeout_readiness_cli_opt_out_does_not_advertise_mutation(tmp_path: Path) -> None:
     _write_phase_project(tmp_path, verification_status=None)
 
     result = RUNNER.invoke(
@@ -444,11 +458,13 @@ def test_phase_closeout_readiness_cli_allows_explicit_verification_opt_out(tmp_p
         ],
     )
 
-    assert result.exit_code == 0
+    assert result.exit_code == 1
     payload = json.loads(result.output)
-    assert payload["ready"] is True
+    assert payload["ready"] is False
+    assert payload["mutation_allowed"] is False
     assert payload["require_verification"] is False
-    assert payload["closeout_command"] == "gpd phase complete 02"
+    assert payload["closeout_command"] is None
+    assert payload["lifecycle_next_up"]["primary"]["command"] == "gpd:verify-work 02"
 
 
 def test_phase_help_lists_closeout_readiness_not_removed_verification_summary() -> None:

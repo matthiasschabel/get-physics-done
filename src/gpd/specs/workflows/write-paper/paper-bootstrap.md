@@ -16,26 +16,24 @@ Run staged init and enter the resolved project root:
 
 ```bash
 WRITE_PAPER_ARGUMENTS="${ARGUMENTS:-}"
-if [ -n "$WRITE_PAPER_ARGUMENTS" ]; then
-  PAPER_BOOTSTRAP_INIT=$(gpd --raw init write-paper --stage paper_bootstrap -- "$WRITE_PAPER_ARGUMENTS")
-else
-  PAPER_BOOTSTRAP_INIT=$(gpd --raw init write-paper --stage paper_bootstrap)
-fi
-if [ $? -ne 0 ]; then
-  echo "ERROR: gpd initialization failed: $PAPER_BOOTSTRAP_INIT"
-  # STOP; surface the error.
-fi
+if [ -n "$WRITE_PAPER_ARGUMENTS" ]; then PAPER_BOOTSTRAP_INIT=$(gpd --raw init write-paper --stage paper_bootstrap -- "$WRITE_PAPER_ARGUMENTS"); else PAPER_BOOTSTRAP_INIT=$(gpd --raw init write-paper --stage paper_bootstrap); fi
+if [ $? -ne 0 ]; then echo "ERROR: gpd initialization failed: $PAPER_BOOTSTRAP_INIT"; fi
 INIT="$PAPER_BOOTSTRAP_INIT"
-PROJECT_ROOT=$(echo "$INIT" | gpd json get .project_root --default "")
-if [ -n "$PROJECT_ROOT" ]; then
-  cd "$PROJECT_ROOT" || { echo "ERROR: could not enter resolved project root: $PROJECT_ROOT"; exit 1; }
-fi
 ```
 
 Apply `PAPER_BOOTSTRAP_INIT.staged_loading.field_access_instruction` before reading `PAPER_BOOTSTRAP_INIT`. Keep `project_contract_gate`, load info, validation, and
 `effective_reference_intake` visible before authoritative-use decisions; treat
 the contract as authoritative only when `project_contract_gate.authoritative` is
 true.
+
+```bash
+PROJECT_ROOT=$(echo "$INIT" | gpd json get .project_root --default "")
+if [ -n "$PROJECT_ROOT" ]; then cd "$PROJECT_ROOT" || { echo "ERROR: could not enter resolved project root: $PROJECT_ROOT"; exit 1; }; fi
+WRITE_PAPER_ARGUMENTS=$(echo "$INIT" | gpd json get .write_paper_argument_input --default "$WRITE_PAPER_ARGUMENTS")
+PAPER_DIR=$(echo "$INIT" | gpd json get .publication_bootstrap_root --default "")
+PAPER_DIR="${PAPER_DIR:-$(echo "$INIT" | gpd json get .manuscript_root --default "")}"
+MANUSCRIPT_ENTRYPOINT=$(echo "$INIT" | gpd json get .manuscript_entrypoint --default "")
+```
 
 Use derived manuscript review statuses from init before reconstructing them from
 source ordering or prose: `derived_manuscript_reference_status` for the resolved
@@ -179,7 +177,7 @@ When preflight, evidence inventory, citation readiness, and claim/evidence gates
 are non-blocking, reload:
 
 ```bash
-OUTLINE_INIT=$(gpd --raw init write-paper --stage outline_and_scaffold -- "${WRITE_PAPER_ARGUMENTS:-}")
+if [ -n "$WRITE_PAPER_ARGUMENTS" ]; then OUTLINE_INIT=$(gpd --raw init write-paper --stage outline_and_scaffold -- "$WRITE_PAPER_ARGUMENTS"); else OUTLINE_INIT=$(gpd --raw init write-paper --stage outline_and_scaffold); fi
 ```
 
 Start the next stage from `OUTLINE_INIT`; do not carry this bootstrap authority as the active instruction surface.

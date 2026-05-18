@@ -57,6 +57,7 @@ PHASE6_CROSS_RUNTIME_ACCEPTANCE_SUPPORT_RELPATHS = (
     "adapters/projection_test_utils.py",
     "adapters/projection_budget_support.py",
 )
+PROVIDER_FREE_PERSONA_CANARY_RELPATH = "core/test_provider_free_persona_canary_acceptance.py"
 
 
 def _read(relpath: str) -> str:
@@ -333,6 +334,32 @@ def test_adapter_hotspot_metadata_tracks_catalog_runtime_adapter_tests() -> None
     assert runtime_adapter_test_files <= set(CI_HOT_TEST_FILE_WEIGHT_MULTIPLIERS)
     assert all(CI_HOT_TEST_FILE_SPLITS[rel_path] >= 2 for rel_path in runtime_adapter_test_files)
     assert all(CI_HOT_TEST_FILE_WEIGHT_MULTIPLIERS[rel_path] > 1.0 for rel_path in runtime_adapter_test_files)
+
+
+def test_provider_free_persona_canary_hotspot_metadata_keeps_canary_split() -> None:
+    relpath = PROVIDER_FREE_PERSONA_CANARY_RELPATH
+
+    assert CI_HOT_TEST_FILE_SPLITS[relpath] >= 2
+    assert CI_HOT_TEST_FILE_WEIGHT_MULTIPLIERS[relpath] >= 6.0
+
+    inventory = synthetic_test_inventory()
+    work_units = build_ci_work_units(inventory)
+    provider_units = tuple(unit for unit in work_units if unit.label.startswith(f"{relpath} ["))
+    planned_core_shards = plan_category_ci_shards(category="core", inventory=inventory, work_units=work_units)
+    provider_shards = tuple(
+        shard_targets
+        for shard_targets in planned_core_shards
+        if any(PROVIDER_FREE_PERSONA_CANARY_RELPATH in target for target in shard_targets)
+    )
+
+    assert len(provider_units) == CI_HOT_TEST_FILE_SPLITS[relpath]
+    assert all("::" in target for unit in provider_units for target in unit.targets)
+    assert all(f"tests/{relpath}" not in shard_targets for shard_targets in planned_core_shards)
+    assert len(provider_shards) == len(provider_units)
+    assert all(
+        sum(1 for target in shard_targets if PROVIDER_FREE_PERSONA_CANARY_RELPATH in target) == 1
+        for shard_targets in provider_shards
+    )
 
 
 def test_phase6_cross_runtime_acceptance_surfaces_remain_ci_visible() -> None:

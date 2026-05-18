@@ -14,22 +14,30 @@ This stage is read-only. It must not create response artifacts, load response te
 Load the report-triage stage before parsing referee reports or latest-round artifacts:
 
 ```bash
-if [ -n "${PREFLIGHT_ARGUMENTS:-}" ]; then
-  REPORT_TRIAGE_INIT=$(gpd --raw init respond-to-referees --stage report_triage -- "$PREFLIGHT_ARGUMENTS")
-elif [ -n "${ARGUMENTS:-}" ]; then
-  REPORT_TRIAGE_INIT=$(gpd --raw init respond-to-referees --stage report_triage -- "$ARGUMENTS")
-else
-  REPORT_TRIAGE_INIT=$(gpd --raw init respond-to-referees --stage report_triage)
-fi
-if [ $? -ne 0 ]; then
-  echo "ERROR: respond-to-referees report-triage init failed: $REPORT_TRIAGE_INIT"
-  # STOP; surface the error.
-fi
+if [ -n "${ARGUMENTS:-}" ]; then REPORT_TRIAGE_INIT=$(gpd --raw init respond-to-referees --stage report_triage -- "$ARGUMENTS"); else REPORT_TRIAGE_INIT=$(gpd --raw init respond-to-referees --stage report_triage); fi
+if [ $? -ne 0 ]; then echo "ERROR: respond-to-referees report-triage init failed: $REPORT_TRIAGE_INIT"; fi
+INIT="$REPORT_TRIAGE_INIT"
 ```
 
 <field_access>
 Apply `REPORT_TRIAGE_INIT.staged_loading.field_access_instruction` before reading `REPORT_TRIAGE_INIT`. Select report/round before evidence bodies load.
 </field_access>
+
+```bash
+RESPONSE_ARGUMENTS=$(echo "$INIT" | gpd json get .response_intake_input --default "")
+PAPER_DIR=$(echo "$INIT" | gpd json get .manuscript_root --default "")
+MANUSCRIPT_ENTRYPOINT=$(echo "$INIT" | gpd json get .manuscript_entrypoint --default "")
+MANUSCRIPT_BASENAME="${MANUSCRIPT_ENTRYPOINT##*/}"
+RESPONSE_PUBLICATION_ROOT=$(echo "$INIT" | gpd json get .selected_publication_root --default GPD)
+RESPONSE_REVIEW_ROOT=$(echo "$INIT" | gpd json get .selected_review_root --default "")
+RESPONSE_REVIEW_ROOT="${RESPONSE_REVIEW_ROOT:-${RESPONSE_PUBLICATION_ROOT}/review}"
+ROUND_SUFFIX=$(echo "$INIT" | gpd json get .latest_response_round_suffix --default "")
+ROUND_SUFFIX="${ROUND_SUFFIX:-$(echo "$INIT" | gpd json get .latest_review_round_suffix --default "")}"
+RESPONSE_AUTHOR_PATH=$(echo "$INIT" | gpd json get .latest_author_response --default "")
+RESPONSE_AUTHOR_PATH="${RESPONSE_AUTHOR_PATH:-${RESPONSE_PUBLICATION_ROOT}/AUTHOR-RESPONSE${ROUND_SUFFIX}.md}"
+RESPONSE_REFEREE_PATH=$(echo "$INIT" | gpd json get .latest_referee_response --default "")
+RESPONSE_REFEREE_PATH="${RESPONSE_REFEREE_PATH:-${RESPONSE_REVIEW_ROOT}/REFEREE_RESPONSE${ROUND_SUFFIX}.md}"
+```
 
 Apply `{GPD_INSTALL_DIR}/references/publication/publication-response-writer-handoff.md` from this stage exactly.
 Use that shared handoff for `round_suffix`, sibling-artifact discovery, and the canonical response-artifact pair for the active round.

@@ -666,11 +666,14 @@ def assert_help_command_quick_start_extract_contract(content: str) -> None:
     _assert_contains_any(
         content,
         (
+            "Extract from `<!-- gpd-help:default:start -->` through `<!-- gpd-help:default:end -->`.",
+            "gpd-help:default:start",
             "Extract from `<!-- gpd-help:quick-start:start -->` through `<!-- gpd-help:quick-start:end -->`.",
             "gpd-help:quick-start:start",
         ),
         label="help command quick-start reference anchor",
     )
+    assert "gpd-help:default:start" in content
     assert "## Invocation Surfaces" not in content
     _assert_contains_any(
         content,

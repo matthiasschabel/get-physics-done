@@ -4,8 +4,15 @@ Choose the correct workflow for `PHASE_NUM` after roadmap discovery.
 </purpose>
 
 <load>
-Load the current phase with `gpd --raw init autonomous --stage phase_route` and
-`gpd --raw roadmap get-phase ${PHASE_NUM}`. Then refresh phase state with:
+Load the current phase:
+
+```sh
+PHASE_ROUTE_INIT=$(gpd --raw init autonomous --stage phase_route)
+```
+
+Apply `PHASE_ROUTE_INIT.staged_loading.field_access_instruction` before reading
+`PHASE_ROUTE_INIT`. Also load `gpd --raw roadmap get-phase ${PHASE_NUM}`. Then
+refresh phase state with:
 
 ```sh
 PHASE_STATE=$(gpd --raw init phase-op ${PHASE_NUM})

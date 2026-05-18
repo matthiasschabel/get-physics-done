@@ -13,6 +13,7 @@ if __package__ in {None, ""}:
 
 from gpd.core.help_renderer import (
     render_command_index_markdown,
+    render_default_help_markdown,
     render_detailed_command_reference_markdown,
     render_quick_start_markdown,
     render_root_detailed_command_reference_markdown,
@@ -40,6 +41,7 @@ _ROOT_HELP_BLOCK_RENDERERS: dict[str, Callable[[], str]] = {
     "quick-start": render_quick_start_markdown,
     "command-index": render_command_index_markdown,
     "detailed-command-reference": render_root_detailed_command_reference_markdown,
+    "default": render_default_help_markdown,
 }
 
 _DETAIL_HELP_BLOCK_RENDERERS: dict[str, Callable[[], str]] = {

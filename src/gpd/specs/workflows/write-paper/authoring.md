@@ -16,15 +16,27 @@ Load the staged figure/section authoring payload before generating figures or
 spawning paper-writer section agents:
 
 ```bash
-AUTHORING_INIT=$(gpd --raw init write-paper --stage figure_and_section_authoring -- "${WRITE_PAPER_ARGUMENTS:-}")
-if [ $? -ne 0 ]; then
-  echo "ERROR: write-paper authoring init failed: $AUTHORING_INIT"
-  # STOP; surface the error.
-fi
+if [ -n "${ARGUMENTS:-}" ]; then AUTHORING_INIT=$(gpd --raw init write-paper --stage figure_and_section_authoring -- "$ARGUMENTS"); else AUTHORING_INIT=$(gpd --raw init write-paper --stage figure_and_section_authoring); fi
+if [ $? -ne 0 ]; then echo "ERROR: write-paper authoring init failed: $AUTHORING_INIT"; fi
 INIT="$AUTHORING_INIT"
 ```
 
 Apply `AUTHORING_INIT.staged_loading.field_access_instruction` before reading `AUTHORING_INIT`.
+
+```bash
+WRITE_PAPER_ARGUMENTS=$(echo "$INIT" | gpd json get .write_paper_argument_input --default "")
+PAPER_DIR=$(echo "$INIT" | gpd json get .publication_bootstrap_root --default "")
+PAPER_DIR="${PAPER_DIR:-$(echo "$INIT" | gpd json get .manuscript_root --default "")}"
+MANUSCRIPT_ENTRYPOINT=$(echo "$INIT" | gpd json get .manuscript_entrypoint --default "")
+MANUSCRIPT_BASENAME="${MANUSCRIPT_ENTRYPOINT##*/}"
+AUTONOMY=$(echo "$INIT" | gpd json get .autonomy --default balanced)
+RESEARCH_MODE=$(echo "$INIT" | gpd json get .research_mode --default balanced)
+if command -v pdflatex >/dev/null 2>&1; then
+  PDFLATEX_AVAILABLE=true
+else
+  PDFLATEX_AVAILABLE=false
+fi
+```
 
 This is a body-hydration stage: section drafting may use planning bodies and
 reference artifact content. It still does not need rendered
@@ -168,7 +180,7 @@ readable in grayscale, and prefer vector formats for line plots.
 After section drafting, reload:
 
 ```bash
-CONSISTENCY_INIT=$(gpd --raw init write-paper --stage consistency_and_references -- "${WRITE_PAPER_ARGUMENTS:-}")
+if [ -n "$WRITE_PAPER_ARGUMENTS" ]; then CONSISTENCY_INIT=$(gpd --raw init write-paper --stage consistency_and_references -- "$WRITE_PAPER_ARGUMENTS"); else CONSISTENCY_INIT=$(gpd --raw init write-paper --stage consistency_and_references); fi
 ```
 
 Do not mark authoring complete until expected section files exist on disk and the

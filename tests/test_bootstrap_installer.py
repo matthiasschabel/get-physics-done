@@ -1154,6 +1154,19 @@ def test_bootstrap_help_uses_catalog_driven_example_runtimes() -> None:
     shared_install = _BOOTSTRAP_INSTALLER_METADATA_PAYLOAD["shared_install_metadata"]
     assert isinstance(shared_install, dict)
     assert f"{shared_install['bootstrapCommand']} [install|uninstall] [options]" in result.stdout
+    plain_stdout = re.sub(r"\x1b\[[0-9;]*m", "", result.stdout)
+    longest_runtime_flags, longest_runtime_display_name = max(
+        (
+            (
+                ", ".join(dict.fromkeys((descriptor.install_flag, *descriptor.selection_flags))),
+                descriptor.display_name,
+            )
+            for descriptor in _RUNTIME_DESCRIPTORS
+        ),
+        key=lambda row: len(row[0]),
+    )
+    assert f"{longest_runtime_flags} Select {longest_runtime_display_name} only" in plain_stdout
+    assert f"{longest_runtime_flags}Select" not in plain_stdout
     for descriptor in _RUNTIME_HELP_EXAMPLE_DESCRIPTORS:
         assert f"# Install for {descriptor.display_name} {descriptor.installer_help_example_scope}" in result.stdout
     _assert_in_order(

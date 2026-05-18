@@ -109,6 +109,7 @@ def test_current_help_surface_generated_target_inventory_is_explicit() -> None:
         "quick-start",
         "command-index",
         "detailed-command-reference",
+        "default",
     )
     assert _relative_path_key(HELP_DETAIL_REFERENCE_PATH) == (
         "src/gpd/specs/references/help/detailed-command-reference.md"

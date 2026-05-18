@@ -1,7 +1,14 @@
 <stage id="initialize_discover">
 Autonomous mode is an orchestrator, not a Markdown status parser. Load this
-stage with `gpd --raw init autonomous --stage initialize_discover`, then use the
-returned JSON and the raw helpers below as the only phase-status authorities.
+stage first:
+
+```sh
+AUTONOMOUS_INIT=$(gpd --raw init autonomous --stage initialize_discover)
+```
+
+Apply `AUTONOMOUS_INIT.staged_loading.field_access_instruction` before reading
+`AUTONOMOUS_INIT`, then use the returned JSON and the raw helpers below as the
+only phase-status authorities.
 
 <discover>
 If the user supplied `--from`, use it as `PHASE_NUM`; otherwise run

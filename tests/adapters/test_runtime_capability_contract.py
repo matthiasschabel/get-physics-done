@@ -18,7 +18,6 @@ from gpd.adapters.runtime_catalog import (
     iter_runtime_descriptors,
 )
 from gpd.core.costs import build_cost_summary, record_usage_from_runtime_payload
-from gpd.core.surface_phrases import cost_summary_surface_note
 from tests.assertion_taxonomy_support import assert_prompt_contracts, public_exact, semantic_concept
 from tests.doc_surface_contracts import assert_settings_local_terminal_follow_up_contract
 
@@ -329,7 +328,12 @@ def test_public_runtime_surfaces_stay_conservative_when_capabilities_differ() ->
         for content in (readme, help_workflow):
             assert "gpd cost" in content
             assert "recorded local telemetry" in content
-        assert cost_summary_surface_note() in help_workflow
+        for fragment in (
+            "read-only machine-local snapshots",
+            "optional USD budget guardrails",
+            "provider billing truth",
+        ):
+            assert fragment in help_workflow
         assert "provider billing truth" in help_workflow
 
     if any(descriptor.capabilities.permissions_surface != "unsupported" for descriptor in descriptors):

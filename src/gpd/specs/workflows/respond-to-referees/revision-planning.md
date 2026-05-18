@@ -9,9 +9,33 @@ Load this stage only after report triage has selected the active report source a
 <process>
 
 <step name="load_specialized_revision_context">
+Load the revision-planning stage before classifying comments or routing new work:
+
+```bash
+if [ -n "${ARGUMENTS:-}" ]; then REVISION_PLANNING_INIT=$(gpd --raw init respond-to-referees --stage revision_planning -- "$ARGUMENTS"); else REVISION_PLANNING_INIT=$(gpd --raw init respond-to-referees --stage revision_planning); fi
+if [ $? -ne 0 ]; then echo "ERROR: respond-to-referees revision-planning init failed: $REVISION_PLANNING_INIT"; fi
+INIT="$REVISION_PLANNING_INIT"
+```
+
 <field_access>
 Apply `REVISION_PLANNING_INIT.staged_loading.field_access_instruction` before reading `REVISION_PLANNING_INIT`. Select reviewer issues from handles before evidence bodies load.
 </field_access>
+
+```bash
+RESPONSE_ARGUMENTS=$(echo "$INIT" | gpd json get .response_intake_input --default "")
+PAPER_DIR=$(echo "$INIT" | gpd json get .manuscript_root --default "")
+MANUSCRIPT_ENTRYPOINT=$(echo "$INIT" | gpd json get .manuscript_entrypoint --default "")
+MANUSCRIPT_BASENAME="${MANUSCRIPT_ENTRYPOINT##*/}"
+RESPONSE_PUBLICATION_ROOT=$(echo "$INIT" | gpd json get .selected_publication_root --default GPD)
+RESPONSE_REVIEW_ROOT=$(echo "$INIT" | gpd json get .selected_review_root --default "")
+RESPONSE_REVIEW_ROOT="${RESPONSE_REVIEW_ROOT:-${RESPONSE_PUBLICATION_ROOT}/review}"
+ROUND_SUFFIX=$(echo "$INIT" | gpd json get .latest_response_round_suffix --default "")
+ROUND_SUFFIX="${ROUND_SUFFIX:-$(echo "$INIT" | gpd json get .latest_review_round_suffix --default "")}"
+RESPONSE_AUTHOR_PATH=$(echo "$INIT" | gpd json get .latest_author_response --default "")
+RESPONSE_AUTHOR_PATH="${RESPONSE_AUTHOR_PATH:-${RESPONSE_PUBLICATION_ROOT}/AUTHOR-RESPONSE${ROUND_SUFFIX}.md}"
+RESPONSE_REFEREE_PATH=$(echo "$INIT" | gpd json get .latest_referee_response --default "")
+RESPONSE_REFEREE_PATH="${RESPONSE_REFEREE_PATH:-${RESPONSE_REVIEW_ROOT}/REFEREE_RESPONSE${ROUND_SUFFIX}.md}"
+```
 
 - If `selected_protocol_bundle_ids` is non-empty, keep the bundle's decisive artifact expectations, benchmark anchors, estimator caveats, and reference prompts visible while triaging referee requests.
 - Use bundle guidance to distinguish "missing decisive evidence we already owed" from "new side quest the referee is asking for."

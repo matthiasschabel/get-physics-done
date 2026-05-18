@@ -784,7 +784,7 @@ def _coerce_shared_phase_lifecycle_suggestion(
         return None
     if closed_next_phase:
         primary_action = _normalize_lifecycle_action(_payload_value(primary_payload, "action"), status)
-        if primary_action not in {"discuss-phase", "plan-phase"}:
+        if primary_action not in {"discuss-phase", "execute-phase", "plan-phase"}:
             return None
 
     ready_for_next = _lifecycle_value(
@@ -1680,6 +1680,7 @@ def suggest_next(cwd: Path, *, limit: int = 5) -> SuggestResult:
         )
         if isinstance(pending_lifecycle, _PhaseLifecycleSuggestion) and pending_lifecycle.action in {
             "discuss-phase",
+            "execute-phase",
             "plan-phase",
         }:
             target_phase = _phase_normalize(pending_lifecycle.phase)

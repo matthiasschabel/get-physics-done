@@ -17,11 +17,18 @@ when the upstream stage artifact index needs lookup.
 Load staged final-adjudication before spawning `gpd-referee`:
 
 ```bash
-FINAL_ADJUDICATION_INIT=$(gpd --raw init peer-review "$REVIEW_TARGET" --stage final_adjudication)
-if [ $? -ne 0 ]; then
-  echo "ERROR: gpd peer-review final-adjudication init failed: $FINAL_ADJUDICATION_INIT"
-  # STOP; surface the error.
-fi
+if [ -n "${ARGUMENTS:-}" ]; then FINAL_ADJUDICATION_INIT=$(gpd --raw init peer-review --stage final_adjudication -- "$ARGUMENTS"); else FINAL_ADJUDICATION_INIT=$(gpd --raw init peer-review --stage final_adjudication); fi
+if [ $? -ne 0 ]; then echo "ERROR: gpd peer-review final-adjudication init failed: $FINAL_ADJUDICATION_INIT"; fi
+INIT="$FINAL_ADJUDICATION_INIT"
+```
+
+Apply `FINAL_ADJUDICATION_INIT.staged_loading.field_access_instruction` before reading it.
+
+```bash
+REVIEW_TARGET=$(echo "$INIT" | gpd json get .review_target_input --default "")
+PUBLICATION_ROOT=$(echo "$INIT" | gpd json get .selected_publication_root --default GPD)
+REVIEW_ROOT=$(echo "$INIT" | gpd json get .selected_review_root --default "")
+REVIEW_ROOT="${REVIEW_ROOT:-${PUBLICATION_ROOT}/review}"
 ```
 
 Spawn `gpd-referee` over persisted artifacts only: selected manuscript path/hash,
@@ -128,7 +135,7 @@ optional bookkeeping.
 When Stage 6 validates, reload before final summary and routing:
 
 ```bash
-FINALIZE_INIT=$(gpd --raw init peer-review "$REVIEW_TARGET" --stage finalize)
+if [ -n "$REVIEW_TARGET" ]; then FINALIZE_INIT=$(gpd --raw init peer-review --stage finalize -- "$REVIEW_TARGET"); else FINALIZE_INIT=$(gpd --raw init peer-review --stage finalize); fi
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd peer-review finalize init failed: $FINALIZE_INIT"
   # STOP; surface the error.

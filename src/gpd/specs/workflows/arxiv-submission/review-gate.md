@@ -20,6 +20,18 @@ if [ $? -ne 0 ]; then
   echo "ERROR: arxiv-submission review_gate init failed: $REVIEW_GATE_INIT"
   exit 1
 fi
+INIT="$REVIEW_GATE_INIT"
+```
+
+Apply `REVIEW_GATE_INIT.staged_loading.field_access_instruction` before reading `REVIEW_GATE_INIT`.
+
+```bash
+PAPER_DIR=$(echo "$INIT" | gpd json get .manuscript_root --default "")
+MAIN_SOURCE=$(echo "$INIT" | gpd json get .manuscript_entrypoint --default "")
+SUBJECT_SLUG=$(echo "$INIT" | gpd json get .publication_subject_slug --default "")
+PUBLICATION_ROOT=$(echo "$INIT" | gpd json get .managed_publication_root --default "")
+[ -n "$PUBLICATION_ROOT" ] || [ -z "$SUBJECT_SLUG" ] || PUBLICATION_ROOT="GPD/publication/${SUBJECT_SLUG}"
+REVIEW_ROOT=$(echo "$INIT" | gpd json get .selected_review_root --default GPD/review)
 ```
 
 Load the shared latest-round publication contract from `{GPD_INSTALL_DIR}/references/publication/publication-review-round-artifacts.md`.

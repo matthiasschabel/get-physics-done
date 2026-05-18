@@ -17,7 +17,7 @@ from gpd.core.workflow_staging import (
     WORKFLOW_STAGE_MANIFEST_SUFFIX,
     load_workflow_stage_manifest,
 )
-from tests.workflow_authority_support import workflow_authority_text
+from tests.workflow_authority_support import workflow_authority_paths, workflow_authority_text
 
 runner = CliRunner()
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -69,6 +69,28 @@ STAGED_PROMPT_HYGIENE_WORKFLOWS = (
     "resume-work",
     "verify-work",
     "new-project",
+    "sync-state",
+)
+PUBLICATION_STAGED_PROMPT_WORKFLOWS = frozenset(
+    {
+        "arxiv-submission",
+        "peer-review",
+        "respond-to-referees",
+        "write-paper",
+    }
+)
+RAW_INIT_WORKFLOW_ALIASES = {
+    "resume": "resume-work",
+}
+STAGED_RAW_INIT_COMMAND_PATTERN = re.compile(
+    r"\bgpd\s+--raw\s+init\s+(?P<workflow>[a-z][a-z0-9-]*)\b[^\n`)]*--stage\b"
+)
+STAGED_RAW_INIT_ASSIGNMENT_PATTERN = re.compile(
+    r"(?m)^\s*(?P<var>[A-Z][A-Z0-9_]*)=\$\(gpd\s+--raw\s+init\s+"
+    r"(?P<workflow>[a-z][a-z0-9-]*)\b[^\n)]*--stage\b[^\n)]*\)"
+)
+STALE_REQUIRED_INIT_FIELDS_PATTERN = re.compile(
+    r"\b(?!staged_loading\b)[a-z][a-z0-9_]*\.required_init_fields\b"
 )
 EXPECTED_FIELD_ACCESS_STAGE_MENTIONS = {
     "plan-phase": ("phase_bootstrap", "research_routing", "planner_authoring", "checker_revision"),
@@ -144,6 +166,33 @@ STAGED_FIELD_INVENTORY_PATTERNS = (
 
 def _field_access_command(workflow_id: str, stage_id: str) -> str:
     return f"gpd --raw stage field-access {workflow_id} --stage {stage_id} --style instruction"
+
+
+def _raw_init_manifest_workflow_id(workflow_id: str) -> str:
+    return RAW_INIT_WORKFLOW_ALIASES.get(workflow_id, workflow_id)
+
+
+def _non_publication_staged_prompt_paths() -> tuple[tuple[str, Path], ...]:
+    paths: list[tuple[str, Path]] = []
+    seen: set[Path] = set()
+    for workflow_id in FIELD_ACCESS_WORKFLOWS:
+        if workflow_id in PUBLICATION_STAGED_PROMPT_WORKFLOWS:
+            continue
+        for path in workflow_authority_paths(WORKFLOWS_DIR, workflow_id):
+            if path in seen:
+                continue
+            seen.add(path)
+            paths.append((workflow_id, path))
+    return tuple(paths)
+
+
+def _manifest_backed_raw_init_workflows(text: str) -> set[str]:
+    manifest_workflows = set(FIELD_ACCESS_WORKFLOWS)
+    return {
+        mapped_workflow_id
+        for match in STAGED_RAW_INIT_COMMAND_PATTERN.finditer(text)
+        if (mapped_workflow_id := _raw_init_manifest_workflow_id(match.group("workflow"))) in manifest_workflows
+    }
 
 
 def _assert_instruction_omits_full_selected_field_inventory(
@@ -404,6 +453,44 @@ def test_staged_workflow_prompts_do_not_reintroduce_hand_written_field_inventori
 
     for pattern in STAGED_FIELD_INVENTORY_PATTERNS:
         assert pattern.search(source) is None
+
+
+def test_non_publication_staged_raw_init_prompts_apply_field_access_instruction() -> None:
+    failures: list[str] = []
+
+    for _owner_workflow_id, path in _non_publication_staged_prompt_paths():
+        text = path.read_text(encoding="utf-8")
+        raw_init_workflows = _manifest_backed_raw_init_workflows(text)
+        if not raw_init_workflows:
+            continue
+
+        if "staged_loading.field_access_instruction" not in text:
+            failures.append(f"{path.relative_to(REPO_ROOT)}: missing staged_loading.field_access_instruction")
+
+        for match in STAGED_RAW_INIT_ASSIGNMENT_PATTERN.finditer(text):
+            command_workflow_id = _raw_init_manifest_workflow_id(match.group("workflow"))
+            if command_workflow_id not in FIELD_ACCESS_WORKFLOWS:
+                continue
+            payload_var = match.group("var")
+            marker = f"{payload_var}.staged_loading.field_access_instruction"
+            if marker not in text:
+                failures.append(f"{path.relative_to(REPO_ROOT)}: `{marker}` is required")
+
+    assert failures == []
+
+
+def test_non_publication_staged_raw_init_prompts_use_payload_required_fields_path() -> None:
+    failures: list[str] = []
+
+    for _owner_workflow_id, path in _non_publication_staged_prompt_paths():
+        text = path.read_text(encoding="utf-8")
+        if not _manifest_backed_raw_init_workflows(text):
+            continue
+
+        for match in STALE_REQUIRED_INIT_FIELDS_PATTERN.finditer(text):
+            failures.append(f"{path.relative_to(REPO_ROOT)}: stale `{match.group(0)}`")
+
+    assert failures == []
 
 
 def test_json_style_exposes_exact_fields_and_requested_aliases() -> None:

@@ -16,7 +16,11 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Use `conflict_analysis.required_init_fields` from `CONFLICT_ANALYSIS_INIT`. Do not re-read the mirrored files by hand for comparison.
+Apply `CONFLICT_ANALYSIS_INIT.staged_loading.field_access_instruction` before
+reading `CONFLICT_ANALYSIS_INIT`.
+
+Use `CONFLICT_ANALYSIS_INIT.staged_loading.required_init_fields` from the
+payload. Do not re-read the mirrored files by hand for comparison.
 This is the only non-bootstrap sync stage that may receive raw state bodies for
 a read-only drift report. Do not load the state JSON schema unless
 `manual_schema_drift_analysis` is explicitly selected.

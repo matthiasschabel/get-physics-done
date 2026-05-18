@@ -396,8 +396,7 @@ Related knobs: `execution.review_cadence`, `planning.commit_docs`, and `git.bran
 - Start: `gpd:start` -> `gpd:tour` -> `gpd:new-project` or `gpd:map-research`; then use fresh context windows for `gpd:discuss-phase 1`, `gpd:plan-phase 1`, and `gpd:execute-phase 1`.
 - Fast bootstrap: `gpd:new-project --minimal` or `gpd:new-project --minimal @plan.md`.
 - Return: `gpd:pause-work`, then `gpd resume` or `gpd resume --recent` from a normal terminal, then `gpd:resume-work`, `gpd:suggest-next`, or `gpd:progress --brief`.
-- Cost/status: `gpd observe execution` and `gpd cost` are read-only machine-local snapshots; cost is advisory only and may be partial or estimated when telemetry is missing, not live budget enforcement.
-- Read-only machine-local usage / cost summary from recorded local telemetry, optional USD budget guardrails, and the current profile tier mix; advisory only, not live budget enforcement or provider billing truth. If telemetry is missing, the USD view stays partial or estimated rather than exact.
+- Cost/status: `gpd observe execution` and `gpd cost` are read-only machine-local snapshots from recorded local telemetry, optional USD budget guardrails, and the current profile tier mix; cost is advisory only, may be partial or estimated when telemetry is missing, and is not live budget enforcement or provider billing truth.
 - Scope changes: `gpd:insert-phase 5 "Fix sign error in renormalization group equation"` -> `gpd:plan-phase 5.1` -> `gpd:execute-phase 5.1`.
 - Milestones and todos: `gpd:complete-milestone v2.0`, `gpd:new-milestone`, `gpd:add-todo`, `gpd:check-todos`, `gpd:check-todos numerical`.
 - Suggested by `gpd:progress`: run `gpd:compact-state` when state compaction is useful.
@@ -412,6 +411,26 @@ Related knobs: `execution.review_cadence`, `planning.commit_docs`, and `git.bran
 - Run `gpd:progress` to check where you are
 - Run `gpd:start` when you need the safest route for this folder
 - Run `gpd:suggest-next` when you only need the next action
+
+<!-- gpd-help:default:start -->
+## Quick Start
+
+Choose the path that matches this folder:
+
+**New folder**
+1. `gpd:start` - Let GPD inspect the folder and route the safest first step
+2. `gpd:new-project` - Create a full GPD project here
+3. `gpd:new-project --minimal` - Use the shortest setup path
+
+**Existing research folder**
+1. `gpd:map-research` - Map files and context before planning
+2. `gpd:new-project` - Turn the mapped context into a full GPD project
+
+**Returning project**
+1. `gpd resume` - Reopen this workspace from your normal terminal
+2. `gpd resume --recent` - Choose a different recent workspace from your normal terminal
+3. `gpd:resume-work` - Continue inside the reopened project's canonical state
+<!-- gpd-help:default:end -->
   </reference>
 
 <success_criteria>

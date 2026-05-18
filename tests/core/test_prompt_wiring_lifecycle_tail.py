@@ -51,7 +51,7 @@ def test_peer_review_and_arxiv_use_subject_aware_publication_roots() -> None:
         "BOOTSTRAP_INIT=$(gpd --raw init arxiv-submission --stage bootstrap)",
         'gpd --raw validate command-context arxiv-submission -- "${ARGUMENTS}"',
         'gpd --raw validate review-preflight arxiv-submission --strict -- "${ARGUMENTS}"',
-        'PUBLICATION_ROOT="GPD/publication/${subject_slug}"',
+        'PUBLICATION_ROOT="GPD/publication/${SUBJECT_SLUG}"',
         'PACKAGE_ROOT="${PUBLICATION_ROOT}/arxiv"',
         context="arxiv subject-aware publication root commands",
     )

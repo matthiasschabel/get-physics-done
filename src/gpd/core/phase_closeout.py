@@ -179,12 +179,12 @@ def _next_phase_context_class(project_root: str, next_phase: str | None) -> str:
         for roadmap_phase in roadmap_analyze(Path(project_root)).phases:
             if phase_normalize(roadmap_phase.number) != target:
                 continue
-            if roadmap_phase.has_context:
-                return "has_context"
-            if roadmap_phase.has_research:
-                return "has_research"
             if roadmap_phase.plan_count > 0:
                 return "planned"
+            if roadmap_phase.has_research:
+                return "has_research"
+            if roadmap_phase.has_context:
+                return "has_context"
             return "missing_context"
     except Exception:  # noqa: BLE001 - raw payload projection should not break readiness.
         return "unknown"

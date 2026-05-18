@@ -12,14 +12,19 @@ protocols, author referee decisions, or route author-response work.
 Read the staged payload from:
 
 ```bash
-PREFLIGHT_INIT=$(gpd --raw init peer-review "$REVIEW_TARGET" --stage preflight)
-if [ $? -ne 0 ]; then
-  echo "ERROR: gpd peer-review preflight init failed: $PREFLIGHT_INIT"
-  # STOP; surface the error.
-fi
+if [ -n "${ARGUMENTS:-}" ]; then PREFLIGHT_INIT=$(gpd --raw init peer-review --stage preflight -- "$ARGUMENTS"); else PREFLIGHT_INIT=$(gpd --raw init peer-review --stage preflight); fi
+if [ $? -ne 0 ]; then echo "ERROR: gpd peer-review preflight init failed: $PREFLIGHT_INIT"; fi
+INIT="$PREFLIGHT_INIT"
 ```
 
-Apply `PREFLIGHT_INIT.staged_loading.field_access_instruction` before reading `PREFLIGHT_INIT`. Keep review target mode, selected roots, manuscript paths, publication blockers, contract gate, and derived manuscript status visible.
+Apply `PREFLIGHT_INIT.staged_loading.field_access_instruction` before reading it. Keep target mode, selected roots, manuscript paths, blockers, contract gate, and derived status visible.
+
+```bash
+REVIEW_TARGET=$(echo "$INIT" | gpd json get .review_target_input --default "")
+PUBLICATION_ROOT=$(echo "$INIT" | gpd json get .selected_publication_root --default GPD)
+REVIEW_ROOT=$(echo "$INIT" | gpd json get .selected_review_root --default "")
+REVIEW_ROOT="${REVIEW_ROOT:-${PUBLICATION_ROOT}/review}"
+```
 
 Apply the canonical manuscript-root publication preflight from the loaded
 manifest authority `{GPD_INSTALL_DIR}/templates/paper/publication-manuscript-root-preflight.md`.
@@ -40,13 +45,13 @@ Run command context and strict review preflight before reading or writing review
 artifacts:
 
 ```bash
-CONTEXT=$(gpd --raw validate command-context peer-review "$REVIEW_TARGET")
+if [ -n "$REVIEW_TARGET" ]; then CONTEXT=$(gpd --raw validate command-context peer-review -- "$REVIEW_TARGET"); else CONTEXT=$(gpd --raw validate command-context peer-review); fi
 if [ $? -ne 0 ]; then
   echo "$CONTEXT"
   # STOP; surface the command-context error.
 fi
 
-REVIEW_PREFLIGHT=$(gpd validate review-preflight peer-review "$REVIEW_TARGET" --strict)
+if [ -n "$REVIEW_TARGET" ]; then REVIEW_PREFLIGHT=$(gpd validate review-preflight peer-review --strict -- "$REVIEW_TARGET"); else REVIEW_PREFLIGHT=$(gpd validate review-preflight peer-review --strict); fi
 if [ $? -ne 0 ]; then
   echo "$REVIEW_PREFLIGHT"
   # STOP; surface the strict review-preflight blockers.
@@ -91,7 +96,7 @@ Do not repeat full contract/reference payloads in every child prompt.
 When preflight passes, reload before artifact discovery:
 
 ```bash
-ARTIFACT_DISCOVERY_INIT=$(gpd --raw init peer-review "$REVIEW_TARGET" --stage artifact_discovery)
+if [ -n "$REVIEW_TARGET" ]; then ARTIFACT_DISCOVERY_INIT=$(gpd --raw init peer-review --stage artifact_discovery -- "$REVIEW_TARGET"); else ARTIFACT_DISCOVERY_INIT=$(gpd --raw init peer-review --stage artifact_discovery); fi
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd peer-review artifact-discovery init failed: $ARTIFACT_DISCOVERY_INIT"
   # STOP; surface the error.

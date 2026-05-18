@@ -147,6 +147,9 @@ After `PHASE_ARG` is set and session-router preflight succeeds, load the next ac
 PHASE_BOOTSTRAP_INIT=$(gpd --raw init verify-work "${PHASE_ARG}" --stage phase_bootstrap)
 ```
 
+Apply `PHASE_BOOTSTRAP_INIT.staged_loading.field_access_instruction` before
+reading `PHASE_BOOTSTRAP_INIT`.
+
 Do not load inventory, interactive-validation, gap-repair, verification-report schema, or planner/checker authorities in this stage.
 </stage_transition>
 

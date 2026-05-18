@@ -74,12 +74,12 @@ executable_gate:
   id: arxiv_package_validator
   role: arxiv-package-validator
   expected_artifacts:
-    - GPD/publication/${subject_slug}/arxiv/arxiv-submission.tar.gz
+    - GPD/publication/${SUBJECT_SLUG}/arxiv/arxiv-submission.tar.gz
     - ${PAPER_DIR}/ARTIFACT-MANIFEST.json
     - ${PAPER_DIR}/BIBLIOGRAPHY-AUDIT.json
     - latest REVIEW-LEDGER and REFEREE-DECISION pair
     - current PROOF-REDTEAM artifact when theorem-bearing
-  allowed_root: GPD/publication/${subject_slug}/arxiv
+  allowed_root: GPD/publication/${SUBJECT_SLUG}/arxiv
   freshness_marker: PACKAGE_VALIDATION from current package/finalize stage
   validators:
     - gpd --raw validate arxiv-package --materialize

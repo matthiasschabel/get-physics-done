@@ -225,6 +225,7 @@ def _help_region_spec(block_ids: tuple[str, ...]) -> GeneratedRegionSpec:
 def help_surface_region_targets() -> tuple[GeneratedRegionTarget, ...]:
     from gpd.core.help_renderer import (  # noqa: PLC0415
         render_command_index_markdown,
+        render_default_help_markdown,
         render_detailed_command_reference_markdown,
         render_quick_start_markdown,
         render_root_detailed_command_reference_markdown,
@@ -234,6 +235,7 @@ def help_surface_region_targets() -> tuple[GeneratedRegionTarget, ...]:
         "quick-start": render_quick_start_markdown,
         "command-index": render_command_index_markdown,
         "detailed-command-reference": render_root_detailed_command_reference_markdown,
+        "default": render_default_help_markdown,
     }
     detail_renderers: dict[str, Callable[[], str]] = {
         "detailed-command-reference": render_detailed_command_reference_markdown,

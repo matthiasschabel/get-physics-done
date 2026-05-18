@@ -1221,6 +1221,22 @@ def test_after_phase_closeout_next_phase_suggestions_may_appear(tmp_path: Path) 
     assert plan.command == "gpd init plan-phase 02"
 
 
+def test_after_phase_closeout_planned_next_phase_suggests_execute_not_plan(tmp_path: Path) -> None:
+    root = _setup_project(tmp_path)
+    _create_roadmap_with_phases(root, [("1", "Setup"), ("2", "Core")], completed={"1"})
+    _create_phase(root, "01-setup", plans=1, summaries=1, verification=True)
+    _create_phase(root, "02-core", plans=2, summaries=0)
+
+    result = suggest_next(root)
+
+    assert result.top_action is not None
+    assert result.top_action.action == "execute-phase"
+    assert result.top_action.command == "gpd init execute-phase 02"
+    actions = [s.action for s in result.suggestions]
+    assert "execute-phase" in actions
+    assert "plan-phase" not in actions
+
+
 def test_unknown_verification_status_blocks_audit_and_paper_suggestions(tmp_path: Path) -> None:
     """Unknown verification status is verification debt, not milestone/paper readiness."""
     root = _setup_project(tmp_path)

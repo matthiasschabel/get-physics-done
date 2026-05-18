@@ -23,7 +23,7 @@ Refresh the current phase payload before reading stage fields:
 AUTONOMOUS_PLAN_EXECUTE_INIT=$(gpd --raw init autonomous "${PHASE_NUM}" --stage plan_execute_child_cycle)
 ```
 
-If staged autonomous init is unavailable because the root/manifest split has not been installed yet, continue with the phase payload handed off by `phase_route`; do not invent additional file scans.
+Apply `AUTONOMOUS_PLAN_EXECUTE_INIT.staged_loading.field_access_instruction` before reading it. If staged init is unavailable, use the `phase_route` payload; do not scan.
 </step>
 
 <step name="plan_lifecycle_gate">

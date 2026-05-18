@@ -9,16 +9,12 @@ Load reconcile/validate immediately before writing either state file:
 
 ```bash
 RECONCILE_INIT=$(gpd --raw init sync-state --stage reconcile_and_validate)
-if [ $? -ne 0 ]; then
-  echo "ERROR: gpd sync-state reconcile init failed: $RECONCILE_INIT"
-  exit 1
-fi
+if [ $? -ne 0 ]; then echo "ERROR: gpd sync-state reconcile init failed: $RECONCILE_INIT"; exit 1; fi
 ```
 
-Use `reconcile_and_validate.required_init_fields` as the reconciliation inputs.
-These are compact existence, recovery, and loader-status fields. Do not request
-or inspect raw state file bodies in this stage; the backend repair command owns
-the source decision and all state mutation.
+Apply `RECONCILE_INIT.staged_loading.field_access_instruction` before reading it.
+Use `RECONCILE_INIT.staged_loading.required_init_fields` as reconciliation inputs.
+These are compact existence/recovery/loader fields. Do not inspect raw state bodies; backend repair owns source/mutation.
 
 Run the backend reconciliation command. It chooses the recovery source from the
 loader result, prefers valid backup state over malformed markdown, rejects

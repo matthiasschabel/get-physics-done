@@ -53,6 +53,9 @@ VERIFY_PAYLOAD=$(gpd --raw init verify-work "${PHASE_NUM}" --stage session_route
 VERIFY_STATUS=$(echo "$VERIFY_PAYLOAD" | gpd json get .verification_report_status --default "missing")
 ```
 
+Apply `VERIFY_PAYLOAD.staged_loading.field_access_instruction` before reading
+`VERIFY_PAYLOAD`.
+
 Do not reuse an earlier verification payload. Do not read report prose to decide whether the gap closed.
 </step>
 

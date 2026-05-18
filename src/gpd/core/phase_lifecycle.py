@@ -195,7 +195,11 @@ class LifecycleNextUp(BaseModel):
     ) -> Self:
         secondary: list[NextCommand] = []
         if next_phase is not None:
-            if next_phase_context_class == "missing_context":
+            if next_phase_context_class == "planned":
+                primary = _runtime_next_command(action="execute-phase", phase=next_phase)
+                secondary.append(_runtime_next_command(action="plan-phase", phase=next_phase))
+                secondary.append(_runtime_next_command(action="discuss-phase", phase=next_phase))
+            elif next_phase_context_class == "missing_context":
                 primary = _runtime_next_command(action="discuss-phase", phase=next_phase)
                 secondary.append(_runtime_next_command(action="plan-phase", phase=next_phase))
             else:
@@ -272,7 +276,14 @@ class LifecycleNextUp(BaseModel):
             ):
                 raise ValueError("blocked lifecycle route invariant failed")
         elif self.status == "closed":
-            closed_actions = {"discuss-phase", "plan-phase", "audit-milestone", "complete-milestone", "new-milestone"}
+            closed_actions = {
+                "discuss-phase",
+                "execute-phase",
+                "plan-phase",
+                "audit-milestone",
+                "complete-milestone",
+                "new-milestone",
+            }
             if (
                 self.transition_owner != OWNER_RUNTIME
                 or self.primary.owner != OWNER_RUNTIME
@@ -771,6 +782,12 @@ def _state_text(value: object) -> str | None:
     return text
 
 
+def _roadmap_phase_is_already_closed_or_complete(roadmap_phase: object) -> bool:
+    if bool(getattr(roadmap_phase, "roadmap_complete", False)):
+        return True
+    return str(getattr(roadmap_phase, "disk_status", "") or "").strip().lower() == "complete"
+
+
 def _phase_closure(
     project_root: Path,
     phase: str,
@@ -783,7 +800,11 @@ def _phase_closure(
         if roadmap_number == normalized_phase:
             roadmap_complete = roadmap_phase.roadmap_complete
             continue
-        if compare_phase_numbers(roadmap_number, normalized_phase) > 0 and next_phase is None:
+        if (
+            compare_phase_numbers(roadmap_number, normalized_phase) > 0
+            and next_phase is None
+            and not _roadmap_phase_is_already_closed_or_complete(roadmap_phase)
+        ):
             next_phase = roadmap_number
 
     state_current_phase, state_status = _state_position(project_root)
@@ -1068,6 +1089,16 @@ def phase_lifecycle_decision(
             )
     elif not require_verification and verification_status != "passed":
         warnings.append(f"canonical verification status is {verification_routing_status!r}")
+        warnings.append("verification opt-out is advisory only; phase closeout mutation still requires passed verification")
+        if verification_path is None:
+            blockers.append("canonical verification report missing")
+        elif verification is not None and verification.errors:
+            blockers.extend(f"canonical verification report blocked: {error}" for error in verification.errors)
+        else:
+            blockers.append(
+                "canonical verification report must have top-level frontmatter status 'passed'; "
+                f"got {verification_routing_status!r}"
+            )
 
     proof_required, proof_ready, proof_artifacts, proof_errors = _proof_redteam_status(project_root, phase_dir)
     if not proof_ready:
@@ -1092,12 +1123,13 @@ def phase_lifecycle_decision(
         blockers.append(_PHASE_ALREADY_CLOSED_BLOCKER)
 
     ready = not blockers
+    mutation_allowed = ready and verification_status == "passed"
     preserve_checkpoint_tags = bool(blockers or recovery_artifacts)
-    closeout_command = f"gpd phase complete {phase_info.phase_number}" if ready else None
+    closeout_command = f"gpd phase complete {phase_info.phase_number}" if mutation_allowed else None
     cleanup_command = (
         f"gpd --raw phase checkpoint cleanup --phase {phase_info.phase_number} "
         "--namespace phase --policy successful-closeout"
-        if ready and not preserve_checkpoint_tags
+        if mutation_allowed and not preserve_checkpoint_tags
         else None
     )
     next_up = _next_up_payload(
@@ -1124,7 +1156,7 @@ def phase_lifecycle_decision(
     closeout = PhaseCloseoutReadiness(
         phase=phase_info.phase_number,
         ready=ready,
-        mutation_allowed=ready,
+        mutation_allowed=mutation_allowed,
         project_root=project_root.as_posix(),
         phase_dir=_relative(project_root, phase_dir),
         plan_count=plan_count,

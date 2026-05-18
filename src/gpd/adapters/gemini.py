@@ -731,7 +731,7 @@ def _render_gemini_policy_toml(bridge_command: str) -> str:
         'decision = "allow"\n'
         "priority = 350\n"
         'modes = ["autoEdit"]\n'
-        "allow_redirection = true\n"
+        "allowRedirection = true\n"
     )
 
 

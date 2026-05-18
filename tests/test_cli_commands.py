@@ -34,6 +34,7 @@ from gpd.core.recent_projects import record_recent_project
 from gpd.core.reproducibility import compute_sha256
 from gpd.core.state import StateUpdateResult, default_state_dict, generate_state_markdown
 from gpd.registry import _parse_command_file
+from scripts.render_help_surface import extract_help_surface_region
 from tests.helpers.cli import (
     StableCliRunner,
     assert_check,
@@ -4353,7 +4354,13 @@ class TestReviewValidationCommands:
         assert payload["quick_start"]["heading"] == "Quick Start"
         _assert_text_contains(payload["quick_start"]["markdown"], ("gpd:start", "Existing research folder"))
         _assert_text_excludes(payload["quick_start"]["markdown"], ("gpd:progress", "gpd cost"))
+        fallback_default = extract_help_surface_region(
+            (Path(__file__).resolve().parents[1] / "src/gpd/specs/workflows/help.md").read_text(encoding="utf-8"),
+            "default",
+        ).strip()
+        assert payload["quick_start"]["markdown"] == fallback_default
         assert payload["quick_start"]["canonical_markdown"] == help_renderer.render_default_help_markdown()
+        assert payload["quick_start"]["canonical_markdown"] == fallback_default
         _assert_text_excludes(payload["quick_start"]["markdown"], ("<!--",))
         assert payload["recommended_commands"] == ["gpd:help --all"]
         assert payload["canonical_recommended_commands"] == ["gpd:help --all"]

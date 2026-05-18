@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from gpd.adapters.install_utils import parse_at_include_path
@@ -17,6 +18,45 @@ WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
 REFERENCES_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "references" / "publication"
 SOURCE_ROOT = REPO_ROOT / "src" / "gpd"
 PATH_PREFIX = "/runtime/"
+PUBLICATION_STAGED_WORKFLOWS = ("write-paper", "peer-review", "respond-to-referees", "arxiv-submission")
+_SHELL_VAR_REFERENCE_RE = re.compile(r"\$(?:\{([A-Z_][A-Z0-9_]*)(?::-[^}]*)?\}|([A-Z_][A-Z0-9_]*))")
+_SHELL_ASSIGNMENT_RE = re.compile(r"(?:^\s*|[;&]\s*|then\s+)(?:export\s+)?([A-Z_][A-Z0-9_]*)=")
+_SHELL_READ_ASSIGNMENT_RE = re.compile(r"\bread(?:\s+-[A-Za-z]+)*\s+([A-Z_][A-Z0-9_]*)\b")
+_PUBLICATION_STAGE_AMBIENT_VARS = frozenset(
+    {
+        "ARGUMENTS",
+        "BIBLIO_HANDOFF_STARTED_AT",
+        "PENDING_COUNT",
+        "RESPONSE_HANDOFF_STARTED_AT",
+        "REVISION_SECTION_HANDOFF_STARTED_AT",
+        "SECTION_WRITER_HANDOFF_STARTED_AT",
+    }
+)
+_REQUIRED_LOCAL_BINDINGS = {
+    "peer-review": {
+        "REVIEW_TARGET",
+        "PUBLICATION_ROOT",
+        "REVIEW_ROOT",
+    },
+    "write-paper": {
+        "WRITE_PAPER_ARGUMENTS",
+        "PAPER_DIR",
+        "MANUSCRIPT_BASENAME",
+    },
+    "respond-to-referees": {
+        "RESPONSE_ARGUMENTS",
+        "PAPER_DIR",
+        "MANUSCRIPT_BASENAME",
+        "RESPONSE_AUTHOR_PATH",
+        "RESPONSE_REFEREE_PATH",
+    },
+    "arxiv-submission": {
+        "SUBJECT_SLUG",
+        "PACKAGE_ROOT",
+        "SUBMISSION_DIR",
+        "PACKAGE_TARBALL",
+    },
+}
 RAW_INCLUDE_ALLOWED_DEFERRED_AUTHORITIES = {
     "references/orchestration/runtime-delegation-note.md",
 }
@@ -54,6 +94,10 @@ WRITE_PAPER_PUBLICATION_REVIEW_CONDITIONALS = {
     "proactive_critique_loop": frozenset({"references/publication/proactive-critique-loop.md"}),
     "review_failure_or_round_state_debug": frozenset({"references/publication/peer-review-reliability.md"}),
 }
+WRITE_OR_SPAWN_TOOLS = frozenset({"file_edit", "file_write", "task"})
+READ_ONLY_BOOTSTRAP_STAGE_IDS = (
+    ("write-paper", "paper_bootstrap"),
+)
 PEER_REVIEW_PANEL_REQUIRED_EAGER = frozenset(
     {
         "workflows/peer-review/panel-stages.md",
@@ -152,6 +196,73 @@ def _raw_projection_include_relpaths(source: str) -> tuple[tuple[int, str], ...]
             includes.append((line_number, _canonical_include_relpath(include_path)))
 
     return tuple(includes)
+
+
+def _shell_variables_referenced(source: str) -> set[str]:
+    return {braced or bare for braced, bare in _SHELL_VAR_REFERENCE_RE.findall(source) if (braced or bare)}
+
+
+def _shell_variables_assigned(source: str) -> set[str]:
+    assigned: set[str] = set()
+    for line in source.splitlines():
+        assigned.update(match.group(1) for match in _SHELL_ASSIGNMENT_RE.finditer(line))
+        if match := _SHELL_READ_ASSIGNMENT_RE.search(line):
+            assigned.add(match.group(1))
+    return assigned
+
+
+def test_publication_stage_shell_variables_are_bound_by_same_stage_payloads() -> None:
+    offenders: list[str] = []
+
+    for workflow_name in PUBLICATION_STAGED_WORKFLOWS:
+        stage_dir = WORKFLOWS_DIR / workflow_name
+        for stage_path in sorted(stage_dir.glob("*.md")):
+            source = stage_path.read_text(encoding="utf-8")
+            referenced = _shell_variables_referenced(source)
+            assigned = _shell_variables_assigned(source)
+            for variable in sorted((referenced - assigned) - _PUBLICATION_STAGE_AMBIENT_VARS):
+                offenders.append(f"{workflow_name}/{stage_path.name}:${variable}")
+
+            for variable in sorted(_REQUIRED_LOCAL_BINDINGS[workflow_name] & referenced):
+                if variable not in assigned:
+                    offenders.append(f"{workflow_name}/{stage_path.name}:missing-local-binding:${variable}")
+
+    assert offenders == []
+
+
+def test_publication_stage_fields_are_read_after_field_access_instruction() -> None:
+    offenders: list[str] = []
+
+    for workflow_name in PUBLICATION_STAGED_WORKFLOWS:
+        for stage_path in sorted((WORKFLOWS_DIR / workflow_name).glob("*.md")):
+            source = stage_path.read_text(encoding="utf-8")
+            first_json_read = source.find("gpd json get")
+            if first_json_read == -1:
+                continue
+            first_field_access = source.find("staged_loading.field_access_instruction")
+            if first_field_access == -1 or first_field_access > first_json_read:
+                offenders.append(f"{workflow_name}/{stage_path.name}")
+
+    assert offenders == []
+
+
+def test_arxiv_finalize_revalidates_package_from_finalize_payload_before_success() -> None:
+    source = (WORKFLOWS_DIR / "arxiv-submission" / "finalize.md").read_text(encoding="utf-8")
+
+    for fragment in (
+        'SUBJECT_SLUG=$(echo "$INIT" | gpd json get .publication_subject_slug --default "")',
+        'PACKAGE_ROOT="${PUBLICATION_ROOT}/arxiv"',
+        'SUBMISSION_DIR="${PACKAGE_ROOT}/submission"',
+        'PACKAGE_TARBALL="${PACKAGE_ROOT}/arxiv-submission.tar.gz"',
+        'PACKAGE_VALIDATION=$(gpd --raw validate arxiv-package --submission-dir "$SUBMISSION_DIR" --tarball "$PACKAGE_TARBALL"',
+        'echo "$PACKAGE_VALIDATION"',
+        "GPD/publication/${SUBJECT_SLUG}/arxiv/",
+    ):
+        assert fragment in source
+
+    assert "${subject_slug}" not in source
+    assert "--materialize" not in source
+    assert source.index('echo "$PACKAGE_VALIDATION"') < source.index("Present a final checklist")
 
 
 def test_stage_one_deferred_authorities_are_not_raw_projection_includes() -> None:
@@ -338,6 +449,18 @@ def test_write_paper_stage_manifest_uses_canonical_publication_contracts() -> No
     assert publication_review_loaded.isdisjoint(WRITE_PAPER_PUBLICATION_REVIEW_DEFERRED)
     assert WRITE_PAPER_PUBLICATION_REVIEW_DEFERRED <= set(publication_review.must_not_eager_load)
     assert _conditional_authorities_by_when(publication_review) == WRITE_PAPER_PUBLICATION_REVIEW_CONDITIONALS
+
+
+def test_read_only_bootstrap_stages_do_not_expose_write_or_spawn_tools() -> None:
+    offenders: list[str] = []
+
+    for workflow_name, stage_id in READ_ONLY_BOOTSTRAP_STAGE_IDS:
+        stage = _load_manifest(workflow_name).stage(stage_id)
+        exposed_tools = sorted(WRITE_OR_SPAWN_TOOLS.intersection(stage.allowed_tools))
+        if exposed_tools:
+            offenders.append(f"{workflow_name}.{stage_id}: {', '.join(exposed_tools)}")
+
+    assert offenders == []
 
 
 def test_peer_review_stage_manifest_uses_canonical_publication_contracts() -> None:

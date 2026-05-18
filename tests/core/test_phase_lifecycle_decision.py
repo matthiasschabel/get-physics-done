@@ -123,6 +123,22 @@ def _write_next_phase_context(root: Path) -> None:
     (phase_dir / "03-01-PLAN.md").write_text("---\nwave: 1\n---\n\n# Plan\n", encoding="utf-8")
 
 
+_ROADMAP_ONLY_FORBIDDEN_NEXT_PHASE_COMMANDS = frozenset(("gpd:discuss-phase 03", "gpd:plan-phase 03"))
+
+
+def _assert_not_next_phase_route(decision: object) -> None:
+    assert decision.roadmap_complete is True
+    assert decision.phase_closed is False
+    assert decision.decision != "closed_ready_next_phase"
+    assert decision.lifecycle_class != "closed_ready_next_phase"
+    assert decision.next_phase == "03"
+    assert decision.primary_command not in _ROADMAP_ONLY_FORBIDDEN_NEXT_PHASE_COMMANDS
+    route = decision.lifecycle_next_up
+    assert route is not None
+    assert route.status == "blocked"
+    assert route.primary.command not in _ROADMAP_ONLY_FORBIDDEN_NEXT_PHASE_COMMANDS
+
+
 def test_lifecycle_decision_ready_closeout_matches_closeout_readiness_and_stays_read_only(tmp_path: Path) -> None:
     _write_phase_project(tmp_path)
     before_roadmap = (tmp_path / "GPD" / "ROADMAP.md").read_text(encoding="utf-8")
@@ -223,9 +239,7 @@ def test_lifecycle_decision_non_passing_verification_routes_to_runtime_verify_wo
     _write_phase_project(tmp_path, verification_status="gaps_found", state_status="Blocked")
     before_roadmap = (tmp_path / "GPD" / "ROADMAP.md").read_text(encoding="utf-8")
     before_state = (tmp_path / "GPD" / "state.json").read_text(encoding="utf-8")
-    before_report = (tmp_path / "GPD" / "phases" / "02-analysis" / "02-VERIFICATION.md").read_text(
-        encoding="utf-8"
-    )
+    before_report = (tmp_path / "GPD" / "phases" / "02-analysis" / "02-VERIFICATION.md").read_text(encoding="utf-8")
 
     decision = phase_lifecycle_decision(tmp_path, "02")
 
@@ -259,6 +273,100 @@ def test_lifecycle_decision_non_passing_verification_routes_to_runtime_verify_wo
     assert (tmp_path / "GPD" / "phases" / "02-analysis" / "02-VERIFICATION.md").read_text(
         encoding="utf-8"
     ) == before_report
+
+
+def test_lifecycle_decision_roadmap_only_closed_missing_verification_stays_on_verification(
+    tmp_path: Path,
+) -> None:
+    _write_phase_project(
+        tmp_path,
+        roadmap_closed=True,
+        verification_status=None,
+        state_current_phase="02",
+        state_status="Verified",
+    )
+
+    decision = phase_lifecycle_decision(tmp_path, "02")
+
+    _assert_not_next_phase_route(decision)
+    assert decision.decision == "needs_verification"
+    assert decision.lifecycle_class == "needs_verification"
+    assert decision.verification_routing_status == "missing"
+    assert decision.closeout_blockers == ["canonical verification report missing"]
+    route = decision.lifecycle_next_up
+    assert route is not None
+    _assert_route(
+        route,
+        status_class="needs_verification",
+        transition_owner="runtime",
+        current_blocking_gate="verification_missing",
+        primary_runtime_command="gpd:verify-work 02",
+        local_transition_command=None,
+        after_local_runtime_command=None,
+    )
+
+
+def test_lifecycle_decision_roadmap_only_closed_incomplete_summaries_stays_on_execution(
+    tmp_path: Path,
+) -> None:
+    _write_phase_project(
+        tmp_path,
+        roadmap_closed=True,
+        summaries=("02-01-SUMMARY.md",),
+        state_current_phase="02",
+        state_status="Verified",
+    )
+
+    decision = phase_lifecycle_decision(tmp_path, "02")
+
+    _assert_not_next_phase_route(decision)
+    assert decision.decision == "needs_execution"
+    assert decision.lifecycle_class == "needs_execution"
+    assert decision.summary_count == 1
+    assert decision.closeout_readiness.all_plans_complete is False
+    assert decision.closeout_readiness.incomplete_plans == ["02-02-PLAN.md"]
+    route = decision.lifecycle_next_up
+    assert route is not None
+    _assert_route(
+        route,
+        status_class="needs_execution",
+        transition_owner="runtime",
+        current_blocking_gate="summaries_incomplete",
+        primary_runtime_command="gpd:execute-phase 02",
+        local_transition_command=None,
+        after_local_runtime_command=None,
+    )
+
+
+def test_lifecycle_decision_roadmap_only_closed_active_bounded_segment_stays_on_resume(
+    tmp_path: Path,
+) -> None:
+    _write_phase_project(
+        tmp_path,
+        roadmap_closed=True,
+        bounded_segment=True,
+        state_current_phase="02",
+        state_status="Verified",
+    )
+
+    decision = phase_lifecycle_decision(tmp_path, "02")
+
+    _assert_not_next_phase_route(decision)
+    assert decision.decision == "blocked_closeout"
+    assert decision.lifecycle_class == "blocked_closeout"
+    assert decision.closeout_readiness.active_bounded_segment is True
+    assert decision.closeout_blockers == ["active bounded segment must be resumed or cleared before phase closeout"]
+    route = decision.lifecycle_next_up
+    assert route is not None
+    _assert_route(
+        route,
+        status_class="blocked_closeout",
+        transition_owner="runtime",
+        current_blocking_gate="active_bounded_segment",
+        primary_runtime_command="gpd:resume-work",
+        local_transition_command=None,
+        after_local_runtime_command=None,
+    )
 
 
 def test_lifecycle_decision_proof_redteam_blocker_uses_runtime_verify_work(tmp_path: Path) -> None:

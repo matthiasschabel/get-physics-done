@@ -98,6 +98,26 @@ def _region_spec_for_renderers(block_renderers: dict[str, Callable[[], str]]) ->
     )
 
 
+def _check_help_surface_inventory(text: str, *, path: Path | None = None) -> tuple[HelpSurfaceDiff, ...]:
+    block_renderers = _renderers_for_path(path)
+    return check_region_inventory(
+        text,
+        spec=_region_spec_for_renderers(block_renderers),
+        required_blocks=tuple(block_renderers),
+        path=path,
+        label="help surface marker inventory",
+    )
+
+
+def _assert_help_surface_inventory_valid(text: str, *, path: Path | None = None) -> None:
+    inventory_diffs = _check_help_surface_inventory(text, path=path)
+    if inventory_diffs:
+        details = "\n".join(diff.diff.rstrip() for diff in inventory_diffs)
+        raise ValueError(
+            "Cannot update help surface generated regions because marker inventory is invalid.\n" + details
+        )
+
+
 def _replace_help_surface_regions_in_text(text: str, *, path: Path | None = None) -> tuple[str, tuple[str, ...]]:
     block_renderers = _renderers_for_path(path)
     region_spec = _region_spec_for_renderers(block_renderers)
@@ -115,17 +135,11 @@ def replace_help_surface_text(text: str) -> str:
 
 
 def check_help_surface_text(text: str, *, path: Path | None = None) -> tuple[HelpSurfaceDiff, ...]:
-    updated, block_ids = _replace_help_surface_regions_in_text(text, path=path)
-    block_renderers = _renderers_for_path(path)
-    inventory_diffs = check_region_inventory(
-        block_ids,
-        spec=_region_spec_for_renderers(block_renderers),
-        required_blocks=tuple(block_renderers),
-        path=path,
-        label="help surface marker inventory",
-    )
+    inventory_diffs = _check_help_surface_inventory(text, path=path)
     if inventory_diffs:
         return inventory_diffs
+
+    updated, block_ids = _replace_help_surface_regions_in_text(text, path=path)
     if updated == text:
         return ()
     return (
@@ -154,6 +168,7 @@ def update_help_surface_file(
     path: Path = REPO_ROOT / HELP_WORKFLOW_PATH,
 ) -> bool:
     original = path.read_text(encoding="utf-8")
+    _assert_help_surface_inventory_valid(original, path=path)
     updated, _block_ids = _replace_help_surface_regions_in_text(original, path=path)
     if updated == original:
         return False
@@ -195,19 +210,25 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(block_id)
         return 0
 
-    if args.check:
-        diffs = check_help_surface_file(args.path) if args.path is not None else check_help_surface_files()
-        if diffs:
-            return write_stale_check_result(
-                diffs,
-                heading="Help surface generated regions are stale.",
-                regenerate_command="uv run python scripts/render_help_surface.py",
-            )
-        return 0
+    try:
+        if args.check:
+            diffs = check_help_surface_file(args.path) if args.path is not None else check_help_surface_files()
+            if diffs:
+                return write_stale_check_result(
+                    diffs,
+                    heading="Help surface generated regions are stale.",
+                    regenerate_command="uv run python scripts/render_help_surface.py",
+                )
+            return 0
 
-    changed_paths = (REPO_ROOT / args.path,) if args.path is not None and update_help_surface_file(args.path) else ()
-    if args.path is None:
-        changed_paths = update_help_surface_files()
+        changed_paths = (
+            (REPO_ROOT / args.path,) if args.path is not None and update_help_surface_file(args.path) else ()
+        )
+        if args.path is None:
+            changed_paths = update_help_surface_files()
+    except ValueError as error:
+        sys.stderr.write(f"{error}\n")
+        return 1
     for path in changed_paths:
         print(path.relative_to(REPO_ROOT).as_posix())
     return 0

@@ -373,7 +373,7 @@ Structure a point-by-point response to referee reports for an explicit manuscrip
 
 Notes:
 - Uses a bounded external-authoring lane when an explicit intake manifest or subject is allowed by command policy.
-- Project-backed review/response/package outputs stay under the resolved manuscript root; this is not a full publication-root migration.
+- Manuscript edits stay beside the resolved manuscript; GPD-authored response artifacts use the selected GPD roots (`GPD/` and `GPD/review/` for project-backed response rounds, or `GPD/publication/{subject_slug}` plus its `review/` subtree for managed/external subjects).
 
 - Subject policy: subject=publication; resolution=explicit_or_project_manuscript; explicit inputs=manuscript_path, referee_report_path, paste_referee_report; external subjects allowed=true
 - Output policy: mode=managed; managed root=gpd_managed_durable; default subtree=GPD

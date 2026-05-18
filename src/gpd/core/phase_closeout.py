@@ -28,7 +28,7 @@ def phase_closeout_readiness(
     cwd: Path,
     phase: str,
     *,
-    require_verification: bool = False,
+    require_verification: bool = True,
 ) -> PhaseCloseoutReadiness:
     """Return a read-only closeout gate result; never mutate roadmap, state, or tags."""
 

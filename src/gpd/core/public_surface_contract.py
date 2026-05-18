@@ -125,10 +125,11 @@ class LocalCliBridgeContract:
     doctor_local_command: str
     doctor_global_command: str
     validate_command_context_command: str
+    commands: tuple[str, ...] = ()
 
-    @property
-    def commands(self) -> tuple[str, ...]:
-        return self.named_commands.ordered()
+    def __post_init__(self) -> None:
+        if not self.commands:
+            object.__setattr__(self, "commands", self.named_commands.ordered())
 
     def render_note(self) -> str:
         return (
@@ -230,7 +231,8 @@ def _require_schema_matches_code(schema: PublicSurfaceContractSchema) -> None:
 
     expected_section_keys = {
         "beginner_onboarding": _dataclass_field_names(BeginnerOnboardingContract),
-        "local_cli_bridge": _dataclass_field_names(LocalCliBridgeContract),
+        "local_cli_bridge": ("commands",)
+        + tuple(field for field in _dataclass_field_names(LocalCliBridgeContract) if field != "commands"),
         "post_start_settings": _dataclass_field_names(PostStartSettingsContract),
         "resume_authority": _dataclass_field_names(ResumeAuthorityContract),
         "recovery_ladder": _dataclass_field_names(RecoveryLadderContract),
@@ -567,6 +569,9 @@ def load_public_surface_contract() -> PublicSurfaceContract:
         raise ValueError(
             "recovery_ladder.cross_workspace_command must equal local_cli_bridge.named_commands.resume_recent"
         )
+    bridge_commands = _require_string_list(bridge_payload, "commands", label="local_cli_bridge")
+    if bridge_commands != named_commands.ordered():
+        raise ValueError("local_cli_bridge.commands must equal local_cli_bridge.named_commands ordered values")
     resume_authority_public_fields = _require_string_list(
         resume_authority_payload,
         "public_fields",
@@ -590,6 +595,7 @@ def load_public_surface_contract() -> PublicSurfaceContract:
             startup_ladder=_require_string_list(beginner_payload, "startup_ladder", label="beginner_onboarding"),
         ),
         local_cli_bridge=LocalCliBridgeContract(
+            commands=bridge_commands,
             named_commands=named_commands,
             terminal_phrase=_require_string(bridge_payload, "terminal_phrase", label="local_cli_bridge"),
             purpose_phrase=_require_string(bridge_payload, "purpose_phrase", label="local_cli_bridge"),

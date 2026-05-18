@@ -89,14 +89,21 @@ REQUIRED_P8_WORKFLOW_JIT_ROW_IDS = frozenset(
         "P8-WF-JIT-13",
     }
 )
-REQUIRED_JIT_ROW_IDS = (
-    REQUIRED_LP_JIT_ROW_IDS
-    | REQUIRED_P6_JIT_ROW_IDS
-    | REQUIRED_P7_NEXTUP_JIT_ROW_IDS
-    | REQUIRED_P7_ERG_JIT_ROW_IDS
-    | REQUIRED_P8_AGENT_JIT_ROW_IDS
-    | REQUIRED_P8_WORKFLOW_JIT_ROW_IDS
+REQUIRED_PROVIDER_FREE_CI_ROW_IDS = tuple(
+    "LP-JIT-01 LP-JIT-02 LP-JIT-03 LP-JIT-04 LP-JIT-05 LP-JIT-06 LP-JIT-07 LP-JIT-08 "
+    "P6-START-JIT-01 P6-PLAN-JIT-01 P6-PLAN-JIT-02 P6-PLAN-JIT-03 P6-PLAN-JIT-04 "
+    "P6-EXEC-JIT-01 P6-EXEC-JIT-02 P6-EXEC-JIT-03 P6-EXEC-JIT-04 "
+    "P6-COMP-JIT-01 P6-COMP-JIT-02 P6-COMP-JIT-03 P6-COMP-JIT-04 "
+    "P6-RES-JIT-01 P6-RES-JIT-02 P6-RES-JIT-03 P6-RES-JIT-04 P6-RES-JIT-05 P6-RES-JIT-06 "
+    "P7-NEXTUP-JIT-01 P7-NEXTUP-JIT-02 P7-NEXTUP-JIT-03 P7-NEXTUP-JIT-04 "
+    "P7-NEXTUP-JIT-05 P7-NEXTUP-JIT-06 P7-NEXTUP-JIT-07 "
+    "P7-ERG-JIT-01 P7-ERG-JIT-02 P7-ERG-JIT-03 P7-ERG-JIT-04 P7-ERG-JIT-05 P7-ERG-JIT-06 "
+    "P8-AGENT-JIT-01 P8-AGENT-JIT-02 P8-AGENT-JIT-03 P8-AGENT-JIT-04 "
+    "P8-AGENT-JIT-05 P8-AGENT-JIT-06 "
+    "P8-WF-JIT-01 P8-WF-JIT-02 P8-WF-JIT-03 P8-WF-JIT-04 P8-WF-JIT-05 P8-WF-JIT-06 "
+    "P8-WF-JIT-07 P8-WF-JIT-08 P8-WF-JIT-10 P8-WF-JIT-11 P8-WF-JIT-12 P8-WF-JIT-13".split()
 )
+REQUIRED_JIT_ROW_IDS = frozenset(REQUIRED_PROVIDER_FREE_CI_ROW_IDS)
 LP_JIT_ROW_IDS = tuple(f"LP-JIT-{index:02d}" for index in range(1, 9))
 PHASE7_ROW_ID_RE = re.compile(
     r"^(?:(?:LP[0-9]{2}|LP-JIT-[0-9]{2})(?:-[A-Z0-9]+)*|"
@@ -116,8 +123,7 @@ PHASE6_FIRST_MANUAL_CANARY_ROW_IDS = tuple(
     "P6-RES-JIT-06 P8-WF-JIT-07 P8-WF-JIT-08".split()
 )
 PHASE6_LIFECYCLE_SECOND_WAVE_ROW_IDS = tuple(
-    "P6-COMP-JIT-02 P6-COMP-JIT-03 P7-NEXTUP-JIT-06 P7-NEXTUP-JIT-07 "
-    "P8-WF-JIT-11 P8-WF-JIT-12".split()
+    "P6-COMP-JIT-02 P6-COMP-JIT-03 P7-NEXTUP-JIT-06 P7-NEXTUP-JIT-07 P8-WF-JIT-11 P8-WF-JIT-12".split()
 )
 PHASE6_TRI_RUNTIME_READONLY_ROW_IDS = tuple(
     "LP01-START-PROJECTLESS-READONLY LP13-HELP-REFERENCE-ONLY LP14-START-CHOOSER-ROUTE".split()
@@ -1442,8 +1448,8 @@ def _assert_phase7_manifest_row_sets_valid(
 
     if missing_row_sets := PHASE7_REQUIRED_ROW_SET_IDS - set(selected_row_sets):
         raise AssertionError(f"Phase 7 live persona matrix is missing row sets: {sorted(missing_row_sets)}")
-    if set(selected_row_sets["provider_free_ci_required"]) != REQUIRED_JIT_ROW_IDS:
-        raise AssertionError("provider_free_ci_required row set must match required provider-free CI rows")
+    if tuple(selected_row_sets["provider_free_ci_required"]) != REQUIRED_PROVIDER_FREE_CI_ROW_IDS:
+        raise AssertionError("provider_free_ci_required row set must match the canonical row order")
     for row_set_id, expected_row_ids in PHASE7_EXACT_ROW_SET_IDS.items():
         if tuple(selected_row_sets[row_set_id]) != expected_row_ids:
             raise AssertionError(f"{row_set_id} row set must match the canonical row order")

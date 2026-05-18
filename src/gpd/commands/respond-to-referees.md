@@ -84,7 +84,7 @@ help:
     - gpd:respond-to-referees paste
   notes:
     - Uses a bounded external-authoring lane when an explicit intake manifest or subject is allowed by command policy.
-    - Project-backed review/response/package outputs stay under the resolved manuscript root; this is not a full publication-root migration.
+    - Manuscript edits stay beside the resolved manuscript; GPD-authored response artifacts use the selected GPD roots (`GPD/` and `GPD/review/` for project-backed response rounds, or `GPD/publication/{subject_slug}` plus its `review/` subtree for managed/external subjects).
   root_detail_order: 280
 ---
 <objective>

@@ -22,6 +22,18 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
+Apply `MANUSCRIPT_PREFLIGHT_INIT.staged_loading.field_access_instruction` before reading the payload. Bind only this stage's manuscript root:
+
+```bash
+INIT="$MANUSCRIPT_PREFLIGHT_INIT"
+# gpd --raw stage field-access arxiv-submission --stage manuscript_preflight --style shell --payload-var INIT --alias PAPER_DIR=manuscript_root
+PAPER_DIR=$(echo "$INIT" | gpd json get .manuscript_root --default "")
+if [ -z "$PAPER_DIR" ]; then
+  echo "ERROR: arxiv-submission manuscript_preflight missing manuscript_root"
+  exit 1
+fi
+```
+
 Treat `gpd paper-build` as authoritative for `ARTIFACT-MANIFEST.json` and `BIBLIOGRAPHY-AUDIT.json`. If `${PAPER_DIR}/PAPER-CONFIG.json` exists, refresh the manuscript before packaging:
 
 ```bash

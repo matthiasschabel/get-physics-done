@@ -301,7 +301,7 @@ Notes: Explicit artifact intake follows command-policy supported suffixes for pu
 **`gpd:respond-to-referees [--manuscript PATH --report PATH | report path | paste]`**
 Structure a point-by-point response to referee reports for an explicit manuscript target or the current GPD manuscript
 Usage: `gpd:respond-to-referees --manuscript paper/main.tex --report reports/referee-report.md`; `gpd:respond-to-referees reports/referee-report.md`; `gpd:respond-to-referees paste`
-Notes: Uses a bounded external-authoring lane when an explicit intake manifest or subject is allowed by command policy. Project-backed review/response/package outputs stay under the resolved manuscript root; this is not a full publication-root migration.
+Notes: Uses a bounded external-authoring lane when an explicit intake manifest or subject is allowed by command policy. Manuscript edits stay beside the resolved manuscript; GPD-authored response artifacts use the selected GPD roots (`GPD/` and `GPD/review/` for project-backed response rounds, or `GPD/publication/{subject_slug}` plus its `review/` subtree for managed/external subjects).
 
 **`gpd:arxiv-submission [manuscript root or .tex entrypoint]`**
 Prepare a GPD-owned manuscript for arXiv submission with validation and packaging

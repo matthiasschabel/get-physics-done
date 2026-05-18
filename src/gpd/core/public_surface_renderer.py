@@ -81,8 +81,18 @@ def public_surface_runtime_surfaces(
 ) -> tuple[BeginnerRuntimeSurface, ...]:
     """Return runtime surfaces in stable public documentation order."""
 
-    surfaces = tuple(runtime_surfaces) if runtime_surfaces is not None else beginner_runtime_surfaces()
-    return tuple(sorted(surfaces, key=lambda surface: surface.install_flag))
+    catalog_surfaces = beginner_runtime_surfaces()
+    if runtime_surfaces is None:
+        return catalog_surfaces
+
+    catalog_order = {surface.runtime_name: index for index, surface in enumerate(catalog_surfaces)}
+    return tuple(
+        surface
+        for original_index, surface in sorted(
+            enumerate(runtime_surfaces),
+            key=lambda item: (catalog_order.get(item[1].runtime_name, len(catalog_order) + item[0]), item[0]),
+        )
+    )
 
 
 def _context(context: PublicSurfaceRenderContext | None) -> PublicSurfaceRenderContext:

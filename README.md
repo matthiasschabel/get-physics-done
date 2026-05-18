@@ -79,7 +79,7 @@ model access, billing, or API credits.
 There are two places you type commands: your normal system terminal and the AI runtime.
 
 <!-- gpd-public-surface:terminal-runtime-bridge:start -->
-Use your normal terminal for installs, local `gpd ...` diagnostics, and runtime launchers such as `claude`, `codex`, `gh copilot`, `gemini`, `opencode`.
+Use your normal terminal for installs, local `gpd ...` diagnostics, and runtime launchers such as `claude`, `gemini`, `codex`, `opencode`, `gh copilot`.
 Use the opened runtime for the installed GPD command ladder (`help -> start -> tour -> new-project / map-research -> resume-work`); start with `/gpd:help`, `$gpd-help`, `/gpd-help`.
 <!-- gpd-public-surface:terminal-runtime-bridge:end -->
 
@@ -243,10 +243,10 @@ GPD currently installs into five AI runtimes. To preselect one during install, u
 | Runtime | `npx` flag | Help | Start | Tour | New work | Existing work | Return later |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Claude Code | `--claude` | `/gpd:help` | `/gpd:start` | `/gpd:tour` | `/gpd:new-project --minimal` | `/gpd:map-research` | `/gpd:resume-work` |
-| Codex | `--codex` | `$gpd-help` | `$gpd-start` | `$gpd-tour` | `$gpd-new-project --minimal` | `$gpd-map-research` | `$gpd-resume-work` |
-| GitHub Copilot CLI | `--copilot` | `/gpd-help` | `/gpd-start` | `/gpd-tour` | `/gpd-new-project --minimal` | `/gpd-map-research` | `/gpd-resume-work` |
 | Gemini CLI | `--gemini` | `/gpd:help` | `/gpd:start` | `/gpd:tour` | `/gpd:new-project --minimal` | `/gpd:map-research` | `/gpd:resume-work` |
+| Codex | `--codex` | `$gpd-help` | `$gpd-start` | `$gpd-tour` | `$gpd-new-project --minimal` | `$gpd-map-research` | `$gpd-resume-work` |
 | OpenCode | `--opencode` | `/gpd-help` | `/gpd-start` | `/gpd-tour` | `/gpd-new-project --minimal` | `/gpd-map-research` | `/gpd-resume-work` |
+| GitHub Copilot CLI | `--copilot` | `/gpd-help` | `/gpd-start` | `/gpd-tour` | `/gpd-new-project --minimal` | `/gpd-map-research` | `/gpd-resume-work` |
 <!-- gpd-public-surface:supported-runtimes-table:end -->
 
 Each runtime uses its own command prefix, but the workflow is the same across all five. For install-path details, runtime-specific hooks, and launcher notes, use the onboarding hub and the runtime guides in `docs/`.

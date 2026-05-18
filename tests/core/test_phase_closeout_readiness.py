@@ -215,6 +215,41 @@ def test_closeout_readiness_missing_verification_blocks_required_closeout(tmp_pa
     assert route.rendered_markdown == "## > Next Up\nPrimary: `gpd:verify-work 02`"
 
 
+def test_closeout_readiness_missing_verification_blocks_by_default(tmp_path: Path) -> None:
+    _write_phase_project(tmp_path, verification_status=None)
+
+    result = phase_closeout_readiness(tmp_path, "02")
+
+    assert result.ready is False
+    assert result.mutation_allowed is False
+    assert result.require_verification is True
+    assert result.closeout_command is None
+    assert result.verification_routing_status == "missing"
+    assert result.blockers == ["canonical verification report missing"]
+    route = result.lifecycle_next_up
+    assert route is not None
+    _assert_route(
+        route,
+        status_class="needs_verification",
+        transition_owner="runtime",
+        current_blocking_gate="verification_missing",
+        primary_runtime_command="gpd:verify-work 02",
+        local_transition_command=None,
+        after_local_runtime_command=None,
+    )
+
+
+def test_closeout_readiness_explicit_verification_opt_out_remains_warning_only(tmp_path: Path) -> None:
+    _write_phase_project(tmp_path, verification_status=None)
+
+    result = phase_closeout_readiness(tmp_path, "02", require_verification=False)
+
+    assert result.ready is True
+    assert result.require_verification is False
+    assert result.closeout_command == "gpd phase complete 02"
+    assert result.warnings[:1] == ["canonical verification status is 'missing'"]
+
+
 @pytest.mark.parametrize("status", ["gaps_found", "human_needed", "expert_needed"])
 def test_closeout_readiness_non_passing_verification_blocks_required_closeout(
     tmp_path: Path,
@@ -368,7 +403,7 @@ def test_closeout_readiness_blocks_non_passed_proof_redteam_artifact(tmp_path: P
     assert any("reports status 'gaps_found'; expected 'passed'" in blocker for blocker in result.blockers)
 
 
-def test_phase_closeout_readiness_cli_emits_json_and_nonzero_when_blocked(tmp_path: Path) -> None:
+def test_phase_closeout_readiness_cli_blocks_missing_verification_by_default(tmp_path: Path) -> None:
     _write_phase_project(tmp_path, verification_status=None)
 
     result = RUNNER.invoke(
@@ -380,7 +415,6 @@ def test_phase_closeout_readiness_cli_emits_json_and_nonzero_when_blocked(tmp_pa
             "phase",
             "closeout-readiness",
             "02",
-            "--require-verification",
         ],
     )
 
@@ -389,6 +423,32 @@ def test_phase_closeout_readiness_cli_emits_json_and_nonzero_when_blocked(tmp_pa
     assert payload["ready"] is False
     assert payload["read_only"] is True
     assert payload["mutated"] is False
+    assert payload["require_verification"] is True
+    assert payload["closeout_command"] is None
+    assert payload["blockers"] == ["canonical verification report missing"]
+
+
+def test_phase_closeout_readiness_cli_allows_explicit_verification_opt_out(tmp_path: Path) -> None:
+    _write_phase_project(tmp_path, verification_status=None)
+
+    result = RUNNER.invoke(
+        app,
+        [
+            "--raw",
+            "--cwd",
+            str(tmp_path),
+            "phase",
+            "closeout-readiness",
+            "02",
+            "--no-require-verification",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["ready"] is True
+    assert payload["require_verification"] is False
+    assert payload["closeout_command"] == "gpd phase complete 02"
 
 
 def test_phase_help_lists_closeout_readiness_not_removed_verification_summary() -> None:
@@ -425,7 +485,7 @@ def test_execute_phase_closeout_spec_is_readiness_transition_only() -> None:
     assert "--require-verification" in workflow
     assert 'gpd phase complete "${phase_number}"' in workflow
     assert workflow.index("gpd --raw phase closeout-readiness") < workflow.index('gpd phase complete "${phase_number}"')
-    assert "CLOSEOUT_READY=$(echo \"$CLOSEOUT_READINESS\" | gpd json get .ready --default false)" in workflow
+    assert 'CLOSEOUT_READY=$(echo "$CLOSEOUT_READINESS" | gpd json get .ready --default false)' in workflow
     assert workflow.index('if [ "$CLOSEOUT_READY" != "true" ]; then') < workflow.index(
         'gpd phase complete "${phase_number}"'
     )

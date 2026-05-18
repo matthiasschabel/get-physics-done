@@ -14,6 +14,7 @@ from scripts.render_help_surface import (
     help_surface_block_ids,
     help_surface_markers,
     replace_help_surface_text,
+    update_help_surface_file,
 )
 from tests.assertion_taxonomy_support import assert_prompt_contracts, machine_exact
 
@@ -212,6 +213,20 @@ def test_help_detail_reference_file_marker_matches_renderer_output() -> None:
     assert checked_in_detailed_reference == _render_detailed_command_reference(renderer)
 
 
+def test_respond_to_referees_help_distinguishes_manuscript_edits_from_response_roots() -> None:
+    command_help = (_repo_root() / "src/gpd/commands/respond-to-referees.md").read_text(encoding="utf-8")
+    expected_note = (
+        "Manuscript edits stay beside the resolved manuscript; GPD-authored response artifacts use the selected GPD "
+        "roots (`GPD/` and `GPD/review/` for project-backed response rounds, or "
+        "`GPD/publication/{subject_slug}` plus its `review/` subtree for managed/external subjects)."
+    )
+    stale_note = "Project-backed review/response/package outputs stay under the resolved manuscript root"
+
+    for help_surface in (command_help, _read_workflow_help(), _read_help_detail_reference()):
+        assert expected_note in help_surface
+        assert stale_note not in help_surface
+
+
 def test_help_surface_marker_script_is_idempotent() -> None:
     workflow_help = _read_workflow_help()
     detail_reference = _read_help_detail_reference()
@@ -219,6 +234,39 @@ def test_help_surface_marker_script_is_idempotent() -> None:
     assert check_help_surface_text(workflow_help) == ()
     assert check_help_surface_text(detail_reference, path=_help_detail_reference_path()) == ()
     assert replace_help_surface_text(workflow_help) == workflow_help
+
+
+def test_help_surface_update_rejects_missing_and_duplicate_marker_inventory(tmp_path: Path) -> None:
+    workflow_help = _read_workflow_help()
+    start_marker, end_marker = help_surface_markers("quick-start")
+    start = workflow_help.index(start_marker)
+    end = workflow_help.index(end_marker, start) + len(end_marker)
+    quick_start_region = workflow_help[start:end]
+
+    cases = (
+        (
+            "missing-help.md",
+            workflow_help[:start] + workflow_help[end:],
+            "missing 1 expected marker(s) for 'quick-start'",
+        ),
+        (
+            "duplicate-help.md",
+            workflow_help + "\n" + quick_start_region,
+            "duplicate marker for 'quick-start' is not allowed",
+        ),
+    )
+
+    for filename, text, expected_diagnostic in cases:
+        path = tmp_path / filename
+        path.write_text(text, encoding="utf-8")
+
+        with pytest.raises(ValueError) as error:
+            update_help_surface_file(path)
+
+        inventory_failure = "Cannot update help surface generated regions because marker inventory is invalid."
+        assert inventory_failure in str(error.value)
+        assert expected_diagnostic in str(error.value)
+        assert path.read_text(encoding="utf-8") == text
 
 
 def test_help_detail_reference_inventory_detects_missing_and_duplicate_marker() -> None:

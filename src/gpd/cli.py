@@ -1761,8 +1761,8 @@ def phase_complete(
 def phase_closeout_readiness_cmd(
     phase_num: str = typer.Argument(..., help="Phase number to check"),
     require_verification: bool = typer.Option(
-        False,
-        "--require-verification",
+        True,
+        "--require-verification/--no-require-verification",
         help="Require canonical verification frontmatter status: passed",
     ),
 ) -> None:

@@ -4,10 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from gpd.core.onboarding_surfaces import BeginnerRuntimeSurface
+from gpd.adapters.runtime_catalog import iter_runtime_descriptors
+from gpd.core.onboarding_surfaces import BeginnerRuntimeSurface, beginner_runtime_surfaces
 from gpd.core.public_surface_renderer import (
     public_surface_block_ids,
     public_surface_context,
+    public_surface_runtime_surfaces,
     render_beginner_caveat_list,
     render_beginner_preflight_list,
     render_local_cli_bridge_summary,
@@ -105,6 +107,15 @@ def test_terminal_and_local_cli_bridge_text_derive_from_runtime_and_contract_dat
         assert f"- `{command}`" in cli_summary
 
 
+def test_public_runtime_surfaces_follow_catalog_priority_order() -> None:
+    catalog_order = tuple(descriptor.runtime_name for descriptor in iter_runtime_descriptors())
+    reversed_surfaces = tuple(reversed(beginner_runtime_surfaces()))
+
+    assert tuple(surface.runtime_name for surface in public_surface_runtime_surfaces()) == catalog_order
+    ordered_surfaces = public_surface_runtime_surfaces(reversed_surfaces)
+    assert tuple(surface.runtime_name for surface in ordered_surfaces) == catalog_order
+
+
 def test_supported_runtime_and_install_tables_follow_public_runtime_surfaces() -> None:
     context = public_surface_context()
 
@@ -119,6 +130,9 @@ def test_supported_runtime_and_install_tables_follow_public_runtime_surfaces() -
         "Existing work",
         "Return later",
     )
+    assert [row["Runtime"] for row in supported_table.rows] == [
+        surface.display_name for surface in context.runtime_surfaces
+    ]
     supported_rows = {row["Runtime"]: row for row in supported_table.rows}
     for surface in context.runtime_surfaces:
         assert supported_rows[surface.display_name] == {
@@ -134,6 +148,9 @@ def test_supported_runtime_and_install_tables_follow_public_runtime_surfaces() -
 
     install_table = parse_markdown_table(render_os_install_matrix(context), context="OS install matrix")
     assert install_table.headers == ("Runtime", "Install command")
+    assert [row["Runtime"] for row in install_table.rows] == [
+        surface.display_name for surface in context.runtime_surfaces
+    ]
     install_rows = {row["Runtime"]: row for row in install_table.rows}
     for surface in context.runtime_surfaces:
         install_command = f"{context.bootstrap_command} {surface.install_flag} --local"

@@ -371,7 +371,7 @@ def test_public_surface_contract_loader_rejects_schema_key_drift_after_cache_cle
     load_public_surface_contract.cache_clear()
 
 
-def test_public_surface_contract_schema_does_not_duplicate_local_cli_command_values() -> None:
+def test_public_surface_contract_schema_keeps_v1_local_cli_command_values_for_external_consumers() -> None:
     schema = json.loads(
         (
             Path(public_surface_contract_module.__file__).resolve().with_name("public_surface_contract_schema.json")
@@ -379,11 +379,10 @@ def test_public_surface_contract_schema_does_not_duplicate_local_cli_command_val
     )
 
     local_cli_bridge_schema = schema["sections"]["local_cli_bridge"]
-    assert "commands" not in local_cli_bridge_schema["keys"]
-    assert "gpd --help" not in json.dumps(schema)
+    assert local_cli_bridge_schema["keys"][0] == "commands"
 
 
-def test_public_surface_contract_bridge_commands_derive_from_named_command_order() -> None:
+def test_public_surface_contract_bridge_commands_match_named_command_order() -> None:
     canonical_payload = json.loads(
         (Path(public_surface_contract_module.__file__).resolve().with_name("public_surface_contract.json")).read_text(
             encoding="utf-8"
@@ -399,7 +398,7 @@ def test_public_surface_contract_bridge_commands_derive_from_named_command_order
 
     contract = load_public_surface_contract()
 
-    assert "commands" not in canonical_payload["local_cli_bridge"]
+    assert tuple(canonical_payload["local_cli_bridge"]["commands"]) == expected_commands
     assert contract.local_cli_bridge.commands == expected_commands
     assert contract.local_cli_bridge.commands == contract.local_cli_bridge.named_commands.ordered()
 

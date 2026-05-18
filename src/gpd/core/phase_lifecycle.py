@@ -36,6 +36,7 @@ from gpd.core.utils import (
 from gpd.core.verification_status import read_verification_status, verification_path_for_phase
 
 _NEXT_UP_HINT_SOURCE = "phase-closeout-readiness"
+_PHASE_ALREADY_CLOSED_BLOCKER = "phase already closed; no closeout mutation needed"
 
 _PROOF_REQUIRED_RE = re.compile(
     r"\b("
@@ -898,13 +899,7 @@ def _decision_from_closeout(
     action = lifecycle_next_up.primary.action
     owner = lifecycle_next_up.primary.owner
     command = lifecycle_next_up.primary.command
-
-    if phase_closed:
-        milestone_complete = state_status_class(state_status) == "milestone_complete" or next_phase is None
-        decision: LifecycleDecisionKind = (
-            "closed_milestone_complete" if milestone_complete else "closed_ready_next_phase"
-        )
-        return decision, lifecycle_next_up.status_class, action, owner, command
+    canonical_blockers = [blocker for blocker in closeout.blockers if blocker != _PHASE_ALREADY_CLOSED_BLOCKER]
 
     if not closeout.all_plans_complete:
         return "needs_execution", lifecycle_next_up.status_class, action, owner, command
@@ -912,8 +907,15 @@ def _decision_from_closeout(
     if closeout.active_bounded_segment:
         return "blocked_closeout", lifecycle_next_up.status_class, action, owner, command
 
-    if any("verification" in blocker for blocker in closeout.blockers):
+    if any("verification" in blocker for blocker in canonical_blockers):
         return "needs_verification", lifecycle_next_up.status_class, action, owner, command
+
+    if phase_closed and not canonical_blockers:
+        milestone_complete = state_status_class(state_status) == "milestone_complete" or next_phase is None
+        decision: LifecycleDecisionKind = (
+            "closed_milestone_complete" if milestone_complete else "closed_ready_next_phase"
+        )
+        return decision, lifecycle_next_up.status_class, action, owner, command
 
     if closeout.ready:
         return "ready_for_closeout", lifecycle_next_up.status_class, action, owner, command
@@ -1081,12 +1083,13 @@ def phase_lifecycle_decision(
     tags, tag_warnings = _checkpoint_tags(project_root, phase_info.phase_number)
     warnings.extend(tag_warnings)
 
-    phase_closed, roadmap_complete, next_phase, state_current_phase, state_status = _phase_closure(
+    phase_closed_signal, roadmap_complete, next_phase, state_current_phase, state_status = _phase_closure(
         project_root,
         phase_info.phase_number,
     )
+    phase_closed = phase_closed_signal and not blockers
     if phase_closed:
-        blockers.append("phase already closed; no closeout mutation needed")
+        blockers.append(_PHASE_ALREADY_CLOSED_BLOCKER)
 
     ready = not blockers
     preserve_checkpoint_tags = bool(blockers or recovery_artifacts)

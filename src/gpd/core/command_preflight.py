@@ -303,6 +303,41 @@ def _command_context_publication_roots(
     return publication_root, f"{publication_root}/review"
 
 
+def _is_respond_to_referees_command(command: object) -> bool:
+    return str(getattr(command, "name", "") or "") == "gpd:respond-to-referees"
+
+
+def _respond_to_referees_has_report_source(arguments: str | None) -> bool:
+    """Return whether launch arguments include a referee report source or paste intake."""
+
+    tokens = _split_command_arguments(arguments)
+    skip_next = False
+    for index, token in enumerate(tokens):
+        if skip_next:
+            skip_next = False
+            continue
+        if token == "--":
+            continue
+        if token == "--manuscript":
+            skip_next = True
+            continue
+        if token.startswith("--manuscript="):
+            continue
+        if token == "--report":
+            if index + 1 < len(tokens):
+                next_token = tokens[index + 1].strip()
+                return bool(next_token and not next_token.startswith("-"))
+            return False
+        if token.startswith("--report="):
+            return bool(token.partition("=")[2].strip())
+        if token == "paste":
+            return True
+        if token.startswith("--"):
+            continue
+        return True
+    return False
+
+
 def _project_relative_path(project_root: Path, target: Path | None) -> str | None:
     """Return *target* relative to *project_root* when possible."""
 
@@ -1430,6 +1465,25 @@ def build_command_context_preflight(
         if invalid_explicit_publication_subject and resolved_subject is not None
         else ""
     )
+    respond_to_referees_context = _is_respond_to_referees_command(command)
+    manuscript_context_passed = True
+    manuscript_context_detail = ""
+    if respond_to_referees_context:
+        manuscript_context = _command_context_manuscript_check(
+            context_cwd,
+            command,
+            arguments,
+            workspace_cwd=launch_cwd,
+            resolved_subject=resolved_subject,
+        )
+        if manuscript_context is not None:
+            manuscript_context_passed, manuscript_context_detail = manuscript_context
+        if not project_exists and not (resolved_subject is not None and resolved_subject.explicit_input):
+            manuscript_context_passed = False
+            manuscript_context_detail = (
+                "respond-to-referees outside a project requires `--manuscript PATH`; "
+                "report path or `paste` shorthand only works after a project manuscript resolves"
+            )
     if resolved_subject is not None and not _command_requires_manuscript_context(command):
         explicit_inputs_ok = resolved_subject.status == "resolved"
         interactive_intake_allowed = resolved_subject.status == "interactive"
@@ -1456,6 +1510,17 @@ def build_command_context_preflight(
                     if explicit_inputs_ok
                     else f"invalid explicit review target: {peer_review_mode.mode_reason}"
                 )
+        if respond_to_referees_context:
+            report_source_supplied = _respond_to_referees_has_report_source(arguments)
+            explicit_inputs_ok = bool(
+                manuscript_context_passed
+                and report_source_supplied
+                and (project_exists or (resolved_subject is not None and resolved_subject.explicit_input))
+            )
+            if not manuscript_context_passed:
+                explicit_inputs_detail = manuscript_context_detail
+            elif not report_source_supplied:
+                explicit_inputs_detail = "missing referee report source (`--report PATH`, report path, or `paste`)"
         interactive_intake_allowed = (
             _command_allows_interactive_subject_intake(command)
             and not explicit_inputs_ok
@@ -1463,6 +1528,8 @@ def build_command_context_preflight(
         )
     subject_required = _command_has_typed_subject_policy(command)
     subject_context_ready = resolved_subject is not None and resolved_subject.status in {"resolved", "bootstrap"}
+    if respond_to_referees_context:
+        subject_context_ready = subject_context_ready and manuscript_context_passed
     project_context_satisfies = project_exists and (
         not invalid_explicit_publication_subject
         and (not subject_required or explicit_inputs_ok or interactive_intake_allowed or subject_context_ready)
@@ -1473,6 +1540,13 @@ def build_command_context_preflight(
         (f"{display(layout.project_md)} present" if project_exists else f"missing {display(layout.project_md)}"),
         blocking=False,
     )
+    if respond_to_referees_context:
+        add_check(
+            "manuscript",
+            manuscript_context_passed,
+            manuscript_context_detail,
+            blocking=True,
+        )
     add_check(
         "explicit_inputs",
         explicit_inputs_ok or interactive_intake_allowed,
@@ -1494,7 +1568,11 @@ def build_command_context_preflight(
                 and resolved_subject.ownership_mode == "external_authoring_intake"
             )
             else explicit_inputs_detail
-            if explicit_inputs_ok or (command.name == "gpd:peer-review" and peer_review_has_explicit_target)
+            if (
+                explicit_inputs_ok
+                or (command.name == "gpd:peer-review" and peer_review_has_explicit_target)
+                or respond_to_referees_context
+            )
             else (
                 _command_interactive_subject_detail(command, explicit_inputs)
                 if interactive_intake_allowed
@@ -1531,6 +1609,10 @@ def build_command_context_preflight(
         else (
             invalid_explicit_publication_subject_detail
             if invalid_explicit_publication_subject
+            else manuscript_context_detail
+            if respond_to_referees_context and not manuscript_context_passed
+            else explicit_inputs_detail
+            if respond_to_referees_context and not explicit_inputs_ok
             else _build_project_aware_guidance(explicit_inputs, init_command=runtime.init_command)
         )
     )

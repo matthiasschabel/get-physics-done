@@ -68,7 +68,7 @@ GPD favors scientific rigor and explicit uncertainty. Treat preferred answers as
 You will use two different places: your normal terminal and your runtime.
 
 <!-- gpd-public-surface:terminal-runtime-bridge:start -->
-Use your normal terminal for installs, local `gpd ...` diagnostics, and runtime launchers such as `claude`, `codex`, `gh copilot`, `gemini`, `opencode`.
+Use your normal terminal for installs, local `gpd ...` diagnostics, and runtime launchers such as `claude`, `gemini`, `codex`, `opencode`, `gh copilot`.
 Use the opened runtime for the installed GPD command ladder (`help -> start -> tour -> new-project / map-research -> resume-work`); start with `/gpd:help`, `$gpd-help`, `/gpd-help`.
 <!-- gpd-public-surface:terminal-runtime-bridge:end -->
 

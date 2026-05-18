@@ -10,6 +10,7 @@ from tests.helpers.phase4_persona.matrix import load_phase4_rows
 from tests.helpers.phase7_live_like import (
     PHASE7_REQUIRED_ROW_SET_IDS,
     REQUIRED_JIT_ROW_IDS,
+    REQUIRED_PROVIDER_FREE_CI_ROW_IDS,
     assert_phase7_matrix_payload_valid,
     load_phase7_live_like_rows,
     load_phase7_live_persona_payload,
@@ -19,7 +20,9 @@ from tests.helpers.phase7_live_like import (
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-_PHASE7_TRACKED_LOC_CAP = 3_500
+_PHASE7_TRACKED_SURFACE_UNIT_CAP = 5_200
+_PHASE7_TRACKED_SURFACE_BYTE_CAP = 325_000
+_PHASE7_JSON_BYTES_PER_SURFACE_UNIT = 80
 
 _PHASE7_FORBIDDEN_RAW_ARTIFACT_NAMES = frozenset(
     {
@@ -126,6 +129,25 @@ def _physical_line_count(path: Path) -> int:
     return len(path.read_text(encoding="utf-8").splitlines())
 
 
+def _nonblank_line_count(path: Path) -> int:
+    return sum(1 for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
+
+
+def _byte_count(path: Path) -> int:
+    return len(path.read_bytes())
+
+
+def _phase7_surface_size_units(path: Path) -> int:
+    nonblank_lines = _nonblank_line_count(path)
+    if path.suffix == ".json":
+        byte_units = max(
+            1,
+            (_byte_count(path) + _PHASE7_JSON_BYTES_PER_SURFACE_UNIT - 1) // _PHASE7_JSON_BYTES_PER_SURFACE_UNIT,
+        )
+        return max(nonblank_lines, byte_units)
+    return nonblank_lines
+
+
 def _explicit_denylist_line_numbers(path: Path) -> set[int]:
     allowed_lines: set[int] = set()
     inside_denylist = False
@@ -179,6 +201,7 @@ def test_phase7_manifest_declares_shared_provider_free_row_sets() -> None:
     row_sets = phase7_manifest_row_sets()
 
     assert PHASE7_REQUIRED_ROW_SET_IDS <= set(row_sets)
+    assert row_sets["provider_free_ci_required"] == REQUIRED_PROVIDER_FREE_CI_ROW_IDS
     assert set(row_sets["provider_free_ci_required"]) == REQUIRED_JIT_ROW_IDS
     assert row_sets["phase6_first_manual_canary"] == tuple(_PHASE6_INTEGRATION_PLAN_PERSONA_ROWS.values())
 
@@ -201,12 +224,23 @@ def _assert_phase6_persona_rows_cover(mapping: Mapping[str, str]) -> None:
         assert row.phase4_behavior_ref in phase4_rows, family
 
 
-def test_phase7_acceptance_surface_stays_under_loc_cap() -> None:
+def test_phase7_json_surface_size_counts_minified_bytes(tmp_path: Path) -> None:
+    minified_fixture = tmp_path / "phase7_live_persona_matrix.json"
+    row_body = '{"row_id":"P7-ERG-JIT-01","summary":"' + ("x" * 160) + '"}'
+    minified_fixture.write_text('{"rows":[' + ",".join(row_body for _ in range(40)) + "]}", encoding="utf-8")
+
+    assert _physical_line_count(minified_fixture) == 1
+    assert _phase7_surface_size_units(minified_fixture) >= 80
+
+
+def test_phase7_acceptance_surface_stays_under_size_caps() -> None:
     phase7_files = _phase7_surface_files()
-    phase7_loc = sum(_physical_line_count(path) for path in phase7_files)
+    phase7_units = sum(_phase7_surface_size_units(path) for path in phase7_files)
+    phase7_bytes = sum(_byte_count(path) for path in phase7_files)
 
     assert phase7_files
-    assert phase7_loc <= _PHASE7_TRACKED_LOC_CAP
+    assert phase7_units <= _PHASE7_TRACKED_SURFACE_UNIT_CAP
+    assert phase7_bytes <= _PHASE7_TRACKED_SURFACE_BYTE_CAP
 
 
 def test_phase7_files_contain_raw_artifact_names_only_in_explicit_denylist() -> None:

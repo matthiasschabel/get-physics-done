@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import tarfile
 from pathlib import Path
 
@@ -23,6 +24,21 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 COMMANDS_DIR = REPO_ROOT / "src/gpd/commands"
 WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
 runner = CliRunner()
+
+_SHELL_VAR_REFERENCE_RE = re.compile(r"\$(?:\{([A-Za-z_][A-Za-z0-9_]*)(?::-[^}]*)?\}|([A-Za-z_][A-Za-z0-9_]*))")
+_SHELL_ASSIGNMENT_RE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=")
+_ARXIV_STAGE_SHELL_AMBIENT = frozenset(
+    {
+        "ARGUMENTS",
+        # Bootstrap derives these names from strict review preflight before setting
+        # the durable package variables. Lowercase subject_slug remains a path
+        # template placeholder in staged publication prose.
+        "resolved_dir",
+        "resolved_main_tex",
+        "selected_review_root",
+        "subject_slug",
+    }
+)
 
 
 def _check_by_name(result: object, name: str) -> object:
@@ -104,6 +120,14 @@ def _assert_missing_bibliography_material(tex_check: object) -> None:
     assert "inlined bibliography" in detail
 
 
+def _shell_variables_referenced(source: str) -> set[str]:
+    return {braced or bare for braced, bare in _SHELL_VAR_REFERENCE_RE.findall(source) if (braced or bare)}
+
+
+def _shell_variables_assigned(source: str) -> set[str]:
+    return {match.group(1) for line in source.splitlines() if (match := _SHELL_ASSIGNMENT_RE.match(line))}
+
+
 def test_arxiv_submission_command_declares_manuscript_root_gates_without_first_match_discovery() -> None:
     command = (COMMANDS_DIR / "arxiv-submission.md").read_text(encoding="utf-8")
 
@@ -182,6 +206,18 @@ def test_arxiv_submission_workflow_resolves_manifest_based_manuscript_root_witho
         "Even for an explicit external manuscript subject",
     )
     assert 'ls "${DIR}"/*.tex' not in workflow
+
+
+def test_arxiv_submission_stage_files_bind_shell_variables_locally() -> None:
+    offenders: list[str] = []
+
+    for stage_path in sorted((WORKFLOWS_DIR / "arxiv-submission").glob("*.md")):
+        source = stage_path.read_text(encoding="utf-8")
+        allowed = _shell_variables_assigned(source) | _ARXIV_STAGE_SHELL_AMBIENT
+        for variable in sorted(_shell_variables_referenced(source) - allowed):
+            offenders.append(f"{stage_path.name}:${variable}")
+
+    assert offenders == []
 
 
 def test_arxiv_submission_stage_manifest_path_is_resolved_and_loadable() -> None:

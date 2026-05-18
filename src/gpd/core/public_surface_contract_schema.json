@@ -14,6 +14,7 @@
     },
     "local_cli_bridge": {
       "keys": [
+        "commands",
         "named_commands",
         "terminal_phrase",
         "purpose_phrase",

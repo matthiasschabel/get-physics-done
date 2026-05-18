@@ -22,6 +22,26 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
+Apply `PACKAGE_INIT.staged_loading.field_access_instruction` before reading the payload. Bind package paths from this stage's init payload:
+
+```bash
+INIT="$PACKAGE_INIT"
+# gpd --raw stage field-access arxiv-submission --stage package --style shell --payload-var INIT --alias PAPER_DIR=manuscript_root --alias SUBJECT_SLUG=publication_subject_slug --alias PUBLICATION_ROOT=managed_publication_root
+PAPER_DIR=$(echo "$INIT" | gpd json get .manuscript_root --default "")
+SUBJECT_SLUG=$(echo "$INIT" | gpd json get .publication_subject_slug --default "")
+PUBLICATION_ROOT=$(echo "$INIT" | gpd json get .managed_publication_root --default "")
+if [ -z "$PUBLICATION_ROOT" ] && [ -n "$SUBJECT_SLUG" ]; then
+  PUBLICATION_ROOT="GPD/publication/${SUBJECT_SLUG}"
+fi
+if [ -z "$PAPER_DIR" ] || [ -z "$SUBJECT_SLUG" ] || [ -z "$PUBLICATION_ROOT" ]; then
+  echo "ERROR: arxiv-submission package missing manuscript_root or publication_subject_slug"
+  exit 1
+fi
+PACKAGE_ROOT="${PUBLICATION_ROOT}/arxiv"
+SUBMISSION_DIR="${PACKAGE_ROOT}/submission"
+PACKAGE_TARBALL="${PACKAGE_ROOT}/arxiv-submission.tar.gz"
+```
+
 Keep the packaging rules arXiv-specific and deterministic:
 
 1. Keep `\input{}` / `\include{}` chains only if every source file is packaged; flatten only as repair.

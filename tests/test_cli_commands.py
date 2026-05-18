@@ -4795,7 +4795,7 @@ class TestReviewValidationCommands:
         assert payload["command"] == "gpd:respond-to-referees"
         assert payload["passed"] is False
         checks = checks_by_name(payload)
-        assert checks["command_context"]["passed"] is True
+        assert checks["command_context"]["passed"] is False
         assert checks["referee_report_source"]["passed"] is True
         assert checks["manuscript"]["passed"] is False
         assert checks["command_context"]["detail"]
@@ -6451,12 +6451,90 @@ class TestReviewValidationCommands:
         assert resolved_subject["ownership_mode"] == "external_authoring_intake"
         assert "write_paper_authoring_input.central_claim is required" in resolved_subject["detail"]
 
-    def test_command_context_respond_to_referees_flagged_intake_uses_canonical_input_labels(
+    def test_command_context_respond_to_referees_rejects_report_only_outside_project_without_manuscript(
         self,
         tmp_path: Path,
     ) -> None:
-        workspace = tmp_path / "standalone-respond"
+        workspace = tmp_path.parent / f"{tmp_path.name}-standalone-respond-report-only"
+        report = workspace / "reports" / "referee-1.md"
+        report.parent.mkdir(parents=True)
+        report.write_text("# Referee 1\n\nPlease clarify the proof.\n", encoding="utf-8")
+
+        payload = _raw_json(
+            [
+                "--raw",
+                "--cwd",
+                str(workspace),
+                "validate",
+                "command-context",
+                "respond-to-referees",
+                "--",
+                "--report",
+                report.relative_to(workspace).as_posix(),
+            ],
+            expect_exit=1,
+        )
+        checks = checks_by_name(payload)
+        assert payload["command"] == "gpd:respond-to-referees"
+        assert payload["passed"] is False
+        assert checks["project_exists"]["passed"] is False
+        assert checks["manuscript"]["passed"] is False
+        assert checks["explicit_inputs"]["passed"] is False
+        assert checks["manuscript"]["detail"].startswith("respond-to-referees outside a project requires")
+        assert payload["resolved_subject"]["status"] == "missing"
+
+    def test_command_context_respond_to_referees_requires_explicit_manuscript_outside_project(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        workspace = tmp_path.parent / f"{tmp_path.name}-standalone-respond-with-default-manuscript"
+        manuscript = _manuscript_entrypoint_path(workspace)
+        manuscript.parent.mkdir(parents=True)
+        manuscript.write_text(
+            "\\documentclass{article}\n\\begin{document}\nStandalone draft.\n\\end{document}\n",
+            encoding="utf-8",
+        )
+        report = workspace / "reports" / "referee-1.md"
+        report.parent.mkdir()
+        report.write_text("# Referee 1\n\nPlease clarify notation.\n", encoding="utf-8")
+
+        payload = _raw_json(
+            [
+                "--raw",
+                "--cwd",
+                str(workspace),
+                "validate",
+                "command-context",
+                "respond-to-referees",
+                report.relative_to(workspace).as_posix(),
+            ],
+            expect_exit=1,
+        )
+        checks = checks_by_name(payload)
+        resolved_subject = payload["resolved_subject"]
+        assert payload["passed"] is False
+        assert checks["manuscript"]["passed"] is False
+        assert checks["manuscript"]["detail"].startswith("respond-to-referees outside a project requires")
+        assert resolved_subject["status"] == "missing"
+        assert resolved_subject["explicit_input"] is False
+
+    def test_command_context_respond_to_referees_accepts_valid_external_manuscript_and_report(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        workspace = tmp_path.parent / f"{tmp_path.name}-standalone-respond"
         workspace.mkdir()
+        manuscript = workspace / "submission" / _CANONICAL_MANUSCRIPT_BASENAME
+        manuscript.parent.mkdir()
+        manuscript.write_text(
+            "\\documentclass{article}\n\\begin{document}\nExternal response target.\n\\end{document}\n",
+            encoding="utf-8",
+        )
+        first_report = workspace / "reports" / "referee-1.md"
+        second_report = workspace / "reports" / "referee-2.md"
+        first_report.parent.mkdir()
+        first_report.write_text("# Referee 1\n\nClarify the proof.\n", encoding="utf-8")
+        second_report.write_text("# Referee 2\n\nCompare with prior work.\n", encoding="utf-8")
         explicit_intake = (
             f"--manuscript submission/{_CANONICAL_MANUSCRIPT_BASENAME} "
             "--report reports/referee-1.md --report reports/referee-2.md"
@@ -6469,8 +6547,12 @@ class TestReviewValidationCommands:
         assert payload["command"] == "gpd:respond-to-referees"
         assert payload["passed"] is True
         assert payload["explicit_inputs"] == ["manuscript path", "path to referee report", "`paste`"]
+        assert checks["manuscript"]["passed"] is True
         assert checks["explicit_inputs"]["passed"] is True
         assert checks["explicit_inputs"]["detail"] == "explicit standalone inputs detected"
+        assert payload["resolved_subject"]["ownership_mode"] == "external_artifact"
+        assert payload["resolved_subject"]["explicit_input"] is True
+        assert payload["resolved_subject"]["target_path"].endswith(f"submission/{_CANONICAL_MANUSCRIPT_BASENAME}")
 
     def test_review_preflight_peer_review_accepts_external_txt_artifact(self, tmp_path: Path) -> None:
         workspace = tmp_path / "standalone-review"

@@ -129,7 +129,7 @@ def check_generated_files(
     repo_root: Path = REPO_ROOT,
 ) -> tuple[GeneratedRegionDiff, ...]:
     diffs: list[GeneratedRegionDiff] = []
-    target_contracts = _default_target_contract_map(repo_root=repo_root) if paths is None else {}
+    target_contracts = _default_target_contract_map(repo_root=repo_root)
     for path in _resolve_paths(paths, repo_root=repo_root):
         content = path.read_text(encoding="utf-8")
         diffs.extend(check_generated_regions(content, path=path))
@@ -152,7 +152,7 @@ def update_generated_files(
     repo_root: Path = REPO_ROOT,
 ) -> tuple[Path, ...]:
     updated_paths: list[Path] = []
-    target_contracts = _default_target_contract_map(repo_root=repo_root) if paths is None else {}
+    target_contracts = _default_target_contract_map(repo_root=repo_root)
     for path in _resolve_paths(paths, repo_root=repo_root):
         original = path.read_text(encoding="utf-8")
         updated = replace_generated_regions(original)

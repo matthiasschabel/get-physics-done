@@ -23,6 +23,10 @@ def _section(text: str, start_marker: str, end_marker: str | None = None) -> str
     return text[start:end]
 
 
+def _contains_text(text: str, fragment: str) -> bool:
+    return fragment in text
+
+
 def test_execute_phase_uses_canonical_apply_return_updates_path() -> None:
     text = _read(EXECUTE_PHASE)
 
@@ -71,3 +75,15 @@ def test_execute_plan_routes_state_application_through_canonical_applicator() ->
     assert "gpd apply-return-updates" in text
     assert "contract_updates:" in text
     assert "continuation_update:" in text
+
+
+def test_execute_plan_checkpoint_pause_keeps_bounded_segment_parent_owned() -> None:
+    text = _read(EXECUTE_PLAN)
+    section = _section(text, "<step name=\"execute\">", "</step>")
+
+    assert _contains_text(section, "return checkpoint intent plus the matching `execution_segment`")
+    assert _contains_text(
+        section,
+        "persists `continuation.bounded_segment` through `gpd apply-return-updates --checkpoint-resume-file`",
+    )
+    assert not _contains_text(section, "persist the matching `execution_segment` as `continuation.bounded_segment`")

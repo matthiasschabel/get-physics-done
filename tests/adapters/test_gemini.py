@@ -55,6 +55,10 @@ def _make_managed_home_python(tmp_path: Path) -> Path:
     return managed_python
 
 
+def _contains_text(text: str, fragment: str) -> bool:
+    return fragment in text
+
+
 def _assert_no_manifestless_gpd_artifacts(target: Path) -> None:
     assert not (target / "gpd-file-manifest.json").exists()
     assert not (target / "get-physics-done").exists()
@@ -418,6 +422,46 @@ class TestRewriteGeminiShellWorkflowGuidance:
         assert "|| true" not in result
         assert "PREVIEW=$(" not in result
         assert "$PREVIEW" not in result
+
+    def test_preserves_captured_gpd_assignment_when_value_is_consumed_later(self) -> None:
+        content = (
+            "```bash\n"
+            "STATE_JSON=$(gpd --raw state snapshot)\n"
+            'STATE_PHASE=$(echo "$STATE_JSON" | gpd json get .current_phase --default "")\n'
+            "ROADMAP=$(gpd --raw roadmap analyze)\n"
+            'echo "$ROADMAP" | gpd json get .phases --default "[]"\n'
+            "```"
+        )
+
+        result = _rewrite_gemini_shell_workflow_guidance(content)
+
+        assert _contains_text(result, "STATE_JSON=$(gpd --raw state snapshot)")
+        assert _contains_text(result, 'echo "$STATE_JSON" | gpd json get .current_phase')
+        assert _contains_text(result, "ROADMAP=$(gpd --raw roadmap analyze)")
+        assert _contains_text(result, 'echo "$ROADMAP" | gpd json get .phases')
+
+    def test_preserves_branch_captured_gpd_assignment_when_value_is_checked_after_branch(self) -> None:
+        content = (
+            "```bash\n"
+            'if [ -n "$ARGUMENTS" ]; then\n'
+            '  BOOTSTRAP_INIT=$(gpd --raw init arxiv-submission --stage bootstrap -- "$ARGUMENTS")\n'
+            "else\n"
+            "  BOOTSTRAP_INIT=$(gpd --raw init arxiv-submission --stage bootstrap)\n"
+            "fi\n"
+            "if [ $? -ne 0 ]; then\n"
+            '  echo "ERROR: arxiv-submission bootstrap init failed: $BOOTSTRAP_INIT"\n'
+            "  exit 1\n"
+            "fi\n"
+            'INIT="$BOOTSTRAP_INIT"\n'
+            "```"
+        )
+
+        result = _rewrite_gemini_shell_workflow_guidance(content)
+
+        assert _contains_text(result, 'BOOTSTRAP_INIT=$(gpd --raw init arxiv-submission --stage bootstrap -- "$ARGUMENTS")')
+        assert _contains_text(result, "BOOTSTRAP_INIT=$(gpd --raw init arxiv-submission --stage bootstrap)")
+        assert _contains_text(result, 'echo "ERROR: arxiv-submission bootstrap init failed: $BOOTSTRAP_INIT"')
+        assert _contains_text(result, 'INIT="$BOOTSTRAP_INIT"')
 
     def test_structural_contract_file_transport_preserves_mode_approved(self) -> None:
         content = (

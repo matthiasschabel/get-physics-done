@@ -18,6 +18,16 @@ def _stage(name: str) -> str:
     return (EXECUTE_PHASE_DIR / name).read_text(encoding="utf-8")
 
 
+def _contains_text(text: str, fragment: str) -> bool:
+    return fragment in text
+
+
+def _text_position(text: str, fragment: str) -> int:
+    position = text.find(fragment)
+    assert position >= 0
+    return position
+
+
 def _child_gate(stage_name: str, gate_id: str) -> ChildGateTuple:
     text = _stage(stage_name)
     for match in _YAML_BLOCK_RE.finditer(text):
@@ -63,8 +73,8 @@ def test_wave_return_checkpoint_accepts_executor_summary_only_through_applicator
     wave_return = _stage("wave-return-checkpoint.md")
     gate = _child_gate("wave-return-checkpoint.md", "wave_executor_plan_result")
 
-    assert "canonical SUMMARY applicator" in wave_return
-    assert "Executor subagents must not write `GPD/STATE.md` directly" in wave_return
+    assert _contains_text(wave_return, "canonical SUMMARY applicator")
+    assert _contains_text(wave_return, "Executor subagents must not write `GPD/STATE.md` directly")
     assert "proof_critic_dispatch" in wave_return
     assert 'subagent_type="gpd-check-proof"' not in wave_return
     assert '<step name="classify_child_return_status">' in wave_return
@@ -152,7 +162,10 @@ def test_checkpoint_resume_and_failure_menu_have_separate_ownership() -> None:
     assert "bounded continuation and resume transport" in checkpoint_resume
     assert "gpd_return.status: checkpoint" in checkpoint_resume
     assert "child_gate:" not in checkpoint_resume
-    assert "apply-return-updates" not in checkpoint_resume
+    assert _contains_text(checkpoint_resume, "gpd --raw apply-return-updates")
+    assert _contains_text(checkpoint_resume, "--checkpoint-resume-file")
+    assert _contains_text(checkpoint_resume, "do not show `gpd:resume-work` until the durable state write passes")
+    assert _contains_text(checkpoint_resume, "apply completed-work updates")
     assert "Rollback wave to checkpoint" not in checkpoint_resume
     assert "Skip failed plan and dependent plans" not in checkpoint_resume
 
@@ -162,3 +175,37 @@ def test_checkpoint_resume_and_failure_menu_have_separate_ownership() -> None:
     assert "Stop execution and preserve completed work" in failure_menu
     assert "stage_stop:" in failure_menu
     assert "child_gate:" not in failure_menu
+
+
+def test_wave_checkpoint_route_names_parent_owned_checkpoint_application() -> None:
+    wave_return = _stage("wave-return-checkpoint.md")
+
+    assert _contains_text(wave_return, "parent-owned resume-file creation and durable checkpoint application")
+    assert _contains_text(
+        wave_return,
+        'gpd --raw apply-return-updates ${CHECKPOINT_RETURN_FILE} --checkpoint-resume-file "${CHECKPOINT_RESUME_FILE}"',
+    )
+    assert _contains_text(wave_return, "do not run completed-artifact validators")
+
+
+def test_closeout_readiness_renders_blocked_next_action_before_exit() -> None:
+    closeout = _stage("closeout.md")
+
+    readiness_call = _text_position(closeout, 'CLOSEOUT_READINESS=$(gpd --raw phase closeout-readiness')
+    status_capture = _text_position(closeout[readiness_call:], "READINESS_STATUS=$?") + readiness_call
+    branch = _text_position(closeout[status_capture:], 'CLOSEOUT_READY=$(echo "$CLOSEOUT_READINESS"') + status_capture
+
+    assert readiness_call < status_capture < branch
+    assert not _contains_text(closeout, 'if [ $? -ne 0 ]; then\n  echo "$CLOSEOUT_READINESS"\n  exit 1\nfi')
+    assert _contains_text(closeout, 'gpd json get .next_up.rendered_markdown --default "$CLOSEOUT_READINESS"')
+
+
+def test_execute_phase_bootstrap_binds_phase_aliases_before_plan_validation() -> None:
+    bootstrap = _stage("phase-bootstrap.md")
+
+    alias_binding = _text_position(bootstrap, "Bind `phase_dir` and `phase_number` from `BOOTSTRAP_INIT`")
+    plan_loop = _text_position(bootstrap, 'for plan in "$phase_dir"/*-PLAN.md; do')
+    wave_gate = _text_position(bootstrap, 'gpd phase validate-waves "$phase_number"')
+
+    assert alias_binding < plan_loop < wave_gate
+    assert _contains_text(bootstrap, "default phase number to `PHASE_ARG`")

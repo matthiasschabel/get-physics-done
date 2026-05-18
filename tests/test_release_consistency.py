@@ -868,6 +868,26 @@ def test_export_surfaces_use_visible_exports_directory() -> None:
     _assert_machine_fragments_absent(command, "stale GPD export command path", "Write files to `GPD/exports")
 
 
+def test_export_workflow_keeps_latex_template_and_bibliography_contracts() -> None:
+    repo_root = _repo_root()
+    workflow = (repo_root / "src" / "gpd" / "specs" / "workflows" / "export.md").read_text(encoding="utf-8")
+    generate_latex = workflow[
+        workflow.index('<step name="generate_latex">') : workflow.index('<step name="generate_zip">')
+    ]
+
+    _assert_ordered_fragments(
+        generate_latex,
+        "export template render output",
+        ("render_paper()", "Write the rendered template output to `exports/results.tex`."),
+    )
+    _assert_ordered_fragments(
+        generate_latex,
+        "export standalone bibliography output",
+        ("Otherwise create `exports/results.tex`", "\\" + "bibliographystyle{plainnat}"),
+    )
+    assert "\\" + "bibliography{results}" in generate_latex
+
+
 def test_public_cli_surface_is_unified() -> None:
     repo_root = _repo_root()
     script_lines = _project_script_lines(repo_root)

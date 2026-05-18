@@ -224,11 +224,12 @@ explicitly opts out.
 
 Write the fragment into the requested journal template through
 `gpd.mcp.paper.template_registry.render_paper()` when a target journal is known.
+Write the rendered template output to `exports/results.tex`.
 Otherwise create `exports/results.tex` as a minimal `article` document with
 `amsmath`, `amssymb`, `amsthm`, `physics`, `hyperref`, `booktabs`, `graphicx`,
 `natbib`, a `\tightlist` definition, the pandoc-produced fragment, and
-`plainnat` bibliography style. This avoids raw-LaTeX authoring errors while
-keeping exported `.tex` compilable.
+`\bibliographystyle{plainnat}` plus `\bibliography{results}`. This avoids
+raw-LaTeX authoring errors while keeping exported `.tex` compilable.
 
 Fallback when pandoc is unavailable or below minimum: create the legacy
 article-class scaffold directly in `exports/results.tex` with abstract,

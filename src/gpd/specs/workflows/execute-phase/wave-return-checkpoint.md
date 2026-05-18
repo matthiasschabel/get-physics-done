@@ -35,7 +35,7 @@ Read only the runtime `gpd_return.status` first. Do not run completed-artifact v
 | Runtime status | Route |
 | --- | --- |
 | `completed` | Continue to `completed_executor_return_gate` for the child_gate and applicator. |
-| `checkpoint` | Route directly to `checkpoint_resume`; do not run artifact validators or the applicator. |
+| `checkpoint` | Route to `checkpoint_resume` for parent-owned resume-file creation and durable checkpoint application; do not run completed-artifact validators. |
 | `blocked` | Route to `wave_failure_menu`. |
 | `failed` | Route to `wave_failure_menu`. |
 | missing, malformed, duplicate, or unknown status | Route through the local failure route (`repair_prompt_once` if repairable, otherwise `wave_failure_menu`). |
@@ -66,7 +66,7 @@ Completed executor returns are accepted only after `wave_executor_plan_result` p
 
 Executor subagents must not write `GPD/STATE.md` directly. The SUMMARY applicator is the only durable state-update path for accepted executor returns, and it runs exactly once per accepted SUMMARY. The orchestrator applies them through `gpd apply-return-updates` after each agent completes. The concrete helper call is `gpd --raw apply-return-updates ${SUMMARY_FILE}`.
 
-Checkpoint returns have already routed to `checkpoint_resume` without artifact validators or the applicator. Other non-completed statuses have already routed to `wave_failure_menu`.
+Checkpoint returns have already routed to `checkpoint_resume` without completed-artifact validators. That stage writes the parent-owned resume file and applies the checkpoint return with `gpd --raw apply-return-updates ${CHECKPOINT_RETURN_FILE} --checkpoint-resume-file "${CHECKPOINT_RESUME_FILE}"`. Other non-completed statuses have already routed to `wave_failure_menu`.
 </step>
 
 <step name="spot_check_and_report_wave">

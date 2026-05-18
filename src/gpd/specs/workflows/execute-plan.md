@@ -222,7 +222,7 @@ Load `execute-plan-validation.md` when the first active task starts. Deviations 
 4. Confirm `<success_criteria>` met.
 5. Document deviations in SUMMARY.
 
-Context is finite. After each task, consult `{GPD_INSTALL_DIR}/references/orchestration/context-budget.md`; force a bounded pause before quality degrades or when `MAX_UNATTENDED_MINUTES_PER_PLAN` / `SEGMENT_TASK_CAP` is hit. If pausing mid-plan, commit current work, create `.continue-here.md`, persist the matching `execution_segment` as `continuation.bounded_segment`, and record the same pause in execution lineage.
+Context is finite. After each task, consult `{GPD_INSTALL_DIR}/references/orchestration/context-budget.md`; force a bounded pause before quality degrades or when `MAX_UNATTENDED_MINUTES_PER_PLAN` / `SEGMENT_TASK_CAP` is hit. If pausing mid-plan, commit current work and return checkpoint intent plus the matching `execution_segment`; the orchestrator writes `.continue-here.md` and persists `continuation.bounded_segment` through `gpd apply-return-updates --checkpoint-resume-file`.
 </step>
 
 <task_commit>

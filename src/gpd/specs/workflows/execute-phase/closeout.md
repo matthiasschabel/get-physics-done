@@ -25,13 +25,14 @@ Before any roadmap/state transition, run the read-only helper below and route fr
 
 ```bash
 CLOSEOUT_READINESS=$(gpd --raw phase closeout-readiness "${phase_number}" --require-verification)
-if [ $? -ne 0 ]; then
-  echo "$CLOSEOUT_READINESS"
+READINESS_STATUS=$?
+if [ -z "$CLOSEOUT_READINESS" ]; then
+  echo "ERROR: closeout-readiness produced no JSON (exit ${READINESS_STATUS})"
   exit 1
 fi
 ```
 
-The readiness helper is read-only. On any blocker, stop and surface its next action. Do not repair blockers, update roadmap/state, or clean checkpoints from this stage.
+The readiness helper is read-only. A nonzero exit can mean "blocked but rendered as JSON"; route from the JSON before deciding whether to stop. On any blocker, stop and surface its next action. Do not repair blockers, update roadmap/state, or clean checkpoints from this stage.
 
 `ready-to-execute` and `ready-for-verification` are not `ready-for-closeout`; the helper JSON is the transition authority. Branch before showing any mutation:
 

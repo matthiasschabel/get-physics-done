@@ -164,7 +164,16 @@ def _rewrite_capture_block_body(match: re.Match[str]) -> str:
 def _rewrite_capture_assignment_body(body: str) -> str:
     body = _GEMINI_CAPTURED_GPD_STATUS_BLOCK_RE.sub(_rewrite_capture_block_body, body)
     body = _GEMINI_CAPTURED_GPD_ECHO_BLOCK_RE.sub(_rewrite_capture_block_body, body)
-    return _GEMINI_CAPTURE_ASSIGNMENT_RE.sub(_rewrite_capture_block_body, body)
+
+    def _replace_safe_assignment(match: re.Match[str]) -> str:
+        variable = match.group("var")
+        reference_re = re.compile(rf"\$(?:\{{{re.escape(variable)}\}}|{re.escape(variable)})(?![A-Z0-9_])")
+        remaining_body = body[: match.start()] + body[match.end() :]
+        if reference_re.search(remaining_body):
+            return match.group(0)
+        return _rewrite_capture_block_body(match)
+
+    return _GEMINI_CAPTURE_ASSIGNMENT_RE.sub(_replace_safe_assignment, body)
 
 
 def _rewrite_precheck_capture_echo_body(body: str) -> tuple[str, bool]:

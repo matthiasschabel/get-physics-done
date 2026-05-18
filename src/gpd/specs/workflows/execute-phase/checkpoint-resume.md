@@ -3,7 +3,7 @@ Handle checkpoint presentation, continuation prompt generation, and bounded exec
 </purpose>
 
 <stage_boundary>
-This stage owns bounded continuation and resume transport after a child returned `gpd_return.status: checkpoint`. Do not reuse wave-dispatch fields blindly, accept SUMMARY returns, run child gates, apply return updates, choose retry/skip/rollback/stop paths, aggregate results, or perform closeout here.
+This stage owns bounded continuation and resume transport after a child returned `gpd_return.status: checkpoint`. Do not reuse wave-dispatch fields blindly, accept SUMMARY returns, run child gates, apply completed-work updates, choose retry/skip/rollback/stop paths, aggregate results, or perform closeout here.
 </stage_boundary>
 
 <process>
@@ -23,9 +23,9 @@ Apply `CHECKPOINT_RESUME_INIT.staged_loading.field_access_instruction` before re
 
 **Flow:**
 
-1. Receive a checkpoint return from the wave-return child gate.
-2. Confirm the return includes completed tasks, current blocker, awaited item, and bounded execution segment; first-result/pre-fanout pauses add gate flags, skeptical re-questioning fields, and `downstream_locked`.
-3. Record the bounded continuation payload; do not accept it as completed work.
+1. Receive a checkpoint return from the wave-return child gate. Identify `CHECKPOINT_RETURN_FILE`, the child report containing the checkpoint envelope.
+2. Confirm the return includes completed tasks, current blocker, awaited item, and checkpoint intent or bounded execution segment; first-result/pre-fanout pauses add gate flags, skeptical re-questioning fields, and `downstream_locked`.
+3. Write the parent-owned continuation prompt to `CHECKPOINT_RESUME_FILE` (`.continue-here.md` under the phase directory unless init gives a stricter project-relative handoff path). Then run `gpd --raw apply-return-updates "${CHECKPOINT_RETURN_FILE}" --checkpoint-resume-file "${CHECKPOINT_RESUME_FILE}"`; do not accept it as completed work. Applicator rejection stops here with its JSON; do not show `gpd:resume-work` until the durable state write passes.
 4. **Present to user:** populate the stop envelope, then render the canonical block.
 
    ```yaml

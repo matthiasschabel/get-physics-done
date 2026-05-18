@@ -51,15 +51,15 @@ rm -f "$INIT_STDERR"
 
 Apply `BOOTSTRAP_INIT.staged_loading.field_access_instruction` before reading `BOOTSTRAP_INIT`.
 
-**If `phase_found` is false:** Error -- phase directory not found.
-**If `plan_count` is 0:** Error -- no plans found in phase.
-**If `state_exists` is false but `GPD/` exists:** Offer reconstruct or continue.
+Bind `phase_dir` and `phase_number` from `BOOTSTRAP_INIT` before snippets; default phase number to `PHASE_ARG`.
+
+Init blockers: `phase_found=false` => phase directory not found; `plan_count=0` => no plans found; `state_exists=false` with `GPD/` => offer reconstruct or continue.
 
 `contract_gate_stop:` workflow=execute-phase; stage=phase_bootstrap; status=blocked; checkpoint=contract_gate; trigger=blocked load | invalid validation | non-authoritative gate; primary=gpd:sync-state|gpd:new-project; rerun=gpd:execute-phase ${PHASE_ARG}; secondary=gpd:suggest-next.
 
 For blocked contract load, invalid contract validation, or non-authoritative `project_contract_gate`, STOP, show the gate/load/validation errors, and use `contract_gate_stop`.
 
-Run the executable lifecycle authority gate before branch handling, plan preflight, wave planning, contract fingerprinting, alignment rendering, or any later-stage delegation:
+Run the lifecycle authority gate before branch, plan, wave, contract, alignment, or delegation work:
 
 ```bash
 LIFECYCLE_CONTRACT_GATE=$(gpd --raw validate lifecycle-contract-gate execute-phase "${PHASE_ARG}")
@@ -69,7 +69,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Later stages surface reference/protocol handles for anchor-aware routing. Stable knowledge docs remain reviewed background and never become a separate authority tier. Before branch handling, scripts, computations, dispatches, subagents, writes, or claims, require selected `PLAN.md` files to pass preflight.
+Later stages surface reference/protocol handles. Before branch handling, scripts, dispatches, writes, or claims, selected `PLAN.md` files must pass preflight.
 </step>
 
 <step name="validate_selected_plans_before_execution" priority="first">

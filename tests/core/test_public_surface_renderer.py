@@ -43,6 +43,10 @@ from tests.runtime_command_prefix_support import (
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
+def _contains_text(text: str, fragment: str) -> bool:
+    return fragment in text
+
+
 def _synthetic_runtime_surface(display_name: str) -> BeginnerRuntimeSurface:
     return BeginnerRuntimeSurface(
         runtime_name="synthetic-runtime",
@@ -338,6 +342,18 @@ def test_generated_region_inventory_detects_missing_markers_and_unexpected_dupli
 
 def test_default_public_surface_targets_are_current_in_repo() -> None:
     assert check_generated_files(repo_root=REPO_ROOT) == ()
+
+
+def test_explicit_default_public_surface_path_still_checks_required_inventory(tmp_path: Path) -> None:
+    target = tmp_path / "README.md"
+    target.write_text("# Missing generated regions\n", encoding="utf-8")
+
+    diffs = check_generated_files((Path("README.md"),), repo_root=tmp_path)
+
+    assert len(diffs) == 1
+    assert diffs[0].path == target
+    assert _contains_text(diffs[0].diff, "missing")
+    assert _contains_text(diffs[0].diff, "expected marker(s)")
 
 
 def test_default_public_surface_targets_declare_current_marker_inventory() -> None:

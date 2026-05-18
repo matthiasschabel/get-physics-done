@@ -413,9 +413,10 @@ def test_run_pandoc_injects_external_filters_before_lua(
         status=status,
     )
     cmd = recorded["cmd"]
-    crossref_idx = cmd.index("pandoc-crossref")
-    lua_idx = cmd.index("--lua-filter")
-    citeproc_idx = cmd.index("--citeproc")
+    positions = {str(value): index for index, value in enumerate(cmd)}
+    crossref_idx = positions["pandoc-crossref"]
+    lua_idx = positions["--lua-filter"]
+    citeproc_idx = positions["--citeproc"]
     # External filter must come before Lua filters and before citeproc.
     assert crossref_idx < lua_idx
     assert crossref_idx < citeproc_idx

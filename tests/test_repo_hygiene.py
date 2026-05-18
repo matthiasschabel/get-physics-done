@@ -285,4 +285,4 @@ def test_gpd_utils_package_exposes_only_live_utility_modules() -> None:
     package_init = utils_dir / "__init__.py"
 
     assert package_init.read_text().strip() == ""
-    assert sorted(path.name for path in utils_dir.glob("*.py")) == ["__init__.py", "latex.py"]
+    assert sorted(path.name for path in utils_dir.glob("*.py")) == ["__init__.py", "latex.py", "pandoc.py"]

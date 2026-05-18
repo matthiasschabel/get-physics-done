@@ -85,12 +85,12 @@ def fetch_pdf_from_gcs(paper_id: str) -> bytes | None:
                     resp = client.get(url)
                 except httpx.RequestError as exc:
                     logger.info("gcs GET error %s v%d: %s", paper_id, v, exc)
-                    return None
+                    continue
 
                 if resp.status_code == 200 and resp.content:
                     return resp.content
 
-                return None
+                continue
     except Exception:
         logger.exception("unexpected error probing GCS for %s", paper_id)
     return None

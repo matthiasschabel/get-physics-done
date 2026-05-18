@@ -1092,7 +1092,7 @@ Run `{GPD_INSTALL_DIR}/references/shared/reward-hacking-self-check.md` against t
 
 2. Spawn `gpd-paper-writer` (`readonly=false`) using the canonical runtime delegation convention loaded above:
 
-   ```
+   ```python
    task(
      subagent_type="gpd-paper-writer",
      model="{writer_model}",

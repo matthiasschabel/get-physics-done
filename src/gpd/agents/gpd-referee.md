@@ -962,7 +962,7 @@ Apply the five-item gate (literal-vs-spirit, cheap wins, adversarial self-review
 
 Record the gate result in the canonical `gpd_return` envelope below, by populating its `integrity_gate` extension field:
 
-```
+```yaml
 integrity_gate:
   passed: true | false
   items_failed: []  # e.g. ["item3: did not steelman the rejection case", "S4: accept-level prose for medium-confidence evidence"]

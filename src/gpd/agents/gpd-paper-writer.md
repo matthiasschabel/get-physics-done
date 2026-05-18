@@ -163,7 +163,7 @@ The reference defines the five-item gate (literal-vs-spirit, cheap wins, adversa
 
 Record the gate result in the structured return under the canonical `gpd_return` envelope defined in `<structured_returns>` below, by populating its `integrity_gate` extension field:
 
-```
+```yaml
 integrity_gate:
   passed: true | false
   items_failed: []  # e.g. ["S2: citation Smith2024 not verified", "item4: convergence not checked"]

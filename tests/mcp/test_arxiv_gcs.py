@@ -57,7 +57,13 @@ def test_parse_rejects_empty() -> None:
         _arxiv_gcs.parse_paper_id("")
 
 
-def test_pdf_bytes_to_markdown_rejects_empty_output(tmp_path) -> None:
-    pytest.importorskip("pymupdf4llm")
-    with pytest.raises((RuntimeError, Exception)):
-        _arxiv_gcs.pdf_bytes_to_markdown(b"\x00" * 100, "test/0000001", tmp_path)
+def test_pdf_bytes_to_markdown_rejects_empty_output(tmp_path, monkeypatch) -> None:
+    pymupdf4llm = pytest.importorskip("pymupdf4llm")
+    # Force the converter to return an empty string so we exercise the
+    # empty-output guard specifically (rather than generic parse failure).
+    monkeypatch.setattr(pymupdf4llm, "to_markdown", lambda *a, **kw: "")
+    # Minimal valid PDF header so PyMuPDF can open the temp file before
+    # the converter (now mocked) returns empty output.
+    minimal_pdf = b"%PDF-1.4\n%%EOF\n"
+    with pytest.raises(RuntimeError, match="empty"):
+        _arxiv_gcs.pdf_bytes_to_markdown(minimal_pdf, "test/0000001", tmp_path)

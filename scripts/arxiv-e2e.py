@@ -24,7 +24,9 @@ Acceptance gate:
     * shape_parity_rate     == 1.00   (zero envelope shape diffs)
     * inner_parity_rate     >= 0.95
     * mcp_call_success_rate >= 0.95
-    * subprocess exits cleanly (returncode == 0) after harness shutdown
+    * subprocess return code is intentionally NOT gated (the MCP `stdio_client`
+      we use does not expose `returncode`); the gate scores only the three
+      rates above
 """
 
 from __future__ import annotations
@@ -40,6 +42,8 @@ from pathlib import Path
 
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
+
+BQ_TIMEOUT_SECONDS = 120
 
 CONTRACT_SEARCH_KEYS = {"total_results", "papers"}
 CONTRACT_PAPER_KEYS = {
@@ -90,20 +94,24 @@ WHERE ingest_date >= DATE_SUB(CURRENT_DATE(), INTERVAL {days} DAY)
   AND JSON_VALUE(part, '$.state.input') IS NOT NULL
 LIMIT {limit}
 """
-    proc = subprocess.run(
-        [
-            "bq",
-            f"--project_id={project}",
-            "query",
-            "--use_legacy_sql=false",
-            "--format=json",
-            f"--max_rows={limit}",
-            sql,
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        proc = subprocess.run(
+            [
+                "bq",
+                f"--project_id={project}",
+                "query",
+                "--use_legacy_sql=false",
+                "--format=json",
+                f"--max_rows={limit}",
+                sql,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=BQ_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise SystemExit(f"bq query timed out after {BQ_TIMEOUT_SECONDS}s") from exc
     if proc.returncode != 0:
         raise SystemExit(f"bq query failed: {proc.stderr}")
     rows = json.loads(proc.stdout) if proc.stdout.strip() else []
@@ -136,10 +144,14 @@ def _validate_inner(tool: str, data: dict[str, object]) -> tuple[bool, bool, lis
         expected = CONTRACT_DOWNLOAD_KEYS
     else:
         return True, True, []
-    missing = expected - set(data.keys())
-    keys_ok = not missing
+    actual = set(data.keys())
+    missing = expected - actual
+    unexpected = actual - expected
+    keys_ok = not missing and not unexpected
     if missing:
         notes.append(f"missing_inner_keys:{sorted(missing)}")
+    if unexpected:
+        notes.append(f"unexpected_inner_keys:{sorted(unexpected)}")
     types_ok = True
     if tool == "search_papers":
         if not isinstance(data.get("total_results"), int):
@@ -157,10 +169,15 @@ def _validate_inner(tool: str, data: dict[str, object]) -> tuple[bool, bool, lis
                     types_ok = False
                     notes.append(f"paper_not_object[{index}]:{type(p).__name__}")
                     continue
-                missing = sorted(CONTRACT_PAPER_KEYS - set(p.keys()))
-                if missing:
+                paper_keys = set(p.keys())
+                missing = sorted(CONTRACT_PAPER_KEYS - paper_keys)
+                unexpected = sorted(paper_keys - CONTRACT_PAPER_KEYS)
+                if missing or unexpected:
                     types_ok = False
-                    notes.append(f"paper_keys_missing[{index}]:{missing}")
+                    if missing:
+                        notes.append(f"paper_keys_missing[{index}]:{missing}")
+                    if unexpected:
+                        notes.append(f"paper_keys_unexpected[{index}]:{unexpected}")
     elif tool == "get_abstract":
         if data.get("status") not in {"success", "error"}:
             types_ok = False

@@ -261,8 +261,12 @@ def summarize(records: list[CallRecord]) -> dict[str, object]:
         new_only = [r for r in old_failed if r.new_ok]
         overlaps = [r.overlap for r in recs if r.old_ok and r.new_ok]
         coverages = [r.coverage for r in recs if r.old_ok and r.new_ok and r.coverage is not None]
-        lat_old = [r.latency_old_ms for r in old_ok]
-        lat_new = [r.latency_new_ms for r in recs if r.new_ok]
+        # Matched cohort: only requests where BOTH backends succeeded. Comparing
+        # `mean_latency_old_ms` from old_ok against `mean_latency_new_ms` from
+        # all new_ok mixes populations and can misclassify the latency gate.
+        matched = [r for r in recs if r.old_ok and r.new_ok]
+        lat_old = [r.latency_old_ms for r in matched]
+        lat_new = [r.latency_new_ms for r in matched]
         new_faster = sum(1 for r in recs if r.new_faster)
         out["tools"][tool] = {
             "n": n,

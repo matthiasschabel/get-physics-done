@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import re
+from urllib.parse import quote
 
 import httpx
 
@@ -281,8 +282,10 @@ def openalex_abstract(args: dict[str, object]) -> dict[str, object]:
     paper_id = _strip_version(paper_id_raw.strip())
 
     # OpenAlex resolves arxiv preprints via the canonical DOI prefix.
+    # URL-encode the DOI segment so old-style arXiv IDs containing slashes
+    # (e.g. "hep-th/9901001") don't break the request path.
     doi = f"10.48550/arxiv.{paper_id}"
-    status, body, _ = _http_get(f"/works/doi:{doi}")
+    status, body, _ = _http_get(f"/works/doi:{quote(doi, safe='')}")
     if status != 200 or body is None:
         return _abstract_error(paper_id, f"OpenAlex lookup failed (HTTP {status}) for {paper_id}")
 

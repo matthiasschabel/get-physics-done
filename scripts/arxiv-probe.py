@@ -41,6 +41,8 @@ from urllib.parse import quote_plus
 
 import httpx
 
+BQ_TIMEOUT_SECONDS = 120
+
 OPENALEX_WORKS = "https://api.openalex.org/works"
 AR5IV_BASE = "https://ar5iv.labs.arxiv.org/html"
 GCS_API = "https://storage.googleapis.com/storage/v1/b/arxiv-dataset/o"
@@ -117,20 +119,24 @@ WHERE ingest_date >= DATE_SUB(CURRENT_DATE(), INTERVAL {days} DAY)
   AND JSON_VALUE(part, '$.state.input') IS NOT NULL
 LIMIT {limit}
 """
-    proc = subprocess.run(
-        [
-            "bq",
-            f"--project_id={project}",
-            "query",
-            "--use_legacy_sql=false",
-            "--format=json",
-            f"--max_rows={limit}",
-            sql,
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        proc = subprocess.run(
+            [
+                "bq",
+                f"--project_id={project}",
+                "query",
+                "--use_legacy_sql=false",
+                "--format=json",
+                f"--max_rows={limit}",
+                sql,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=BQ_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise SystemExit(f"bq query timed out after {BQ_TIMEOUT_SECONDS}s") from exc
     if proc.returncode != 0:
         raise SystemExit(f"bq query failed: {proc.stderr}")
     rows = json.loads(proc.stdout) if proc.stdout.strip() else []

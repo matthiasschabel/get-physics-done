@@ -64,7 +64,9 @@ class AuthorProfile(BaseModel):
     def _name_required(cls, value: object) -> str:
         if value is None:
             raise ValueError("author name is required")
-        text = str(value).strip()
+        if not isinstance(value, str):
+            raise ValueError("author name must be a string")
+        text = value.strip()
         if not text:
             raise ValueError("author name must not be empty")
         return text
@@ -80,7 +82,9 @@ class AuthorProfile(BaseModel):
         for entry in value:
             if entry is None:
                 continue
-            text = str(entry).strip()
+            if not isinstance(entry, str):
+                raise ValueError("affiliations must be a list of strings")
+            text = entry.strip()
             if text:
                 cleaned.append(text)
         return cleaned
@@ -90,7 +94,9 @@ class AuthorProfile(BaseModel):
     def _normalize_optional_string(cls, value: object) -> str:
         if value is None:
             return ""
-        return str(value).strip()
+        if not isinstance(value, str):
+            raise ValueError("must be a string")
+        return value.strip()
 
 
 class Profile(BaseModel):

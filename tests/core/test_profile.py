@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from gpd.core.profile import (
     AuthorProfile,
@@ -154,7 +155,7 @@ class TestSaveProfileValidation:
 
 class TestAuthorProfileValidation:
     def test_name_is_required(self) -> None:
-        with pytest.raises(ValueError):
+        with pytest.raises(ValidationError):
             AuthorProfile(name="")
 
     def test_name_stripped(self) -> None:

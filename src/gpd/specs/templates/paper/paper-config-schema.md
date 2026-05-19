@@ -63,7 +63,7 @@ Create this JSON before asking the builder to emit `${PAPER_DIR}/{topic_specific
 ## Required Fields
 
 - `title`: non-empty string
-- `authors`: array of objects with `name`; `email` and `affiliation` are optional strings. When the user has filled in a saved profile, prefer `gpd.core.profile.load_profile()` for defaults rather than prompting per paper.
+- `authors`: array of objects with `name`; `email` and `affiliation` are optional strings
 - `abstract`: non-empty string
 - `sections`: array of section objects
 

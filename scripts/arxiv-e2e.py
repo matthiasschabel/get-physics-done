@@ -145,6 +145,13 @@ def _validate_inner(tool: str, data: dict[str, object]) -> tuple[bool, bool, lis
             notes.append("papers_not_list")
         else:
             for index, p in enumerate(data["papers"]):
+                # Non-dict paper entries are a concrete contract violation —
+                # surface them as such instead of letting ``p.keys()`` raise
+                # and turning the parity check into a generic harness error.
+                if not isinstance(p, dict):
+                    types_ok = False
+                    notes.append(f"paper_not_object[{index}]:{type(p).__name__}")
+                    continue
                 missing = sorted(CONTRACT_PAPER_KEYS - set(p.keys()))
                 if missing:
                     types_ok = False
@@ -156,13 +163,12 @@ def _validate_inner(tool: str, data: dict[str, object]) -> tuple[bool, bool, lis
     return keys_ok, types_ok, notes
 
 
-async def run_session(samples: list[tuple[str, dict[str, object]]], storage_path: Path) -> tuple[list[E2EResult], int]:
+async def run_session(samples: list[tuple[str, dict[str, object]]], storage_path: Path) -> list[E2EResult]:
     server = StdioServerParameters(
         command=sys.executable,
         args=["-m", "gpd.mcp.servers.arxiv_bridge", "--storage-path", str(storage_path)],
     )
     results: list[E2EResult] = []
-    exit_code = -1
     async with stdio_client(server) as streams:
         async with ClientSession(*streams) as session:
             await session.initialize()
@@ -208,12 +214,13 @@ async def run_session(samples: list[tuple[str, dict[str, object]]], storage_path
                     rec.latency_ms = (time.perf_counter() - t0) * 1000
                 results.append(rec)
 
-    # stdio_client tears down the subprocess on exit. We re-check the exit code
-    # by spawning a tiny probe that imports the bridge — if the previous run
-    # leaked a process, this would race; we instead expose returncode from the
-    # transport when available.
-    exit_code = 0
-    return results, exit_code
+    # ``stdio_client`` from the ``mcp`` package does not expose the
+    # subprocess return code (it only yields the JSONRPC stream pair and
+    # waits for termination on context exit). Rather than hardcode a value
+    # that would make the acceptance gate accept any subprocess outcome,
+    # we omit the subprocess-exit signal from the gate entirely and rely on
+    # per-call ``rec.is_error`` / parity checks to surface failures.
+    return results
 
 
 def evaluate_gate(records: list[E2EResult]) -> tuple[bool, dict[str, object], list[str]]:
@@ -272,7 +279,7 @@ def main() -> int:
             samples.append(("download_paper", a))
 
     print(f"[e2e] replaying {len(samples)} calls through stdio bridge", file=sys.stderr)
-    records, exit_code = asyncio.run(run_session(samples, Path(args.storage_path)))
+    records = asyncio.run(run_session(samples, Path(args.storage_path)))
 
     ok, summary, failures = evaluate_gate(records)
     out_path = Path(args.out)
@@ -282,21 +289,18 @@ def main() -> int:
             {
                 "config": vars(args),
                 "summary": summary,
-                "subprocess_exit_code": exit_code,
                 "records": [asdict(r) for r in records],
             },
             indent=2,
         )
     )
 
-    if ok and exit_code == 0:
+    if ok:
         print(f"[e2e] GATE PASS  {summary}", file=sys.stderr)
         return 0
     print(f"[e2e] GATE FAIL  {summary}", file=sys.stderr)
     for f in failures:
         print(f"  - {f}", file=sys.stderr)
-    if exit_code != 0:
-        print(f"  - bridge subprocess exited with code {exit_code}", file=sys.stderr)
     return 1
 
 

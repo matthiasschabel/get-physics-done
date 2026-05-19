@@ -388,9 +388,12 @@ def main() -> int:
 
     # human readable to stderr; machine readable to file
     for k, v in summary["endpoints"].items():
+        # ``p50_ms`` / ``p95_ms`` are ``None`` when there are no samples or
+        # too few for a percentile. Coerce defensively so the human summary
+        # never aborts the probe before the gate block below can run.
         print(
             f"[probe] {k:24} success={v['success_rate']:.0%} "
-            f"p50={v['p50_ms']:.0f}ms p95={v['p95_ms'] or 0:.0f}ms "
+            f"p50={(v['p50_ms'] or 0):.0f}ms p95={(v['p95_ms'] or 0):.0f}ms "
             f"id_extract={v['id_extract_rate']:.0%} mean_bytes={v['mean_bytes']:.0f}",
             file=sys.stderr,
         )
@@ -398,13 +401,30 @@ def main() -> int:
 
     gate_fail = False
     for k, v in summary["endpoints"].items():
+        # Missing evidence must fail the gate — silently skipping zero-sample
+        # endpoints would let the script exit 0 even when an endpoint never
+        # actually ran.
         if v["samples"] == 0:
+            print(f"[probe] GATE FAIL: {k} has no samples", file=sys.stderr)
+            gate_fail = True
             continue
         if v["success_rate"] < 0.95:
             print(f"[probe] GATE FAIL: {k} success {v['success_rate']:.0%} < 95%", file=sys.stderr)
             gate_fail = True
         if (v["p95_ms"] or 0) > 5000:
-            print(f"[probe] GATE FAIL: {k} p95 {v['p95_ms']:.0f}ms > 5000ms", file=sys.stderr)
+            print(
+                f"[probe] GATE FAIL: {k} p95 {(v['p95_ms'] or 0):.0f}ms > 5000ms",
+                file=sys.stderr,
+            )
+            gate_fail = True
+        # ``openalex.search`` exists specifically to prove the translator can
+        # recover arxiv IDs from OpenAlex payloads. If id_extract_rate drops
+        # below 95%, downstream search results lose their arxiv-id contract.
+        if k == "openalex.search" and v["id_extract_rate"] < 0.95:
+            print(
+                f"[probe] GATE FAIL: {k} id_extract {v['id_extract_rate']:.0%} < 95%",
+                file=sys.stderr,
+            )
             gate_fail = True
     return 1 if gate_fail else 0
 

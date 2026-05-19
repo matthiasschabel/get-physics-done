@@ -53,6 +53,13 @@ async def test_back_to_back_calls_sleep_for_min_interval(
 
 @pytest.mark.asyncio
 async def test_acquire_is_serialized(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Capture the real sleep before monkeypatching so the worker still has a
+    # genuine yield point. Without this, every ``await asyncio.sleep(0)``
+    # inside ``worker`` hits ``fake_sleep`` (a coroutine that never yields),
+    # and the event loop may run the workers serially by accident — making
+    # ``max_seen == 1`` pass without actually exercising the bucket's lock.
+    real_sleep = asyncio.sleep
+
     async def fake_sleep(_seconds: float) -> None:
         return None
 
@@ -66,7 +73,7 @@ async def test_acquire_is_serialized(monkeypatch: pytest.MonkeyPatch) -> None:
         async with _arxiv_token_bucket.acquire():
             in_flight += 1
             max_seen = max(max_seen, in_flight)
-            await asyncio.sleep(0)
+            await real_sleep(0)
             in_flight -= 1
 
     await asyncio.gather(worker(), worker(), worker())

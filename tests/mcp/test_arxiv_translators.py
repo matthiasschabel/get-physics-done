@@ -60,13 +60,17 @@ UPSTREAM_ABSTRACT_KEYS = {
 
 @pytest.fixture(scope="module")
 def translators():
+    # Only xfail when the module/symbols genuinely do not exist yet — a broad
+    # ``except Exception`` would also swallow runtime defects (TypeError,
+    # AttributeError, etc.) inside the translator module and silently mark
+    # them as "expected to fail", hiding real regressions.
     try:
         from gpd.mcp.servers.arxiv_translators import (  # type: ignore
             gcs_fetch_pdf,
             openalex_abstract,
             openalex_search,
         )
-    except Exception as exc:
+    except (ImportError, ModuleNotFoundError) as exc:
         pytest.xfail(f"arxiv_translators not yet implemented: {exc}")
     return openalex_search, openalex_abstract, gcs_fetch_pdf
 

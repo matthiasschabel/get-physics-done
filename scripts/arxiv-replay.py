@@ -280,17 +280,33 @@ def summarize(records: list[CallRecord]) -> dict[str, object]:
 
 def evaluate_gate(summary: dict[str, object]) -> tuple[bool, list[str]]:
     failures: list[str] = []
+    # A replay run with no records can never demonstrate parity. Fail closed
+    # rather than treating an empty harness output as a passing gate.
+    if not summary.get("total"):
+        return False, ["no replay records"]
+
     for tool, s in summary["tools"].items():
-        if (s.get("new_ok_on_old_ok_rate") or 0) < 0.95:
-            failures.append(f"{tool}: new_ok_on_old_ok={s['new_ok_on_old_ok_rate']:.0%} < 95%")
-        if tool == "search_papers" and (s.get("top3_overlap_mean") or 0) < 1.5:
-            failures.append(f"{tool}: top3_overlap_mean={s['top3_overlap_mean']:.2f} < 1.5")
+        # Guard each metric so missing/None values are treated as N/A rather
+        # than coerced to 0 — coercing turns absent evidence into spurious
+        # gate failures (or, in the latency case, into accidental passes).
+        new_ok_rate = s.get("new_ok_on_old_ok_rate")
+        if new_ok_rate is not None and new_ok_rate < 0.95:
+            failures.append(f"{tool}: new_ok_on_old_ok={new_ok_rate:.0%} < 95%")
+        if tool == "search_papers":
+            overlap = s.get("top3_overlap_mean")
+            if overlap is not None and overlap < 1.5:
+                failures.append(f"{tool}: top3_overlap_mean={overlap:.2f} < 1.5")
         cov = s.get("coverage_ratio_median")
         if cov is not None and not (0.5 <= cov <= 2.0):
             failures.append(f"{tool}: coverage_ratio_median={cov:.2f} outside [0.5, 2.0]")
-        lat_old = s.get("mean_latency_old_ms") or 0
-        lat_new = s.get("mean_latency_new_ms") or 0
-        if lat_old and lat_new > 0.5 * lat_old:
+        lat_old = s.get("mean_latency_old_ms")
+        lat_new = s.get("mean_latency_new_ms")
+        if (
+            lat_old is not None
+            and lat_new is not None
+            and lat_old > 0
+            and lat_new > 0.5 * lat_old
+        ):
             failures.append(
                 f"{tool}: mean_latency_new={lat_new:.0f}ms > 50% of mean_latency_old={lat_old:.0f}ms"
             )

@@ -360,10 +360,20 @@ class ArxivBridge:
                     _arxiv_gcs.pdf_bytes_to_markdown, pdf_bytes, paper_id, storage
                 )
             except ImportError as exc:
-                return _tool_payload_error(str(exc))
-            except Exception as exc:
-                logger.exception("PDF→markdown failed for %s", paper_id)
-                return _tool_payload_error(f"PDF conversion failed: {exc}")
+                # ``pymupdf4llm`` missing — fall through to upstream rather
+                # than failing the call. The user's request can still succeed
+                # via the upstream MCP's own PDF→markdown path.
+                logger.warning(
+                    "PDF conversion unavailable for %s: %s; falling back upstream",
+                    paper_id,
+                    exc,
+                )
+                return None
+            except Exception:
+                # Conversion errored on this PDF — keep the fallback chain
+                # intact so upstream can still serve the paper.
+                logger.exception("PDF→markdown failed for %s; falling back upstream", paper_id)
+                return None
             self._safe_write(cache_path, markdown)
             return _content_envelope(
                 "pdf-gcs",
@@ -496,13 +506,6 @@ def _content_envelope(
         "source": source,
         "content": _CONTENT_WARNING + content,
     }
-    return types.CallToolResult(
-        content=[types.TextContent(type="text", text=json.dumps(payload))],
-    )
-
-
-def _tool_payload_error(message: str) -> types.CallToolResult:
-    payload = {"status": "error", "message": message}
     return types.CallToolResult(
         content=[types.TextContent(type="text", text=json.dumps(payload))],
     )

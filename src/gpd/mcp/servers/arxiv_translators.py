@@ -47,11 +47,11 @@ _TIMEOUT = httpx.Timeout(20.0, connect=10.0)
 # landing page, doi). New-format e.g. "2401.12345v3"; old-format e.g.
 # "hep-th/9901001".
 _ARXIV_ID_RE = re.compile(
-    r"arxiv\.org/(?:abs|pdf|html)/(?P<id>(?:[a-z\-]+(?:\.[A-Z]{2})?/\d{7}|\d{4}\.\d{4,5})(?:v\d+)?)",
+    r"arxiv\.org/(?:abs|pdf|html)/(?P<id>(?:[a-z\-]+(?:\.[a-z][a-z0-9\-]*)?/\d{7}|\d{4}\.\d{4,5})(?:v\d+)?)",
     re.IGNORECASE,
 )
 _DOI_ARXIV_RE = re.compile(
-    r"10\.48550/arxiv\.(?P<id>(?:[a-z\-]+(?:\.[A-Z]{2})?/\d{7}|\d{4}\.\d{4,5})(?:v\d+)?)",
+    r"10\.48550/arxiv\.(?P<id>(?:[a-z\-]+(?:\.[a-z][a-z0-9\-]*)?/\d{7}|\d{4}\.\d{4,5})(?:v\d+)?)",
     re.IGNORECASE,
 )
 
@@ -157,18 +157,16 @@ def _categories(work: dict[str, object]) -> list[str]:
 
 
 def _landing_url(work: dict[str, object], arxiv_id: str) -> str:
-    primary = work.get("primary_location") or {}
-    landing = primary.get("landing_page_url")
-    if isinstance(landing, str) and landing:
-        return landing
+    # Always return the canonical arXiv URL. OpenAlex ``primary_location`` can
+    # point at a publisher or OpenAlex page even when the work has an arXiv id,
+    # and the upstream arxiv_mcp_server contract requires the arxiv.org URL so
+    # downstream consumers route through the bridge's normal download path.
+    del work  # signature parity with prior call sites; OpenAlex fields ignored.
     return f"https://arxiv.org/abs/{arxiv_id}"
 
 
 def _pdf_url(work: dict[str, object], arxiv_id: str) -> str:
-    primary = work.get("primary_location") or {}
-    url = primary.get("pdf_url")
-    if isinstance(url, str) and url:
-        return url
+    del work  # same rationale as ``_landing_url``: canonical arxiv.org only.
     return f"https://arxiv.org/pdf/{arxiv_id}"
 
 
@@ -259,9 +257,12 @@ def openalex_search(args: dict[str, object]) -> dict[str, object]:
     }
 
     status, body, _ = _http_get("/works", params)
-    if status != 200 or body is None:
-        # Drop the arxiv-only filter once and retry — OpenAlex sometimes
-        # rejects the host-org filter when the catalogue id rotates.
+    # Only retry without the filter when OpenAlex rejects the filter itself
+    # (400 Bad Request / 422 Unprocessable). For 429, 5xx, timeouts, or parse
+    # failures, the filter is not the problem — retrying doubles upstream load
+    # without improving the outcome, which violates the rate-limit-resilient
+    # contract this translator is built around.
+    if status in {400, 422}:
         params.pop("filter", None)
         status, body, _ = _http_get("/works", params)
 

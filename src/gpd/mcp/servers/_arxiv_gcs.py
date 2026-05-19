@@ -5,6 +5,7 @@ from __future__ import annotations
 import gc
 import logging
 import re
+import tempfile
 import unicodedata
 from pathlib import Path
 
@@ -26,7 +27,7 @@ _TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 
 _NEW_RE = re.compile(r"^(?P<yymm>\d{4})\.(?P<num>\d{4,5})(?:v\d+)?$")
 _OLD_RE = re.compile(
-    r"^(?P<cat>[a-z][a-z0-9\-]*(?:\.[A-Z]{2})?)/(?P<yymm>\d{4})(?P<num>\d{3,})(?:v\d+)?$"
+    r"^(?P<cat>[a-z][a-z0-9\-]*(?:\.[a-z][a-z0-9\-]*)?)/(?P<yymm>\d{4})(?P<num>\d{3,})(?:v\d+)?$"
 )
 
 
@@ -135,16 +136,26 @@ def pdf_bytes_to_markdown(
 
     storage_path.mkdir(parents=True, exist_ok=True)
     safe_id = paper_id.replace("/", "_")
-    tmp_pdf = storage_path / f"{safe_id}.pdf.tmp"
+    tmp_pdf: Path | None = None
     try:
-        tmp_pdf.write_bytes(pdf_bytes)
+        # Unique per-call temp file so concurrent conversions of the same paper
+        # cannot delete or overwrite each other mid-pymupdf4llm.
+        with tempfile.NamedTemporaryFile(
+            dir=str(storage_path),
+            prefix=f"{safe_id}.",
+            suffix=".pdf",
+            delete=False,
+        ) as fh:
+            fh.write(pdf_bytes)
+            tmp_pdf = Path(fh.name)
         markdown = pymupdf4llm.to_markdown(str(tmp_pdf), show_progress=False)
     finally:
         gc.collect()
-        try:
-            tmp_pdf.unlink()
-        except OSError:
-            pass
+        if tmp_pdf is not None:
+            try:
+                tmp_pdf.unlink()
+            except OSError:
+                pass
 
     if not markdown or not markdown.strip():
         raise RuntimeError(f"PDF conversion produced empty output for {paper_id}")

@@ -133,9 +133,9 @@ When authoring `${PAPER_DIR}/PAPER-CONFIG.json` for a fresh bootstrap, pre-fill
 `~/.gpd/profile.json` (or `${GPD_DATA_DIR}/profile.json` if that env var is set)
 via `gpd.core.profile.load_profile()`; if it returns at least one author, map
 each `AuthorProfile` to a paper-config `authors[]` entry (`name` and `email` map
-directly; map the first `affiliations` entry to the singular `affiliation`
-field, or join multiple with `"; "`). Only ask the user for the byline when the
-profile is empty or missing.
+directly; map every `affiliations` entry to the singular `affiliation` field —
+when one entry exists, use it as-is; when multiple exist, join them with
+`"; "`). Only ask the user for the byline when the profile is empty or missing.
 
 For `resume_existing_manuscript`, do not probe the builder with throwaway `/tmp`
 configs or create optional `${PAPER_DIR}/PAPER-CONFIG.json` when an accepted

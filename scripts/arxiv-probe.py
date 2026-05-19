@@ -134,15 +134,20 @@ LIMIT {limit}
     if proc.returncode != 0:
         raise SystemExit(f"bq query failed: {proc.stderr}")
     rows = json.loads(proc.stdout) if proc.stdout.strip() else []
-    parsed = []
+    parsed: list[dict[str, object]] = []
     for row in rows:
         raw = row.get("input_str")
         if not raw:
             continue
         try:
-            parsed.append(json.loads(raw))
+            item = json.loads(raw)
         except json.JSONDecodeError:
             continue
+        # Downstream consumers call ``.get(...)`` on every entry, so a stray
+        # list/string/number payload would abort the probe with
+        # ``AttributeError``. Treat non-objects as bad input and skip.
+        if isinstance(item, dict):
+            parsed.append(item)
     return parsed
 
 
@@ -408,8 +413,15 @@ def main() -> int:
             print(f"[probe] GATE FAIL: {k} has no samples", file=sys.stderr)
             gate_fail = True
             continue
-        if v["success_rate"] < 0.95:
-            print(f"[probe] GATE FAIL: {k} success {v['success_rate']:.0%} < 95%", file=sys.stderr)
+        # The pass criteria in the module docstring carve out a 90% floor for
+        # GCS object-existence (HEAD on gs://arxiv-dataset/...). Every other
+        # endpoint stays at the generic 95% gate.
+        min_success_rate = 0.90 if k == "gcs.arxiv-dataset" else 0.95
+        if v["success_rate"] < min_success_rate:
+            print(
+                f"[probe] GATE FAIL: {k} success {v['success_rate']:.0%} < {min_success_rate:.0%}",
+                file=sys.stderr,
+            )
             gate_fail = True
         if (v["p95_ms"] or 0) > 5000:
             print(

@@ -113,9 +113,14 @@ LIMIT {limit}
         if not raw:
             continue
         try:
-            out.append(json.loads(raw))
+            parsed = json.loads(raw)
         except json.JSONDecodeError:
             continue
+        # The replay loop downstream does ``arg.get(...)`` on every entry, so a
+        # stray list/string/number payload would crash the harness with
+        # ``AttributeError`` before parity is evaluated. Drop non-objects here.
+        if isinstance(parsed, dict):
+            out.append(parsed)
     return out
 
 
@@ -279,6 +284,16 @@ def main() -> int:
             samples.append(("download_paper", a))
 
     print(f"[e2e] replaying {len(samples)} calls through stdio bridge", file=sys.stderr)
+    # Fail the gate when BigQuery filtering left us below the requested cohort
+    # size. Without this check, ``evaluate_gate`` would still green-light the
+    # bridge on a handful of records — insufficient evidence for promotion.
+    if len(samples) < args.samples:
+        print(
+            f"[e2e] GATE FAIL: collected {len(samples)} valid samples for "
+            f"requested {args.samples} — insufficient evidence",
+            file=sys.stderr,
+        )
+        return 1
     records = asyncio.run(run_session(samples, Path(args.storage_path)))
 
     ok, summary, failures = evaluate_gate(records)

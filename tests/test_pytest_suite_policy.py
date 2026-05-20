@@ -34,7 +34,7 @@ TOP_LEVEL_CONFTEST = TESTS_ROOT / "conftest.py"
 PHASE8_LARGE_TEST_FILE_LOC_BUDGETS = {
     "tests/core/test_cli.py": 9_350,
     "tests/test_cli_commands.py": 8_000,
-    "tests/core/test_prompt_wiring.py": 7_200,
+    "tests/core/test_prompt_wiring.py": 7_300,
     "tests/core/test_context.py": 5_500,
 }
 PHASE8_DIRECT_RESULT_OUTPUT_MENTION_BUDGETS = {

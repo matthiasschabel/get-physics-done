@@ -7,6 +7,11 @@ allowed-tools:
   - file_read
   - file_write
   - shell
+help:
+  group: Configuration and maintenance
+  order: 670
+  compact_description: Switch the abstract model profile
+  display_signature: gpd:set-profile <profile>
 ---
 
 

@@ -7,6 +7,25 @@ from dataclasses import dataclass
 from functools import lru_cache
 from importlib.resources import files
 
+from gpd.core.strict_json_contract import (
+    require_allowed_keys as _strict_require_allowed_keys,
+)
+from gpd.core.strict_json_contract import (
+    require_object as _strict_require_object,
+)
+from gpd.core.strict_json_contract import (
+    require_required_keys as _strict_require_required_keys,
+)
+from gpd.core.strict_json_contract import (
+    require_schema_version as _strict_require_schema_version,
+)
+from gpd.core.strict_json_contract import (
+    require_string as _strict_require_string,
+)
+from gpd.core.strict_json_contract import (
+    require_unique_string_tuple as _strict_require_unique_string_tuple,
+)
+
 __all__ = [
     "BeginnerOnboardingContract",
     "LocalCliBridgeContract",
@@ -99,7 +118,6 @@ class LocalCliNamedCommandsContract:
 
 @dataclass(frozen=True, slots=True)
 class LocalCliBridgeContract:
-    commands: tuple[str, ...]
     named_commands: LocalCliNamedCommandsContract
     terminal_phrase: str
     purpose_phrase: str
@@ -107,6 +125,11 @@ class LocalCliBridgeContract:
     doctor_local_command: str
     doctor_global_command: str
     validate_command_context_command: str
+    commands: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.commands:
+            object.__setattr__(self, "commands", self.named_commands.ordered())
 
     def render_note(self) -> str:
         return (
@@ -177,23 +200,15 @@ _LOCAL_CLI_VALIDATE_COMMAND_CONTEXT_COMMAND = "gpd validate command-context <nam
 
 
 def _require_object(payload: object, *, label: str) -> dict[str, object]:
-    if not isinstance(payload, dict):
-        raise ValueError(f"{label} must be a JSON object")
-    return payload
+    return _strict_require_object(payload, label=label)
 
 
 def _require_present_keys(payload: dict[str, object], *, label: str, keys: tuple[str, ...]) -> None:
-    missing = sorted(key for key in keys if key not in payload)
-    if not missing:
-        return
-    raise ValueError(f"{label} is missing required key(s): {', '.join(missing)}")
+    _strict_require_required_keys(payload, label=label, keys=keys)
 
 
 def _require_allowed_keys(payload: dict[str, object], *, label: str, keys: tuple[str, ...]) -> None:
-    unknown = sorted(key for key in payload if key not in keys)
-    if not unknown:
-        return
-    raise ValueError(f"{label} contains unknown key(s): {', '.join(unknown)}")
+    _strict_require_allowed_keys(payload, label=label, keys=keys)
 
 
 @dataclass(frozen=True, slots=True)
@@ -216,7 +231,8 @@ def _require_schema_matches_code(schema: PublicSurfaceContractSchema) -> None:
 
     expected_section_keys = {
         "beginner_onboarding": _dataclass_field_names(BeginnerOnboardingContract),
-        "local_cli_bridge": _dataclass_field_names(LocalCliBridgeContract),
+        "local_cli_bridge": ("commands",)
+        + tuple(field for field in _dataclass_field_names(LocalCliBridgeContract) if field != "commands"),
         "post_start_settings": _dataclass_field_names(PostStartSettingsContract),
         "resume_authority": _dataclass_field_names(ResumeAuthorityContract),
         "recovery_ladder": _dataclass_field_names(RecoveryLadderContract),
@@ -237,19 +253,16 @@ def _require_schema_matches_code(schema: PublicSurfaceContractSchema) -> None:
 
 
 def _require_schema_string_tuple(value: object, *, label: str) -> tuple[str, ...]:
-    if not isinstance(value, list) or not value:
-        raise ValueError(f"{label} must be a non-empty list")
-    items: list[str] = []
-    seen: set[str] = set()
-    for item in value:
-        if not isinstance(item, str) or not item.strip():
-            raise ValueError(f"{label} entries must be non-empty strings")
-        normalized = item.strip()
-        if normalized in seen:
-            raise ValueError(f"{label} must not contain duplicates")
-        seen.add(normalized)
-        items.append(normalized)
-    return tuple(items)
+    return _strict_require_unique_string_tuple(
+        value,
+        label=label,
+        allow_empty=False,
+        trim=True,
+        list_label="non-empty list",
+        empty_message=f"{label} must be a non-empty list",
+        entry_message=f"{label} entries must be non-empty strings",
+        duplicate_message=f"{label} must not contain duplicates",
+    )
 
 
 @lru_cache(maxsize=1)
@@ -270,9 +283,12 @@ def load_public_surface_contract_schema() -> PublicSurfaceContractSchema:
         keys=("schema_version", "top_level_keys", "sections"),
     )
 
-    schema_version = payload.get("schema_version")
-    if not isinstance(schema_version, int) or isinstance(schema_version, bool) or schema_version != 1:
-        raise ValueError(f"Unsupported public surface contract schema_version: {schema_version!r}")
+    _strict_require_schema_version(
+        payload.get("schema_version"),
+        label="public_surface_contract_schema.schema_version",
+        expected=1,
+        invalid_message="Unsupported public surface contract schema_version: {value!r}",
+    )
 
     top_level_keys = _require_schema_string_tuple(
         payload.get("top_level_keys"),
@@ -363,33 +379,35 @@ def load_public_surface_contract_schema() -> PublicSurfaceContractSchema:
 
 
 def _require_string(payload: dict[str, object], key: str, *, label: str) -> str:
-    value = payload.get(key)
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{label}.{key} must be a non-empty string")
-    return value.strip()
+    return _strict_require_string(payload.get(key), label=f"{label}.{key}", trim=True)
 
 
 def _require_string_list(payload: dict[str, object], key: str, *, label: str) -> tuple[str, ...]:
-    value = payload.get(key)
-    if not isinstance(value, list) or not value:
-        raise ValueError(f"{label}.{key} must be a non-empty list")
-    items: list[str] = []
-    seen: set[str] = set()
-    for item in value:
-        if not isinstance(item, str) or not item.strip():
-            raise ValueError(f"{label}.{key} entries must be non-empty strings")
-        normalized = item.strip()
-        if normalized in seen:
-            raise ValueError(f"{label}.{key} must not contain duplicates")
-        seen.add(normalized)
-        items.append(normalized)
-    return tuple(items)
+    item_label = f"{label}.{key}"
+    return _strict_require_unique_string_tuple(
+        payload.get(key),
+        label=item_label,
+        allow_empty=False,
+        trim=True,
+        list_label="non-empty list",
+        empty_message=f"{item_label} must be a non-empty list",
+        entry_message=f"{item_label} entries must be non-empty strings",
+        duplicate_message=f"{item_label} must not contain duplicates",
+    )
 
 
 def _require_exact_command(commands: tuple[str, ...], *, label: str, command: str) -> str:
     if command not in commands:
         raise ValueError(f"{label}.commands must include {command!r}")
     return command
+
+
+def _require_unique_command_values(commands: tuple[str, ...], *, label: str) -> None:
+    seen: set[str] = set()
+    for command in commands:
+        if command in seen:
+            raise ValueError(f"{label} must not contain duplicate command values")
+        seen.add(command)
 
 
 def _local_cli_bridge_command(command: str) -> str:
@@ -405,7 +423,6 @@ def _require_local_cli_bridge_template(command: str, *, label: str, expected: st
 def _require_local_cli_named_commands(
     payload: dict[str, object],
     *,
-    bridge_commands: tuple[str, ...],
     named_command_keys: tuple[str, ...],
 ) -> LocalCliNamedCommandsContract:
     named_payload = _require_object(payload.get("named_commands"), label="local_cli_bridge.named_commands")
@@ -453,10 +470,7 @@ def _require_local_cli_named_commands(
             label="local_cli_bridge.named_commands",
         ),
     )
-    for command in named_commands.ordered():
-        _require_exact_command(bridge_commands, label="local_cli_bridge", command=command)
-    if bridge_commands != named_commands.ordered():
-        raise ValueError("local_cli_bridge.commands must exactly match local_cli_bridge.named_commands in canonical order")
+    _require_unique_command_values(named_commands.ordered(), label="local_cli_bridge.named_commands")
     return named_commands
 
 
@@ -473,9 +487,12 @@ def load_public_surface_contract() -> PublicSurfaceContract:
     )
     _require_allowed_keys(payload, label="public_surface_contract", keys=schema.top_level_keys)
 
-    schema_version = payload.get("schema_version")
-    if not isinstance(schema_version, int) or isinstance(schema_version, bool) or schema_version != 1:
-        raise ValueError(f"Unsupported public surface contract schema_version: {schema_version!r}")
+    _strict_require_schema_version(
+        payload.get("schema_version"),
+        label="public_surface_contract.schema_version",
+        expected=1,
+        invalid_message="Unsupported public surface contract schema_version: {value!r}",
+    )
 
     beginner_payload = _require_object(payload.get("beginner_onboarding"), label="beginner_onboarding")
     _require_present_keys(
@@ -532,10 +549,8 @@ def load_public_surface_contract() -> PublicSurfaceContract:
         label="recovery_ladder",
         keys=schema.section_keys["recovery_ladder"],
     )
-    bridge_commands = _require_string_list(bridge_payload, "commands", label="local_cli_bridge")
     named_commands = _require_local_cli_named_commands(
         bridge_payload,
-        bridge_commands=bridge_commands,
         named_command_keys=schema.local_cli_named_command_keys,
     )
     recovery_local_snapshot_command = _require_string(
@@ -548,16 +563,15 @@ def load_public_surface_contract() -> PublicSurfaceContract:
         "cross_workspace_command",
         label="recovery_ladder",
     )
-    _require_exact_command(bridge_commands, label="local_cli_bridge", command=recovery_local_snapshot_command)
-    _require_exact_command(bridge_commands, label="local_cli_bridge", command=recovery_cross_workspace_command)
     if recovery_local_snapshot_command != named_commands.resume:
-        raise ValueError(
-            "recovery_ladder.local_snapshot_command must equal local_cli_bridge.named_commands.resume"
-        )
+        raise ValueError("recovery_ladder.local_snapshot_command must equal local_cli_bridge.named_commands.resume")
     if recovery_cross_workspace_command != named_commands.resume_recent:
         raise ValueError(
             "recovery_ladder.cross_workspace_command must equal local_cli_bridge.named_commands.resume_recent"
         )
+    bridge_commands = _require_string_list(bridge_payload, "commands", label="local_cli_bridge")
+    if bridge_commands != named_commands.ordered():
+        raise ValueError("local_cli_bridge.commands must equal local_cli_bridge.named_commands ordered values")
     resume_authority_public_fields = _require_string_list(
         resume_authority_payload,
         "public_fields",

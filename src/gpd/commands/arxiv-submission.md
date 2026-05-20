@@ -86,6 +86,16 @@ allowed-tools:
   - search_files
   - find_files
   - task
+help:
+  group: Writing and publication
+  order: 480
+  compact_description: Package a built manuscript for arXiv from the resolved GPD-owned manuscript root or entrypoint
+  display_signature: gpd:arxiv-submission [manuscript root or .tex entrypoint]
+  examples:
+    - gpd:arxiv-submission paper/
+  notes:
+    - Packages the GPD-owned manuscript root or a supported .tex entrypoint; it does not package arbitrary external material.
+  root_detail_order: 290
 ---
 
 
@@ -100,7 +110,7 @@ Output: A submission-ready tarball and checklist of manual steps remaining.
 </objective>
 
 <execution_context>
-@{GPD_INSTALL_DIR}/workflows/arxiv-submission.md
+@{GPD_INSTALL_DIR}/workflows/arxiv-submission/bootstrap.md
 </execution_context>
 
 <context>
@@ -112,8 +122,9 @@ This remains a project-backed manuscript workflow: package the resolved built ma
 </context>
 
 <process>
-Follow the included arxiv-submission workflow exactly.
+Follow the included arxiv-submission bootstrap authority exactly. Later stage loading is manifest-owned; do not use the root workflow index as active authority.
 </process>
+
 
 <success_criteria>
 - [ ] Workflow ran end to end

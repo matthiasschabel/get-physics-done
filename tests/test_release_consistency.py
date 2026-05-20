@@ -12,6 +12,7 @@ import subprocess
 import tarfile
 import tomllib
 import zipfile
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -20,6 +21,7 @@ import yaml
 from gpd._python_compat import MIN_SUPPORTED_PYTHON_LABEL, PREFERRED_PYTHON_VERSIONS
 from gpd.adapters.runtime_catalog import get_shared_install_metadata, iter_runtime_descriptors
 from scripts import release_workflow as release_workflow_module
+from scripts import render_bootstrap_installer_metadata as bootstrap_metadata_module
 from scripts.release_workflow import (
     ReleaseError,
     bump_version,
@@ -28,7 +30,14 @@ from scripts.release_workflow import (
     stamp_publish_date,
     update_readme_version_text,
 )
-from tests.ci_sharding import assert_ci_workflow_pytest_shard_policy
+from tests.assertion_taxonomy_support import (
+    FragmentMode,
+    MatchMode,
+    assert_prompt_contracts,
+    fragment_count,
+    machine_exact,
+    semantic_anchor,
+)
 from tests.helpers.git import (
     git_add,
     git_commit,
@@ -37,7 +46,12 @@ from tests.helpers.git import (
     run_git,
     seed_test_git_repo,
 )
-from tests.helpers.github_actions import load_repo_github_actions_workflow, workflow_step_by_name, workflow_steps_using
+from tests.helpers.github_actions import (
+    load_repo_github_actions_workflow,
+    workflow_job,
+    workflow_step_by_name,
+    workflow_steps_using,
+)
 from tests.helpers.release import (
     EXPECTED_SETUP_UV_VERSION,
     assert_run_step_uses_isolated_uv_build_env,
@@ -49,13 +63,15 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def _bootstrap_json_assets_from_metadata_generator(repo_root: Path) -> tuple[str, ...]:
+    return (
+        bootstrap_metadata_module.INSTALLER_METADATA_PATH.relative_to(repo_root).as_posix(),
+        *(source_path.as_posix() for source_path in bootstrap_metadata_module.SOURCE_PATHS),
+    )
+
+
 _SHARED_INSTALL = get_shared_install_metadata()
-_BOOTSTRAP_JSON_ASSETS = (
-    "src/gpd/adapters/runtime_catalog.json",
-    "src/gpd/adapters/runtime_catalog_schema.json",
-    "src/gpd/core/public_surface_contract.json",
-    "src/gpd/core/public_surface_contract_schema.json",
-)
+_BOOTSTRAP_JSON_ASSETS = _bootstrap_json_assets_from_metadata_generator(_repo_root())
 _PUBLIC_BOOTSTRAP_PREREQUISITE = "Install GPD before enabling built-in MCP servers."
 _ARXIV_EXTRA_PREREQUISITE = (
     "Install GPD with the `arxiv` Python extra in the same environment before enabling gpd-arxiv."
@@ -109,6 +125,65 @@ def _python_release_version(repo_root: Path) -> str:
 
     assert package_version == python_version == pyproject_version
     return pyproject_version
+
+
+def _project_table(repo_root: Path) -> dict[str, object]:
+    project = tomllib.loads((repo_root / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    assert isinstance(project, dict)
+    return project
+
+
+def _project_url(project: dict[str, object], label: str) -> str:
+    urls = project.get("urls")
+    assert isinstance(urls, dict)
+    url = urls.get(label)
+    assert isinstance(url, str)
+    return url
+
+
+def _project_author_name(project: dict[str, object]) -> str:
+    authors = project.get("authors")
+    assert isinstance(authors, list) and len(authors) == 1
+    author = authors[0]
+    assert isinstance(author, dict)
+    name = author.get("name")
+    assert isinstance(name, str)
+    return name
+
+
+def _project_keywords(project: dict[str, object]) -> list[str]:
+    keywords = project.get("keywords")
+    assert isinstance(keywords, list)
+    assert all(isinstance(keyword, str) for keyword in keywords)
+    return keywords
+
+
+def _project_spdx_license(project: dict[str, object]) -> str:
+    classifiers = project.get("classifiers")
+    apache_classifier = "License :: OSI Approved :: Apache Software License"
+    assert project.get("license") == {"file": "LICENSE"}
+    assert isinstance(classifiers, list)
+    assert apache_classifier in classifiers
+    return "Apache-2.0"
+
+
+def _package_json_metadata(repo_root: Path) -> dict[str, object]:
+    package_json = json.loads((repo_root / "package.json").read_text(encoding="utf-8"))
+    assert isinstance(package_json, dict)
+    return package_json
+
+
+def _citation_metadata(repo_root: Path) -> dict[str, object]:
+    citation = yaml.safe_load((repo_root / "CITATION.cff").read_text(encoding="utf-8"))
+    assert isinstance(citation, dict)
+    return citation
+
+
+def _citation_release_date(citation: dict[str, object]) -> str:
+    release_date = citation.get("date-released")
+    assert isinstance(release_date, str)
+    assert date.fromisoformat(release_date).isoformat() == release_date
+    return release_date
 
 
 def _uv_lock_editable_package(repo_root: Path) -> dict[str, object]:
@@ -211,6 +286,33 @@ def _uv_build_blocked_by_environment(stderr: str) -> bool:
         and "Attempted to create a NULL object" in stderr
         and "Tokio executor failed" in stderr
     )
+
+
+def _assert_machine_fragments(text: str, label: str, fragments: str | tuple[str, ...]) -> None:
+    assert_prompt_contracts(text, machine_exact(label, fragments, context=label))
+
+
+def _assert_machine_fragments_absent(text: str, label: str, fragments: str | tuple[str, ...]) -> None:
+    assert_prompt_contracts(text, machine_exact(label, fragments, mode=FragmentMode.ABSENT, context=label))
+
+
+def _assert_semantic_fragments(text: str, label: str, fragments: str | tuple[str, ...]) -> None:
+    assert_prompt_contracts(
+        text,
+        semantic_anchor(label, fragments, match=MatchMode.CASEFOLD_NORMALIZED, context=label),
+    )
+
+
+def _assert_ordered_fragments(text: str, label: str, fragments: tuple[str, ...]) -> None:
+    offset = 0
+    for fragment in fragments:
+        index = text.find(fragment, offset)
+        assert index >= 0, f"{label}: missing ordered fragment {fragment!r}"
+        offset = index + len(fragment)
+
+
+def _assert_fragment_count(text: str, label: str, fragment: str, *, expected_count: int) -> None:
+    assert_prompt_contracts(text, fragment_count(label, fragment, expected_count=expected_count, context=label))
 
 
 class _FakePypiResponse:
@@ -384,9 +486,9 @@ def test_required_public_release_artifacts_exist() -> None:
 
 def test_public_citation_metadata_uses_iso_release_date() -> None:
     repo_root = _repo_root()
-    citation = (repo_root / "CITATION.cff").read_text(encoding="utf-8")
+    citation = _citation_metadata(repo_root)
 
-    assert re.search(r"^date-released: '\d{4}-\d{2}-\d{2}'$", citation, re.M)
+    _citation_release_date(citation)
 
 
 def test_bug_report_template_asks_for_current_version_without_stale_placeholder() -> None:
@@ -404,12 +506,46 @@ def test_bug_report_template_asks_for_current_version_without_stale_placeholder(
 def test_public_citation_and_readme_versions_match_release_version() -> None:
     repo_root = _repo_root()
     version = _python_release_version(repo_root)
-    citation = (repo_root / "CITATION.cff").read_text(encoding="utf-8")
+    citation = _citation_metadata(repo_root)
     readme = (repo_root / "README.md").read_text(encoding="utf-8")
 
-    assert f"version: {version}" in citation
+    assert citation["version"] == version
     assert f"version = {{{version}}}" in readme
     assert f"(Version {version})" in readme
+
+
+def test_public_package_json_identity_fields_are_derived_from_pyproject() -> None:
+    repo_root = _repo_root()
+    project = _project_table(repo_root)
+    package_json = _package_json_metadata(repo_root)
+
+    repository_url = _project_url(project, "Repository").rstrip("/")
+    project_author = _project_author_name(project)
+
+    assert package_json["name"] == project["name"]
+    assert package_json["version"] == project["version"]
+    assert package_json["gpdPythonVersion"] == project["version"]
+    assert package_json["repository"] == {"type": "git", "url": f"git+{repository_url}.git"}
+    assert package_json["homepage"] == _project_url(project, "Documentation")
+    assert package_json["bugs"] == {"url": _project_url(project, "Issues")}
+    assert package_json["keywords"] == _project_keywords(project)
+    assert package_json["license"] == _project_spdx_license(project)
+    assert isinstance(package_json["author"], str)
+    assert package_json["author"].startswith(project_author)
+
+
+def test_public_citation_identity_fields_are_derived_from_pyproject() -> None:
+    repo_root = _repo_root()
+    project = _project_table(repo_root)
+    citation = _citation_metadata(repo_root)
+    project_author = _project_author_name(project)
+    citation_authors = citation.get("authors")
+
+    assert citation["version"] == project["version"]
+    assert citation["repository-code"] == _project_url(project, "Repository")
+    assert citation["license"] == _project_spdx_license(project)
+    assert citation_authors == [{"name": project_author, "affiliation": project_author}]
+    _citation_release_date(citation)
 
 
 def test_uv_lock_matches_release_version() -> None:
@@ -442,12 +578,10 @@ def test_installed_prompt_sources_do_not_pin_release_version_literals() -> None:
 
 def test_public_readme_citation_year_matches_citation_release_date() -> None:
     repo_root = _repo_root()
-    citation = (repo_root / "CITATION.cff").read_text(encoding="utf-8")
+    citation = _citation_metadata(repo_root)
     readme = (repo_root / "README.md").read_text(encoding="utf-8")
 
-    match = re.search(r"^date-released: '(\d{4})-\d{2}-\d{2}'$", citation, re.M)
-    assert match is not None
-    release_year = match.group(1)
+    release_year = _citation_release_date(citation).split("-", 1)[0]
 
     assert f"year = {{{release_year}}}" in readme
     assert f"Physical Superintelligence PBC ({release_year}). Get Physics Done (GPD)" in readme
@@ -456,14 +590,15 @@ def test_public_readme_citation_year_matches_citation_release_date() -> None:
 def test_public_metadata_records_psi_affiliation() -> None:
     repo_root = _repo_root()
 
-    citation = (repo_root / "CITATION.cff").read_text(encoding="utf-8")
+    citation = _citation_metadata(repo_root)
     contributing = (repo_root / "CONTRIBUTING.md").read_text(encoding="utf-8")
-    pyproject = tomllib.loads((repo_root / "pyproject.toml").read_text(encoding="utf-8"))
+    project = _project_table(repo_root)
+    project_author = _project_author_name(project)
 
-    assert 'affiliation: "Physical Superintelligence PBC"' in citation
+    assert citation["authors"] == [{"name": project_author, "affiliation": project_author}]
     assert "Physical Superintelligence PBC (PSI)" in contributing
-    assert pyproject["project"]["authors"] == [{"name": "Physical Superintelligence PBC"}]
-    assert pyproject["project"]["maintainers"] == [{"name": "Physical Superintelligence PBC"}]
+    assert project["authors"] == [{"name": "Physical Superintelligence PBC"}]
+    assert project["maintainers"] == [{"name": "Physical Superintelligence PBC"}]
 
 
 def test_contributor_docs_describe_gemini_completion_at_cli_boundary() -> None:
@@ -471,15 +606,34 @@ def test_contributor_docs_describe_gemini_completion_at_cli_boundary() -> None:
     contributing = (repo_root / "CONTRIBUTING.md").read_text(encoding="utf-8")
     normalized = re.sub(r"\s+", " ", contributing)
 
-    assert "Gemini installs are expected to be complete on disk after `GeminiAdapter.install()`" not in contributing
-    assert "Gemini public installs are expected to be complete on disk after the CLI-level install path succeeds" in normalized
-    assert "`gpd install gemini" in normalized
-    assert "`npx -y get-physics-done --gemini" in normalized
-    assert "Raw `GeminiAdapter.install()` prepares deferred settings" in normalized
-    assert "must call `finalize_install()` before asserting complete Gemini artifacts" in normalized
-    assert ".gemini/settings.json" in contributing
-    assert "policyPaths" in contributing
-    assert "policies/gpd-auto-edit.toml" in contributing
+    _assert_machine_fragments_absent(
+        contributing,
+        "stale raw Gemini adapter completion docs",
+        "Gemini installs are expected to be complete on disk after `GeminiAdapter.install()`",
+    )
+    _assert_semantic_fragments(
+        normalized,
+        "Gemini completion boundary docs",
+        (
+            "Gemini public installs",
+            "complete on disk",
+            "CLI-level install path succeeds",
+            "Raw `GeminiAdapter.install()`",
+            "deferred settings",
+            "finalize_install()",
+            "complete Gemini artifacts",
+        ),
+    )
+    _assert_machine_fragments(
+        contributing,
+        "Gemini completion exact config surfaces",
+        (".gemini/settings.json", "policyPaths", "policies/gpd-auto-edit.toml"),
+    )
+    _assert_machine_fragments(
+        normalized,
+        "Gemini completion exact runtime commands",
+        ("`gpd install gemini", "`npx -y get-physics-done --gemini"),
+    )
 
 
 def test_public_release_surfaces_share_agentic_system_positioning() -> None:
@@ -489,11 +643,12 @@ def test_public_release_surfaces_share_agentic_system_positioning() -> None:
     pyproject = tomllib.loads((repo_root / "pyproject.toml").read_text(encoding="utf-8"))
     installer = (repo_root / "bin" / "install.js").read_text(encoding="utf-8")
 
-    expected = "open-source agentic ai system for physics research"
+    expected_public_positioning = "Open-source agentic AI system for physics research"
+    expected = expected_public_positioning.lower()
     assert expected in readme.lower()
     assert expected in package_json["description"].lower()
     assert expected in pyproject["project"]["description"].lower()
-    assert "Open-source agentic AI system for physics research" in installer
+    assert expected_public_positioning in installer
 
 
 def test_readme_exposes_pypi_and_npm_release_badges() -> None:
@@ -512,9 +667,15 @@ def test_readme_labels_prefixless_runtime_examples_as_canonical_command_names() 
     repo_root = _repo_root()
     readme = (repo_root / "README.md").read_text(encoding="utf-8")
 
-    assert "Canonical post-install order, shown as command names without runtime prefixes:" in readme
-    assert "The table below uses canonical command names without runtime prefixes." in readme
-    assert "Apply the\nprefix for your runtime from [Supported Runtimes](#supported-runtimes)." in readme
+    _assert_machine_fragments(
+        readme,
+        "README prefixless runtime command labels",
+        (
+            "Canonical post-install order, shown as command names without runtime prefixes:",
+            "The table below uses canonical command names without runtime prefixes.",
+            "Apply the\nprefix for your runtime from [Supported Runtimes](#supported-runtimes).",
+        ),
+    )
 
 
 def test_public_codex_windows_docs_track_current_official_guidance() -> None:
@@ -523,29 +684,49 @@ def test_public_codex_windows_docs_track_current_official_guidance() -> None:
     windows = (repo_root / "docs" / "windows.md").read_text(encoding="utf-8")
     combined = f"{codex}\n{windows}"
 
-    assert "Windows support is\nexperimental" not in codex
-    assert "Codex support on Windows is still experimental" not in windows
-    assert "macOS, Windows, and Linux" in codex
-    assert "macOS, Windows, and Linux" in windows
-    assert "PowerShell" in codex
-    assert "PowerShell" in windows
-    assert "Windows sandbox" in codex
-    assert "Windows sandbox" in windows
-    assert "WSL2" in codex
-    assert "WSL2" in windows
-    assert combined.count("https://developers.openai.com/codex/windows") == 2
+    _assert_machine_fragments_absent(
+        codex,
+        "stale Codex Windows experimental wording",
+        "Windows support is\nexperimental",
+    )
+    _assert_machine_fragments_absent(
+        windows,
+        "stale Windows docs experimental wording",
+        "Codex support on Windows is still experimental",
+    )
+    for doc_name, content in {"codex": codex, "windows": windows}.items():
+        _assert_machine_fragments(
+            content,
+            f"{doc_name} current Windows platform anchors",
+            ("macOS, Windows, and Linux", "PowerShell", "Windows sandbox", "WSL2"),
+        )
+    _assert_fragment_count(
+        combined,
+        "official Codex Windows guidance link count",
+        "https://developers.openai.com/codex/windows",
+        expected_count=2,
+    )
 
 
 def test_pull_request_template_points_to_current_ci_and_pre_commit_validation() -> None:
     repo_root = _repo_root()
     template = (repo_root / ".github" / "pull_request_template.md").read_text(encoding="utf-8")
 
-    assert "uv run pytest -v" not in template
-    assert "ruff check src/ tests/" not in template
-    assert "uv run pytest -n 0 -q <targets>" in template
-    assert "GitHub Actions PR checks" in template
-    assert "uv run ruff check ." in template
-    assert "pre-commit run --all-files" in template
+    _assert_machine_fragments_absent(
+        template,
+        "stale PR validation commands",
+        ("uv run pytest -v", "ruff check src/ tests/"),
+    )
+    _assert_machine_fragments(
+        template,
+        "current PR validation commands",
+        (
+            "uv run pytest -n 0 -q <targets>",
+            "GitHub Actions PR checks",
+            "uv run ruff check .",
+            "pre-commit run --all-files",
+        ),
+    )
 
 
 def test_targeted_release_and_pr_pytest_commands_disable_xdist() -> None:
@@ -585,6 +766,20 @@ def test_public_bootstrap_package_exposes_npx_installer() -> None:
     assert (repo_root / "bin" / "install.js").is_file()
 
 
+def test_public_bootstrap_package_json_assets_follow_metadata_generator_sources() -> None:
+    repo_root = _repo_root()
+    package_json = json.loads((repo_root / "package.json").read_text(encoding="utf-8"))
+    packaged_json_assets = {path for path in package_json.get("files", []) if path.endswith(".json")}
+
+    assert packaged_json_assets == set(_bootstrap_json_assets_from_metadata_generator(repo_root))
+
+    installer_metadata_path = bootstrap_metadata_module.INSTALLER_METADATA_PATH.relative_to(repo_root)
+    installer_metadata = json.loads((repo_root / installer_metadata_path).read_text(encoding="utf-8"))
+    assert set(installer_metadata["source_hashes"]) == {
+        source_path.as_posix() for source_path in bootstrap_metadata_module.SOURCE_PATHS
+    }
+
+
 def test_public_bootstrap_installer_uses_python_cli_without_uv() -> None:
     repo_root = _repo_root()
     content = (repo_root / "bin" / "install.js").read_text(encoding="utf-8")
@@ -597,32 +792,55 @@ def test_public_bootstrap_installer_pins_the_matching_python_release() -> None:
     repo_root = _repo_root()
     content = (repo_root / "bin" / "install.js").read_text(encoding="utf-8")
 
-    assert 'require("../package.json")' in content
-    assert 'require("../src/gpd/core/public_surface_contract.json")' in content
-    assert "gpdPythonVersion" in content
-    assert '["-m", "venv", "--help"]' in content
-    assert "managed environment" in content
-    assert 'const GITHUB_MAIN_BRANCH = "main"' in content
-    assert "installManagedPackage(managedEnv.python, pythonPackageVersion" in content
-    assert "archive/refs/tags/v${version}.tar.gz" in content
-    assert "archive/refs/heads/${GITHUB_MAIN_BRANCH}.tar.gz" in content
-    assert "git+${repoGitUrl}@v${version}" in content
-    assert "git+${repoGitUrl}@${GITHUB_MAIN_BRANCH}" in content
-    assert "function repositoryGitUrl(" in content
-    assert "function repositorySshGitUrl(" not in content
-    assert "requestedVersion" in content
-    assert "the PyPI pinned release or tagged GitHub release sources" in content
-    assert "the latest unreleased GitHub ${GITHUB_MAIN_BRANCH} source" in content
+    _assert_machine_fragments(
+        content,
+        "bootstrap installer exact release source wiring",
+        (
+            'require("../package.json")',
+            "BOOTSTRAP_INSTALLER_METADATA_RELATIVE_PATH",
+            '"installer_metadata.json"',
+            "loadBootstrapInstallerMetadata()",
+            "validateBootstrapInstallerMetadata",
+            'crypto.createHash("sha256")',
+            "gpdPythonVersion",
+            '["-m", "venv", "--help"]',
+            "managed environment",
+            'const GITHUB_MAIN_BRANCH = "main"',
+            "installManagedPackage(managedEnv.python, pythonPackageVersion",
+            "archive/refs/tags/v${version}.tar.gz",
+            "archive/refs/heads/${GITHUB_MAIN_BRANCH}.tar.gz",
+            "git+${repoGitUrl}@v${version}",
+            "git+${repoGitUrl}@${GITHUB_MAIN_BRANCH}",
+            "function repositoryGitUrl(",
+            "requestedVersion",
+            "the PyPI pinned release or tagged GitHub release sources",
+            "the latest unreleased GitHub ${GITHUB_MAIN_BRANCH} source",
+        ),
+    )
+    _assert_machine_fragments_absent(
+        content,
+        "bootstrap installer stale bundled contract imports",
+        (
+            'require("../src/gpd/core/public_surface_contract.json")',
+            "function repositorySshGitUrl(",
+        ),
+    )
 
 
 def test_export_workflow_uses_release_attribution_footer() -> None:
     repo_root = _repo_root()
     content = (repo_root / "src" / "gpd" / "specs" / "workflows" / "export.md").read_text(encoding="utf-8")
 
-    assert "<p><em>Generated with Get Physics Done (PSI)" in content
-    assert "{\\footnotesize\\textit{Generated with Get Physics Done (PSI)}}" in content
-    assert "Attribution: Generated with Get Physics Done (PSI)" in content
-    assert "Tool: GPD (Get Physics Done)" not in content
+    _assert_machine_fragments(
+        content,
+        "export workflow release attribution footer",
+        (
+            "<p><em>Generated with Get Physics Done (PSI)",
+            "{\\footnotesize\\textit{Generated with Get Physics Done (PSI)}}",
+            "Attribution: Generated with Get Physics Done (PSI)",
+        ),
+    )
+    _assert_machine_fragments_absent(content, "stale export attribution footer", "Tool: GPD (Get Physics Done)")
 
 
 def test_export_surfaces_use_visible_exports_directory() -> None:
@@ -630,15 +848,44 @@ def test_export_surfaces_use_visible_exports_directory() -> None:
     workflow = (repo_root / "src" / "gpd" / "specs" / "workflows" / "export.md").read_text(encoding="utf-8")
     command = (repo_root / "src" / "gpd" / "commands" / "export.md").read_text(encoding="utf-8")
 
-    assert "mkdir -p exports" in workflow
-    assert "exports/results.html" in workflow
-    assert "exports/results.tex" in workflow
-    assert "exports/results.bib" in workflow
-    assert "exports/results.zip" in workflow
-    assert "mkdir -p GPD/exports" not in workflow
-    assert "Write files to `exports/`." in command
-    assert "Files written to exports/" in command
-    assert "Write files to `GPD/exports" not in command
+    _assert_machine_fragments(
+        workflow,
+        "export workflow writes visible export paths",
+        (
+            "mkdir -p exports",
+            "exports/results.html",
+            "exports/results.tex",
+            "exports/results.bib",
+            "exports/results.zip",
+        ),
+    )
+    _assert_machine_fragments_absent(workflow, "stale GPD export workflow path", "mkdir -p GPD/exports")
+    _assert_machine_fragments(
+        command,
+        "export command surfaces visible export paths",
+        ("Write files to `exports/`.", "Files written to exports/"),
+    )
+    _assert_machine_fragments_absent(command, "stale GPD export command path", "Write files to `GPD/exports")
+
+
+def test_export_workflow_keeps_latex_template_and_bibliography_contracts() -> None:
+    repo_root = _repo_root()
+    workflow = (repo_root / "src" / "gpd" / "specs" / "workflows" / "export.md").read_text(encoding="utf-8")
+    generate_latex = workflow[
+        workflow.index('<step name="generate_latex">') : workflow.index('<step name="generate_zip">')
+    ]
+
+    _assert_ordered_fragments(
+        generate_latex,
+        "export template render output",
+        ("render_paper()", "Write the rendered template output to `exports/results.tex`."),
+    )
+    _assert_ordered_fragments(
+        generate_latex,
+        "export standalone bibliography output",
+        ("Otherwise create `exports/results.tex`", "\\" + "bibliographystyle{plainnat}"),
+    )
+    assert "\\" + "bibliography{results}" in generate_latex
 
 
 def test_public_cli_surface_is_unified() -> None:
@@ -653,67 +900,117 @@ def test_public_cli_surface_is_unified() -> None:
 
 def test_merge_gate_workflow_uses_main_branch_pytest_on_python_floor() -> None:
     repo_root = _repo_root()
-    workflow = (repo_root / ".github" / "workflows" / "test.yml").read_text(encoding="utf-8")
     workflow_data = load_repo_github_actions_workflow(repo_root, "test.yml")
     pyproject = (repo_root / "pyproject.toml").read_text(encoding="utf-8")
 
-    assert "name: tests" in workflow
-    assert "pull_request:" in workflow
-    assert "push:" in workflow
-    assert "branches: [main]" in workflow
-    assert "workflow_dispatch:" in workflow
-    assert f"name: pytest ${{{{ matrix.display_name }}}} ({MIN_SUPPORTED_PYTHON_LABEL})" in workflow
-    assert "actions/setup-python@v6" in workflow
-    assert f'python-version: "{MIN_SUPPORTED_PYTHON_LABEL}"' in workflow
-    assert "name: python compatibility (${{ matrix.python-version }})" in workflow
-    assert 'python-version: ["3.12", "3.13"]' in workflow
-    assert "uv run gpd --version" in workflow
-    assert "uv build --wheel --out-dir dist/compat-${{ matrix.python-version }}" in workflow
-    assert "astral-sh/setup-uv@v7" in workflow
-    assert f'version: "{EXPECTED_SETUP_UV_VERSION}"' in workflow
-    assert "Check repo graph generated artifacts" in workflow
-    assert "uv run python scripts/sync_repo_graph_contract.py --check" in workflow
-    assert 'addopts = "-n auto --dist=worksteal"' in pyproject
-    assert_ci_workflow_pytest_shard_policy(workflow_data, pyproject_text=pyproject)
+    triggers = workflow_data["on"]
+    pytest_job = workflow_job(workflow_data, "pytest")
+    compatibility_job = workflow_job(workflow_data, "python-compatibility")
+    ruff_repo_graph_step = workflow_step_by_name(workflow_data, "ruff", "Check repo graph generated artifacts")
+    ruff_public_surface_step = workflow_step_by_name(workflow_data, "ruff", "Check public surface generated artifacts")
+    ruff_help_surface_step = workflow_step_by_name(workflow_data, "ruff", "Check help surface generated artifacts")
+    ruff_bootstrap_metadata_step = workflow_step_by_name(
+        workflow_data,
+        "ruff",
+        "Check bootstrap installer metadata generated artifacts",
+    )
+    pytest_python_step = workflow_step_by_name(workflow_data, "pytest", "Set up Python")
+    pytest_uv_step = workflow_step_by_name(workflow_data, "pytest", "Set up uv")
+    compatibility_console_step = workflow_step_by_name(workflow_data, "python-compatibility", "Smoke console script")
+    compatibility_build_step = workflow_step_by_name(workflow_data, "python-compatibility", "Build wheel")
+
+    assert workflow_data["name"] == "tests"
+    assert triggers["pull_request"]["branches"] == ["main"]
+    assert triggers["push"]["branches"] == ["main"]
+    assert "workflow_dispatch" in triggers
+    assert pytest_job["name"] == f"pytest ${{{{ matrix.display_name }}}} ({MIN_SUPPORTED_PYTHON_LABEL})"
+    assert pytest_python_step["uses"] == "actions/setup-python@v6"
+    assert pytest_python_step["with"]["python-version"] == MIN_SUPPORTED_PYTHON_LABEL
+    assert compatibility_job["name"] == "python compatibility (${{ matrix.python-version }})"
+    assert compatibility_job["strategy"]["matrix"]["python-version"] == ["3.12", "3.13"]
+    _assert_machine_fragments(
+        compatibility_console_step["run"],
+        "python compatibility console smoke command",
+        "uv run gpd --version",
+    )
+    _assert_machine_fragments(
+        compatibility_build_step["run"],
+        "python compatibility wheel build command",
+        "uv build --wheel --out-dir dist/compat-${{ matrix.python-version }}",
+    )
+    assert_setup_uv_step_pins_expected_version(pytest_uv_step, context="test.yml pytest Set up uv")
+    assert ruff_repo_graph_step["run"] == "uv run python scripts/sync_repo_graph_contract.py --check"
+    assert ruff_public_surface_step["run"] == "uv run python scripts/render_public_surface.py --check"
+    assert ruff_help_surface_step["run"] == "uv run python scripts/render_help_surface.py --check"
+    assert ruff_bootstrap_metadata_step["run"] == "uv run python scripts/render_bootstrap_installer_metadata.py --check"
+    _assert_machine_fragments(pyproject, "pytest default xdist policy", 'addopts = "-n auto --dist=worksteal"')
 
     # Staging rebuild trigger lives in a separate workflow (staging-rebuild.yml)
     # to avoid showing as a skipped check on PRs. It gates on tests via workflow_run.
-    rebuild_workflow = (repo_root / ".github" / "workflows" / "staging-rebuild.yml").read_text(encoding="utf-8")
-    assert 'workflows: ["tests"]' in rebuild_workflow
-    assert "conclusion == 'success'" in rebuild_workflow
-    assert "curl -sf --retry 3 --retry-delay 5 --connect-timeout 10 --max-time 30 -X POST" in rebuild_workflow
+    rebuild_workflow = load_repo_github_actions_workflow(repo_root, "staging-rebuild.yml")
+    rebuild_trigger = rebuild_workflow["on"]["workflow_run"]
+    rebuild_job = workflow_job(rebuild_workflow, "trigger-staging-rebuild")
+    rebuild_step = workflow_step_by_name(rebuild_workflow, "trigger-staging-rebuild", "Dispatch rebuild to gpd-web")
+    assert rebuild_trigger["workflows"] == ["tests"]
+    assert rebuild_trigger["branches"] == ["main"]
+    assert rebuild_job["if"] == "github.event.workflow_run.conclusion == 'success'"
+    _assert_machine_fragments(
+        rebuild_step["run"],
+        "staging rebuild dispatch command",
+        "curl -sf --retry 3 --retry-delay 5 --connect-timeout 10 --max-time 30 -X POST",
+    )
 
 
 def test_prepare_release_workflow_creates_release_pr_without_publishing() -> None:
     repo_root = _repo_root()
     workflow = (repo_root / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
 
-    assert "Admin-owned release workflow:" in workflow
-    assert "This workflow never publishes anything and never pushes to `main`." in workflow
-    assert "opens a release PR on `release/vX.Y.Z`." in workflow
-    assert "name: prepare release" in workflow
-    assert "workflow_dispatch:" in workflow
-    assert 'description: "Dry run — validate and preview without opening a release PR"' in workflow
-    assert "pull-requests: write" in workflow
-    assert "actions/checkout@v6" in workflow
-    assert "actions/setup-python@v6" in workflow
-    assert "actions/setup-node@v6" in workflow
-    assert "astral-sh/setup-uv@v7" in workflow
-    assert f'version: "{EXPECTED_SETUP_UV_VERSION}"' in workflow
-    assert "uv sync --dev --frozen" in workflow
-    assert "scripts/release_workflow.py prepare" in workflow
-    assert "uv lock" in workflow
-    assert "uv run pytest -n 0 tests/test_release_consistency.py -v" in workflow
-    assert "uv build --out-dir dist" in workflow
-    assert "npm pack --dry-run --json" in workflow
-    assert "gh pr create" in workflow
-    assert "--jq '.[0].url // \"\"'" in workflow
-    assert "--jq '.[0].url')" not in workflow
-    assert "git add CHANGELOG.md CITATION.cff README.md package.json pyproject.toml uv.lock" in workflow
-    assert "Publish release" in workflow
-    assert "pypa/gh-action-pypi-publish@release/v1" not in workflow
-    assert "npm publish" not in workflow
-    assert "gh release create" not in workflow
+    _assert_semantic_fragments(
+        workflow,
+        "prepare release workflow comments",
+        (
+            "Admin-owned release workflow",
+            "never publishes",
+            "never pushes to `main`",
+            "opens a release PR",
+            "release/vX.Y.Z",
+        ),
+    )
+    _assert_machine_fragments(
+        workflow,
+        "prepare release exact workflow wiring",
+        (
+            "name: prepare release",
+            "workflow_dispatch:",
+            'description: "Dry run — validate and preview without opening a release PR"',
+            "pull-requests: write",
+            "actions/checkout@v6",
+            "actions/setup-python@v6",
+            "actions/setup-node@v6",
+            "astral-sh/setup-uv@v7",
+            f'version: "{EXPECTED_SETUP_UV_VERSION}"',
+            "uv sync --dev --frozen",
+            "scripts/release_workflow.py prepare",
+            "uv lock",
+            "uv run pytest -n 0 tests/test_release_consistency.py -v",
+            "uv build --out-dir dist",
+            "npm pack --dry-run --json",
+            "gh pr create",
+            "--jq '.[0].url // \"\"'",
+            "git add CHANGELOG.md CITATION.cff README.md package.json pyproject.toml uv.lock",
+            "Publish release",
+        ),
+    )
+    _assert_machine_fragments_absent(
+        workflow,
+        "prepare release workflow forbidden publish paths",
+        (
+            "--jq '.[0].url')",
+            "pypa/gh-action-pypi-publish@release/v1",
+            "npm publish",
+            "gh release create",
+        ),
+    )
 
 
 def test_pypi_preflight_helper_records_already_published_version(
@@ -733,7 +1030,11 @@ def test_pypi_preflight_helper_records_already_published_version(
     assert status == "already-published"
     assert github_output.read_text(encoding="utf-8") == "status=already-published\n"
     assert calls == [("https://pypi.org/pypi/get-physics-done/1.2.3/json", 20.0)]
-    assert "get-physics-done 1.2.3 is already published on PyPI; skipping PyPI publish." in capsys.readouterr().out
+    _assert_semantic_fragments(
+        capsys.readouterr().out,
+        "pypi preflight already-published notice",
+        "get-physics-done 1.2.3 is already published on PyPI; skipping PyPI publish.",
+    )
 
 
 def test_pypi_preflight_helper_attempts_publish_when_probe_is_inconclusive(
@@ -753,8 +1054,16 @@ def test_pypi_preflight_helper_attempts_publish_when_probe_is_inconclusive(
     captured = capsys.readouterr()
     assert status == "not-published"
     assert github_output.read_text(encoding="utf-8") == "status=not-published\n"
-    assert "Could not determine whether get-physics-done 1.2.3 is already on PyPI" in captured.out
-    assert "PyPI version check failed: temporary network failure" in captured.err
+    _assert_semantic_fragments(
+        captured.out,
+        "pypi inconclusive preflight stdout",
+        "Could not determine whether get-physics-done 1.2.3 is already on PyPI",
+    )
+    _assert_semantic_fragments(
+        captured.err,
+        "pypi inconclusive preflight stderr",
+        "PyPI version check failed: temporary network failure",
+    )
 
 
 def test_pypi_publish_status_helper_reuses_preflight_already_published_status(
@@ -821,7 +1130,11 @@ def test_pypi_publish_status_helper_recovers_when_failed_publish_is_visible_on_p
 
     assert status == "recovered"
     assert github_output.read_text(encoding="utf-8") == "status=recovered\n"
-    assert "PyPI publish failed, but get-physics-done 1.2.3 is now published; continuing." in capsys.readouterr().out
+    _assert_semantic_fragments(
+        capsys.readouterr().out,
+        "pypi publish recovery notice",
+        "PyPI publish failed, but get-physics-done 1.2.3 is now published; continuing.",
+    )
 
 
 def test_pypi_publish_status_helper_fails_when_publish_and_recovery_probe_fail(
@@ -852,125 +1165,200 @@ def test_publish_release_workflow_uses_trusted_publishing_from_merged_release_co
     repo_root = _repo_root()
     workflow = (repo_root / ".github" / "workflows" / "publish-release.yml").read_text(encoding="utf-8")
 
-    assert "Admin-owned publish workflow:" in workflow
-    assert "Run manually from merged `main` after the release PR has landed." in workflow
-    assert "Ordinary PR merges to `main` must never invoke this flow automatically." in workflow
-    assert "name: publish release" in workflow
-    assert "workflow_dispatch:" in workflow
-    assert "release_sha:" in workflow
-    assert "ref: ${{ inputs.release_sha || github.sha }}" in workflow
-    assert "git merge-base --is-ancestor HEAD" in workflow
-    assert "scripts/release_workflow.py show-version" in workflow
-    assert "scripts/release_workflow.py stamp-publish-date" in workflow
+    _assert_semantic_fragments(
+        workflow,
+        "publish release workflow manual boundary comments",
+        (
+            "Admin-owned publish workflow",
+            "Run manually",
+            "merged `main`",
+            "release PR has landed",
+            "Ordinary PR merges",
+            "must never invoke this flow automatically",
+        ),
+    )
+    _assert_machine_fragments(
+        workflow,
+        "publish release workflow exact entrypoint wiring",
+        (
+            "name: publish release",
+            "workflow_dispatch:",
+            "release_sha:",
+            "ref: ${{ inputs.release_sha || github.sha }}",
+            "git merge-base --is-ancestor HEAD",
+            "scripts/release_workflow.py show-version",
+            "scripts/release_workflow.py stamp-publish-date",
+        ),
+    )
     workflow_data = load_repo_github_actions_workflow(repo_root, "publish-release.yml")
     setup_uv_steps = workflow_steps_using(workflow_data, "astral-sh/setup-uv@v7")
     assert setup_uv_steps
     for _, step in setup_uv_steps:
         assert_setup_uv_step_pins_expected_version(step, context="publish-release.yml")
-    assert "Check existing release tag safety" in workflow
-    assert 'TAG_SHA="$(git rev-list -n 1 "v${VERSION}")"' in workflow
-    assert "Tag v${VERSION} already points at release commit ${RELEASE_SHA}; continuing publish recovery." in workflow
-    assert "Tag v${VERSION} already exists at ${TAG_SHA}, not release commit ${RELEASE_SHA}." in workflow
-    assert "environment:" in workflow
-    assert "name: PyPI" in workflow
+    _assert_machine_fragments(
+        workflow,
+        "publish release tag and PyPI environment wiring",
+        (
+            "Check existing release tag safety",
+            'TAG_SHA="$(git rev-list -n 1 "v${VERSION}")"',
+            "Tag v${VERSION} already points at release commit ${RELEASE_SHA}; continuing publish recovery.",
+            "Tag v${VERSION} already exists at ${TAG_SHA}, not release commit ${RELEASE_SHA}.",
+            "environment:",
+            "name: PyPI",
+        ),
+    )
     assert re.search(
         r"  publish-pypi:\n(?:.*\n)*?    permissions:\n      contents: read\n      id-token: write",
         workflow,
     )
-    assert "id-token: write" in workflow
-    assert "status: ${{ steps.pypi_status.outputs.status }}" in workflow
-    assert "Check out release helper" in workflow
-    assert "id: pypi_preflight" in workflow
-    assert "id: pypi_publish" in workflow
-    assert "continue-on-error: true" in workflow
-    assert "id: pypi_status" in workflow
-    assert workflow.count("python3 scripts/release_workflow.py pypi-preflight") == 1
-    assert workflow.count("python3 scripts/release_workflow.py pypi-publish-status") == 1
-    assert '--github-output "$GITHUB_OUTPUT"' in workflow
-    assert '--pre-publish-status "$PRE_PUBLISH_STATUS"' in workflow
-    assert '--publish-outcome "$PYPI_PUBLISH_OUTCOME"' in workflow
-    assert "PYPI_CHECK_STATUS=0" not in workflow
-    assert "pypi_version_is_published()" not in workflow
-    assert "urllib.request" not in workflow
-    assert "https://pypi.org/pypi/get-physics-done" not in workflow
-    assert "PYPI_PUBLISH_OUTCOME: ${{ steps.pypi_publish.outcome }}" in workflow
-    assert "skip-existing: true" in workflow
-    assert "actions/checkout@v6" in workflow
-    assert "actions/setup-python@v6" in workflow
-    assert "actions/setup-node@v6" in workflow
-    assert workflow.count('node-version: "20"') == 1
-    assert workflow.count('node-version: "24"') == 1
+    _assert_machine_fragments(
+        workflow,
+        "publish release PyPI trusted publishing exact wiring",
+        (
+            "id-token: write",
+            "status: ${{ steps.pypi_status.outputs.status }}",
+            "Check out release helper",
+            "id: pypi_preflight",
+            "id: pypi_publish",
+            "continue-on-error: true",
+            "id: pypi_status",
+            '--github-output "$GITHUB_OUTPUT"',
+            '--pre-publish-status "$PRE_PUBLISH_STATUS"',
+            '--publish-outcome "$PYPI_PUBLISH_OUTCOME"',
+            "PYPI_PUBLISH_OUTCOME: ${{ steps.pypi_publish.outcome }}",
+            "skip-existing: true",
+            "actions/checkout@v6",
+            "actions/setup-python@v6",
+            "actions/setup-node@v6",
+        ),
+    )
+    _assert_fragment_count(
+        workflow,
+        "publish release PyPI preflight command count",
+        "python3 scripts/release_workflow.py pypi-preflight",
+        expected_count=1,
+    )
+    _assert_fragment_count(
+        workflow,
+        "publish release PyPI status command count",
+        "python3 scripts/release_workflow.py pypi-publish-status",
+        expected_count=1,
+    )
+    _assert_machine_fragments_absent(
+        workflow,
+        "publish release stale inline PyPI probe code",
+        (
+            "PYPI_CHECK_STATUS=0",
+            "pypi_version_is_published()",
+            "urllib.request",
+            "https://pypi.org/pypi/get-physics-done",
+        ),
+    )
+    _assert_fragment_count(workflow, "publish release setup node 20 count", 'node-version: "20"', expected_count=1)
+    _assert_fragment_count(workflow, "publish release setup node 24 count", 'node-version: "24"', expected_count=1)
     assert re.search(r"  publish-npm-and-github-release:\n(?:.*\n)*?          node-version: \"24\"", workflow)
-    assert "actions/upload-artifact@v7" in workflow
-    assert "actions/download-artifact@v8" in workflow
-    assert "pypa/gh-action-pypi-publish@release/v1" in workflow
-    assert "name: npm" in workflow
-    assert "NODE_AUTH_TOKEN" not in workflow
-    assert "NPM_TOKEN" not in workflow
-    assert "pull-requests: write" in workflow
-    assert "npm publish" in workflow
-    assert 'npm view "get-physics-done@${VERSION}" version' in workflow
-    assert "status=already-published" in workflow
-    assert "status=published" in workflow
-    assert "get-physics-done@${VERSION} is already published on npm; skipping npm publish." in workflow
-    assert "npm publish failed, but get-physics-done@${VERSION} is now published; continuing." in workflow
-    assert "gh release create" in workflow
-    assert "git fetch --tags origin" in workflow
-    assert "--verify-tag" in workflow
-    assert (
-        "GitHub release v${VERSION} already exists at the reviewed release commit; continuing publish recovery."
-        in workflow
+    _assert_machine_fragments(
+        workflow,
+        "publish release artifact npm and GitHub release wiring",
+        (
+            "actions/upload-artifact@v7",
+            "actions/download-artifact@v8",
+            "pypa/gh-action-pypi-publish@release/v1",
+            "name: npm",
+            "pull-requests: write",
+            "npm publish",
+            'npm view "get-physics-done@${VERSION}" version',
+            "status=already-published",
+            "status=published",
+            "get-physics-done@${VERSION} is already published on npm; skipping npm publish.",
+            "npm publish failed, but get-physics-done@${VERSION} is now published; continuing.",
+            "gh release create",
+            "git fetch --tags origin",
+            "--verify-tag",
+        ),
     )
-    assert "Tag v${VERSION} exists at ${TAG_SHA}, not release commit ${RELEASE_SHA}." in workflow
-    assert "post-release/v${VERSION}-publish-date" in workflow
-    assert "remote_followup_branch_sha()" in workflow
-    assert "refresh_followup_branch()" in workflow
-    assert "verify_followup_branch_matches_fresh_stamp()" in workflow
-    assert "refreshing stamped metadata before returning its URL" in workflow
-    assert 'git push --force-with-lease="refs/heads/${FOLLOWUP_BRANCH}:${EXISTING_BRANCH_SHA}"' in workflow
-    assert (
-        'git fetch --no-tags origin "refs/heads/${FOLLOWUP_BRANCH}:refs/remotes/origin/${FOLLOWUP_BRANCH}"' in workflow
+    _assert_machine_fragments_absent(
+        workflow,
+        "publish release forbidden npm tokens",
+        ("NODE_AUTH_TOKEN", "NPM_TOKEN"),
     )
-    assert "does not match freshly stamped publish-date metadata" in workflow
-    assert workflow.index("refreshing stamped metadata before returning its URL") < workflow.index(
-        'echo "pr_url=${PR_URL}" >> "$GITHUB_OUTPUT"'
+    _assert_machine_fragments(
+        workflow,
+        "publish release follow-up branch recovery wiring",
+        (
+            "GitHub release v${VERSION} already exists at the reviewed release commit; continuing publish recovery.",
+            "Tag v${VERSION} exists at ${TAG_SHA}, not release commit ${RELEASE_SHA}.",
+            "post-release/v${VERSION}-publish-date",
+            "remote_followup_branch_sha()",
+            "refresh_followup_branch()",
+            "verify_followup_branch_matches_fresh_stamp()",
+            "refreshing stamped metadata before returning its URL",
+            'git push --force-with-lease="refs/heads/${FOLLOWUP_BRANCH}:${EXISTING_BRANCH_SHA}"',
+        ),
+    )
+    _assert_machine_fragments(
+        workflow,
+        "publish release follow-up branch validation fragments",
+        (
+            'git fetch --no-tags origin "refs/heads/${FOLLOWUP_BRANCH}:refs/remotes/origin/${FOLLOWUP_BRANCH}"',
+            "does not match freshly stamped publish-date metadata",
+        ),
+    )
+    _assert_ordered_fragments(
+        workflow,
+        "publish release refreshes stamped metadata before returning PR URL",
+        (
+            "refreshing stamped metadata before returning its URL",
+            'echo "pr_url=${PR_URL}" >> "$GITHUB_OUTPUT"',
+        ),
     )
     assert workflow.index("refresh_followup_branch") < workflow.index(
         'gh pr create --base "$DEFAULT_BRANCH" --head "$FOLLOWUP_BRANCH"'
     )
-    assert "ref: ${{ needs.build-release.outputs.release_sha }}" in workflow
-    assert "Run stamped release validation" in workflow
-    assert workflow.index("Stamp actual publish date in release checkout") < workflow.index(
-        "Run stamped release validation"
+    _assert_machine_fragments(
+        workflow,
+        "publish release stamped validation checkout",
+        ("ref: ${{ needs.build-release.outputs.release_sha }}", "Run stamped release validation"),
     )
-    assert workflow.index("Run stamped release validation") < workflow.index("Publish to npm")
-    assert "uv run pytest -n 0 tests/test_release_consistency.py -v" in workflow
-    assert (
-        'rm -rf dist\n          npm_config_cache="$(mktemp -d)" npm pack --dry-run --json >/tmp/npm-pack-publish.json'
-        in workflow
+    _assert_ordered_fragments(
+        workflow,
+        "publish release validates stamped checkout before npm publish",
+        ("Stamp actual publish date in release checkout", "Run stamped release validation", "Publish to npm"),
     )
-    assert 'npm_config_cache="$(mktemp -d)" npm pack --dry-run --json >/tmp/npm-pack-publish.json' in workflow
-    assert "scripts/release_workflow.py release-notes" in workflow
-    assert "gh pr create" in workflow
-    assert "id: gpd_web_rebuild" in workflow
-    assert "curl -sf --retry 3 --retry-delay 5 --connect-timeout 10 --max-time 30 -X POST" in workflow
-    assert "GPD_WEB_DISPATCH_TOKEN not configured" in workflow
-    assert 'echo "status=skipped" >> "$GITHUB_OUTPUT"' in workflow
-    assert 'echo "status=dispatched" >> "$GITHUB_OUTPUT"' in workflow
-    assert "PYPI_PUBLISH_STATUS: ${{ needs.publish-pypi.outputs.status }}" in workflow
-    assert 'if [ "${PYPI_PUBLISH_STATUS}" = "already-published" ]; then' in workflow
-    assert 'echo "- PyPI: already published; skipped trusted-publishing rerun"' in workflow
-    assert 'elif [ "${PYPI_PUBLISH_STATUS}" = "recovered" ]; then' in workflow
-    assert 'echo "- PyPI: publish recovery completed; version is present on PyPI"' in workflow
-    assert 'echo "- PyPI: published via trusted publishing from environment \\`PyPI\\`"' in workflow
-    assert "NPM_PUBLISH_STATUS: ${{ steps.npm_publish.outputs.status }}" in workflow
-    assert 'if [ "${NPM_PUBLISH_STATUS}" = "already-published" ]; then' in workflow
-    assert 'echo "- npm: already published; skipped trusted-publishing rerun"' in workflow
-    assert 'echo "- npm: published via trusted publishing from environment \\`npm\\`"' in workflow
-    assert "GPD_WEB_REBUILD_STATUS: ${{ steps.gpd_web_rebuild.outputs.status }}" in workflow
-    assert 'if [ "${GPD_WEB_REBUILD_STATUS}" = "dispatched" ]; then' in workflow
-    assert 'echo "- GPD Web production rebuild: dispatched"' in workflow
-    assert 'echo "- GPD Web production rebuild: skipped; \\`GPD_WEB_DISPATCH_TOKEN\\` is not configured"' in workflow
+    _assert_machine_fragments(
+        workflow,
+        "publish release stamped validation pytest command",
+        "uv run pytest -n 0 tests/test_release_consistency.py -v",
+    )
+    _assert_machine_fragments(
+        workflow,
+        "publish release npm pack and summary commands",
+        (
+            'rm -rf dist\n          npm_config_cache="$(mktemp -d)" npm pack --dry-run --json >/tmp/npm-pack-publish.json',
+            'npm_config_cache="$(mktemp -d)" npm pack --dry-run --json >/tmp/npm-pack-publish.json',
+            "scripts/release_workflow.py release-notes",
+            "gh pr create",
+            "id: gpd_web_rebuild",
+            "curl -sf --retry 3 --retry-delay 5 --connect-timeout 10 --max-time 30 -X POST",
+            "GPD_WEB_DISPATCH_TOKEN not configured",
+            'echo "status=skipped" >> "$GITHUB_OUTPUT"',
+            'echo "status=dispatched" >> "$GITHUB_OUTPUT"',
+            "PYPI_PUBLISH_STATUS: ${{ needs.publish-pypi.outputs.status }}",
+            'if [ "${PYPI_PUBLISH_STATUS}" = "already-published" ]; then',
+            'echo "- PyPI: already published; skipped trusted-publishing rerun"',
+            'elif [ "${PYPI_PUBLISH_STATUS}" = "recovered" ]; then',
+            'echo "- PyPI: publish recovery completed; version is present on PyPI"',
+            'echo "- PyPI: published via trusted publishing from environment \\`PyPI\\`"',
+            "NPM_PUBLISH_STATUS: ${{ steps.npm_publish.outputs.status }}",
+            'if [ "${NPM_PUBLISH_STATUS}" = "already-published" ]; then',
+            'echo "- npm: already published; skipped trusted-publishing rerun"',
+            'echo "- npm: published via trusted publishing from environment \\`npm\\`"',
+            "GPD_WEB_REBUILD_STATUS: ${{ steps.gpd_web_rebuild.outputs.status }}",
+            'if [ "${GPD_WEB_REBUILD_STATUS}" = "dispatched" ]; then',
+            'echo "- GPD Web production rebuild: dispatched"',
+            'echo "- GPD Web production rebuild: skipped; \\`GPD_WEB_DISPATCH_TOKEN\\` is not configured"',
+        ),
+    )
     summary_lines = [line.strip() for line in workflow.splitlines()]
     condition_index = summary_lines.index('if [ "${GPD_WEB_REBUILD_STATUS}" = "dispatched" ]; then')
     dispatched_index = summary_lines.index('echo "- GPD Web production rebuild: dispatched"')
@@ -1027,31 +1415,33 @@ def test_publish_release_followup_recreates_or_fails_when_branch_exists_without_
         )
     ]
 
-    assert "remote_followup_branch_sha()" in workflow
-    assert "refresh_followup_branch()" in workflow
-    assert force_with_lease_push in workflow
-    assert 'if [ -n "$PR_URL" ]; then' in branch_exists_block
-    assert "--jq '.[0].url // \"\"'" in branch_exists_block
-    assert "refreshing stamped metadata before returning its URL" in branch_exists_block
-    assert "refresh_followup_branch" in branch_exists_block
-    assert (
-        'echo "::warning::Follow-up branch ${FOLLOWUP_BRANCH} already exists, but no open PR was found'
-        in branch_exists_block
+    _assert_machine_fragments(
+        workflow,
+        "publish release follow-up helper functions",
+        ("remote_followup_branch_sha()", "refresh_followup_branch()", force_with_lease_push),
     )
-    assert "restamping and updating the branch before recreating the PR" in branch_exists_block
-    assert 'gh pr create --base "$DEFAULT_BRANCH" --head "$FOLLOWUP_BRANCH"' in branch_exists_block
-    assert 'if [ -z "$PR_URL" ]; then' in branch_exists_block
-    assert (
-        'echo "::error::Follow-up branch ${FOLLOWUP_BRANCH} exists, but no open PR URL could be found'
-        in branch_exists_block
+    _assert_machine_fragments(
+        branch_exists_block,
+        "publish release existing follow-up branch handling",
+        (
+            'if [ -n "$PR_URL" ]; then',
+            "--jq '.[0].url // \"\"'",
+            "refreshing stamped metadata before returning its URL",
+            "refresh_followup_branch",
+            'echo "::warning::Follow-up branch ${FOLLOWUP_BRANCH} already exists, but no open PR was found',
+            "restamping and updating the branch before recreating the PR",
+            'gh pr create --base "$DEFAULT_BRANCH" --head "$FOLLOWUP_BRANCH"',
+            'if [ -z "$PR_URL" ]; then',
+            'echo "::error::Follow-up branch ${FOLLOWUP_BRANCH} exists, but no open PR URL could be found',
+        ),
     )
-    open_pr_refresh_index = branch_exists_block.index("refreshing stamped metadata before returning its URL")
+    open_pr_refresh_message = "refreshing stamped metadata before returning its URL"
+    open_pr_refresh_index = branch_exists_block.index(open_pr_refresh_message)
     no_pr_refresh_index = branch_exists_block.rindex("refresh_followup_branch")
     assert branch_exists_block.index('if [ -n "$PR_URL" ]; then') < open_pr_refresh_index
     assert open_pr_refresh_index < branch_exists_block.index('echo "pr_url=${PR_URL}" >> "$GITHUB_OUTPUT"')
-    assert (
-        branch_exists_block.index("restamping and updating the branch before recreating the PR") < no_pr_refresh_index
-    )
+    restamp_message = "restamping and updating the branch before recreating the PR"
+    assert branch_exists_block.index(restamp_message) < no_pr_refresh_index
     assert (
         no_pr_refresh_index
         < branch_exists_block.index('gh pr create --base "$DEFAULT_BRANCH" --head "$FOLLOWUP_BRANCH"')
@@ -1186,7 +1576,11 @@ def test_model_visible_command_note_does_not_depend_on_live_registry(monkeypatch
 
     note = model_visible_text.command_visibility_note()
 
-    assert "`agent` must match a built-in canonical agent label exactly" in note
+    _assert_semantic_fragments(
+        note,
+        "command visibility agent label exactness note",
+        "`agent` must match a built-in canonical agent label exactly",
+    )
     assert "gpd-planner" not in note
 
 
@@ -1486,7 +1880,7 @@ def test_human_author_check_allows_explicit_repository_automation_identities(tmp
     )
 
     assert result.returncode == 0
-    assert "Human author attribution check passed" in result.stdout
+    _assert_semantic_fragments(result.stdout, "human author hook success notice", "Human author attribution check passed")
 
 
 def test_human_author_commit_msg_hook_rejects_nonhuman_current_identity(tmp_path: Path) -> None:
@@ -1526,7 +1920,8 @@ def test_human_author_check_fails_closed_on_invalid_range(tmp_path: Path) -> Non
     )
 
     assert result.returncode == 1
-    assert "invalid git range missing-base..HEAD" in result.stderr
+    invalid_range_message = "invalid git range missing-base..HEAD"
+    assert invalid_range_message in result.stderr
 
 
 def test_release_test_checkout_fixture_copies_only_tracked_files(tmp_path: Path) -> None:
@@ -1870,7 +2265,11 @@ def test_stamp_publish_date_updates_citation_release_date_and_readme_year(tmp_pa
     readme = (tmp_path / "README.md").read_text(encoding="utf-8")
     assert "date-released: '2027-01-02'" in citation
     assert "year = {2027}" in readme
-    assert "Physical Superintelligence PBC (2027). Get Physics Done (GPD)" in readme
+    _assert_semantic_fragments(
+        readme,
+        "readme acknowledgement citation keeps PSI attribution",
+        "Physical Superintelligence PBC (2027). Get Physics Done (GPD)",
+    )
 
 
 def test_stamp_publish_date_reports_no_changes_when_release_date_already_matches(tmp_path: Path) -> None:

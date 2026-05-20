@@ -16,6 +16,7 @@ from gpd.adapters.runtime_catalog import (
 )
 from gpd.core.constants import HOME_DATA_DIR_NAME
 from gpd.hooks.install_metadata import installed_update_command, load_install_manifest_explicit_target_status
+from tests.assertion_taxonomy_support import assert_prompt_contracts, machine_exact, semantic_concept
 
 GPD_ROOT = Path(__file__).resolve().parent.parent / "src" / "gpd"
 _RUNTIME_DESCRIPTORS = iter_runtime_descriptors()
@@ -81,7 +82,13 @@ def test_update_workflow_executes_assigned_update_command_without_literal_placeh
 
     assert shell_blocks
     assert all("<UPDATE_COMMAND>" not in block for block in shell_blocks)
-    assert "UPDATE_COMMAND is empty; this install is missing trusted update provenance" in run_update_block
+    assert_prompt_contracts(
+        run_update_block,
+        machine_exact(
+            "update workflow empty update command diagnostic",
+            "UPDATE_COMMAND is empty; this install is missing trusted update provenance",
+        ),
+    )
     assert "{GPD_BOOTSTRAP_COMMAND} install <runtime>" in run_update_block
     assert 'sh -c "$UPDATE_COMMAND"' in run_update_block
     assert '"$UPDATE_COMMAND"' in run_update_block
@@ -91,10 +98,18 @@ def test_update_workflow_executes_assigned_update_command_without_literal_placeh
 def test_update_workflow_empty_update_command_has_fail_closed_repair_guidance() -> None:
     content = (GPD_ROOT / "specs" / "workflows" / "update.md").read_text(encoding="utf-8")
 
-    assert "line 3 is empty, do not run a generic update command" in content
-    assert "install provenance is missing or legacy" in content
+    assert_prompt_contracts(
+        content,
+        *semantic_concept(
+            "update workflow empty command repair guidance",
+            required=(
+                "line 3 is empty, do not run a generic update command",
+                "install provenance is missing or legacy",
+                "If line 3 is empty, use the install-provenance repair guidance from step 1 instead.",
+            ),
+        ),
+    )
     assert "`{GPD_BOOTSTRAP_COMMAND} install <runtime> <line 2> --target-dir <line 4>`" in content
-    assert "If line 3 is empty, use the install-provenance repair guidance from step 1 instead." in content
 
 
 def test_reapply_patches_workflow_uses_runtime_config_placeholders() -> None:

@@ -36,8 +36,8 @@ It covers:
 - `src/gpd/agents/*.md`: `24`
 - `src/gpd/specs/workflows/*.md`: `72`
 - `src/gpd/specs/templates/**/*.md`: `81`
-- `src/gpd/specs/references/**/*.md`: `184`
-- `src/gpd/adapters/*.py`: `10`
+- `src/gpd/specs/references/**/*.md`: `241`
+- `src/gpd/adapters/*.py`: `15`
 - `src/gpd/hooks/*.py`: `11`
 - `src/gpd/mcp/*.py`: `5`
 - `src/gpd/mcp/integrations/*.py`: `2`
@@ -63,6 +63,14 @@ Excluded as noise from node counting, but still modeled where contractually rele
 - `.copilot/**`
 - `dist/**`
 <!-- repo-graph-scope:end -->
+
+Prompt stem inventory:
+
+<!-- repo-graph-prompt-stem-inventory:start -->
+- Same-stem command/workflow prompt stems: `69`
+- Command-only prompt stems: `health`, `suggest-next`
+- Workflow-only prompt stems: `execute-plan`, `transition`, `verify-phase`
+<!-- repo-graph-prompt-stem-inventory:end -->
 
 Generated-output families are modeled when code or tests depend on them:
 
@@ -141,6 +149,71 @@ flowchart TD
     ci --> pyproject
     ci --> gh_actions[external GitHub Actions]
 ```
+
+## Required Edge Contracts
+
+<!-- repo-graph-required-edges:start -->
+- `.github/workflows/test.yml -> tests/ci_sharding.py`
+  `authority`
+- `.github/workflows/test.yml -> actions/checkout@v6`
+  `external-service`
+- `.github/workflows/test.yml -> actions/setup-node@v6`
+  `external-service`
+- `src/gpd/mcp/builtin_servers.py -> src/gpd/mcp/descriptor_text.py`
+  `hard-import`
+- `src/gpd/mcp/servers/skills_server.py -> src/gpd/mcp/descriptor_text.py`
+  `hard-import`
+- `pyproject.toml -> src/gpd/mcp/servers/{arxiv_bridge,conventions_server,verification_server,protocols_server,errors_mcp,patterns_server,state_server,skills_server}.py`
+  `authority`
+- `pyproject.toml -> src/gpd/mcp/integrations/wolfram_bridge.py`
+  `authority`
+- `src/gpd/hooks/statusline.py -> src/gpd/hooks/runtime_detect.py`
+  `hard-import`
+- `src/gpd/hooks/statusline.py -> src/gpd/adapters/__init__.py`
+  `hard-import`
+- `src/gpd/hooks/check_update.py -> src/gpd/hooks/runtime_detect.py`
+  `hard-import`
+- `src/gpd/hooks/notify.py -> src/gpd/hooks/check_update.py`
+  `spawn`
+- `src/gpd/hooks/notify.py -> src/gpd/hooks/runtime_detect.py`
+  `hard-import`
+- `src/gpd/cli.py::sync_phase_checkpoints -> src/gpd/core/checkpoints.py::sync_phase_checkpoints`
+  `spawn`
+- `src/gpd/core/phases.py -> src/gpd/core/checkpoints.py::sync_phase_checkpoints`
+  `hard-import`
+- `src/gpd/core/state.py -> <cwd>/GPD/.state-write-intent`
+  `generated-output`
+- `src/gpd/core/checkpoints.py -> generated outputs {GPD/CHECKPOINTS.md, GPD/phase-checkpoints/*.md}`
+  `generated-output`
+- `src/gpd/core/checkpoints.py -> <cwd>/GPD/CHECKPOINTS.md`
+  `generated-output`
+- `src/gpd/core/checkpoints.py -> <cwd>/GPD/phase-checkpoints/*.md`
+  `generated-output`
+- `src/gpd/specs/workflows/execute-phase.md -> src/gpd/specs/{references/orchestration/meta-orchestration.md,references/orchestration/artifact-surfacing.md,references/orchestration/checkpoints.md,references/verification/core/verification-core.md,templates/summary.md,templates/continuation-prompt.md,templates/paper/figure-tracker.md,templates/paper/experimental-comparison.md,templates/recovery-plan.md}`
+  `include`
+- `src/gpd/specs/workflows/execute-phase.md -> src/gpd/specs/{references/orchestration/meta-orchestration.md,references/orchestration/checkpoints.md,references/orchestration/continuous-execution.md,references/verification/core/verification-core.md,templates/summary.md,templates/continuation-prompt.md,templates/paper/figure-tracker.md,templates/paper/experimental-comparison.md,templates/recovery-plan.md}`
+  `include`
+- `src/gpd/specs/workflows/execute-plan.md -> src/gpd/specs/{references/execution/git-integration.md,references/execution/github-lifecycle.md,references/execution/execute-plan-recovery.md,references/execution/execute-plan-validation.md,references/execution/execute-plan-checkpoints.md,references/protocols/reproducibility.md,references/execution/executor-index.md,references/orchestration/context-budget.md,references/orchestration/checkpoints.md,templates/summary.md}`
+  `include`
+- `src/gpd/specs/workflows/plan-phase.md -> src/gpd/specs/templates/plan-contract-schema.md`
+  `include`
+- `src/gpd/specs/workflows/execute-plan.md -> src/gpd/specs/templates/contract-results-schema.md`
+  `include`
+- `src/gpd/specs/workflows/verify-work.md -> src/gpd/specs/templates/contract-results-schema.md`
+  `include`
+- `src/gpd/specs/workflows/verify-work.md -> src/gpd/specs/templates/plan-contract-schema.md`
+  `include`
+- `src/gpd/specs/workflows/write-paper.md -> src/gpd/specs/templates/paper/{paper-config-schema.md,artifact-manifest-schema.md,bibliography-audit-schema.md,reproducibility-manifest.md}`
+  `include`
+- `src/gpd/specs/workflows/new-project.md -> src/gpd/specs/templates/project-contract-schema.md`
+  `include`
+- `src/gpd/commands/peer-review.md -> src/gpd/agents/{gpd-review-reader,gpd-review-literature,gpd-review-math,gpd-check-proof,gpd-review-physics,gpd-review-significance,gpd-referee}.md`
+  `spawn`
+- `src/gpd/specs/workflows/peer-review.md -> src/gpd/agents/{gpd-review-reader,gpd-review-literature,gpd-review-math,gpd-check-proof,gpd-review-physics,gpd-review-significance,gpd-referee}.md`
+  `spawn`
+- `src/gpd/agents/{gpd-review-reader,gpd-review-literature,gpd-review-math,gpd-check-proof,gpd-review-physics,gpd-review-significance,gpd-referee}.md -> src/gpd/specs/references/publication/peer-review-panel.md`
+  `include`
+<!-- repo-graph-required-edges:end -->
 
 ## Canonical Authority Chains
 

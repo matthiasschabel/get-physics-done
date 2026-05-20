@@ -32,6 +32,14 @@ allowed-tools:
   - web_search
   - web_fetch
   - ask_user
+help:
+  group: Starter commands
+  order: 100
+  compact_description: Explain a concept, method, result, or paper
+  display_signature: gpd:explain [concept]
+  examples:
+    - gpd:explain "Ward identity"
+  root_detail_order: 70
 ---
 
 

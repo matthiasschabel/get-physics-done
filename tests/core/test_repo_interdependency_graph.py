@@ -7,57 +7,51 @@ import re
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from gpd.registry import LOCAL_CLI_BRIDGE_WORKFLOW_EXEMPT_COMMANDS
+from scripts.generated_region_support import marker_start_counts
 from scripts.repo_graph_contract import (
     EXCLUDED_GRAPH_DIRS,
     GENERATED_ON_END,
     GENERATED_ON_START,
+    GRAPH_SCOPE_LABELS,
+    GRAPH_SCOPE_SPECS,
+    PROMPT_STEM_INVENTORY_END,
+    PROMPT_STEM_INVENTORY_START,
+    REPO_GRAPH_BLOCK_IDS,
+    REPO_GRAPH_REGION_SPEC,
     REPO_ROOT,
+    REQUIRED_EDGES_END,
+    REQUIRED_EDGES_START,
+    REQUIRED_REPO_GRAPH_EDGES,
     SAME_STEM_COMMAND_WORKFLOW_END,
     SAME_STEM_COMMAND_WORKFLOW_START,
     SCOPE_END,
     SCOPE_START,
+    GraphEdgeSpec,
     _is_excluded_path,
     build_contract,
+    canonical_scope_label,
+    contract_prompt_stem_inventory,
     expected_scope_counts,
-    extract_marked_block,
     graph_has_edge,
     graph_has_edge_containing,
     iter_runtime_descriptors,
     live_repo_file_count,
     load_contract,
     parse_scope_count,
+    prompt_stem_inventory,
     read_graph_text,
     render_generated_on_block,
+    render_prompt_stem_inventory_block,
+    render_required_edges_block,
     render_same_stem_command_workflow_block,
     render_scope_block,
-    replace_marked_block,
     sync_readme_text,
     untracked_graph_scope_files,
 )
 from scripts.sync_repo_graph_contract import check_generated_artifacts
-
-_WORKFLOW_ONLY_STEMS = {"execute-plan", "transition", "verify-phase"}
-
-
-def _tracked_prompt_stems() -> tuple[set[str], set[str]]:
-    tracked = subprocess.run(
-        ["git", "ls-files", "-z"],
-        cwd=REPO_ROOT,
-        check=True,
-        capture_output=True,
-        text=False,
-    )
-    tracked_paths = [Path(path) for path in tracked.stdout.decode("utf-8").split("\0") if path]
-    command_stems = {
-        path.stem for path in tracked_paths if path.parts[:-1] == ("src", "gpd", "commands") and path.suffix == ".md"
-    }
-    workflow_stems = {
-        path.stem
-        for path in tracked_paths
-        if path.parts[:-1] == ("src", "gpd", "specs", "workflows") and path.suffix == ".md"
-    }
-    return command_stems, workflow_stems
 
 
 def test_graph_same_stem_command_workflow_inventory_matches_tree() -> None:
@@ -69,32 +63,17 @@ def test_graph_same_stem_command_workflow_inventory_matches_tree() -> None:
     assert match is not None, "Missing same-stem command/workflow edge inventory"
 
     graph_stems = [stem.strip() for stem in match.group(1).split(",") if stem.strip()]
-    tracked = subprocess.run(
-        ["git", "ls-files", "-z"],
-        cwd=REPO_ROOT,
-        check=True,
-        capture_output=True,
-        text=False,
-    )
-    tracked_paths = [Path(path) for path in tracked.stdout.decode("utf-8").split("\0") if path]
-    command_stems = {
-        path.stem for path in tracked_paths if path.parts[:-1] == ("src", "gpd", "commands") and path.suffix == ".md"
-    }
-    workflow_stems = {
-        path.stem
-        for path in tracked_paths
-        if path.parts[:-1] == ("src", "gpd", "specs", "workflows") and path.suffix == ".md"
-    }
-    actual_stems = sorted(command_stems & workflow_stems)
+    actual_stems = list(prompt_stem_inventory()["same_stems"])
 
     assert graph_stems == actual_stems
 
 
 def test_workflow_only_and_command_only_prompt_inventory_is_explicit() -> None:
-    command_stems, workflow_stems = _tracked_prompt_stems()
+    live_inventory = prompt_stem_inventory()
+    contract_inventory = contract_prompt_stem_inventory(load_contract())
 
-    assert workflow_stems - command_stems == _WORKFLOW_ONLY_STEMS
-    assert command_stems - workflow_stems == LOCAL_CLI_BRIDGE_WORKFLOW_EXEMPT_COMMANDS
+    assert contract_inventory == live_inventory
+    assert contract_inventory["command_only_stems"] == tuple(sorted(LOCAL_CLI_BRIDGE_WORKFLOW_EXEMPT_COMMANDS))
 
 
 def test_graph_same_stem_inventory_ignores_untracked_matching_files(tmp_path: Path) -> None:
@@ -122,12 +101,20 @@ def test_graph_same_stem_inventory_ignores_untracked_matching_files(tmp_path: Pa
     assert "scratch" not in block
 
 
-def test_graph_captures_current_ci_action_and_shard_edges() -> None:
+def _required_edge_id(edge: GraphEdgeSpec) -> str:
+    return f"{edge.source} -> {edge.target}"
+
+
+@pytest.mark.parametrize("edge", REQUIRED_REPO_GRAPH_EDGES, ids=_required_edge_id)
+def test_graph_captures_required_high_value_edges(edge: GraphEdgeSpec) -> None:
     graph = read_graph_text()
 
-    assert graph_has_edge(".github/workflows/test.yml", "tests/ci_sharding.py", graph)
-    assert graph_has_edge(".github/workflows/test.yml", "actions/checkout@v6", graph)
-    assert graph_has_edge(".github/workflows/test.yml", "actions/setup-node@v6", graph)
+    assert graph_has_edge(edge.source, edge.target, graph)
+
+
+def test_graph_rejects_retired_ci_action_versions() -> None:
+    graph = read_graph_text()
+
     assert not graph_has_edge(".github/workflows/test.yml", "actions/checkout@v5", graph)
     assert not graph_has_edge(".github/workflows/test.yml", "actions/setup-node@v5", graph)
 
@@ -147,124 +134,16 @@ def test_graph_edge_matching_expands_braces_without_substring_matches() -> None:
     assert graph_has_edge_containing("long-runtime", "long-runtime", graph)
 
 
-def test_graph_captures_shared_mcp_descriptor_text_edges() -> None:
+def test_graph_does_not_claim_notify_adapter_wiring() -> None:
     graph = read_graph_text()
 
-    assert graph_has_edge("src/gpd/mcp/builtin_servers.py", "src/gpd/mcp/descriptor_text.py", graph)
-    assert graph_has_edge("src/gpd/mcp/servers/skills_server.py", "src/gpd/mcp/descriptor_text.py", graph)
-
-
-def test_graph_captures_shipped_mcp_console_script_edges() -> None:
-    graph = read_graph_text()
-
-    assert graph_has_edge(
-        "pyproject.toml",
-        (
-            "src/gpd/mcp/servers/{arxiv_bridge,conventions_server,verification_server,protocols_server,"
-            "errors_mcp,patterns_server,state_server,skills_server}.py"
-        ),
-        graph,
-    )
-    assert graph_has_edge(
-        "pyproject.toml",
-        "src/gpd/mcp/integrations/wolfram_bridge.py",
-        graph,
-    )
-
-
-def test_graph_captures_hook_runtime_wiring_edges() -> None:
-    graph = read_graph_text()
-    assert graph_has_edge("src/gpd/hooks/statusline.py", "src/gpd/hooks/runtime_detect.py", graph)
-    assert graph_has_edge("src/gpd/hooks/statusline.py", "src/gpd/adapters/__init__.py", graph)
-    assert graph_has_edge("src/gpd/hooks/check_update.py", "src/gpd/hooks/runtime_detect.py", graph)
-    assert graph_has_edge("src/gpd/hooks/notify.py", "src/gpd/hooks/check_update.py", graph)
-    assert graph_has_edge("src/gpd/hooks/notify.py", "src/gpd/hooks/runtime_detect.py", graph)
     assert not graph_has_edge("src/gpd/hooks/notify.py", "src/gpd/adapters/__init__.py", graph)
 
 
-def test_graph_captures_checkpoint_feature_edges() -> None:
+def test_graph_keeps_state_runtime_out_of_checkpoint_sync_edges() -> None:
     graph = read_graph_text()
-    assert graph_has_edge(
-        "src/gpd/cli.py::sync_phase_checkpoints", "src/gpd/core/checkpoints.py::sync_phase_checkpoints", graph
-    )
-    assert graph_has_edge("src/gpd/core/phases.py", "src/gpd/core/checkpoints.py::sync_phase_checkpoints", graph)
-    assert graph_has_edge("src/gpd/core/state.py", "<cwd>/GPD/.state-write-intent", graph)
-    assert graph_has_edge(
-        "src/gpd/core/checkpoints.py", "generated outputs {GPD/CHECKPOINTS.md, GPD/phase-checkpoints/*.md}", graph
-    )
-    assert graph_has_edge("src/gpd/core/checkpoints.py", "<cwd>/GPD/CHECKPOINTS.md", graph)
-    assert graph_has_edge("src/gpd/core/checkpoints.py", "<cwd>/GPD/phase-checkpoints/*.md", graph)
+
     assert not graph_has_edge("src/gpd/core/state.py", "src/gpd/core/checkpoints.py::sync_phase_checkpoints", graph)
-
-
-def test_graph_captures_workflow_and_schema_edges() -> None:
-    graph = read_graph_text()
-
-    assert graph_has_edge(
-        "src/gpd/specs/workflows/execute-phase.md",
-        "src/gpd/specs/{references/orchestration/meta-orchestration.md,references/orchestration/artifact-surfacing.md,references/orchestration/checkpoints.md,references/verification/core/verification-core.md,templates/summary.md,templates/continuation-prompt.md,templates/paper/figure-tracker.md,templates/paper/experimental-comparison.md,templates/recovery-plan.md}",
-        graph,
-    )
-    assert graph_has_edge(
-        "src/gpd/specs/workflows/execute-phase.md",
-        "src/gpd/specs/{references/orchestration/meta-orchestration.md,references/orchestration/checkpoints.md,references/orchestration/continuous-execution.md,references/verification/core/verification-core.md,templates/summary.md,templates/continuation-prompt.md,templates/paper/figure-tracker.md,templates/paper/experimental-comparison.md,templates/recovery-plan.md}",
-        graph,
-    )
-    assert graph_has_edge(
-        "src/gpd/specs/workflows/execute-plan.md",
-        "src/gpd/specs/{references/execution/git-integration.md,references/execution/github-lifecycle.md,references/execution/execute-plan-recovery.md,references/execution/execute-plan-validation.md,references/execution/execute-plan-checkpoints.md,references/protocols/reproducibility.md,references/execution/executor-index.md,references/orchestration/context-budget.md,references/orchestration/checkpoints.md,templates/summary.md}",
-        graph,
-    )
-    assert graph_has_edge(
-        "src/gpd/specs/workflows/plan-phase.md",
-        "src/gpd/specs/templates/plan-contract-schema.md",
-        graph,
-    )
-    assert graph_has_edge(
-        "src/gpd/specs/workflows/execute-plan.md",
-        "src/gpd/specs/templates/contract-results-schema.md",
-        graph,
-    )
-    assert graph_has_edge(
-        "src/gpd/specs/workflows/verify-work.md",
-        "src/gpd/specs/templates/contract-results-schema.md",
-        graph,
-    )
-    assert graph_has_edge(
-        "src/gpd/specs/workflows/verify-work.md",
-        "src/gpd/specs/templates/plan-contract-schema.md",
-        graph,
-    )
-    assert graph_has_edge(
-        "src/gpd/specs/workflows/write-paper.md",
-        "src/gpd/specs/templates/paper/{paper-config-schema.md,artifact-manifest-schema.md,bibliography-audit-schema.md,reproducibility-manifest.md}",
-        graph,
-    )
-    assert graph_has_edge(
-        "src/gpd/specs/workflows/new-project.md",
-        "src/gpd/specs/templates/project-contract-schema.md",
-        graph,
-    )
-
-
-def test_graph_captures_staged_review_panel_wiring() -> None:
-    graph = read_graph_text()
-
-    assert graph_has_edge(
-        "src/gpd/commands/peer-review.md",
-        "src/gpd/agents/{gpd-review-reader,gpd-review-literature,gpd-review-math,gpd-check-proof,gpd-review-physics,gpd-review-significance,gpd-referee}.md",
-        graph,
-    )
-    assert graph_has_edge(
-        "src/gpd/specs/workflows/peer-review.md",
-        "src/gpd/agents/{gpd-review-reader,gpd-review-literature,gpd-review-math,gpd-check-proof,gpd-review-physics,gpd-review-significance,gpd-referee}.md",
-        graph,
-    )
-    assert graph_has_edge(
-        "src/gpd/agents/{gpd-review-reader,gpd-review-literature,gpd-review-math,gpd-check-proof,gpd-review-physics,gpd-review-significance,gpd-referee}.md",
-        "src/gpd/specs/references/publication/peer-review-panel.md",
-        graph,
-    )
 
 
 def test_graph_contract_scope_counts_match_live_inventory() -> None:
@@ -278,14 +157,32 @@ def test_graph_contract_scope_counts_match_live_inventory() -> None:
 
     assert not mismatches, "Graph scope counts are stale:\n" + "\n".join(mismatches)
     assert load_contract()["scope_counts"] == expected
+    assert GRAPH_SCOPE_LABELS == tuple(spec.label for spec in GRAPH_SCOPE_SPECS)
+    for label in GRAPH_SCOPE_LABELS:
+        assert canonical_scope_label(label) == label
+        assert canonical_scope_label(label.strip("`")) == label
 
 
 def test_graph_readme_generated_blocks_match_contract() -> None:
     contract = load_contract()
     graph_text = read_graph_text()
 
-    assert extract_marked_block(graph_text, GENERATED_ON_START, GENERATED_ON_END) == render_generated_on_block(contract)
-    assert extract_marked_block(graph_text, SCOPE_START, SCOPE_END) == render_scope_block(contract)
+    assert marker_start_counts(graph_text, spec=REPO_GRAPH_REGION_SPEC) == dict.fromkeys(REPO_GRAPH_BLOCK_IDS, 1)
+    assert sync_readme_text(graph_text, contract) == graph_text
+
+
+def test_graph_readme_inventory_rejects_missing_and_duplicate_generated_blocks() -> None:
+    contract = load_contract()
+    graph_text = read_graph_text()
+    start = graph_text.index(GENERATED_ON_START)
+    end = graph_text.index(GENERATED_ON_END, start) + len(GENERATED_ON_END)
+    generated_on_region = graph_text[start:end]
+
+    with pytest.raises(ValueError, match="missing 1 expected marker\\(s\\) for 'generated-on'"):
+        sync_readme_text(graph_text[:start] + graph_text[end:], contract)
+
+    with pytest.raises(ValueError, match="duplicate marker for 'generated-on' is not allowed"):
+        sync_readme_text(graph_text + "\n" + generated_on_region, contract)
 
 
 def test_graph_check_detects_stale_generated_contract_without_mutation(tmp_path: Path) -> None:
@@ -332,8 +229,12 @@ def test_graph_check_detects_untracked_scope_files_without_mutation(tmp_path: Pa
             GENERATED_ON_END,
             SCOPE_START,
             SCOPE_END,
+            PROMPT_STEM_INVENTORY_START,
+            PROMPT_STEM_INVENTORY_END,
             SAME_STEM_COMMAND_WORKFLOW_START,
             SAME_STEM_COMMAND_WORKFLOW_END,
+            REQUIRED_EDGES_START,
+            REQUIRED_EDGES_END,
             "",
         )
     )
@@ -361,22 +262,29 @@ def test_graph_sync_repairs_stale_marked_blocks() -> None:
     stale_contract = dict(contract)
     stale_contract["scope_counts"] = {label: int(value) + 1 for label, value in contract["scope_counts"].items()}
 
-    stale = replace_marked_block(
-        original,
-        GENERATED_ON_START,
-        GENERATED_ON_END,
+    stale = original.replace(
+        render_generated_on_block(contract),
         "\n".join((GENERATED_ON_START, "Generated from an outdated contract.", GENERATED_ON_END)),
+        1,
     )
-    stale = replace_marked_block(
-        stale,
-        SCOPE_START,
-        SCOPE_END,
+    stale = stale.replace(
+        render_scope_block(contract),
         render_scope_block(stale_contract),
+        1,
     )
-    stale = replace_marked_block(
-        stale,
-        SAME_STEM_COMMAND_WORKFLOW_START,
-        SAME_STEM_COMMAND_WORKFLOW_END,
+    stale = stale.replace(
+        render_prompt_stem_inventory_block(contract),
+        "\n".join(
+            (
+                PROMPT_STEM_INVENTORY_START,
+                "- Workflow-only prompt stems: `stale`",
+                PROMPT_STEM_INVENTORY_END,
+            )
+        ),
+        1,
+    )
+    stale = stale.replace(
+        render_same_stem_command_workflow_block(),
         "\n".join(
             (
                 SAME_STEM_COMMAND_WORKFLOW_START,
@@ -384,6 +292,18 @@ def test_graph_sync_repairs_stale_marked_blocks() -> None:
                 SAME_STEM_COMMAND_WORKFLOW_END,
             )
         ),
+        1,
+    )
+    stale = stale.replace(
+        render_required_edges_block(contract),
+        "\n".join(
+            (
+                REQUIRED_EDGES_START,
+                "- `stale.py -> stale-target.py`",
+                REQUIRED_EDGES_END,
+            )
+        ),
+        1,
     )
 
     repaired = sync_readme_text(stale, contract)

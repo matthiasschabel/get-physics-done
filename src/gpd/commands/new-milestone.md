@@ -9,6 +9,11 @@ allowed-tools:
   - shell
   - task
   - ask_user
+help:
+  group: Roadmap and milestones
+  order: 270
+  compact_description: Start the next milestone
+  display_signature: gpd:new-milestone <name>
 ---
 
 
@@ -29,7 +34,7 @@ Continuation equivalent of new-project. Research project exists, PROJECT.md has 
 </objective>
 
 <execution_context>
-@{GPD_INSTALL_DIR}/workflows/new-milestone.md
+@{GPD_INSTALL_DIR}/workflows/new-milestone/milestone-bootstrap.md
 </execution_context>
 
 <context>
@@ -46,14 +51,10 @@ Milestone name: $ARGUMENTS (optional - will prompt if not provided)
 </context>
 
 <process>
-**Follow the included new-milestone workflow.**
-Use the workflow's staged init: bootstrap context first, then a fresh late-stage init before roadmapping. The roadmapper handoff must prove freshness with a typed return and `files_written`.
+**Read the included new-milestone bootstrap authority first.**
+Later survey/objective and roadmapper stages are manifest-owned. The roadmapper handoff must prove freshness with a typed return and `files_written`.
 
-Load late-stage authorities only when the workflow reaches the matching stage:
-- Read {GPD_INSTALL_DIR}/references/research/questioning.md only when you need guided milestone questioning.
-- Read {GPD_INSTALL_DIR}/templates/project.md only when updating `GPD/PROJECT.md`.
-- Read {GPD_INSTALL_DIR}/templates/requirements.md only when writing `GPD/REQUIREMENTS.md`.
-- Read {GPD_INSTALL_DIR}/references/ui/ui-brand.md only when rendering branded completion or status blocks.
+Load local late authorities only at matching stages: questioning reference for guided milestone questions; project/requirements templates for those writes; UI brand for completion or status blocks.
 
 **Argument parsing:**
 

@@ -36,20 +36,39 @@
       "derived_manuscript_reference_status_count",
       "derived_manuscript_proof_review_status"
     ],
-    "publication_review_context": [
+    "publication_route_context": [
       "publication_subject_slug",
       "publication_lane_kind",
       "publication_lane_owner",
       "managed_publication_root",
       "selected_publication_root",
-      "selected_review_root",
+      "selected_review_root"
+    ],
+    "publication_blocker_summary": [
       "publication_blockers",
-      "publication_blocker_count",
+      "publication_blocker_count"
+    ],
+    "latest_review_gate_context": [
       "latest_review_round",
       "latest_review_round_suffix",
       "latest_review_ledger",
       "latest_referee_decision",
-      "latest_review_artifacts",
+      "latest_referee_report_md",
+      "latest_referee_report_tex",
+      "latest_proof_redteam",
+      "latest_review_artifacts"
+    ],
+    "response_freshness_summary": [
+      "latest_response_round",
+      "latest_response_round_suffix",
+      "latest_response_freshness_policy",
+      "latest_response_requires_fresh_review",
+      "latest_response_required_review_round",
+      "latest_response_required_review_round_suffix",
+      "latest_response_freshness_detail",
+      "latest_response_freshness"
+    ],
+    "response_freshness_gate_context": [
       "latest_response_round",
       "latest_response_round_suffix",
       "latest_author_response",
@@ -63,13 +82,22 @@
       "latest_response_freshness"
     ]
   },
+  "stage_defaults": {
+    "allowed_tools": [
+      "file_read",
+      "shell",
+      "task"
+    ],
+    "conditional_authorities": [],
+    "writes_allowed": []
+  },
   "stages": [
     {
       "id": "bootstrap",
       "order": 1,
       "purpose": "project-aware publication bootstrap, explicit manuscript target resolution, and fail-closed latest-review gating",
       "mode_paths": [
-        "workflows/arxiv-submission.md"
+        "workflows/arxiv-submission/bootstrap.md"
       ],
       "required_init_field_groups": [
         "launch_context",
@@ -79,14 +107,21 @@
         "manuscript_package_paths",
         "manuscript_reference_warnings",
         "manuscript_reference_status",
-        "publication_review_context"
+        "publication_route_context",
+        "publication_blocker_summary",
+        "response_freshness_summary"
       ],
       "loaded_authorities": [
-        "workflows/arxiv-submission.md",
+        "workflows/arxiv-submission/bootstrap.md",
         "references/publication/publication-bootstrap-preflight.md"
       ],
-      "conditional_authorities": [],
       "must_not_eager_load": [
+        "workflows/arxiv-submission.md",
+        "workflows/arxiv-submission/manuscript-preflight.md",
+        "workflows/arxiv-submission/review-gate.md",
+        "workflows/arxiv-submission/package.md",
+        "workflows/arxiv-submission/finalize.md",
+        "templates/paper/publication-manuscript-root-preflight.md",
         "references/publication/publication-review-round-artifacts.md",
         "references/publication/publication-response-artifacts.md",
         "references/publication/peer-review-reliability.md"
@@ -98,7 +133,6 @@
         "shell",
         "task"
       ],
-      "writes_allowed": [],
       "produced_state": [
         "bootstrap routing state",
         "manuscript target state",
@@ -118,7 +152,7 @@
       "order": 2,
       "purpose": "manuscript-root refresh, bibliography freshness, and compiler smoke-check readiness",
       "mode_paths": [
-        "workflows/arxiv-submission.md"
+        "workflows/arxiv-submission/manuscript-preflight.md"
       ],
       "required_init_field_groups": [
         "launch_context",
@@ -127,14 +161,18 @@
         "manuscript_package_paths",
         "manuscript_reference_warnings",
         "manuscript_reference_status",
-        "publication_review_context"
+        "publication_route_context",
+        "publication_blocker_summary"
       ],
       "loaded_authorities": [
-        "workflows/arxiv-submission.md",
+        "workflows/arxiv-submission/manuscript-preflight.md",
         "templates/paper/publication-manuscript-root-preflight.md"
       ],
-      "conditional_authorities": [],
       "must_not_eager_load": [
+        "workflows/arxiv-submission.md",
+        "workflows/arxiv-submission/review-gate.md",
+        "workflows/arxiv-submission/package.md",
+        "workflows/arxiv-submission/finalize.md",
         "references/publication/publication-review-round-artifacts.md",
         "references/publication/publication-response-artifacts.md",
         "references/publication/peer-review-reliability.md"
@@ -145,7 +183,6 @@
         "shell",
         "task"
       ],
-      "writes_allowed": [],
       "produced_state": [
         "manuscript preflight state",
         "build freshness state"
@@ -163,7 +200,7 @@
       "order": 3,
       "purpose": "latest review-round validation and submission clearance",
       "mode_paths": [
-        "workflows/arxiv-submission.md"
+        "workflows/arxiv-submission/review-gate.md"
       ],
       "required_init_field_groups": [
         "launch_context",
@@ -172,21 +209,29 @@
         "manuscript_package_paths",
         "manuscript_reference_warnings",
         "manuscript_reference_status",
-        "publication_review_context"
+        "publication_route_context",
+        "publication_blocker_summary",
+        "latest_review_gate_context",
+        "response_freshness_gate_context"
       ],
       "loaded_authorities": [
+        "workflows/arxiv-submission/review-gate.md",
+        "references/publication/publication-review-round-artifacts.md"
+      ],
+      "conditional_authorities": [
+        {
+          "when": "review_integrity_recovery_needed",
+          "authorities": [
+            "references/publication/peer-review-reliability.md"
+          ]
+        }
+      ],
+      "must_not_eager_load": [
         "workflows/arxiv-submission.md",
-        "references/publication/publication-review-round-artifacts.md",
+        "workflows/arxiv-submission/package.md",
+        "workflows/arxiv-submission/finalize.md",
         "references/publication/peer-review-reliability.md"
       ],
-      "conditional_authorities": [],
-      "must_not_eager_load": [],
-      "allowed_tools": [
-        "file_read",
-        "shell",
-        "task"
-      ],
-      "writes_allowed": [],
       "produced_state": [
         "latest review gate state",
         "submission clearance state"
@@ -204,20 +249,21 @@
       "order": 4,
       "purpose": "submission-tree construction, figure handling, metadata checks, and tarball assembly",
       "mode_paths": [
-        "workflows/arxiv-submission.md"
+        "workflows/arxiv-submission/package.md"
       ],
       "required_init_field_groups": [
         "launch_context",
         "workspace_context",
         "manuscript_package_paths",
         "manuscript_reference_status",
-        "publication_review_context"
+        "publication_route_context"
       ],
       "loaded_authorities": [
-        "workflows/arxiv-submission.md"
+        "workflows/arxiv-submission/package.md"
       ],
-      "conditional_authorities": [],
       "must_not_eager_load": [
+        "workflows/arxiv-submission.md",
+        "workflows/arxiv-submission/finalize.md",
         "references/publication/publication-review-round-artifacts.md",
         "references/publication/peer-review-reliability.md"
       ],
@@ -249,24 +295,20 @@
       "order": 5,
       "purpose": "final checklist presentation and submission handoff",
       "mode_paths": [
-        "workflows/arxiv-submission.md"
+        "workflows/arxiv-submission/finalize.md"
       ],
       "required_init_field_groups": [
         "launch_context",
         "workspace_context",
         "manuscript_package_paths",
         "manuscript_reference_status",
-        "publication_review_context"
+        "publication_route_context"
       ],
       "loaded_authorities": [
-        "workflows/arxiv-submission.md"
+        "workflows/arxiv-submission/finalize.md"
       ],
-      "conditional_authorities": [],
-      "must_not_eager_load": [],
-      "allowed_tools": [
-        "file_read",
-        "shell",
-        "task"
+      "must_not_eager_load": [
+        "workflows/arxiv-submission.md"
       ],
       "writes_allowed": [
         "GPD/publication/{subject_slug}/arxiv"

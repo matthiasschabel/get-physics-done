@@ -53,6 +53,13 @@ def _create_phase(tmp_path: Path, name: str) -> Path:
     return d
 
 
+def _write_passed_verification(phase_dir: Path) -> Path:
+    phase_number = phase_dir.name.split("-", 1)[0]
+    path = phase_dir / f"{phase_number}-VERIFICATION.md"
+    path.write_text("---\nstatus: passed\n---\n\n# Verification\nPASS\n", encoding="utf-8")
+    return path
+
+
 def _write_roadmap(tmp_path: Path, content: str) -> Path:
     p = tmp_path / "GPD" / "ROADMAP.md"
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -281,7 +288,8 @@ class TestEdgeSummaryFrontmatterOnly:
         d = _create_phase(tmp_path, "01-setup")
         (d / "a-PLAN.md").write_text("---\nwave: 1\n---\n# Plan\n", encoding="utf-8")
         (d / "a-SUMMARY.md").write_text(
-            '---\none-liner: "Established ground state energy framework"\ncompleted: 2026-02-23\n---\n', encoding="utf-8"
+            '---\none-liner: "Established ground state energy framework"\ncompleted: 2026-02-23\n---\n',
+            encoding="utf-8",
         )
 
         result = milestone_complete(tmp_path, "v1.0", name="Core")
@@ -302,6 +310,7 @@ class TestEdgeDecimalPhaseCompletion:
         d = _create_phase(tmp_path, "03.1-hotfix")
         (d / "a-PLAN.md").write_text("plan", encoding="utf-8")
         (d / "a-SUMMARY.md").write_text("done", encoding="utf-8")
+        _write_passed_verification(d)
 
         result = phase_complete(tmp_path, "3.1")
         assert result.completed_phase == "3.1"

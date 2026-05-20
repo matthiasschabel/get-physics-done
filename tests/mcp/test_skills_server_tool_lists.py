@@ -10,6 +10,19 @@ from unittest.mock import patch
 import gpd.registry as registry_module
 from gpd.core.workflow_staging import WorkflowStage, WorkflowStageConditionalAuthority, WorkflowStageManifest
 from gpd.registry import AgentDef, CommandDef, SkillDef
+from tests.assertion_taxonomy_support import assert_prompt_contracts, semantic_concept
+
+_TASK_OVERLAY_BODY_KEYS = frozenset(
+    {"body", "content", "markdown", "text", "overlay_body", "overlay_content", "overlay_markdown", "overlay_text"}
+)
+
+
+def _assert_body_free_task_overlay_metadata(payload: dict[str, object]) -> None:
+    assert payload["body_policy"] == "metadata_only"
+    for entry in payload["overlays"]:
+        assert _TASK_OVERLAY_BODY_KEYS.isdisjoint(entry)
+        assert entry["body_loaded"] is False
+        assert entry["portable_path"] == "@{GPD_INSTALL_DIR}/references/orchestration/task-overlays.md"
 
 
 def test_get_skill_tool_schema_publishes_transitive_reference_body_opt_in() -> None:
@@ -313,6 +326,111 @@ def test_get_skill_command_surfaces_staged_loading_sidecar() -> None:
     assert result["structured_metadata_authority"]["staged_loading"] == "mirrored"
 
 
+def test_staged_authority_seeds_are_metadata_only_and_scanned_transitively(tmp_path: Path) -> None:
+    from gpd.mcp.servers import skills_server
+
+    fixtures = {
+        "stage-authority.md": "Stage authority references @{GPD_INSTALL_DIR}/templates/staged-schema.md.\n",
+        "staged-schema.md": "---\ntype: schema\n---\n# Staged Schema\nDefault payload omits this body.\n",
+        "conditional-authority.md": "# Conditional Authority\n",
+        "lazy-schema.md": (
+            "---\ntype: schema\n---\n# Lazy Schema\n"
+            "This lazy body mentions @{GPD_INSTALL_DIR}/templates/lazy-nested-schema.md.\n"
+        ),
+        "lazy-nested-schema.md": "---\ntype: schema\n---\n# Lazy Nested Schema\n",
+    }
+    fixture_paths = {name: tmp_path / name for name in fixtures}
+    for name, body in fixtures.items():
+        fixture_paths[name].write_text(body, encoding="utf-8")
+
+    staged_loading = WorkflowStageManifest(
+        schema_version=1,
+        workflow_id="debug",
+        stages=(
+            WorkflowStage(
+                id="bootstrap",
+                order=1,
+                purpose="debug bootstrap",
+                mode_paths=(),
+                required_init_fields=(),
+                loaded_authorities=("workflows/stage-authority.md",),
+                conditional_authorities=(
+                    WorkflowStageConditionalAuthority(
+                        when="needs_extra_context",
+                        authorities=("workflows/conditional-authority.md",),
+                    ),
+                ),
+                must_not_eager_load=("templates/lazy-schema.md",),
+                allowed_tools=("file_read",),
+                writes_allowed=(),
+                produced_state=(),
+                next_stages=(),
+                checkpoints=(),
+            ),
+        ),
+    )
+    portable_paths = {
+        "workflows/stage-authority.md": (
+            "@{GPD_INSTALL_DIR}/workflows/stage-authority.md",
+            fixture_paths["stage-authority.md"],
+        ),
+        "workflows/conditional-authority.md": (
+            "@{GPD_INSTALL_DIR}/workflows/conditional-authority.md",
+            fixture_paths["conditional-authority.md"],
+        ),
+        "templates/lazy-schema.md": ("@{GPD_INSTALL_DIR}/templates/lazy-schema.md", fixture_paths["lazy-schema.md"]),
+        "@{GPD_INSTALL_DIR}/templates/staged-schema.md": (
+            "@{GPD_INSTALL_DIR}/templates/staged-schema.md",
+            fixture_paths["staged-schema.md"],
+        ),
+        "@{GPD_INSTALL_DIR}/templates/lazy-nested-schema.md": (
+            "@{GPD_INSTALL_DIR}/templates/lazy-nested-schema.md",
+            fixture_paths["lazy-nested-schema.md"],
+        ),
+    }
+    original_portable_reference_path = skills_server._portable_reference_path
+
+    def _patched_portable_reference_path(raw_path: str, *, base_path: Path | None = None):
+        if raw_path in portable_paths:
+            return portable_paths[raw_path]
+        return original_portable_reference_path(raw_path, base_path=base_path)
+
+    with patch("gpd.mcp.servers.skills_server._portable_reference_path", side_effect=_patched_portable_reference_path):
+        referenced_files, transitive_referenced_files = skills_server._build_skill_reference_lists(
+            "Command body.",
+            source_path=tmp_path / "gpd-debug.md",
+            staged_loading=staged_loading,
+            read_transitive_reference_bodies=False,
+        )
+
+    direct_by_name = {Path(entry["path"]).name: entry for entry in referenced_files}
+    transitive_paths = {entry["path"] for entry in transitive_referenced_files}
+    assert direct_by_name["stage-authority.md"] == {
+        "path": "@{GPD_INSTALL_DIR}/workflows/stage-authority.md",
+        "kind": "workflow",
+        "source": "staged_loading",
+        "stage": "bootstrap",
+        "relationship": "stage_eager",
+    }
+    assert direct_by_name["conditional-authority.md"] == {
+        "path": "@{GPD_INSTALL_DIR}/workflows/conditional-authority.md",
+        "kind": "workflow",
+        "source": "staged_loading",
+        "stage": "bootstrap",
+        "relationship": "stage_conditional",
+        "conditional_when": "needs_extra_context",
+    }
+    assert direct_by_name["lazy-schema.md"] == {
+        "path": "@{GPD_INSTALL_DIR}/templates/lazy-schema.md",
+        "kind": "template",
+        "source": "staged_loading",
+        "stage": "bootstrap",
+        "relationship": "stage_lazy_declared",
+    }
+    assert "@{GPD_INSTALL_DIR}/templates/staged-schema.md" in transitive_paths
+    assert "@{GPD_INSTALL_DIR}/templates/lazy-nested-schema.md" not in transitive_paths
+
+
 def test_get_skill_plan_phase_surfaces_staged_loading_sidecar() -> None:
     from gpd.mcp.servers.skills_server import get_skill
 
@@ -597,22 +715,34 @@ def test_get_skill_verify_work_surfaces_staged_loading_sidecar() -> None:
         "gap_repair",
     ]
     assert result["staged_loading"]["workflow_id"] == "verify-work"
-    assert result["staged_loading"]["stages"][0]["loaded_authorities"] == ["workflows/verify-work.md"]
-    assert "Follow the included workflow file exactly." in result["content"]
-    assert (
-        "The workflow file owns the detailed check taxonomy; this wrapper only bootstraps the canonical "
-        "verification surfaces and delegates the physics checks." in result["content"]
+    assert result["staged_loading"]["stages"][0]["loaded_authorities"] == ["workflows/verify-work/session-router.md"]
+    assert_prompt_contracts(
+        result["content"],
+        *semantic_concept(
+            "verify-work skill delegates detailed checks to staged authorities",
+            required=(
+                "Follow the included first-stage authority exactly",
+                "The staged workflow authorities own the detailed check taxonomy; this wrapper only bootstraps the canonical verification surface and delegates the physics checks.",
+            ),
+            forbidden=(
+                "One check at a time, plain text responses, no interrogation.",
+                "Physics verification is not binary:",
+            ),
+        ),
     )
     assert "Severity Classification" not in result["content"]
-    assert "One check at a time, plain text responses, no interrogation." not in result["content"]
-    assert "Physics verification is not binary:" not in result["content"]
     assert "For deeper focused analysis" not in result["content"]
-    assert result["staged_loading"]["stages"][2]["loaded_authorities"] == [
-        "workflows/verify-work.md",
-        "references/verification/meta/verification-independence.md",
+    inventory_build = result["staged_loading"]["stages"][2]
+    assert inventory_build["loaded_authorities"] == ["workflows/verify-work/inventory-build.md"]
+    assert inventory_build["conditional_authorities"] == [
+        {
+            "when": "full_independence_policy_check",
+            "authorities": ["references/verification/meta/verification-independence.md"],
+        }
     ]
-    assert result["staged_loading"]["stages"][2]["next_stages"] == ["interactive_validation"]
-    assert result["staged_loading"]["stages"][2]["checkpoints"] == [
+    assert "references/verification/meta/verification-independence.md" in inventory_build["must_not_eager_load"]
+    assert inventory_build["next_stages"] == ["interactive_validation"]
+    assert inventory_build["checkpoints"] == [
         "verifier delegation completed",
         "handoff remains fail-closed",
         "anchor obligations explicit",
@@ -628,26 +758,53 @@ def test_get_skill_verify_work_surfaces_staged_loading_sidecar() -> None:
         "task",
     ]
     assert result["staged_loading"]["stages"][3]["loaded_authorities"] == [
-        "workflows/verify-work.md",
-        "templates/research-verification.md",
-        "templates/verification-report.md",
-        "templates/contract-results-schema.md",
-        "references/shared/canonical-schema-discipline.md",
+        "workflows/verify-work/interactive-validation.md",
+    ]
+    assert result["staged_loading"]["stages"][3]["conditional_authorities"] == [
+        {
+            "when": "session_overlay_write_or_repair",
+            "authorities": [
+                "templates/research-verification.md",
+                "templates/verification-report.md",
+                "templates/contract-results-schema.md",
+                "references/shared/canonical-schema-discipline.md",
+            ],
+        },
+        {
+            "when": "custom_verifier_continuation",
+            "authorities": [
+                "templates/verification-report.md",
+                "templates/contract-results-schema.md",
+                "references/shared/canonical-schema-discipline.md",
+            ],
+        },
     ]
     assert result["staged_loading"]["stages"][3]["writes_allowed"] == ["GPD/phases/XX-name/XX-VERIFICATION.md"]
     assert result["staged_loading"]["stages"][3]["next_stages"] == ["gap_repair"]
     assert result["staged_loading"]["stages"][3]["checkpoints"] == [
         "verification file can be written",
-        "writer-stage schema is visible",
+        "writer-stage schema deferral barrier is visible",
         "check results remain contract-backed",
     ]
     assert result["staged_loading"]["stages"][4]["loaded_authorities"] == [
-        "workflows/verify-work.md",
-        "templates/research-verification.md",
-        "templates/verification-report.md",
-        "templates/contract-results-schema.md",
-        "references/shared/canonical-schema-discipline.md",
-        "references/protocols/error-propagation-protocol.md",
+        "workflows/verify-work/gap-repair.md",
+    ]
+    assert result["staged_loading"]["stages"][4]["conditional_authorities"] == [
+        {
+            "when": "gap_report_write_or_schema_repair",
+            "authorities": [
+                "templates/research-verification.md",
+                "templates/verification-report.md",
+                "templates/contract-results-schema.md",
+                "references/shared/canonical-schema-discipline.md",
+            ],
+        },
+        {
+            "when": "error_propagation_gap",
+            "authorities": [
+                "references/protocols/error-propagation-protocol.md",
+            ],
+        },
     ]
     assert result["staged_loading"]["stages"][4]["writes_allowed"] == ["GPD/phases/XX-name/XX-VERIFICATION.md"]
     assert result["staged_loading"]["stages"][4]["next_stages"] == []
@@ -765,7 +922,13 @@ def test_get_skill_executor_agent_does_not_expose_staged_loading_sidecar() -> No
         "content": "canonical",
         "allowed_tools": "mirrored",
         "agent_policy": "mirrored",
+        "compatible_task_overlays": "mirrored",
     }
+    assert result["compatible_task_overlays"]["compatible_task_overlay_ids"] == [
+        "executor.proof_bearing",
+        "executor.bounded_segment",
+    ]
+    _assert_body_free_task_overlay_metadata(result["compatible_task_overlays"])
     assert "staged_loading" not in result
     assert "staged_loading" not in result["structured_metadata_authority"]
 

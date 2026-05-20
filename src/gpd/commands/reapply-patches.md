@@ -10,6 +10,11 @@ allowed-tools:
   - find_files
   - search_files
   - ask_user
+help:
+  group: Configuration and maintenance
+  order: 720
+  compact_description: Reapply local modifications after updating
+  display_signature: gpd:reapply-patches
 ---
 
 

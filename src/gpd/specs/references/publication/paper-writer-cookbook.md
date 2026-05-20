@@ -63,3 +63,87 @@ Use this pack only when the venue or manuscript structure needs concrete example
 - Supplemental material carries long derivations, alternative cross-checks, full convergence data, extended tables, extra figures, and convention/unit conversion details.
 - Number supplemental equations, figures, and tables with an `S` prefix when the journal style allows it.
 - PRL-style manuscripts should keep supplemental material reproducibility-focused; long-form journals can usually carry appendices in the paper.
+
+## Research-To-Paper Handoff Detail
+
+Use these recipes only when the base prompt selects `paper_writer.handoff_audit`.
+
+Project-backed result completeness audit:
+
+```bash
+ls GPD/phases/*-*/*-SUMMARY.md
+for f in GPD/phases/*-*/*-SUMMARY.md; do
+  echo "=== $f ==="
+  grep -A12 "contract_results:" "$f" 2>/dev/null || echo "NO CONTRACT RESULTS"
+  grep -A6 "comparison_verdicts:" "$f" 2>/dev/null || echo "NO COMPARISON VERDICTS"
+  grep "CONFIDENCE:" "$f" 2>/dev/null || echo "NO CONFIDENCE TAGS"
+done
+```
+
+Convention consistency spot check:
+
+```bash
+for f in GPD/phases/*-*/*-SUMMARY.md; do
+  echo "=== $f ==="
+  grep -A10 "## Conventions" "$f" 2>/dev/null | head -15
+done
+```
+
+Use source files rather than stale summaries when numerical values differ, and report the discrepancy. For figures, check that the generator exists, has run with final parameters, writes a newer output than the script when applicable, and carries the intended physical message, axes, units, and uncertainty display.
+
+## Confidence-To-Language Mapping
+
+| Confidence | Paper Language | Example |
+|---|---|---|
+| HIGH | Direct statement | "The ground state energy is $E_0 = -0.4432(1)\,J$" |
+| MEDIUM | Statement with caveat | "We obtain $E_0 = -0.443(2)\,J$, pending verification of finite-size corrections" |
+| LOW | Qualified statement | "Our preliminary estimate yields $E_0 \approx -0.44\,J$, subject to systematic uncertainties from the truncation" |
+
+Never present LOW confidence without qualification. Never present MEDIUM confidence as established fact.
+
+## Missing Citation Protocol
+
+When using an equation, result, or method from a published source:
+
+1. Check the active bibliography path for an existing citation key.
+2. If the key exists, use `\cite{key}`.
+3. If the key is missing, insert `\cite{MISSING:author-year-topic}` and add a nearby LaTeX comment naming the needed source.
+4. At section end, add a `%% CITATIONS NEEDED` comment block for `gpd-bibliographer`.
+5. Never guess citation keys. A `MISSING:` placeholder is safer than a fabricated key.
+
+## Incomplete-Result Examples
+
+Use `## WRITING BLOCKED` when a missing result determines the argument:
+
+```markdown
+**Section:** Results
+**Missing results:** Phase 3 task 2 binding energy value
+**Cannot proceed because:** the value sets the central comparison.
+**Unblock by:** complete Phase 3 task 2 and rerun paper writer.
+```
+
+Use placeholders only for secondary items:
+
+```latex
+% [RESULT PENDING: phase 3, task 2 -- binding energy value]
+E_b = \text{[PENDING]}~\text{eV}
+```
+
+Placeholders must name the source phase/task, compile as LaTeX, and not support the conclusion by themselves.
+
+## Equation And Figure Verification Checklist
+
+- Check dimensional consistency of every displayed equation term.
+- Verify at least one limiting case for central equations.
+- Confirm every symbol is defined in the active notation source.
+- Check equation labels and references after editing.
+- Confirm every figure caption states the physical message, axes/units, uncertainty representation when quantitative, and comparison baseline.
+
+## Completion Checklist
+
+- Section architecture completed before LaTeX drafting.
+- Main message, supporting results, appendix boundary, and framing strategy are explicit.
+- Journal calibration and abstract protocol are applied when relevant.
+- Equations are necessary, labeled, contextualized, dimensionally checked, and symbol-defined.
+- Figures, citations, approximations, and quantified uncertainty are all evidence-backed.
+- The section advances the paper's central argument without unsupported hedging.

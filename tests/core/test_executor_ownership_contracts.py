@@ -40,10 +40,20 @@ def test_executor_retains_worker_return_envelope_and_bounded_stop_contract() -> 
     completion = (
         REFERENCES_DIR / "execution" / "executor-completion.md"
     ).read_text(encoding="utf-8")
+    checkpoints = (
+        REFERENCES_DIR / "execution" / "execute-plan-checkpoints.md"
+    ).read_text(encoding="utf-8")
+    continuation = (
+        REFERENCES_DIR / "orchestration" / "continuation-boundary.md"
+    ).read_text(encoding="utf-8")
 
-    assert "Pattern D: Auto-bounded" in executor
-    assert "bounded execution segment envelope" in executor
+    assert "execute-plan-checkpoints.md" in executor
+    assert "continuation-boundary.md" in executor
+    assert "bounded execution segment envelope" not in executor
     assert "Do NOT write `GPD/STATE.md` directly" in executor
     assert "gpd_return.state_updates" in executor
+    assert "Checkpoint Return (For Orchestrator)" in checkpoints
+    assert "execution_segment" in checkpoints
+    assert "must not wait for the user" in continuation
     assert "state_updates:" in completion
     assert "continuation_update:" in completion

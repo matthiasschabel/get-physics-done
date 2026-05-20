@@ -11,13 +11,22 @@ from gpd.contracts import (
     parse_comparison_verdicts_data_strict,
     parse_contract_results_data_artifact,
 )
+from gpd.core.contract_skeletons import build_contract_results_skeleton
 from gpd.core.frontmatter import extract_frontmatter, reconstruct_frontmatter, validate_frontmatter
 from gpd.core.strict_yaml import load_strict_yaml
 from gpd.core.verification_report import (
+    VerificationComparisonVerdictPatch,
+    VerificationForbiddenProxyOutcomePatch,
+    VerificationReferenceActionPatch,
+    VerificationReportOutcomePatch,
+    VerificationSuggestedCheckPatch,
+    VerificationTargetOutcomePatch,
     build_verification_gap_report_frontmatter,
     build_verification_report_skeleton,
     compose_verification_report_markdown,
+    finalize_verification_report,
     render_verification_report_markdown,
+    validate_rendered_verification_report,
 )
 
 
@@ -161,6 +170,68 @@ def _stale_refresh_prose_only_body() -> str:
     )
 
 
+def _closed_passed_outcome_patch() -> VerificationReportOutcomePatch:
+    return VerificationReportOutcomePatch(
+        status="passed",
+        target_outcomes=[
+            VerificationTargetOutcomePatch(
+                target_kind="claim",
+                target_id="claim-stale-verification",
+                status="passed",
+                summary="Oracle evidence supports the refreshed benchmark claim.",
+                linked_ids=[
+                    "deliv-stale-data",
+                    "test-stale-verification-decisive",
+                    "ref-stale-verification-benchmark",
+                ],
+            ),
+            VerificationTargetOutcomePatch(
+                target_kind="deliverable",
+                target_id="deliv-stale-data",
+                status="passed",
+                summary="The refreshed data artifact exists and was inspected by the oracle check.",
+                path="artifacts/phase4/result.json",
+            ),
+            VerificationTargetOutcomePatch(
+                target_kind="acceptance_test",
+                target_id="test-stale-verification-decisive",
+                status="passed",
+                summary="The decisive benchmark comparison was executed.",
+                linked_ids=["claim-stale-verification", "deliv-stale-data", "ref-stale-verification-benchmark"],
+            ),
+        ],
+        reference_actions=[
+            VerificationReferenceActionPatch(
+                reference_id="ref-stale-verification-benchmark",
+                status="completed",
+                completed_actions=["read", "compare"],
+                summary="The benchmark reference was read and compared.",
+            )
+        ],
+        forbidden_proxy_outcomes=[
+            VerificationForbiddenProxyOutcomePatch(
+                forbidden_proxy_id="fp-stale-verification-prose-only",
+                status="rejected",
+                notes="The report uses executed oracle evidence rather than a prose-only freshness claim.",
+            )
+        ],
+        comparison_verdicts=[
+            VerificationComparisonVerdictPatch(
+                subject_id="test-stale-verification-decisive",
+                subject_kind="acceptance_test",
+                subject_role="decisive",
+                reference_id="ref-stale-verification-benchmark",
+                comparison_kind="benchmark",
+                metric="acceptance_condition",
+                threshold="The refreshed value matches the benchmark tolerance.",
+                verdict="pass",
+                notes="The decisive benchmark comparison passed.",
+            )
+        ],
+        suggested_contract_checks=[],
+    )
+
+
 def _assert_no_empty_copy_bait(value: object) -> None:
     if isinstance(value, dict):
         for key, child in value.items():
@@ -227,6 +298,14 @@ def test_build_verification_gap_report_frontmatter_returns_typed_schema_valid_sk
         ("acceptance_test", "test-stale-verification-decisive"),
         ("reference", "ref-stale-verification-benchmark"),
     }
+
+
+def test_build_verification_gap_report_frontmatter_uses_shared_contract_results_skeleton() -> None:
+    contract = _compact_stale_refresh_contract()
+
+    frontmatter = build_verification_gap_report_frontmatter(contract)
+
+    assert frontmatter["contract_results"] == build_contract_results_skeleton(contract, target="verification")
 
 
 def test_build_verification_report_skeleton_renders_copy_safe_yaml_and_markdown(tmp_path: Path) -> None:
@@ -362,6 +441,44 @@ def test_verification_report_markdown_draft_surfaces_authoring_rules_and_warning
     assert "Markdown body" in skeleton.markdown_draft or "body" in skeleton.markdown_draft
 
 
+def test_generated_verification_skeleton_fails_contract_validation_until_placeholders_replaced(
+    tmp_path: Path,
+) -> None:
+    contract = _compact_stale_refresh_contract()
+    plan_path = _write_stale_refresh_plan(tmp_path, contract)
+    report_path = plan_path.with_name("01-VERIFICATION.md")
+    target_report_ref = "GPD/phases/01-baseline/01-VERIFICATION.md"
+    skeleton = build_verification_report_skeleton(
+        contract=contract,
+        plan_path=plan_path,
+        plan_contract_ref="GPD/phases/01-baseline/01-PLAN.md#/contract",
+    )
+
+    skeleton_validation = validate_rendered_verification_report(
+        skeleton.markdown_draft,
+        source_path=report_path,
+        mode="contract",
+    )
+
+    assert not skeleton_validation.valid
+    assert skeleton_validation.missing == []
+    assert skeleton_validation.oracle_evidence_count == 0
+    assert any("computational_oracle" in error for error in skeleton_validation.errors)
+
+    filled_composition = compose_verification_report_markdown(
+        skeleton.frontmatter,
+        _stale_refresh_oracle_body(),
+        target_report_ref=target_report_ref,
+        source_path=report_path,
+        validation_mode="contract",
+    )
+
+    assert filled_composition.validation.valid, filled_composition.validation.errors
+    assert filled_composition.validation.oracle_evidence_count == 1
+    meta, _body = extract_frontmatter(filled_composition.markdown)
+    assert meta["status"] == "gaps_found"
+
+
 def test_gap_report_composition_accepts_oracle_evidence_body(tmp_path: Path) -> None:
     contract = _compact_stale_refresh_contract()
     plan_path = _write_stale_refresh_plan(tmp_path, contract)
@@ -419,6 +536,167 @@ def test_gap_report_composition_rejects_prose_only_body(tmp_path: Path) -> None:
     meta, body = extract_frontmatter(composition.markdown)
     assert "old passed report cannot be reused" in body
     assert "old passed report cannot be reused" not in meta
+
+
+def test_finalize_verification_report_accepts_gaps_found_with_oracle_evidence(tmp_path: Path) -> None:
+    contract = _compact_stale_refresh_contract()
+    plan_path = _write_stale_refresh_plan(tmp_path, contract)
+    report_path = plan_path.with_name("01-VERIFICATION.md")
+
+    composition = finalize_verification_report(
+        contract=contract,
+        outcome=VerificationReportOutcomePatch(status="gaps_found"),
+        body_markdown=_stale_refresh_oracle_body(),
+        plan_path=plan_path,
+        plan_contract_ref="GPD/phases/01-baseline/01-PLAN.md#/contract",
+        target_report_ref="GPD/phases/01-baseline/01-VERIFICATION.md",
+        source_path=report_path,
+    )
+
+    assert composition.validation.valid, composition.validation.errors
+    assert composition.validation.oracle_evidence_count == 1
+    meta, body = extract_frontmatter(composition.markdown)
+    assert meta["status"] == "gaps_found"
+    assert meta["phase"] == "01-baseline"
+    assert meta["plan_contract_ref"] == "GPD/phases/01-baseline/01-PLAN.md#/contract"
+    assert meta["comparison_verdicts"]
+    assert meta["suggested_contract_checks"]
+    assert "Computational Oracle: stale-refresh artifact freshness" in body
+
+
+def test_finalize_verification_report_rejects_body_frontmatter(tmp_path: Path) -> None:
+    contract = _compact_stale_refresh_contract()
+    plan_path = _write_stale_refresh_plan(tmp_path, contract)
+
+    with pytest.raises(ValueError, match="body-only Markdown"):
+        finalize_verification_report(
+            contract=contract,
+            outcome=VerificationReportOutcomePatch(status="gaps_found"),
+            body_markdown="---\nstatus: gaps_found\n---\n# Verification\n",
+            plan_path=plan_path,
+            plan_contract_ref="GPD/phases/01-baseline/01-PLAN.md#/contract",
+            target_report_ref="GPD/phases/01-baseline/01-VERIFICATION.md",
+            source_path=plan_path.with_name("01-VERIFICATION.md"),
+        )
+
+
+def test_finalize_verification_report_rejects_passed_with_open_targets(tmp_path: Path) -> None:
+    contract = _compact_stale_refresh_contract()
+    plan_path = _write_stale_refresh_plan(tmp_path, contract)
+
+    composition = finalize_verification_report(
+        contract=contract,
+        outcome=VerificationReportOutcomePatch(status="passed"),
+        body_markdown=_stale_refresh_oracle_body(),
+        plan_path=plan_path,
+        plan_contract_ref="GPD/phases/01-baseline/01-PLAN.md#/contract",
+        target_report_ref="GPD/phases/01-baseline/01-VERIFICATION.md",
+        source_path=plan_path.with_name("01-VERIFICATION.md"),
+    )
+
+    assert not composition.validation.valid
+    joined_errors = "\n".join(composition.validation.errors)
+    assert "status: passed is inconsistent with non-passed contract_results targets" in joined_errors
+    assert "claim claim-stale-verification" in joined_errors
+
+
+def test_finalize_verification_report_rejects_passed_with_suggested_checks(tmp_path: Path) -> None:
+    contract = _compact_stale_refresh_contract()
+    plan_path = _write_stale_refresh_plan(tmp_path, contract)
+    outcome = _closed_passed_outcome_patch().model_copy(
+        update={
+            "suggested_contract_checks": [
+                VerificationSuggestedCheckPatch(
+                    check="contract.benchmark_reproduction",
+                    reason="Follow-up benchmark check remains open.",
+                    suggested_subject_kind="acceptance_test",
+                    suggested_subject_id="test-stale-verification-decisive",
+                    evidence_path="GPD/phases/01-baseline/01-VERIFICATION.md",
+                )
+            ]
+        }
+    )
+
+    composition = finalize_verification_report(
+        contract=contract,
+        outcome=outcome,
+        body_markdown=_stale_refresh_oracle_body(),
+        plan_path=plan_path,
+        plan_contract_ref="GPD/phases/01-baseline/01-PLAN.md#/contract",
+        target_report_ref="GPD/phases/01-baseline/01-VERIFICATION.md",
+        source_path=plan_path.with_name("01-VERIFICATION.md"),
+    )
+
+    assert not composition.validation.valid
+    assert "status: passed is inconsistent with non-empty suggested_contract_checks" in "\n".join(
+        composition.validation.errors
+    )
+
+
+def test_finalize_verification_report_rejects_passed_when_decisive_comparison_missing(tmp_path: Path) -> None:
+    contract = _compact_stale_refresh_contract()
+    plan_path = _write_stale_refresh_plan(tmp_path, contract)
+    outcome = _closed_passed_outcome_patch().model_copy(update={"comparison_verdicts": []})
+
+    composition = finalize_verification_report(
+        contract=contract,
+        outcome=outcome,
+        body_markdown=_stale_refresh_oracle_body(),
+        plan_path=plan_path,
+        plan_contract_ref="GPD/phases/01-baseline/01-PLAN.md#/contract",
+        target_report_ref="GPD/phases/01-baseline/01-VERIFICATION.md",
+        source_path=plan_path.with_name("01-VERIFICATION.md"),
+    )
+
+    assert not composition.validation.valid
+    joined_errors = "\n".join(composition.validation.errors)
+    assert "Missing decisive comparison_verdict for acceptance test test-stale-verification-decisive" in joined_errors
+    assert "Missing decisive comparison_verdict for reference ref-stale-verification-benchmark" in joined_errors
+
+
+def test_finalize_verification_report_rejects_passed_when_oracle_evidence_missing(tmp_path: Path) -> None:
+    contract = _compact_stale_refresh_contract()
+    plan_path = _write_stale_refresh_plan(tmp_path, contract)
+
+    composition = finalize_verification_report(
+        contract=contract,
+        outcome=_closed_passed_outcome_patch(),
+        body_markdown=_stale_refresh_prose_only_body(),
+        plan_path=plan_path,
+        plan_contract_ref="GPD/phases/01-baseline/01-PLAN.md#/contract",
+        target_report_ref="GPD/phases/01-baseline/01-VERIFICATION.md",
+        source_path=plan_path.with_name("01-VERIFICATION.md"),
+    )
+
+    assert not composition.validation.valid
+    assert composition.validation.oracle_evidence_count == 0
+    assert any("computational_oracle" in error for error in composition.validation.errors)
+
+
+@pytest.mark.parametrize("status", ["human_needed", "expert_needed"])
+def test_finalize_verification_report_non_passed_statuses_keep_open_state(
+    tmp_path: Path,
+    status: str,
+) -> None:
+    contract = _compact_stale_refresh_contract()
+    plan_path = _write_stale_refresh_plan(tmp_path, contract)
+
+    composition = finalize_verification_report(
+        contract=contract,
+        outcome=VerificationReportOutcomePatch(status=status),
+        body_markdown=_stale_refresh_oracle_body(),
+        plan_path=plan_path,
+        plan_contract_ref="GPD/phases/01-baseline/01-PLAN.md#/contract",
+        target_report_ref="GPD/phases/01-baseline/01-VERIFICATION.md",
+        source_path=plan_path.with_name("01-VERIFICATION.md"),
+    )
+
+    assert composition.validation.valid, composition.validation.errors
+    meta, _body = extract_frontmatter(composition.markdown)
+    assert meta["status"] == status
+    assert meta["contract_results"]["claims"]["claim-stale-verification"]["status"] == "blocked"
+    assert meta["contract_results"]["references"]["ref-stale-verification-benchmark"]["status"] == "missing"
+    assert meta["suggested_contract_checks"]
 
 
 def test_render_verification_report_markdown_keeps_colon_rich_body_out_of_yaml(tmp_path: Path) -> None:

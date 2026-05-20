@@ -6,8 +6,12 @@ from gpd.core.context import init_progress, init_resume
 from gpd.core.recent_projects import recent_projects_index_path
 from gpd.core.recovery_advice import RecoveryAdvice, serialize_recovery_advice
 from gpd.core.resume_surface import (
+    RESUME_PRESENTATION_LANE_BLOCKER_NEXT_COMMAND,
+    RESUME_PRESENTATION_LANE_PRIMARY_RESUME_TARGET,
+    RESUME_PRESENTATION_LANE_SELECTED_PROJECT,
     RESUME_SURFACE_SCHEMA_VERSION,
     build_resume_candidate,
+    build_resume_presentation_lanes,
     build_resume_segment_candidate,
     canonicalize_resume_public_payload,
     lookup_resume_surface_list,
@@ -20,6 +24,16 @@ from gpd.core.resume_surface import (
     resume_origin_for_handoff,
     resume_payload_has_local_recovery_target,
 )
+
+
+def _assert_contains_all(text: str, fragments: tuple[str, ...]) -> None:
+    missing = [fragment for fragment in fragments if fragment not in text]
+    assert missing == []
+
+
+def _assert_contains_none(text: str, fragments: tuple[str, ...]) -> None:
+    present = [fragment for fragment in fragments if fragment in text]
+    assert present == []
 
 
 def test_lookup_resume_surface_helpers_prefer_canonical_values() -> None:
@@ -221,6 +235,157 @@ def test_resume_payload_has_local_recovery_target_classifies_supported_resume_fa
     expected: bool,
 ) -> None:
     assert resume_payload_has_local_recovery_target(resume_payload) is expected
+
+
+def test_resume_presentation_lanes_are_selected_project_target_and_next_command() -> None:
+    payload = {
+        "workspace_root": "/tmp/workspace",
+        "project_root": "/tmp/project",
+        "project_root_source": "current_workspace",
+        "project_label": "Bridge Test",
+        "active_resume_kind": "continuity_handoff",
+        "active_resume_pointer": "GPD/phases/03/.continue-here.md",
+        "execution_resumable": False,
+        "active_resume_result": {
+            "id": "result-3",
+            "description": "Bridge equation",
+            "equation": "R = A + B",
+            "verified": True,
+        },
+        "resume_candidates": [
+            {
+                "kind": "continuity_handoff",
+                "origin": "continuation.handoff",
+                "status": "handoff",
+                "resume_file": "GPD/phases/03/.continue-here.md",
+            }
+        ],
+    }
+
+    lanes = build_resume_presentation_lanes(
+        payload,
+        recovery_advice={
+            "continue_command": "gpd:resume-work",
+            "fast_next_command": "gpd:suggest-next",
+        },
+    )
+
+    assert [lane["lane"] for lane in lanes] == [
+        RESUME_PRESENTATION_LANE_SELECTED_PROJECT,
+        RESUME_PRESENTATION_LANE_PRIMARY_RESUME_TARGET,
+        RESUME_PRESENTATION_LANE_BLOCKER_NEXT_COMMAND,
+    ]
+    assert [lane["label"] for lane in lanes] == [
+        "Selected project",
+        "Primary resume target",
+        "Blocker / next command",
+    ]
+    _assert_contains_all(lanes[0]["value"], ("Bridge Test",))
+    _assert_contains_all(
+        lanes[1]["value"],
+        (
+            "A continuity handoff is available",
+            "Primary pointer: ./GPD/phases/03/.continue-here.md",
+            "Resume result: Bridge equation [R = A + B] (result-3); verified",
+            "Canonical candidate kinds: bounded_segment, continuity_handoff, interrupted_agent",
+        ),
+    )
+    _assert_contains_all(lanes[2]["value"], ("Next command: `gpd:resume-work`", "fast next: `gpd:suggest-next`"))
+
+
+def test_resume_presentation_bounded_segment_outranks_advisory_live_snapshot() -> None:
+    payload = {
+        "project_root": "/tmp/project",
+        "active_resume_kind": "bounded_segment",
+        "active_resume_pointer": "GPD/phases/03/.continue-here.md",
+        "active_bounded_segment": {
+            "phase": "03",
+            "plan": "02",
+            "resume_file": "GPD/phases/03/.continue-here.md",
+        },
+        "derived_execution_head": {
+            "phase": "04",
+            "resume_file": "GPD/phases/04/advisory.md",
+        },
+        "resume_candidates": [
+            {
+                "kind": "bounded_segment",
+                "origin": "continuation.bounded_segment",
+                "status": "paused",
+                "resume_file": "GPD/phases/03/.continue-here.md",
+            }
+        ],
+    }
+
+    lanes = build_resume_presentation_lanes(payload)
+    target_lane = lanes[1]["value"]
+
+    _assert_contains_all(
+        target_lane,
+        (
+            "A bounded segment is resumable from the selected project",
+            "phase 03, plan 02",
+            "GPD/phases/03/.continue-here.md",
+        ),
+    )
+    _assert_contains_none(target_lane, ("Advisory live execution snapshot only",))
+
+
+def test_resume_presentation_recent_project_blocks_quick_resume() -> None:
+    payload = {
+        "workspace_root": "/tmp/outside",
+        "project_root": "/tmp/recent-project",
+        "project_root_source": "recent_project",
+        "project_root_auto_selected": True,
+        "project_reentry_mode": "auto-recent-project",
+        "active_resume_kind": "bounded_segment",
+        "active_resume_pointer": "GPD/phases/02/.continue-here.md",
+        "resume_candidates": [
+            {
+                "kind": "bounded_segment",
+                "origin": "continuation.bounded_segment",
+                "status": "paused",
+                "resume_file": "GPD/phases/02/.continue-here.md",
+            }
+        ],
+    }
+
+    lanes = build_resume_presentation_lanes(
+        payload,
+        recovery_advice={
+            "continue_command": "gpd:resume-work",
+            "fast_next_command": "gpd:suggest-next",
+        },
+    )
+
+    _assert_contains_all(lanes[0]["value"], ("auto-selected recent project",))
+    _assert_contains_all(lanes[1]["value"], ("A bounded segment is resumable from an auto-selected recent project",))
+    _assert_contains_all(
+        lanes[2]["value"],
+        ("cannot quick-resume from an unrelated workspace", "gpd resume --recent", "gpd:resume-work"),
+    )
+
+
+def test_resume_presentation_missing_handoff_surfaces_repair_not_local_recovery() -> None:
+    payload = {
+        "project_root": "/tmp/project",
+        "missing_continuity_handoff_file": "GPD/phases/05/.continue-here.md",
+        "resume_candidates": [
+            {
+                "kind": "continuity_handoff",
+                "origin": "continuation.handoff",
+                "status": "missing",
+                "resume_file": "GPD/phases/05/.continue-here.md",
+            }
+        ],
+    }
+
+    lanes = build_resume_presentation_lanes(payload)
+
+    _assert_contains_all(
+        lanes[1]["value"], ("Canonical recovery metadata exists", "continuity handoff file is missing")
+    )
+    _assert_contains_all(lanes[2]["value"], ("Blocker: recorded handoff file is missing", "gpd:sync-state"))
 
 
 def test_build_resume_segment_candidate_projects_segment_fields_into_raw_resume_shape() -> None:

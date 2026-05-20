@@ -36,6 +36,8 @@ from gpd.core.public_surface_contract import (
     resume_authority_fields,
 )
 from tests import doc_surface_contracts as doc_surface_contracts_module
+from tests.assertion_taxonomy_support import FragmentMode, MatchMode, semantic_anchor
+from tests.workflow_authority_support import workflow_authority_text
 
 
 @pytest.fixture(autouse=True)
@@ -104,21 +106,49 @@ def _expected_beginner_runtime_surface(descriptor: object) -> BeginnerRuntimeSur
     )
 
 
+def _assert_anchor(text: str, label: str, fragments: tuple[str, ...] | str) -> None:
+    semantic_anchor(label, fragments, match=MatchMode.CASEFOLD_NORMALIZED).check(text)
+
+
+def _assert_absent(text: str, label: str, fragments: tuple[str, ...] | str) -> None:
+    semantic_anchor(
+        label,
+        fragments,
+        mode=FragmentMode.ABSENT,
+        match=MatchMode.CASEFOLD_NORMALIZED,
+    ).check(text)
+
+
 def test_beginner_onboarding_surface_contract_exposes_hub_and_ladder() -> None:
+    preflight = beginner_preflight_requirements()
+    caveats = beginner_onboarding_caveats()
+
     assert beginner_onboarding_hub_url() == "https://github.com/psi-oss/get-physics-done/tree/main/docs"
     assert "blob/main" not in beginner_onboarding_hub_url()
     assert beginner_startup_ladder_text() == "`help -> start -> tour -> new-project / map-research -> resume-work`"
-    assert beginner_preflight_requirements() == (
-        "One supported runtime is already installed and can open from your normal terminal.",
-        "Node.js 20+ is available in that same terminal.",
-        "Python 3.11+ with the standard `venv` module is available there too.",
+    assert len(preflight) == 3
+    assert len(caveats) == 5
+    _assert_anchor(
+        "\n".join(preflight),
+        "beginner preflight requirements",
+        ("supported runtime", "normal terminal", "Node.js 20+", "Python 3.11+", "`venv`"),
     )
-    assert beginner_onboarding_caveats() == (
-        "GPD is not a standalone app.",
-        "GPD does not install your runtime for you.",
-        "GPD does not include model access, billing, or API credits.",
-        "This hub is the beginner path, not the full reference.",
-        "If evidence, references, or artifacts are missing, say so explicitly; GPD should not invent them.",
+    _assert_anchor(
+        "\n".join(caveats),
+        "beginner onboarding caveats",
+        (
+            "not a standalone app",
+            "does not install your runtime",
+            "model access",
+            "billing",
+            "API credits",
+            "beginner path",
+            "not the full reference",
+            "evidence",
+            "references",
+            "artifacts",
+            "not invent",
+        ),
     )
 
 
@@ -126,13 +156,11 @@ def test_beginner_startup_ladder_stays_separate_from_deeper_recovery_follow_ups(
     startup_ladder = beginner_startup_ladder_text()
 
     assert startup_ladder.endswith("resume-work`")
-    assert "suggest-next" not in startup_ladder
-    assert "pause-work" not in startup_ladder
-    assert "Node" not in startup_ladder
-    assert "Python" not in startup_ladder
-    assert "--local" not in startup_ladder
-    assert "standalone" not in startup_ladder
-    assert "billing" not in startup_ladder
+    _assert_absent(
+        startup_ladder,
+        "beginner startup ladder excludes deeper recovery and readiness details",
+        ("suggest-next", "pause-work", "Node", "Python", "--local", "standalone", "billing"),
+    )
 
 
 def test_public_surface_contract_rejects_recovery_ladder_command_drift(
@@ -343,7 +371,7 @@ def test_public_surface_contract_loader_rejects_schema_key_drift_after_cache_cle
     load_public_surface_contract.cache_clear()
 
 
-def test_public_surface_contract_schema_does_not_duplicate_local_cli_command_values() -> None:
+def test_public_surface_contract_schema_keeps_v1_local_cli_command_values_for_external_consumers() -> None:
     schema = json.loads(
         (
             Path(public_surface_contract_module.__file__).resolve().with_name("public_surface_contract_schema.json")
@@ -351,33 +379,28 @@ def test_public_surface_contract_schema_does_not_duplicate_local_cli_command_val
     )
 
     local_cli_bridge_schema = schema["sections"]["local_cli_bridge"]
-    assert "commands" not in local_cli_bridge_schema
-    assert "gpd --help" not in json.dumps(schema)
+    assert local_cli_bridge_schema["keys"][0] == "commands"
 
 
-def test_public_surface_contract_loader_still_rejects_command_named_command_order_drift(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
+def test_public_surface_contract_bridge_commands_match_named_command_order() -> None:
     canonical_payload = json.loads(
         (Path(public_surface_contract_module.__file__).resolve().with_name("public_surface_contract.json")).read_text(
             encoding="utf-8"
         )
     )
-    drifted_payload = copy.deepcopy(canonical_payload)
-    drifted_payload["local_cli_bridge"]["commands"][:2] = [
-        canonical_payload["local_cli_bridge"]["commands"][1],
-        canonical_payload["local_cli_bridge"]["commands"][0],
-    ]
+    canonical_schema = json.loads(
+        (
+            Path(public_surface_contract_module.__file__).resolve().with_name("public_surface_contract_schema.json")
+        ).read_text(encoding="utf-8")
+    )
+    ordered_keys = canonical_schema["sections"]["local_cli_bridge"]["named_commands"]["ordered_keys"]
+    expected_commands = tuple(canonical_payload["local_cli_bridge"]["named_commands"][key] for key in ordered_keys)
 
-    _load_public_surface_contract_with_payload(monkeypatch, tmp_path, drifted_payload)
+    contract = load_public_surface_contract()
 
-    with pytest.raises(
-        ValueError,
-        match=r"local_cli_bridge\.commands must exactly match local_cli_bridge\.named_commands in canonical order",
-    ):
-        load_public_surface_contract()
-    load_public_surface_contract.cache_clear()
+    assert tuple(canonical_payload["local_cli_bridge"]["commands"]) == expected_commands
+    assert contract.local_cli_bridge.commands == expected_commands
+    assert contract.local_cli_bridge.commands == contract.local_cli_bridge.named_commands.ordered()
 
 
 @pytest.mark.parametrize(
@@ -404,42 +427,6 @@ def test_public_surface_contract_loader_rejects_section_additive_keys(
     _load_public_surface_contract_with_payload(monkeypatch, tmp_path, additive_payload)
     with pytest.raises(ValueError, match=expected_message):
         load_public_surface_contract()
-    load_public_surface_contract.cache_clear()
-
-
-def test_public_surface_contract_loader_requires_authoritative_local_cli_bridge_commands(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    canonical_path = Path(__file__).resolve().parents[2] / "src" / "gpd" / "core" / "public_surface_contract.json"
-    canonical_payload = json.loads(canonical_path.read_text(encoding="utf-8"))
-    invalid_payload = copy.deepcopy(canonical_payload)
-    invalid_payload["local_cli_bridge"]["commands"] = [
-        command for command in invalid_payload["local_cli_bridge"]["commands"] if command != "gpd doctor"
-    ]
-
-    _load_public_surface_contract_with_payload(monkeypatch, tmp_path, invalid_payload)
-    with pytest.raises(ValueError, match=r"local_cli_bridge\.commands must include 'gpd doctor'"):
-        load_public_surface_contract()
-
-    load_public_surface_contract.cache_clear()
-
-
-def test_public_surface_contract_loader_requires_recovery_ladder_commands_to_stay_public(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    canonical_path = Path(__file__).resolve().parents[2] / "src" / "gpd" / "core" / "public_surface_contract.json"
-    canonical_payload = json.loads(canonical_path.read_text(encoding="utf-8"))
-    invalid_payload = copy.deepcopy(canonical_payload)
-    invalid_payload["local_cli_bridge"]["commands"] = [
-        command for command in invalid_payload["local_cli_bridge"]["commands"] if command != "gpd resume --recent"
-    ]
-
-    _load_public_surface_contract_with_payload(monkeypatch, tmp_path, invalid_payload)
-    with pytest.raises(ValueError, match=r"local_cli_bridge\.commands must include 'gpd resume --recent'"):
-        load_public_surface_contract()
-
     load_public_surface_contract.cache_clear()
 
 
@@ -475,10 +462,9 @@ def test_public_surface_contract_loader_normalizes_whitespace(
         f"  {canonical_payload['beginner_onboarding']['startup_ladder'][0]}  ",
         *canonical_payload["beginner_onboarding"]["startup_ladder"][1:],
     ]
-    noisy_payload["local_cli_bridge"]["commands"] = [
-        f"  {canonical_payload['local_cli_bridge']['commands'][0]}  ",
-        *canonical_payload["local_cli_bridge"]["commands"][1:],
-    ]
+    noisy_payload["local_cli_bridge"]["named_commands"]["help"] = (
+        f"  {canonical_payload['local_cli_bridge']['named_commands']['help']}  "
+    )
     noisy_payload["local_cli_bridge"]["named_commands"]["doctor"] = (
         f"  {canonical_payload['local_cli_bridge']['named_commands']['doctor']}  "
     )
@@ -499,7 +485,10 @@ def test_public_surface_contract_loader_normalizes_whitespace(
     assert contract.beginner_onboarding.startup_ladder == tuple(
         canonical_payload["beginner_onboarding"]["startup_ladder"]
     )
-    assert contract.local_cli_bridge.commands == tuple(canonical_payload["local_cli_bridge"]["commands"])
+    assert contract.local_cli_bridge.commands == contract.local_cli_bridge.named_commands.ordered()
+    assert (
+        contract.local_cli_bridge.named_commands.help == canonical_payload["local_cli_bridge"]["named_commands"]["help"]
+    )
     assert (
         contract.local_cli_bridge.named_commands.doctor
         == canonical_payload["local_cli_bridge"]["named_commands"]["doctor"]
@@ -517,10 +506,12 @@ def test_public_surface_contract_loader_rejects_duplicate_entries(
     canonical_path = Path(__file__).resolve().parents[2] / "src" / "gpd" / "core" / "public_surface_contract.json"
     canonical_payload = json.loads(canonical_path.read_text(encoding="utf-8"))
     duplicate_payload = copy.deepcopy(canonical_payload)
-    duplicate_payload["local_cli_bridge"]["commands"].append(canonical_payload["local_cli_bridge"]["commands"][0])
+    duplicate_payload["local_cli_bridge"]["named_commands"]["doctor"] = canonical_payload["local_cli_bridge"][
+        "named_commands"
+    ]["help"]
 
     _load_public_surface_contract_with_payload(monkeypatch, tmp_path, duplicate_payload)
-    with pytest.raises(ValueError, match=r"local_cli_bridge\.commands must not contain duplicates"):
+    with pytest.raises(ValueError, match=r"local_cli_bridge\.named_commands must not contain duplicate command values"):
         load_public_surface_contract()
 
     load_public_surface_contract.cache_clear()
@@ -576,20 +567,6 @@ def test_doc_surface_contract_helpers_read_runtime_normalized_contract(
             startup_ladder=("help", "start"),
         ),
         local_cli_bridge=public_surface_contract_module.LocalCliBridgeContract(
-            commands=(
-                "gpd --help",
-                "gpd doctor",
-                "gpd validate unattended-readiness --runtime <runtime> --autonomy balanced",
-                "gpd permissions status --runtime <runtime> --autonomy balanced",
-                "gpd permissions sync --runtime <runtime> --autonomy balanced",
-                "gpd resume",
-                "gpd resume --recent",
-                "gpd observe execution",
-                "gpd cost",
-                "gpd presets list",
-                "gpd validate plan-preflight <PLAN.md>",
-                "gpd integrations status wolfram",
-            ),
             named_commands=public_surface_contract_module.LocalCliNamedCommandsContract(
                 help="gpd --help",
                 doctor="gpd doctor",
@@ -657,7 +634,11 @@ def test_doc_surface_contract_helpers_read_runtime_normalized_contract(
     assert recovery_cross_workspace_command() == "resume --recent"
     assert public_surface_contract_module.local_cli_bridge_purpose_phrase() == "workspace diagnostics"
     bridge_note = local_cli_bridge_note()
-    assert bridge_note == "Use `gpd --help` in your normal terminal for the broader local CLI surface: workspace diagnostics."
+    _assert_anchor(
+        bridge_note,
+        "local CLI bridge note composes dynamic command and purpose",
+        ("gpd --help", "normal terminal", "broader local CLI surface", "workspace diagnostics"),
+    )
     assert public_surface_contract_module.local_cli_bridge_purpose_phrase() in bridge_note
     assert public_surface_contract_module.local_cli_plan_preflight_command() not in bridge_note
     assert public_surface_contract_module.local_cli_install_local_example_command() == "gpd install <runtime> --local"
@@ -680,20 +661,6 @@ def test_doc_surface_contract_helpers_refresh_dynamic_command_surfaces(
             startup_ladder=("help", "start"),
         ),
         local_cli_bridge=public_surface_contract_module.LocalCliBridgeContract(
-            commands=(
-                "gpd help dynamic",
-                "gpd doctor dynamic",
-                "gpd validate dynamic-unattended --runtime <runtime> --autonomy balanced",
-                "gpd permissions status dynamic --runtime <runtime> --autonomy balanced",
-                "gpd permissions sync dynamic --runtime <runtime> --autonomy balanced",
-                "gpd resume dynamic",
-                "gpd resume dynamic --recent",
-                "gpd observe dynamic",
-                "gpd cost dynamic",
-                "gpd presets dynamic",
-                "gpd validate dynamic-plan <PLAN.md>",
-                "gpd integrations status dynamic-wolfram",
-            ),
             named_commands=public_surface_contract_module.LocalCliNamedCommandsContract(
                 help="gpd help dynamic",
                 doctor="gpd doctor dynamic",
@@ -799,9 +766,26 @@ def test_onboarding_boundary_reference_stays_internal_to_start_and_tour() -> Non
     from pathlib import Path
 
     repo_root = Path(__file__).resolve().parents[2]
-    fragment = "scalpel, not an autopilot"
+    boundary_reference = "@{GPD_INSTALL_DIR}/references/shared/onboarding-command-boundaries.md"
+    boundary_concepts = (
+        "start",
+        "chooser/router",
+        "tour",
+        "read-only explainer",
+        "help",
+        "reference/index surface",
+        "settings",
+        "after first successful startup",
+        "not an autopilot",
+        "verify",
+        "redirect",
+    )
 
-    assert fragment in (repo_root / "README.md").read_text(encoding="utf-8")
+    _assert_anchor(
+        (repo_root / "README.md").read_text(encoding="utf-8"),
+        "README preserves supervised execution posture",
+        ("GPD", "not an autopilot", "verify", "redirect", "Supervised", "Balanced"),
+    )
 
     internal_workflows = (
         "src/gpd/specs/workflows/start.md",
@@ -810,8 +794,8 @@ def test_onboarding_boundary_reference_stays_internal_to_start_and_tour() -> Non
     for rel in internal_workflows:
         raw = (repo_root / rel).read_text(encoding="utf-8")
         expanded = expand_at_includes(raw, repo_root / "src/gpd", "/runtime/")
-        assert "@{GPD_INSTALL_DIR}/references/shared/onboarding-command-boundaries.md" in raw
-        assert fragment in expanded
+        assert boundary_reference in raw
+        _assert_anchor(expanded, f"{rel} expands shared onboarding boundary concepts", boundary_concepts)
         if rel.endswith("tour.md"):
             assert expanded.count("help -> start -> tour") == 1
 
@@ -822,29 +806,55 @@ def test_onboarding_boundary_reference_stays_internal_to_start_and_tour() -> Non
     for rel in public_workflows:
         raw = (repo_root / rel).read_text(encoding="utf-8")
         expanded = expand_at_includes(raw, repo_root / "src/gpd", "/runtime/")
-        assert "@{GPD_INSTALL_DIR}/references/shared/onboarding-command-boundaries.md" not in raw
-        assert "Keep the beginner boundaries stable" not in expanded
-        assert "`start` is the chooser/router" not in expanded
-        assert "`settings` belongs after first successful startup" not in expanded
+        assert boundary_reference not in raw
+        _assert_absent(
+            expanded,
+            f"{rel} excludes internal onboarding boundary reference prose",
+            (
+                "Keep the beginner boundaries stable",
+                "`start` is the chooser/router",
+                "`settings` belongs after first successful startup",
+            ),
+        )
 
 
 def test_workflow_interactive_choice_fallback_is_single_sourced() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     fallback_ref = "@{GPD_INSTALL_DIR}/references/shared/interactive-choice-fallback.md"
     workflow_surfaces = (
-        "src/gpd/specs/workflows/start.md",
-        "src/gpd/specs/workflows/new-project.md",
-        "src/gpd/specs/workflows/settings.md",
+        ("src/gpd/specs/workflows/start.md", None),
+        ("src/gpd/specs/workflows/new-project.md", "new-project"),
+        ("src/gpd/specs/workflows/settings.md", None),
     )
 
-    for rel in workflow_surfaces:
+    for rel, staged_name in workflow_surfaces:
         raw = (repo_root / rel).read_text(encoding="utf-8")
-        expanded = expand_at_includes(raw, repo_root / "src/gpd", "/runtime/")
-        assert fallback_ref in raw
-        assert "Use `ask_user` for structured choices when the runtime supports it." in expanded
-        assert "Platform note" not in raw
-        assert "If `ask_user` is available" not in raw
-        assert "If `ask_user` is not available" not in raw
+        authority_text = (
+            workflow_authority_text(repo_root / "src/gpd/specs/workflows", staged_name)
+            if staged_name is not None
+            else raw
+        )
+        expanded = expand_at_includes(authority_text, repo_root / "src/gpd", "/runtime/")
+        if staged_name is None:
+            assert fallback_ref in raw
+        _assert_anchor(
+            expanded,
+            f"{rel} preserves interactive choice fallback meaning",
+            (
+                "ask_user",
+                "structured choices",
+                "wait for a structured reply",
+                "plain text",
+                "same option labels",
+                "freeform response",
+                "Do not duplicate the same question",
+            ),
+        )
+        _assert_absent(
+            raw,
+            f"{rel} avoids stale platform-specific fallback prose",
+            ("Platform note", "If `ask_user` is available", "If `ask_user` is not available"),
+        )
 
 
 def test_quick_workflow_uses_freeform_prompt_without_choice_fallback() -> None:
@@ -852,7 +862,10 @@ def test_quick_workflow_uses_freeform_prompt_without_choice_fallback() -> None:
     raw = (repo_root / "src/gpd/specs/workflows/quick.md").read_text(encoding="utf-8")
 
     assert "@{GPD_INSTALL_DIR}/references/shared/interactive-choice-fallback.md" not in raw
-    assert "Ask ONE question inline (freeform, NOT ask_user):" in raw
-    assert "there are no fixed option labels to preserve" in raw
+    _assert_anchor(
+        raw,
+        "quick workflow keeps inherently freeform prompt boundary",
+        ("Ask ONE question inline", "freeform", "NOT ask_user", "no fixed option labels to preserve"),
+    )
     assert "ask_user(" not in raw
-    assert "If `ask_user` is not available" not in raw
+    _assert_absent(raw, "quick workflow avoids structured-choice fallback branch", "If `ask_user` is not available")

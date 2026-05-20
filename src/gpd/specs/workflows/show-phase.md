@@ -15,7 +15,7 @@ Read all files referenced by the invoking prompt's execution_context before star
 INIT=$(gpd --raw init phase-op "$PHASE")
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd initialization failed: $INIT"
-  # STOP — display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 ```
 

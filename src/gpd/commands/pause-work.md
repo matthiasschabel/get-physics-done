@@ -6,6 +6,12 @@ allowed-tools:
   - file_read
   - file_write
   - shell
+help:
+  group: Tangents, memory, and exports
+  order: 530
+  compact_description: Save a continuation handoff before stepping away
+  display_signature: gpd:pause-work
+  root_detail_order: 40
 ---
 
 

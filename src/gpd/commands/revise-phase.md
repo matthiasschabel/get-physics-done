@@ -11,6 +11,11 @@ allowed-tools:
   - search_files
   - find_files
   - task
+help:
+  group: Roadmap and milestones
+  order: 250
+  compact_description: Supersede a completed phase with a replacement
+  display_signature: gpd:revise-phase <number> "<reason>"
 ---
 
 

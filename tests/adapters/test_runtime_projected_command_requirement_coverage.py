@@ -9,11 +9,14 @@ import pytest
 from gpd.adapters.install_utils import project_markdown_for_runtime
 from gpd.adapters.runtime_catalog import iter_runtime_descriptors
 from gpd.registry import _frontmatter_parts, _load_frontmatter_mapping
+from tests.adapters.projection_test_utils import normalize_projected_text
 from tests.prompt_metrics_support import runtime_command_visibility_note
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COMMANDS_DIR = REPO_ROOT / "src/gpd/commands"
 RUNTIMES = tuple(descriptor.runtime_name for descriptor in iter_runtime_descriptors())
+
+
 def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
@@ -59,17 +62,17 @@ def _project_command(command_name: str, runtime: str) -> str:
 def test_runtime_projected_commands_keep_requirements_visible(command_name: str, runtime: str) -> None:
     command_requires = _command_requirements(command_name)
     projected = _project_command(command_name, runtime)
+    requirements_section = normalize_projected_text(projected).section("Command Requirements")
 
-    assert projected.count("## Command Requirements") == 1
-    assert runtime_command_visibility_note(runtime) in projected
+    assert runtime_command_visibility_note(runtime) in requirements_section.body
 
     for require_key, require_value in command_requires.items():
-        assert str(require_key) in projected
+        assert str(require_key) in requirements_section.body
         if isinstance(require_value, list):
             for item in require_value:
-                assert str(item) in projected
+                assert str(item) in requirements_section.body
         else:
-            assert str(require_value) in projected
+            assert str(require_value) in requirements_section.body
 
 
 @pytest.mark.parametrize("runtime", RUNTIMES)
@@ -99,6 +102,6 @@ def test_runtime_projected_peer_review_keeps_canonical_manuscript_roots_and_expl
         "draft/*.tex",
         "draft/*.md",
         "The default in-project manuscript family is limited to `paper/`, `manuscript/`, and `draft/`.",
-        "Explicit external artifact intake may also target `.tex`, `.md`, `.txt`, or `.pdf`.",
+        "External artifact intake may target `.tex`, `.md`, `.txt`, `.pdf`, `.docx`, `.csv`, `.tsv`, `.xlsx`, or `.xlsm`.",
     ):
         assert fragment in projected

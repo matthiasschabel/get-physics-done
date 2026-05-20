@@ -10,8 +10,35 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tests.assertion_taxonomy_support import (
+    assert_prompt_contracts,
+    checkpoint_stop_boundary,
+    fail_closed_before_writes,
+    semantic_anchor,
+)
+
 WORKFLOWS_DIR = Path(__file__).resolve().parents[2] / "src" / "gpd" / "specs" / "workflows"
-EXECUTE_PHASE = (WORKFLOWS_DIR / "execute-phase.md").read_text(encoding="utf-8")
+EXECUTE_PHASE_STAGE_DIR = WORKFLOWS_DIR / "execute-phase"
+EXECUTE_PHASE_STAGE_FILES = (
+    "phase-bootstrap.md",
+    "phase-classification.md",
+    "wave-planning.md",
+    "pre-execution-specialists.md",
+    "wave-dispatch.md",
+    "executor-dispatch.md",
+    "proof-critic-dispatch.md",
+    "wave-return-checkpoint.md",
+    "wave-failure-menu.md",
+    "checkpoint-resume.md",
+    "aggregate-and-verify.md",
+    "verification-handoff.md",
+    "gap-reverification.md",
+    "consistency-check.md",
+    "closeout.md",
+)
+EXECUTE_PHASE = "\n\n".join(
+    (EXECUTE_PHASE_STAGE_DIR / stage_file).read_text(encoding="utf-8") for stage_file in EXECUTE_PHASE_STAGE_FILES
+)
 
 _PRECHECK_OPEN_TAG = '<step name="claim_deliverable_alignment_check">'
 _STEP_CLOSE_TAG = "</step>"
@@ -35,23 +62,25 @@ def _extract_precheck_body() -> str:
 _PRECHECK_BODY = _extract_precheck_body()
 
 
-def test_precheck_step_exists_and_lives_before_plan_discovery() -> None:
+def test_precheck_step_exists_and_lives_after_current_wave_selection() -> None:
     assert _PRECHECK_OPEN_TAG in EXECUTE_PHASE, (
         "claim_deliverable_alignment_check step is missing from execute-phase.md"
     )
 
-    proof_gate_tag = '<step name="detect_proof_obligation_work">'
     discover_tag = '<step name="discover_and_group_plans">'
+    wave_intent_tag = '<step name="select_current_wave_intent">'
+    proof_gate_tag = '<step name="detect_proof_obligation_work">'
 
+    discover_idx = EXECUTE_PHASE.index(discover_tag)
+    wave_intent_idx = EXECUTE_PHASE.index(wave_intent_tag)
     proof_gate_idx = EXECUTE_PHASE.index(proof_gate_tag)
     precheck_idx = EXECUTE_PHASE.index(_PRECHECK_OPEN_TAG)
-    discover_idx = EXECUTE_PHASE.index(discover_tag)
 
-    assert proof_gate_idx < precheck_idx < discover_idx, (
-        "claim_deliverable_alignment_check must be positioned after "
-        "detect_proof_obligation_work and before discover_and_group_plans "
-        f"(got offsets proof_gate={proof_gate_idx}, precheck={precheck_idx}, "
-        f"discover={discover_idx})"
+    assert discover_idx < wave_intent_idx < proof_gate_idx < precheck_idx, (
+        "claim_deliverable_alignment_check must run after plan discovery, current-wave "
+        "selection, and proof classification "
+        f"(got offsets discover={discover_idx}, wave_intent={wave_intent_idx}, "
+        f"proof_gate={proof_gate_idx}, precheck={precheck_idx})"
     )
 
 
@@ -103,43 +132,80 @@ def test_precheck_proceed_does_not_reprompt_in_same_session() -> None:
 def test_precheck_fails_closed_when_fingerprints_are_missing() -> None:
     assert _PRECHECK_BODY, "precheck step body could not be extracted"
 
-    assert "Fail closed if either fingerprint command fails or resolves to an empty value" in _PRECHECK_BODY
-    assert 'if [ -z "$CONTRACT_HASH" ] || [ -z "$CONTEXT_HASH" ]; then' in _PRECHECK_BODY
-    assert "do not call `gpd contract record-alignment` on this path" in _PRECHECK_BODY
-    assert "Next Up: gpd:execute-phase {N}" in _PRECHECK_BODY
+    assert_prompt_contracts(
+        _PRECHECK_BODY,
+        *fail_closed_before_writes(
+            "fail closed if either fingerprint command fails or resolves to an empty value",
+            "call `gpd contract record-alignment` on this path",
+            safe_stop_anchor="STOP before writes, scripts, computations, dispatches, subagents, or artifacts",
+            machine_fragments='if [ -z "$CONTRACT_HASH" ] || [ -z "$CONTEXT_HASH" ]; then',
+            context="claim/deliverable fingerprint gate",
+        ),
+    )
 
 
 def test_precheck_requires_explicit_interactive_answer_before_recording_alignment() -> None:
     assert _PRECHECK_BODY, "precheck step body could not be extracted"
 
-    assert "Only an explicit `ask_user` answer of `Y: proceed`" in _PRECHECK_BODY
-    assert "The command invocation" in _PRECHECK_BODY
-    assert "missing `ask_user` support" in _PRECHECK_BODY
-    assert "any noninteractive run is not an alignment answer" in _PRECHECK_BODY
-    assert "STOP before `gpd contract record-alignment`" in _PRECHECK_BODY
-    assert "scripts/numerical computations" in _PRECHECK_BODY
-    assert "Blocked: claim-deliverable alignment needs an explicit user answer." in _PRECHECK_BODY
-    assert 'On "Y: proceed" (or Enter from that `ask_user` prompt)' in _PRECHECK_BODY
-
-    block_idx = _PRECHECK_BODY.index("Only an explicit `ask_user` answer")
-    record_idx = _PRECHECK_BODY.index(
-        'gpd contract record-alignment --contract-hash "$CONTRACT_HASH" --context-hash "$CONTEXT_HASH"'
+    assert_prompt_contracts(
+        _PRECHECK_BODY,
+        *fail_closed_before_writes(
+            "Only explicit `Y: proceed` authorizes record-alignment.",
+            "On `Y: proceed` record alignment and continue",
+            safe_stop_anchor="STOP before writes, scripts, computations, dispatches, subagents, or artifacts",
+            context="claim/deliverable record-alignment confirmation",
+        ),
+        semantic_anchor(
+            "missing answer is not confirmation",
+            "Missing `ask_user`, timeout, empty answer, or noninteractive run is not confirmation",
+        ),
     )
-    assert block_idx < record_idx
+
+    assert_prompt_contracts(
+        _PRECHECK_BODY,
+        semantic_anchor(
+            "explicit confirmation precedes record-alignment command",
+            (
+                "Only explicit `Y: proceed`",
+                'gpd contract record-alignment --contract-hash "$CONTRACT_HASH" --context-hash "$CONTEXT_HASH"',
+            ),
+            mode="ordered",
+        ),
+    )
 
 
 def test_wave_checkpoint_authority_is_established_before_execution_work() -> None:
-    checkpoint_idx = EXECUTE_PHASE.index("This is the rollback authority gate for the wave.")
-    describe_idx = EXECUTE_PHASE.index("3. **Describe what's being done (BEFORE spawning):**")
-    spawn_idx = EXECUTE_PHASE.index("4. **Spawn executor agents:**")
+    assert_prompt_contracts(
+        EXECUTE_PHASE,
+        semantic_anchor(
+            "execute wave checkpoint precedes plan reading and dispatch",
+            (
+                "This is the rollback authority gate for the wave.",
+                "Read each selected plan's `<objective>`",
+                "Choose exactly one immediate route after the checkpoint",
+            ),
+            mode="ordered",
+        ),
+        *checkpoint_stop_boundary(
+            "safe_to_execute_wave: true",
+            "Do not run computation and then checkpoint afterward.",
+            bounded_fields='gpd --raw phase checkpoint create --phase "${phase_number}" --wave "${WAVE_NUM}"',
+            required="No scripts, numerical computation, executor dispatch, proof critic dispatch, artifact writes",
+            context="execute wave rollback checkpoint",
+        ),
+    )
+    assert 'gpd --raw phase checkpoint create --phase "${phase_number}" --wave "${WAVE_NUM}"' in EXECUTE_PHASE
+    assert "safe_to_execute_wave: true" in EXECUTE_PHASE
+    assert "PROJECT_ROOT=$(pwd -P)" not in EXECUTE_PHASE
+    assert "GIT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || true)" not in EXECUTE_PHASE
 
-    assert checkpoint_idx < describe_idx < spawn_idx
-    assert "before scripts, numerical computation, dispatch, subagents, artifacts" in EXECUTE_PHASE
-    assert "Do not run computation and then checkpoint afterward." in EXECUTE_PHASE
-    assert "PROJECT_ROOT=$(pwd -P)" in EXECUTE_PHASE
-    assert "GIT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || true)" in EXECUTE_PHASE
-    assert "refusing ambient rollback checkpoint" in EXECUTE_PHASE
-    assert "initialize fixture-local git/checkpoint support" in EXECUTE_PHASE
+
+def test_execute_phase_closeout_uses_readiness_and_checkpoint_helpers() -> None:
+    assert 'gpd --raw phase closeout-readiness "${phase_number}" --require-verification' in EXECUTE_PHASE
+    assert 'gpd phase complete "${phase_number}"' in EXECUTE_PHASE
+    assert 'gpd --raw phase checkpoint cleanup --phase "${phase_number}" --namespace phase' in EXECUTE_PHASE
+    assert 'git tag -l "gpd-checkpoint-phase-${phase_number}-*"' not in EXECUTE_PHASE
+    assert 'git tag -d "${TAG}"' not in EXECUTE_PHASE
 
 
 def test_precheck_abort_does_not_spawn_workers() -> None:

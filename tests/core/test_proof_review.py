@@ -7,7 +7,9 @@ from pathlib import Path
 import pytest
 
 from gpd.contracts import PROOF_AUDIT_REVIEWER
+from gpd.core import proof_review
 from gpd.core.artifact_text import ArtifactTextError, ArtifactTextSurface
+from gpd.core.proof_redteam_contract import read_proof_redteam_status
 from gpd.core.proof_review import (
     manuscript_has_theorem_bearing_claim_inventory,
     manuscript_has_theorem_bearing_language,
@@ -21,6 +23,10 @@ from gpd.core.proof_review import (
 )
 from gpd.core.reproducibility import compute_sha256
 from tests.manuscript_test_support import CANONICAL_MANUSCRIPT_STEM, write_proof_review_package
+
+
+def test_proof_review_private_status_reader_uses_shared_proof_redteam_contract() -> None:
+    assert proof_review._read_proof_redteam_status is read_proof_redteam_status
 
 
 def _write_external_manuscript_review_anchor(project_root: Path) -> Path:

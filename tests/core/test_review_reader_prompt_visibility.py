@@ -47,14 +47,23 @@ def test_review_reader_prompt_keeps_shared_contract_visible() -> None:
         "full `ClaimIndex` and `StageReviewReport` contracts",
     )
     assert "Stage 1 must also emit `${REVIEW_ROOT}/CLAIMS{round_suffix}.json`." in review_reader
-    assert "Capture theorem kind, explicit hypotheses, and free target parameters for theorem-like claims." in review_reader
+    assert (
+        "Capture theorem kind, explicit hypotheses, and free target parameters for theorem-like claims."
+        in review_reader
+    )
     assert "Keep `proof_audits` empty in this stage." in review_reader
-    assert "Focus `findings` on overclaiming, missing promised deliverables, and claim-structure blockers." in review_reader
+    assert (
+        "Focus `findings` on overclaiming, missing promised deliverables, and claim-structure blockers."
+        in review_reader
+    )
 
     expanded = _expanded("gpd-review-reader.md")
     assert "Peer Review Panel Protocol" not in expanded
     assert "Stage 1 `CLAIMS{round_suffix}.json` must follow this compact `ClaimIndex` shape:" not in expanded
-    assert "StageReviewReport`, nested `ReviewFinding`, and nested `ProofAuditRecord` entries use a closed schema" not in expanded
+    assert (
+        "StageReviewReport`, nested `ReviewFinding`, and nested `ProofAuditRecord` entries use a closed schema"
+        not in expanded
+    )
 
 
 def test_review_stage_prompts_keep_only_stage_specific_deltas() -> None:
@@ -113,7 +122,10 @@ def test_review_stage_prompts_keep_only_stage_specific_deltas() -> None:
         assert "{GPD_INSTALL_DIR}/references/publication/peer-review-panel.md" in expanded
         assert "Peer Review Panel Protocol" not in expanded
         assert "Stage 1 `CLAIMS{round_suffix}.json` must follow this compact `ClaimIndex` shape:" not in expanded
-        assert "StageReviewReport`, nested `ReviewFinding`, and nested `ProofAuditRecord` entries use a closed schema" not in expanded
+        assert (
+            "StageReviewReport`, nested `ReviewFinding`, and nested `ProofAuditRecord` entries use a closed schema"
+            not in expanded
+        )
 
 
 def test_peer_review_panel_protocol_surfaces_full_review_enum_vocabularies() -> None:
@@ -136,3 +148,35 @@ def test_peer_review_panel_protocol_surfaces_full_review_enum_vocabularies() -> 
         assert line in protocol
     assert "references/publication/peer-review-panel.md" in review_reader
     assert "Peer Review Panel Protocol" not in expanded
+
+
+def test_review_physics_condensed_matter_boundary_opens_selected_handle_before_judgment() -> None:
+    panel = (SPEC_ROOT / "workflows" / "peer-review" / "panel-stages.md").read_text(encoding="utf-8")
+    physics = _read("gpd-review-physics.md")
+    expanded = _expanded("gpd-review-physics.md")
+
+    for source in (panel, physics):
+        assert "protocol_bundle_load_manifest" in source
+        assert "verification_domains" in source
+        assert "execution_guides" in source
+        assert "fallback domain/protocol handle" in source
+        assert "before" in source
+        assert "judgment" in source
+
+    for token in ("condensed-matter", "method-specific", "domain", "method", "judgment"):
+        assert token in panel
+    for token in ("domain", "method", "judgment"):
+        assert token in physics
+    assert "Acknowledging a handle or\nbundle id is not evidence." in panel
+    assert "Peer Review Panel Protocol" not in expanded
+    assert (
+        "StageReviewReport`, nested `ReviewFinding`, and nested `ProofAuditRecord` entries use a closed schema"
+        not in expanded
+    )
+
+    for forbidden in (
+        "# Condensed Matter",
+        "Sum rules, Kramers-Kronig",
+        "Luttinger theorem",
+    ):
+        assert forbidden not in physics

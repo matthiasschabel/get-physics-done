@@ -4,50 +4,10 @@ All notable changes to Get Physics Done are documented here.
 
 ## vNEXT
 
-## v1.2.2
-
-### Live command audit hardening
-
-- Stabilize live command behavior across Codex, Claude, Gemini, and OpenCode, including update, install, uninstall, help, profile, and new-project workflows.
-- Harden phase planning, phase execution, checkpoint routing, project-local verification reports, and publication command gates so live audit recovery paths fail closed instead of drifting across projects.
-- Tighten verifier prompt budgets, staged context handling, raw help surfaces, arXiv command subject validation, and external-project read-only routing.
-
-### Maintenance
-
-- Refresh arXiv, arXiv MCP server, Typer, and Ruff dependencies.
-- Clarify paper-submission README guidance and add the Eberhardt GPD acknowledgement to the public papers list.
-
-## v1.2.1
-
-### Workflow and release hardening
-
-- Harden runtime wiring across installers, projected commands, update checks, and runtime catalogs, including OpenCode permission preservation and fail-closed capability validation.
-- Tighten project, state, and continuation boundaries so nested repositories, live execution state, recent-project cache entries, and child-return rollback are handled more conservatively.
-- Strengthen publication and contract validation by rejecting mismatched or malformed latest review artifacts, aligning contract-link schemas with prompt-visible templates, and preserving valid optional MCP request fields.
-- Improve release recovery and CI guardrails for same-commit publish reruns, existing tag checks, release PR discovery, and human-author range validation.
-- Trim and clarify workflow and agent prompts while preserving canonical model-omission, artifact-gate, destructive-confirmation, and checkpoint semantics.
-
-## v1.2.0
-
-### Supervised by default
-
-- **Defaults flipped to supervised + dense.** New projects start with `autonomy=supervised`, `review_cadence=dense`, `checkpoint_after_n_tasks=1`, and tighter unattended budgets (15 min/plan, 30 min/wave). The "scalpel, not autopilot" framing is surfaced across `README.md`, `start`, `tour`, `help`, and `settings`.
-- **Shallow roadmap on `gpd:new-project` standard mode.** Phase 1 is fully detailed; Phases 2+ ship as one-line stubs that are expanded on demand via `gpd:plan-phase N`. The standard-mode "Next Up" recommends `plan-phase 1` directly. `--minimal` stays opt-in.
-- **`review_cadence=dense` unconditionally forces the first-result gate** on every wave, even when the executor forgets to mark a result load-bearing. Closes the "executor mislabels a result" silent-failure trap. Config validator rejects `dense` paired with `checkpoint_after_first_load_bearing_result=false` so the invariant cannot be silently disabled.
-- **Claim↔deliverable alignment precheck** before `execute-phase` spawns workers. New `<step name="claim_deliverable_alignment_check">` renders user intent next to the machine contract and gates execution on a single `ask_user` (4-option Y/e/p/n, Enter = Y). Confirmation persists by `(contract_hash, context_hash)` so re-runs in the same session don't re-prompt unless the contract or `CONTEXT.md` changes.
-- **`gpd progress --watch` heartbeat.** Polls the execution-state and lineage signal files and redraws via `rich.live.Live` (TTY) or one JSON object per tick (pipes). New `--interval` and `--exit-on-idle` flags. Clean Ctrl-C exit.
-- **`gpd:record-backtrack` command + planner consultation.** Captures "why did we have to backtrack?" rows to `GPD/BACKTRACKS.md` with an 11-column schema (date, phase, stage, trigger, produced, why_wrong, counter_action, category, confidence, promote, reverted_commit). The planner consults the file before each planning decision under the same context-budget discipline as INSIGHTS.md. Rows flagged `promote: true` are auto-copied into `INSIGHTS.md`'s `## Execution Deviations` section. `gpd:undo` offers inline capture as a `[Y/n/e]` post-step with `--reverted-commit` / `--trigger` flags handed off through a real `Skill` invocation.
-- **`[Y/n/e]` Enter-is-accept convention** unified across every `checkpoint:human-verify` surface. Enter / Y accepts the recommended action, `n` rejects, `e` opens a freeform edit. New canonical reference doc `specs/references/orchestration/checkpoint-ux-convention.md` documents the idiom, the one-line summary contract, and the carve-outs that intentionally do not collapse to a single keystroke (decisions, convention lock, destructive rails, claim↔deliverable precheck, first-result gate, pre-fanout review, blocker triage, `checkpoint:human-action`). Render template now shows a `Summary:` one-liner with `press v to expand` for the full verification checklist.
-- **Clean-pass wave batching under `review_cadence=dense`.** Under `autonomy=supervised AND review_cadence=dense`, a wave whose tasks all complete with no deviation collapses its per-task `checkpoint:human-verify` emissions into one batch `Approve tasks N..M as clean pass? [Y/n/e]`. Any deviation, failed verification, or triggered gate immediately reverts the wave to per-task checkpoints — batching collapses keystrokes, not gates.
-- **`gpd contract` CLI subcommand group**: `record-alignment`, `alignment-status`, `fingerprint`, `context-fingerprint` (auto-resolves the active phase's CONTEXT.md when called with no path), and `alignment-summary`. The execute-phase precheck reads and writes alignment state through these commands.
-- **All five workflow presets** (`core-research`, `theory`, `numerics`, `publication-manuscript`, `full-research`) updated to inherit the new supervised/dense defaults instead of pinning `autonomy=balanced` + a mix of `review_cadence` values. Picking "Core research (Recommended)" no longer silently weakens the project default.
-- **Per-segment snapshot cadence override** is now an intentional escalation hook in `observability.py`: a workflow that emits `execution.review_cadence` on a prior event takes precedence over the policy read from `GPD/config.json`, allowing a future high-stakes segment to request dense mid-execution without a config rewrite.
-
-### Other fixes
-
-- feat(paper): Tectonic TeX engine support. When `tectonic` is on PATH (or installed at the common Windows locations under `%LOCALAPPDATA%\Programs\Tectonic\` or `~/.cargo/bin/`), GPD uses it as the preferred compiler and skips the separate pdflatex + bibtex + latexmk stack — Tectonic handles bibliography and multi-pass internally. pdflatex remains the fallback.
-- feat(pdf): Replace the system `pdftotext` binary dependency with the `pypdf` Python library (BSD-3-Clause). Install via `pip install 'get-physics-done[arxiv]'`. The `.txt` companion-file fallback for PDF peer-review intake is unchanged.
-- feat(opencode): The OpenCode install adapter now rewrites bare `gpd:command` references to `gpd-command` in installed command markdown so the runtime sees the correct canonical command names. The "dollar prefixes" phrase in the help workflow was removed to avoid implying OpenCode uses `$gpd-` syntax.
+- Add pandoc-driven markdown→LaTeX pipeline for the paper writer. Sections can opt in via `Section.content_format="markdown"`; raw-LaTeX payloads still pass through unchanged. Pandoc is probed once per `render_paper` call and shared across sections. When pandoc is missing the markdown path raises `PandocNotAvailable` with a recovery hint; legacy `maybe_convert_to_latex` callers degrade to pass-through. `--natbib` is the default so `@key` / `[@k1; @k2]` emit `\citet`/`\citep` for the template's `\bibliography{…}` to resolve; `pandoc-crossref` is auto-enabled when installed and `pandoc-citeproc` is intentionally excluded from auto-detection.
+- Fix Nature template citation rendering: switch from `naturemag.bst` to `unsrtnat` with `\usepackage[numbers,super,sort&compress]{natbib}`. `naturemag.bst` predates natbib and has no author-name macro, so pandoc's `\citet` rendered as "(author?)" in the final PDF while passing every string-level `.tex` assertion.
+- Fix PRL template cite-command resolution under revtex4-2: pass `natbib` as a class option (`\documentclass[…,natbib]{revtex4-2}`) instead of `\usepackage{natbib}`, which would otherwise option-clash with revtex's internal natbib load.
+- Define `\providecommand{\tightlist}{…}` across every journal template (apj, jfm, jhep, mnras, nature, prl) so pandoc-emitted bullet lists compile.
 - Fix `state patch` silent failures: failed fields now include `failure_reasons` with specific messages (invalid status, invalid transition, field not found). Dot-notation prefixes (e.g., `position.status` -> `Status`) are stripped only when the original name is not found. Session Continuity mirror fields (e.g., `resume_file`) are rejected with an explicit error directing users to the continuation API. CLI pretty-prints each failure reason as a separate row.
 - Recognize bare arXiv IDs (`1304.4926`, `hep-th/0603001`) and bare DOIs (`10.1103/PhysRevD.100.026003`) as concrete reference locators for `must_surface` anchor validation. Fix casefold mismatch in `_is_project_artifact_path` that misclassified mixed-case archive names (e.g., `math.DG/0211159`) as project artifact paths.
 - Fix `gpd suggest` ignoring actual project state: use `_project_scoped_cwd()` so root-level PROJECT.md is auto-migrated before `suggest_next()` runs, matching the pattern used by `progress`, `state`, and `status` commands.

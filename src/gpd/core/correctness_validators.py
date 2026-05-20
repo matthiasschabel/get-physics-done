@@ -62,6 +62,10 @@ _PLACEHOLDER_OUTPUT_RE = re.compile(
     r"\b(?:would produce|expected output|not run|not executed|no output|omitted|placeholder|todo)\b",
     re.IGNORECASE,
 )
+_PLACEHOLDER_CODE_RE = re.compile(
+    r"(?:template only\s*-\s*replace before validation|replace this block with|actual code with expressions from this phase)",
+    re.IGNORECASE,
+)
 _VERDICT_RE = re.compile(r"\b(?:PASS|FAIL|INCONCLUSIVE)\b", re.IGNORECASE)
 
 
@@ -98,6 +102,12 @@ def _output_block_is_actual(output_body: str, intervening_text: str) -> bool:
     return _has_substantive_block_text(output_body)
 
 
+def _code_block_is_actual(code_body: str) -> bool:
+    if _PLACEHOLDER_CODE_RE.search(code_body):
+        return False
+    return _has_substantive_block_text(code_body)
+
+
 def validate_verification_oracle_evidence(
     content: str,
     *,
@@ -108,7 +118,7 @@ def validate_verification_oracle_evidence(
     fences = _iter_fences(content)
     evidence_count = 0
     for index, code_fence in enumerate(fences):
-        if code_fence.lang not in _CODE_LANGS or not _has_substantive_block_text(code_fence.body):
+        if code_fence.lang not in _CODE_LANGS or not _code_block_is_actual(code_fence.body):
             continue
 
         for output_fence in fences[index + 1 : index + 3]:

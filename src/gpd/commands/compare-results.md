@@ -24,6 +24,17 @@ allowed-tools:
   - search_files
   - find_files
   - ask_user
+help:
+  group: Validation and analysis
+  order: 350
+  compact_description: Compare internal results or baselines and write the verdict under `GPD/comparisons/`
+  display_signature: gpd:compare-results
+  detail_signature: gpd:compare-results [phase, artifact, or comparison target]
+  examples:
+    - gpd:compare-results GPD/comparisons/baseline.md
+  notes:
+    - Writes a decisive comparison artifact under GPD/comparisons/ for the current workspace.
+  root_detail_order: 190
 ---
 
 

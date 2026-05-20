@@ -20,6 +20,7 @@ import socket
 from contextlib import nullcontext
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -95,6 +96,7 @@ from gpd.core.utils import (
     safe_parse_int,
     safe_read_file,
 )
+from gpd.core.verification_status import read_verification_status, verification_path_for_phase
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +139,7 @@ __all__ = [
     "save_state_json",
     "save_state_json_locked",
     "state_add_blocker",
+    "state_status_class",
     "state_add_decision",
     "state_advance_plan",
     "state_compact",
@@ -1452,6 +1455,54 @@ VALID_STATUSES: list[str] = [
     "Ready to plan",
     "Milestone complete",
 ]
+
+StateStatusClass = Literal[
+    "unset",
+    "not_started",
+    "planning",
+    "researching",
+    "ready_to_execute",
+    "executing",
+    "paused",
+    "phase_ready_for_verification",
+    "verifying",
+    "verified",
+    "complete",
+    "blocked",
+    "ready_to_plan",
+    "milestone_complete",
+    "unknown",
+]
+
+_STATE_STATUS_CLASS_BY_KEY: dict[str, StateStatusClass] = {
+    "not started": "not_started",
+    "planning": "planning",
+    "researching": "researching",
+    "ready to execute": "ready_to_execute",
+    "executing": "executing",
+    "paused": "paused",
+    "phase complete ready for verification": "phase_ready_for_verification",
+    "verifying": "verifying",
+    "verified": "verified",
+    "complete": "complete",
+    "blocked": "blocked",
+    "ready to plan": "ready_to_plan",
+    "milestone complete": "milestone_complete",
+}
+
+
+def state_status_class(status: object) -> StateStatusClass:
+    """Classify a persisted state status string without rewriting it."""
+
+    if status is None:
+        return "unset"
+    text = str(status).strip()
+    if not text or text == "\u2014" or text.casefold() in {"none", "no", "not set", "[not set]"}:
+        return "unset"
+    key = text.casefold().replace("\u2014", " ").replace("--", " ").replace("-", " ")
+    key = " ".join(key.split())
+    return _STATE_STATUS_CLASS_BY_KEY.get(key, "unknown")
+
 
 # Valid state transitions: maps lowercase status -> list of valid next statuses.
 # None means any transition is valid (recovery states like Paused/Blocked).
@@ -4984,13 +5035,16 @@ def state_record_verification(
     phase: str | None = None,
     status: str | None = None,
     verification_path: Path | None = None,
+    admin_override: bool = False,
 ) -> RecordVerificationResult:
     """Atomically update shared state after a VERIFICATION.md result.
 
     Lets callers advance past ``Phase complete — ready for verification`` /
     ``Verifying`` without requiring a later manual ``gpd-sync-state``. If
-    ``status`` is not provided, the function reads the ``status:`` field from
-    the phase's VERIFICATION.md frontmatter.
+    ``status`` is not provided, the function reads the canonical frontmatter
+    status from the phase's VERIFICATION.md and fails closed if it is missing,
+    unparseable, or unknown. Supplying ``status`` is an administrative repair
+    override and requires ``admin_override=True``.
     """
     if not phase:
         return RecordVerificationResult(recorded=False, error="phase required")
@@ -4998,6 +5052,14 @@ def state_record_verification(
     # Normalize user input: "passed" / "pass" / "failed" / "fail".
     normalized_status: str | None = None
     if status is not None:
+        if not admin_override:
+            return RecordVerificationResult(
+                recorded=False,
+                error=(
+                    "manual verification status override requires admin_override=True; "
+                    "omit status to read canonical VERIFICATION.md frontmatter"
+                ),
+            )
         normalized = status.strip().lower()
         if normalized in {"passed", "pass", "ok", "success"}:
             normalized_status = "passed"
@@ -5013,51 +5075,25 @@ def state_record_verification(
             )
 
     if normalized_status is None:
-        # Try to read it from the VERIFICATION.md frontmatter.
         phase_norm = phase.strip()
-        path = verification_path
-        if path is None:
-            phases_dir = ProjectLayout(cwd).phases_dir
-            if phases_dir.exists():
-                for phase_dir in phases_dir.iterdir():
-                    if not phase_dir.is_dir():
-                        continue
-                    name = phase_dir.name
-                    head = name.split("-", 1)[0]
-                    if head == phase_norm or head.lstrip("0") == phase_norm.lstrip("0"):
-                        candidate = phase_dir / f"{head}-VERIFICATION.md"
-                        if candidate.exists():
-                            path = candidate
-                            break
-                        candidate = phase_dir / "VERIFICATION.md"
-                        if candidate.exists():
-                            path = candidate
-                            break
+        path = verification_path or verification_path_for_phase(cwd, phase_norm)
+        if path is not None:
+            path = path.resolve(strict=False)
         if path is None or not path.exists():
             return RecordVerificationResult(
                 recorded=False,
                 error=f"VERIFICATION.md not found for phase {phase}",
             )
-        try:
-            text = path.read_text(encoding="utf-8")
-        except OSError as exc:
-            return RecordVerificationResult(recorded=False, error=str(exc))
-        fm_match = re.match(r"^---\s*\n([\s\S]*?)\n---", text)
-        if fm_match:
-            for line in fm_match.group(1).splitlines():
-                m = re.match(r"\s*status\s*:\s*(\S+)", line)
-                if m:
-                    val = m.group(1).strip().strip("'\"").lower()
-                    if val in {"passed", "pass", "ok"}:
-                        normalized_status = "passed"
-                    elif val in {"failed", "fail", "blocked", "gaps_found", "expert_needed", "human_needed"}:
-                        normalized_status = "failed"
-                    break
-        if normalized_status is None:
+        verification_status = read_verification_status(path)
+        if not verification_status.is_known:
+            reason = "; ".join(verification_status.errors) or (
+                f"verification status could not be routed ({verification_status.routing_status})"
+            )
             return RecordVerificationResult(
                 recorded=False,
-                reason="VERIFICATION.md has no 'status: passed|failed' frontmatter",
+                reason=reason,
             )
+        normalized_status = "passed" if verification_status.status == "passed" else "failed"
 
     new_status = "Verified" if normalized_status == "passed" else "Blocked"
 

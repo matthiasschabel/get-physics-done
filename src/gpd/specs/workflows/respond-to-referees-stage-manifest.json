@@ -2,10 +2,9 @@
   "schema_version": 1,
   "workflow_id": "respond-to-referees",
   "required_init_field_groups": {
-    "response_round_common": [
+    "response_launch_context": [
       "project_exists",
       "state_exists",
-      "commit_docs",
       "autonomy",
       "research_mode",
       "response_intake_input",
@@ -14,33 +13,93 @@
       "review_target_mode_reason",
       "resolved_review_target",
       "resolved_review_root",
-      "project_contract",
+      "platform"
+    ],
+    "response_contract_gate_context": [
       "project_contract_gate",
       "project_contract_load_info",
       "project_contract_validation",
-      "contract_intake",
-      "effective_reference_intake",
+      "effective_reference_intake"
+    ],
+    "response_contract_body_context": [
+      "project_contract_gate",
+      "project_contract_load_info",
+      "project_contract_validation",
+      "effective_reference_intake"
+    ],
+    "response_contract_gate_context_compact": [
+      "project_contract_gate",
+      "effective_reference_intake"
+    ],
+    "response_protocol_reference_context": [
       "selected_protocol_bundle_ids",
       "protocol_bundle_context",
       "active_reference_context",
       "derived_manuscript_reference_status",
       "derived_manuscript_reference_status_count",
-      "derived_manuscript_proof_review_status",
+      "derived_manuscript_proof_review_status"
+    ],
+    "response_protocol_reference_handles": [
+      "selected_protocol_bundle_ids",
+      "protocol_bundle_load_manifest",
+      "derived_manuscript_reference_status",
+      "derived_manuscript_reference_status_count",
+      "derived_manuscript_proof_review_status"
+    ],
+    "response_manuscript_status_context": [
+      "derived_manuscript_reference_status",
+      "derived_manuscript_reference_status_count",
+      "derived_manuscript_proof_review_status"
+    ],
+    "response_reference_evidence_context": [
+      "reference_artifact_files",
+      "reference_artifacts_content",
+      "literature_review_files",
+      "literature_review_count",
+      "research_map_reference_files",
+      "research_map_reference_count",
+      "citation_source_files",
+      "citation_source_count",
+      "citation_source_warnings",
+      "derived_citation_sources",
+      "derived_citation_source_count"
+    ],
+    "response_reference_handle_context": [
+      "reference_artifact_files",
+      "literature_review_files",
+      "literature_review_count",
+      "research_map_reference_files",
+      "research_map_reference_count",
+      "citation_source_files",
+      "citation_source_count",
+      "citation_source_warnings",
+      "derived_citation_sources",
+      "derived_citation_source_count"
+    ],
+    "response_publication_roots": [
       "publication_subject_slug",
       "publication_lane_kind",
       "publication_lane_owner",
       "managed_publication_root",
       "selected_publication_root",
-      "selected_review_root",
+      "selected_review_root"
+    ],
+    "response_manuscript_resolution": [
       "manuscript_resolution_status",
-      "manuscript_resolution_detail",
+      "manuscript_resolution_detail"
+    ],
+    "response_manuscript_package_paths": [
       "manuscript_root",
       "manuscript_entrypoint",
       "artifact_manifest_path",
       "bibliography_audit_path",
-      "reproducibility_manifest_path",
+      "reproducibility_manifest_path"
+    ],
+    "response_blockers_context": [
       "publication_blockers",
-      "publication_blocker_count",
+      "publication_blocker_count"
+    ],
+    "response_review_round_artifacts": [
       "latest_review_round",
       "latest_review_round_suffix",
       "latest_review_ledger",
@@ -48,14 +107,35 @@
       "latest_referee_report_md",
       "latest_referee_report_tex",
       "latest_proof_redteam",
-      "latest_review_artifacts",
+      "latest_review_artifacts"
+    ],
+    "response_artifact_pair_context": [
       "latest_response_round",
       "latest_response_round_suffix",
       "latest_author_response",
       "latest_referee_response",
-      "latest_response_artifacts",
-      "platform"
+      "latest_response_artifacts"
     ]
+  },
+  "authority_groups": {
+    "response_review_recovery_templates": [
+      "references/publication/peer-review-reliability.md",
+      "references/publication/stage-recovery-gate.md",
+      "templates/paper/referee-response.md",
+      "templates/paper/author-response.md"
+    ]
+  },
+  "stage_defaults": {
+    "allowed_tools": [
+      "ask_user",
+      "file_read",
+      "find_files",
+      "search_files",
+      "shell",
+      "task"
+    ],
+    "conditional_authorities": [],
+    "writes_allowed": []
   },
   "stages": [
     {
@@ -63,31 +143,23 @@
       "order": 1,
       "purpose": "target-aware response-round bootstrap, manuscript routing, report-source policy, and publication root selection",
       "mode_paths": [
-        "workflows/respond-to-referees.md"
+        "workflows/respond-to-referees/bootstrap.md"
       ],
       "required_init_fields": [
         "project_root"
       ],
       "loaded_authorities": [
-        "workflows/respond-to-referees.md",
+        "workflows/respond-to-referees/bootstrap.md",
         "references/publication/publication-bootstrap-preflight.md"
       ],
-      "conditional_authorities": [],
       "must_not_eager_load": [
-        "references/publication/publication-response-writer-handoff.md",
-        "references/publication/peer-review-reliability.md",
-        "templates/paper/referee-response.md",
-        "templates/paper/author-response.md"
+        "workflows/respond-to-referees.md",
+        "workflows/respond-to-referees/report-triage.md",
+        "workflows/respond-to-referees/revision-planning.md",
+        "workflows/respond-to-referees/response-authoring.md",
+        "workflows/respond-to-referees/finalize.md",
+        "references/publication/publication-response-writer-handoff.md"
       ],
-      "allowed_tools": [
-        "ask_user",
-        "file_read",
-        "find_files",
-        "search_files",
-        "shell",
-        "task"
-      ],
-      "writes_allowed": [],
       "produced_state": [
         "response-round bootstrap state",
         "target-aware manuscript routing state",
@@ -102,7 +174,18 @@
         "selected publication and review roots identified"
       ],
       "required_init_field_groups": [
-        "response_round_common"
+        "response_launch_context",
+        "response_contract_gate_context",
+        "response_manuscript_status_context",
+        "response_publication_roots",
+        "response_manuscript_resolution",
+        "response_manuscript_package_paths",
+        "response_blockers_context",
+        "response_review_round_artifacts",
+        "response_artifact_pair_context"
+      ],
+      "must_not_eager_load_groups": [
+        "response_review_recovery_templates"
       ]
     },
     {
@@ -110,27 +193,32 @@
       "order": 2,
       "purpose": "referee report ingestion, latest-round detection, and decision artifact calibration",
       "mode_paths": [
-        "workflows/respond-to-referees.md"
+        "workflows/respond-to-referees/report-triage.md"
       ],
       "loaded_authorities": [
-        "workflows/respond-to-referees.md",
-        "references/publication/peer-review-reliability.md",
+        "workflows/respond-to-referees/report-triage.md",
         "references/publication/publication-response-writer-handoff.md"
       ],
-      "conditional_authorities": [],
+      "conditional_authorities": [
+        {
+          "when": "review_integrity_recovery_needed",
+          "authorities": [
+            "references/publication/peer-review-reliability.md"
+          ]
+        },
+        {
+          "when": "checkpoint_or_child_recovery_needed",
+          "authorities": [
+            "references/publication/stage-recovery-gate.md"
+          ]
+        }
+      ],
       "must_not_eager_load": [
-        "templates/paper/referee-response.md",
-        "templates/paper/author-response.md"
+        "workflows/respond-to-referees.md",
+        "workflows/respond-to-referees/revision-planning.md",
+        "workflows/respond-to-referees/response-authoring.md",
+        "workflows/respond-to-referees/finalize.md"
       ],
-      "allowed_tools": [
-        "ask_user",
-        "file_read",
-        "find_files",
-        "search_files",
-        "shell",
-        "task"
-      ],
-      "writes_allowed": [],
       "produced_state": [
         "parsed referee issue inventory",
         "active response round state",
@@ -145,7 +233,16 @@
         "issue inventory ready for revision planning"
       ],
       "required_init_field_groups": [
-        "response_round_common"
+        "response_launch_context",
+        "response_publication_roots",
+        "response_manuscript_resolution",
+        "response_manuscript_package_paths",
+        "response_blockers_context",
+        "response_review_round_artifacts",
+        "response_artifact_pair_context"
+      ],
+      "must_not_eager_load_groups": [
+        "response_review_recovery_templates"
       ]
     },
     {
@@ -153,40 +250,41 @@
       "order": 3,
       "purpose": "claim-level response planning, new-calculation routing, and manuscript-change scope control",
       "mode_paths": [
-        "workflows/respond-to-referees.md"
-      ],
-      "required_init_fields": [
-        "reference_artifact_files",
-        "reference_artifacts_content",
-        "literature_review_files",
-        "literature_review_count",
-        "research_map_reference_files",
-        "research_map_reference_count",
-        "citation_source_files",
-        "citation_source_count",
-        "citation_source_warnings",
-        "derived_citation_sources",
-        "derived_citation_source_count"
+        "workflows/respond-to-referees/revision-planning.md"
       ],
       "loaded_authorities": [
-        "workflows/respond-to-referees.md",
-        "references/publication/peer-review-reliability.md",
-        "references/publication/publication-response-writer-handoff.md"
+        "workflows/respond-to-referees/revision-planning.md"
       ],
-      "conditional_authorities": [],
+      "conditional_authorities": [
+        {
+          "when": "response_pair_artifact_contract_needed",
+          "authorities": [
+            "references/publication/publication-response-writer-handoff.md"
+          ]
+        },
+        {
+          "when": "review_integrity_recovery_needed",
+          "authorities": [
+            "references/publication/peer-review-reliability.md"
+          ]
+        },
+        {
+          "when": "checkpoint_or_child_recovery_needed",
+          "authorities": [
+            "references/publication/stage-recovery-gate.md"
+          ]
+        }
+      ],
       "must_not_eager_load": [
+        "workflows/respond-to-referees.md",
+        "workflows/respond-to-referees/response-authoring.md",
+        "workflows/respond-to-referees/finalize.md",
+        "references/publication/peer-review-reliability.md",
+        "references/publication/publication-response-writer-handoff.md",
+        "references/publication/stage-recovery-gate.md",
         "templates/paper/referee-response.md",
         "templates/paper/author-response.md"
       ],
-      "allowed_tools": [
-        "ask_user",
-        "file_read",
-        "find_files",
-        "search_files",
-        "shell",
-        "task"
-      ],
-      "writes_allowed": [],
       "produced_state": [
         "response plan",
         "manuscript revision plan",
@@ -201,7 +299,15 @@
         "subagent revision handoffs scoped"
       ],
       "required_init_field_groups": [
-        "response_round_common"
+        "response_launch_context",
+        "response_contract_gate_context_compact",
+        "response_protocol_reference_handles",
+        "response_reference_handle_context",
+        "response_publication_roots",
+        "response_manuscript_resolution",
+        "response_manuscript_package_paths",
+        "response_review_round_artifacts",
+        "response_artifact_pair_context"
       ]
     },
     {
@@ -209,16 +315,32 @@
       "order": 4,
       "purpose": "author response drafting, referee-facing response drafting, and synchronized manuscript edits",
       "mode_paths": [
-        "workflows/respond-to-referees.md"
+        "workflows/respond-to-referees/response-authoring.md"
       ],
       "loaded_authorities": [
-        "workflows/respond-to-referees.md",
+        "workflows/respond-to-referees/response-authoring.md",
         "references/publication/publication-response-writer-handoff.md",
+        "references/publication/stage-recovery-gate.md",
         "templates/paper/referee-response.md",
         "templates/paper/author-response.md"
       ],
-      "conditional_authorities": [],
+      "conditional_authorities": [
+        {
+          "when": "writer_spawn_needed",
+          "authorities": [
+            "references/orchestration/runtime-delegation-note.md"
+          ]
+        },
+        {
+          "when": "review_integrity_recovery_needed",
+          "authorities": [
+            "references/publication/peer-review-reliability.md"
+          ]
+        }
+      ],
       "must_not_eager_load": [
+        "references/orchestration/runtime-delegation-note.md",
+        "references/publication/peer-review-reliability.md",
         "references/publication/publication-review-round-artifacts.md"
       ],
       "allowed_tools": [
@@ -252,7 +374,15 @@
         "new calculation artifacts linked when needed"
       ],
       "required_init_field_groups": [
-        "response_round_common"
+        "response_launch_context",
+        "response_contract_gate_context_compact",
+        "response_protocol_reference_context",
+        "response_reference_evidence_context",
+        "response_publication_roots",
+        "response_manuscript_resolution",
+        "response_manuscript_package_paths",
+        "response_review_round_artifacts",
+        "response_artifact_pair_context"
       ]
     },
     {
@@ -260,22 +390,31 @@
       "order": 5,
       "purpose": "response-round closeout, artifact consistency checks, and next-review handoff",
       "mode_paths": [
-        "workflows/respond-to-referees.md"
+        "workflows/respond-to-referees/finalize.md"
       ],
       "loaded_authorities": [
-        "workflows/respond-to-referees.md",
-        "references/publication/peer-review-reliability.md",
+        "workflows/respond-to-referees/finalize.md",
         "references/publication/publication-response-writer-handoff.md"
       ],
-      "conditional_authorities": [],
-      "must_not_eager_load": [],
-      "allowed_tools": [
-        "ask_user",
-        "file_read",
-        "find_files",
-        "search_files",
-        "shell",
-        "task"
+      "conditional_authorities": [
+        {
+          "when": "review_integrity_recovery_needed",
+          "authorities": [
+            "references/publication/peer-review-reliability.md"
+          ]
+        },
+        {
+          "when": "checkpoint_or_child_recovery_needed",
+          "authorities": [
+            "references/publication/stage-recovery-gate.md"
+          ]
+        }
+      ],
+      "must_not_eager_load": [
+        "workflows/respond-to-referees.md",
+        "workflows/respond-to-referees/report-triage.md",
+        "workflows/respond-to-referees/revision-planning.md",
+        "workflows/respond-to-referees/response-authoring.md"
       ],
       "writes_allowed": [
         "GPD/AUTHOR-RESPONSE{round_suffix}.md",
@@ -294,7 +433,15 @@
         "next command surfaced"
       ],
       "required_init_field_groups": [
-        "response_round_common"
+        "response_launch_context",
+        "response_publication_roots",
+        "response_manuscript_resolution",
+        "response_manuscript_package_paths",
+        "response_review_round_artifacts",
+        "response_artifact_pair_context"
+      ],
+      "must_not_eager_load_groups": [
+        "response_review_recovery_templates"
       ]
     }
   ]

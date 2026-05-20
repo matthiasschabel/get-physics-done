@@ -4,23 +4,35 @@ import re
 from pathlib import Path
 
 from gpd.core.workflow_staging import load_workflow_stage_manifest
+from tests.assertion_taxonomy_support import assert_prompt_contracts, machine_exact, semantic_concept
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
+EXECUTE_PHASE_STAGE_DIR = WORKFLOWS_DIR / "execute-phase"
 REFERENCES_DIR = REPO_ROOT / "src/gpd/specs/references/orchestration"
 EXECUTION_REFERENCES_DIR = REPO_ROOT / "src/gpd/specs/references/execution"
 
 
 def test_execute_phase_loads_artifact_surfacing_before_using_it() -> None:
-    execute_phase = (WORKFLOWS_DIR / "execute-phase.md").read_text(encoding="utf-8")
+    execute_phase = (EXECUTE_PHASE_STAGE_DIR / "wave-return-checkpoint.md").read_text(encoding="utf-8")
+    manifest = load_workflow_stage_manifest("execute-phase")
 
-    required_reading = "{GPD_INSTALL_DIR}/references/orchestration/artifact-surfacing.md"
-    later_reference = "See `references/orchestration/artifact-surfacing.md` for artifact class definitions and review priority rules."
+    required_reading = "references/orchestration/artifact-surfacing.md"
+    later_reference = "artifact-surfacing.md` for artifact class definitions and review priority rules."
 
-    assert required_reading in execute_phase
-    assert execute_phase.index(required_reading) < execute_phase.index(later_reference)
-    assert "contract deliverable that is the `subject` of an acceptance test" in execute_phase
-    assert "contract deliverable tagged as an acceptance test" not in execute_phase
+    assert any(
+        required_reading in group.authorities
+        for group in manifest.stage("wave_return_checkpoint").conditional_authorities
+    )
+    assert later_reference in execute_phase
+    assert_prompt_contracts(
+        execute_phase,
+        *semantic_concept(
+            "wave return checkpoint uses subject-based acceptance deliverables",
+            required=("contract deliverable that is the `subject` of an acceptance test",),
+            forbidden=("contract deliverable tagged as an acceptance test",),
+        ),
+    )
 
 
 def test_artifact_surfacing_uses_canonical_paths_and_contract_terms() -> None:
@@ -35,7 +47,13 @@ def test_artifact_surfacing_uses_canonical_paths_and_contract_terms() -> None:
     assert "GPD/REFEREE-REPORT{round_suffix}.tex" in artifact_surfacing
     assert "GPD/review/REVIEW-LEDGER{round_suffix}.json" in artifact_surfacing
     assert "`.md`, `.tex`, `.json`" in artifact_surfacing
-    assert "Contract deliverables that are the `subject` of an acceptance test" in artifact_surfacing
+    assert_prompt_contracts(
+        artifact_surfacing,
+        *semantic_concept(
+            "artifact surfacing contract deliverables use subject-based acceptance",
+            required=("Contract deliverables that are the `subject` of an acceptance test",),
+        ),
+    )
     assert ".gpd/" not in artifact_surfacing
 
 
@@ -76,12 +94,18 @@ def test_execute_plan_uses_staged_execution_bootstrap_and_late_context_refreshes
     assert "segment_execution" not in requested_stage_ids
     assert "summary_finalize" not in requested_stage_ids
     assert 'gpd --raw init execute-phase "${phase}" --include state,config' not in execute_plan
-    assert "summary-schema loads until the stage that actually consumes them" in execute_plan
+    assert_prompt_contracts(
+        execute_plan,
+        machine_exact(
+            "execute-plan defers summary schema to consuming stage",
+            "summary-schema loads until the stage that actually consumes them",
+        ),
+    )
 
 
 def test_execute_phase_loader_does_not_silently_fallback_to_full_init() -> None:
-    execute_phase = (WORKFLOWS_DIR / "execute-phase.md").read_text(encoding="utf-8")
+    execute_phase = (EXECUTE_PHASE_STAGE_DIR / "phase-bootstrap.md").read_text(encoding="utf-8")
 
-    assert "staged gpd initialization failed for stage" in execute_phase
-    assert 'if [ "$init_status" -ne 0 ] || [ -z "$init_payload" ]; then' in execute_phase
-    assert 'if [ $? -eq 0 ] && [ -n "$init_payload" ]; then' not in execute_phase
+    assert "gpd initialization failed" in execute_phase
+    assert 'if [ "$INIT_STATUS" -ne 0 ] || [ -z "$BOOTSTRAP_INIT" ]; then' in execute_phase
+    assert 'if [ $? -eq 0 ] && [ -n "$BOOTSTRAP_INIT" ]; then' not in execute_phase

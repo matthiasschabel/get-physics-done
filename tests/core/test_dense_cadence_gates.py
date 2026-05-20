@@ -144,21 +144,28 @@ def test_dense_cadence_forces_pre_fanout_review_required() -> None:
         / "gpd"
         / "specs"
         / "workflows"
-        / "execute-phase.md"
+        / "execute-phase"
+        / "wave-planning.md"
     ).read_text(encoding="utf-8")
 
-    assert "Dense cadence override:" in execute_phase
+    assert "When `review_cadence=dense`, treat every wave as risky" in execute_phase
+    assert "require both first-result and pre-fanout gates" in execute_phase
     assert "FIRST_RESULT_GATE_REQUIRED=true" in execute_phase
     assert "PRE_FANOUT_REVIEW_REQUIRED=true" in execute_phase
 
-    # Both invariants must live inside the same paragraph as the override header.
-    override_index = execute_phase.index("Dense cadence override:")
-    paragraph_end = execute_phase.find("\n\n", override_index)
+    # Dense cadence now maps to the shared risky-wave settings instead of
+    # repeating their shell literals in the override sentence.
+    risky_index = execute_phase.index("When a wave is risky:")
+    first_gate_index = execute_phase.index("FIRST_RESULT_GATE_REQUIRED=true")
+    pre_fanout_index = execute_phase.index("PRE_FANOUT_REVIEW_REQUIRED=true")
+    dense_index = execute_phase.index("When `review_cadence=dense`")
+    assert risky_index < first_gate_index < pre_fanout_index < dense_index
+    paragraph_end = execute_phase.find("\n\n", dense_index)
     if paragraph_end == -1:
         paragraph_end = len(execute_phase)
-    override_paragraph = execute_phase[override_index:paragraph_end]
-    assert "FIRST_RESULT_GATE_REQUIRED=true" in override_paragraph
-    assert "PRE_FANOUT_REVIEW_REQUIRED=true" in override_paragraph
+    override_paragraph = execute_phase[dense_index:paragraph_end]
+    assert "first-result" in override_paragraph
+    assert "pre-fanout" in override_paragraph
 
 
 def test_clean_wave_under_dense_batches_post_task_checkpoints() -> None:

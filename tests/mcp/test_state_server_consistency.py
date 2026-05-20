@@ -9,10 +9,13 @@ from types import SimpleNamespace
 import anyio
 import pytest
 
+from gpd.command_labels import runtime_public_command_prefixes
+from gpd.core.command_run_hints import KIND_RUNTIME_COMMAND_LABEL
 from gpd.core.constants import ProjectLayout
 from gpd.core.errors import GPDError
 from gpd.core.health import CheckStatus, HealthCheck, HealthReport, HealthSummary
 from gpd.core.state import default_state_dict, generate_state_markdown
+from gpd.core.suggest import Recommendation, SuggestContext, SuggestResult
 from gpd.mcp.servers.state_server import (
     advance_plan,
     get_config,
@@ -22,6 +25,7 @@ from gpd.mcp.servers.state_server import (
     load_state_json,
     mcp,
     run_health_check,
+    suggest_next,
     validate_state,
 )
 from tests.mcp.conftest import FAKE_PROJECT_DIR
@@ -43,6 +47,7 @@ def test_state_server_exposes_expected_tool_names() -> None:
         "validate_state",
         "run_health_check",
         "get_config",
+        "suggest_next",
     } == set(names)
     assert "apply_return_updates" not in names
 
@@ -98,6 +103,7 @@ def test_state_server_read_only_calls_do_not_migrate_root_planning_files(
         (validate_state, {"project_dir": "relative/project"}),
         (run_health_check, {"project_dir": "relative/project", "fix": False}),
         (get_config, {"project_dir": "relative/project"}),
+        (suggest_next, {"project_dir": "relative/project"}),
     ],
 )
 def test_state_server_tools_reject_non_absolute_project_dirs(tool_fn, kwargs: dict[str, object]) -> None:
@@ -116,6 +122,7 @@ def test_state_server_tools_reject_non_absolute_project_dirs(tool_fn, kwargs: di
         (validate_state, "gpd.mcp.servers.state_server.state_validate", {"project_dir": FAKE_PROJECT_DIR}),
         (run_health_check, "gpd.mcp.servers.state_server.run_health", {"project_dir": FAKE_PROJECT_DIR, "fix": False}),
         (get_config, "gpd.mcp.servers.state_server.load_config", {"project_dir": FAKE_PROJECT_DIR}),
+        (suggest_next, "gpd.mcp.servers.state_server.core_suggest_next", {"project_dir": FAKE_PROJECT_DIR}),
     ],
 )
 @pytest.mark.parametrize("error_factory", [lambda: GPDError("boom"), lambda: OSError("missing"), lambda: ValueError("bad")])
@@ -129,6 +136,53 @@ def test_state_server_tools_return_stable_error_envelopes(tool_fn, patch_target:
 
     assert result["schema_version"] == 1
     assert result["error"] in {"boom", "missing", "bad"}
+
+
+def test_suggest_next_returns_read_only_run_hints_and_clamps_limit(monkeypatch, tmp_path: Path) -> None:
+    prefix = runtime_public_command_prefixes()[0]
+    command = f"{prefix}verify-work 01"
+    seen: dict[str, object] = {}
+
+    def _suggest_next(cwd: Path, *, limit: int) -> SuggestResult:
+        seen["cwd"] = cwd
+        seen["limit"] = limit
+        recommendation = Recommendation(
+            action="verify-work",
+            priority=1,
+            reason="Phase 01 is complete but unverified",
+            command=command,
+            phase="01",
+        )
+        return SuggestResult(
+            suggestions=[recommendation],
+            total_suggestions=1,
+            suggestion_count=1,
+            top_action=recommendation,
+            context=SuggestContext(current_phase="01"),
+        )
+
+    monkeypatch.setattr("gpd.mcp.servers.state_server.core_suggest_next", _suggest_next)
+
+    result = suggest_next(str(tmp_path), limit=99)
+
+    assert seen == {"cwd": tmp_path, "limit": 10}
+    assert result["schema_version"] == 1
+    assert result["status"] == "ok"
+    assert result["execution"] == "not_executed"
+    assert result["limit"] == 10
+    assert not (tmp_path / "GPD").exists()
+    suggestion = result["suggestions"][0]
+    assert suggestion["command"] == command
+    assert suggestion["run_hint"]["kind"] == KIND_RUNTIME_COMMAND_LABEL
+    assert suggestion["run_hint"]["execution"] == "not_executed"
+    assert suggestion["run_hint"]["source"] == "gpd-state.suggest_next"
+    assert result["top_action"]["run_hint"] == suggestion["run_hint"]
+
+
+def test_suggest_next_rejects_invalid_limit(tmp_path: Path) -> None:
+    result = suggest_next(str(tmp_path), limit="many")  # type: ignore[arg-type]
+
+    assert result == {"error": "limit must be an integer", "schema_version": 1}
 
 
 def test_load_state_json_strips_session_alias_and_surfaces_contract_gate(monkeypatch, tmp_path: Path) -> None:

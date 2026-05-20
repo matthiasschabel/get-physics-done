@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 
 from gpd.adapters.install_utils import expand_at_includes
+from gpd.cli import app as cli_app
 from gpd.core import public_surface_contract as public_surface_contract_module
 from gpd.core.cli_args import _ROOT_GLOBAL_FLAG_TOKENS
 from gpd.core.model_visible_text import command_visibility_note
@@ -22,7 +23,9 @@ from gpd.core.public_surface_contract import (
     resume_authority_fields,
 )
 from gpd.core.state import VALID_STATUSES
-from gpd.registry import VALID_CONTEXT_MODES, _parse_frontmatter, get_command
+from gpd.core.workflow_presets import list_workflow_presets
+from gpd.registry import VALID_CONTEXT_MODES, _parse_frontmatter, get_command, list_commands
+from tests.assertion_taxonomy_support import FragmentMode, MatchMode, assert_prompt_contracts, semantic_anchor
 from tests.doc_surface_contracts import (
     DOCTOR_RUNTIME_SCOPE_RE,
     assert_beginner_startup_routing_contract,
@@ -47,9 +50,9 @@ from tests.doc_surface_contracts import (
     resume_backend_only_fields,
 )
 from tests.prompt_metrics_support import iter_markdown_fences
+from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-CLI_PATH = REPO_ROOT / "src/gpd/cli.py"
 COMMANDS_DIR = REPO_ROOT / "src/gpd/commands"
 WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
 PROMPT_ROOTS = (
@@ -59,12 +62,10 @@ PROMPT_ROOTS = (
     REPO_ROOT / "src/gpd/specs/references",
     REPO_ROOT / "src/gpd/specs/templates",
 )
-ROOT_COMMAND_RE = re.compile(r"@app\.command\(\s*\"([a-z0-9-]+)\"(?:,|\))", re.MULTILINE)
-TYPER_GROUP_RE = re.compile(r"app\.add_typer\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*name=\"([a-z0-9-]+)\"", re.MULTILINE)
-GROUP_COMMAND_RE = re.compile(r"@{group}\.command\(\s*\"([a-z0-9-]+)\"(?:,|\))", re.MULTILINE)
 NON_CANONICAL_GPD_COMMAND_RE = re.compile(r"(?<![A-Za-z0-9_./}])(?:\$gpd-[A-Za-z0-9{}-]+|/gpd-[A-Za-z0-9{}-]+)(?!\.md)")
 RAW_AFTER_SUBCOMMAND_RE = re.compile(r"\bgpd\s+(?!--raw\b)[^`\n]*\s+--raw\b")
 SUMMARY_EXTRACT_FIELDS_RE = re.compile(r"\bgpd\s+summary-extract\b[^\n`]*\s--fields\b")
+COMMAND_INDEX_ENTRY_RE = re.compile(r"^- `(?P<signature>gpd:[^`]+)` - (?P<description>.+)$", re.MULTILINE)
 SHELL_FENCE_LANGUAGES = frozenset({"bash", "sh", "shell", "zsh"})
 RUNTIME_LABEL_IN_SHELL_RE = re.compile(
     r"(?<![A-Za-z0-9_./}])"
@@ -108,11 +109,13 @@ APPROVED_RUNTIME_LABEL_SHELL_FENCE_LINES = {
     ),
     ("src/gpd/specs/workflows/discuss-phase.md", 'echo "Use gpd:progress to see available phases."'),
     (
-        "src/gpd/specs/workflows/execute-phase.md",
-        'echo "ERROR: missing phase. Usage: gpd:execute-phase <phase-number> [--gaps-only]"',
+        "src/gpd/specs/workflows/execute-phase/phase-bootstrap.md",
+        'echo "ERROR: missing phase. Usage: execute-phase <phase-number> [--gaps-only]"',
     ),
-    ("src/gpd/specs/workflows/execute-phase.md", 'echo "  gpd:validate-conventions"'),
-    ("src/gpd/specs/workflows/execute-phase.md", 'echo "Next Up: gpd:execute-phase {N}"'),
+    (
+        "src/gpd/specs/workflows/execute-phase/wave-planning.md",
+        'Emit a final line `"Next Up: gpd:execute-phase {N}"` so the operator can resume after resolving alignment.',
+    ),
     (
         "src/gpd/specs/workflows/plan-milestone-gaps.md",
         'echo "ERROR: No existing phases found. Create phases with gpd:plan-phase first."',
@@ -133,6 +136,107 @@ def _extract_between(content: str, start_marker: str, end_marker: str) -> str:
     return content[start:end]
 
 
+def _normalize_text(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _assert_normalized_fragments(content: str, fragments: tuple[str, ...]) -> None:
+    normalized = _normalize_text(content)
+    missing = [fragment for fragment in fragments if _normalize_text(fragment) not in normalized]
+    assert missing == []
+
+
+def _assert_normalized_absent(content: str, fragments: tuple[str, ...]) -> None:
+    normalized = _normalize_text(content)
+    present = [fragment for fragment in fragments if _normalize_text(fragment) in normalized]
+    assert present == []
+
+
+def _assert_ordered_fragments(content: str, fragments: tuple[str, ...]) -> None:
+    normalized = _normalize_text(content)
+    cursor = 0
+    missing: list[str] = []
+    for fragment in fragments:
+        normalized_fragment = _normalize_text(fragment)
+        position = normalized.find(normalized_fragment, cursor)
+        if position < 0:
+            missing.append(fragment)
+            continue
+        cursor = position + len(normalized_fragment)
+    assert missing == []
+
+
+def _assert_semantic_fragments(content: str, context: str, fragments: tuple[str, ...]) -> None:
+    assert_prompt_contracts(
+        content,
+        semantic_anchor(context, fragments, match=MatchMode.CASEFOLD_NORMALIZED, context=context),
+    )
+
+
+def _assert_semantic_absent(content: str, context: str, fragments: tuple[str, ...]) -> None:
+    assert_prompt_contracts(
+        content,
+        semantic_anchor(
+            context,
+            fragments,
+            mode=FragmentMode.ABSENT,
+            match=MatchMode.CASEFOLD_NORMALIZED,
+            context=context,
+        ),
+    )
+
+
+def _typer_command_name(command_info: object) -> str:
+    name = getattr(command_info, "name", None)
+    if name:
+        return str(name)
+    callback = getattr(command_info, "callback", None)
+    if callback is not None:
+        return str(callback.__name__).replace("_", "-")
+    raise AssertionError(f"Typer command metadata has no name or callback: {command_info!r}")
+
+
+def _declared_command_surfaces() -> set[str]:
+    root_commands = _declared_root_commands()
+    group_commands = _declared_groups()
+    surfaces = set(root_commands)
+    surfaces.update(group_commands)
+    for group_name, subcommands in group_commands.items():
+        surfaces.update(f"{group_name} {subcommand}" for subcommand in subcommands)
+    return surfaces
+
+
+def _declared_root_commands() -> set[str]:
+    return {_typer_command_name(command) for command in cli_app.registered_commands}
+
+
+def _declared_groups() -> dict[str, set[str]]:
+    groups: dict[str, set[str]] = {}
+    for group in cli_app.registered_groups:
+        group_name = getattr(group, "name", None)
+        assert group_name, f"Typer group metadata has no name: {group!r}"
+        typer_instance = group.typer_instance
+        subcommands = {_typer_command_name(command) for command in typer_instance.registered_commands}
+        for nested_group in typer_instance.registered_groups:
+            nested_name = getattr(nested_group, "name", None)
+            assert nested_name, f"Nested Typer group metadata has no name: {nested_group!r}"
+            subcommands.add(str(nested_name))
+        groups[str(group_name)] = subcommands
+    return groups
+
+
+def _command_index_runtime_labels(command_index_markdown: str) -> set[str]:
+    labels: set[str] = set()
+    for match in COMMAND_INDEX_ENTRY_RE.finditer(command_index_markdown):
+        signature = match.group("signature")
+        labels.add(signature.split()[0])
+    return labels
+
+
+def _workflow_preset_labels() -> set[str]:
+    return {preset.label for preset in list_workflow_presets()}
+
+
 def _iter_prompt_sources() -> list[Path]:
     files: list[Path] = []
     for root in PROMPT_ROOTS:
@@ -146,36 +250,6 @@ def _shell_fence_language(info: str) -> str:
 
 def _has_bracketed_shell_placeholder_arg(line: str) -> bool:
     return bool(BRACKETED_SHELL_PLACEHOLDER_ARG_RE.search(line) or OPTIONAL_BRACKETED_SHELL_ARG_RE.search(line))
-
-
-def _declared_command_surfaces() -> set[str]:
-    content = CLI_PATH.read_text(encoding="utf-8")
-    surfaces = set(ROOT_COMMAND_RE.findall(content))
-    surfaces.update(_declared_group_surfaces(content))
-    return surfaces
-
-
-def _declared_group_surfaces(content: str) -> set[str]:
-    groups = dict(TYPER_GROUP_RE.findall(content))
-    surfaces: set[str] = set(groups.values())
-    for group_var, group_name in groups.items():
-        command_re = re.compile(GROUP_COMMAND_RE.pattern.format(group=re.escape(group_var)), re.MULTILINE)
-        for subcommand in command_re.findall(content):
-            surfaces.add(f"{group_name} {subcommand}")
-    return surfaces
-
-
-def _declared_root_commands(content: str) -> set[str]:
-    return set(ROOT_COMMAND_RE.findall(content))
-
-
-def _declared_groups(content: str) -> dict[str, set[str]]:
-    groups = dict(TYPER_GROUP_RE.findall(content))
-    result: dict[str, set[str]] = {}
-    for group_var, group_name in groups.items():
-        command_re = re.compile(GROUP_COMMAND_RE.pattern.format(group=re.escape(group_var)), re.MULTILINE)
-        result[group_name] = set(command_re.findall(content))
-    return result
 
 
 def _iter_markdown_code_samples(content: str) -> list[str]:
@@ -217,9 +291,8 @@ def _extract_gpd_command_surfaces(
 
 def test_prompt_sources_keep_command_surface_rules_canonical_and_consistent() -> None:
     allowed = _declared_command_surfaces()
-    cli_content = CLI_PATH.read_text(encoding="utf-8")
-    root_commands = _declared_root_commands(cli_content)
-    group_commands = _declared_groups(cli_content)
+    root_commands = _declared_root_commands()
+    group_commands = _declared_groups()
 
     invalid_surfaces: list[str] = []
     noncanonical_surfaces: list[str] = []
@@ -273,15 +346,12 @@ def test_prompt_shell_fences_do_not_add_runtime_command_labels() -> None:
 
 
 def test_agent_infrastructure_distinguishes_structural_phase_verify_from_verify_work() -> None:
-    text = (REPO_ROOT / "src/gpd/specs/references/orchestration/agent-infrastructure.md").read_text(
-        encoding="utf-8"
-    )
+    text = (REPO_ROOT / "src/gpd/specs/references/orchestration/agent-infrastructure.md").read_text(encoding="utf-8")
 
     assert "These terminal `gpd verify ...` commands are structural checks." in text
     assert "They do not" in text
     assert "replace the runtime `gpd:verify-work <phase>` workflow" in text
-    assert "# Structural completeness only: all plans have `*-SUMMARY.md`" in text
-    assert "gpd verify phase <phase-number>" in text
+    assert "gpd verify phase" in text
 
 
 def test_command_looking_fences_are_explicitly_labeled() -> None:
@@ -351,9 +421,8 @@ def test_start_workflow_routes_runtime_labels_without_shell_run_prose() -> None:
 
 
 def test_prompt_surface_extractor_matches_shared_root_global_flags() -> None:
-    cli_content = CLI_PATH.read_text(encoding="utf-8")
-    root_commands = _declared_root_commands(cli_content)
-    group_commands = _declared_groups(cli_content)
+    root_commands = _declared_root_commands()
+    group_commands = _declared_groups()
 
     sample = """
     ```text
@@ -394,11 +463,19 @@ def test_help_prompt_default_quick_start_extracts_workflow_owned_sections() -> N
     assert_help_workflow_quick_start_taxonomy_contract(quick_start_reference)
     assert_help_workflow_command_index_contract(command_index)
     assert_beginner_startup_routing_contract(quick_start_reference)
+    assert _command_index_runtime_labels(command_index) == set(list_commands(name_format="label"))
     assert "Usage: `/gpd:start`" not in quick_start_reference
     assert "## Detailed Command Reference" in help_workflow
-    assert (
-        "gpd:new-project -> gpd:discuss-phase -> gpd:plan-phase -> gpd:execute-phase -> gpd:verify-work -> repeat"
-        in help_workflow
+    _assert_ordered_fragments(
+        help_workflow,
+        (
+            "gpd:new-project",
+            "gpd:discuss-phase",
+            "gpd:plan-phase",
+            "gpd:execute-phase",
+            "gpd:verify-work",
+            "repeat",
+        ),
     )
     assert "gpd init new-project" not in help_workflow
     for token in ("gpd:discuss-phase", "gpd:write-paper", "gpd:tangent", "gpd:set-tier-models", "gpd:settings"):
@@ -415,18 +492,39 @@ def test_help_prompt_keeps_workflow_preset_readiness_on_local_cli_surface() -> N
     )
 
     assert "## Invocation Surfaces" not in quick_start
-    assert "Exclude the marker comment lines themselves." in quick_start
-    assert "Append this one wrapper-owned line" in quick_start
+    _assert_semantic_fragments(
+        quick_start,
+        "help quick-start wrapper extraction",
+        (
+            "Exclude the marker comment lines themselves.",
+            "Append this one wrapper-owned line",
+        ),
+    )
     assert_help_workflow_runtime_reference_contract(help_workflow)
-    assert "executable probes" in help_workflow
-    assert "pdflatex" in help_workflow
-    assert "wolframscript" in help_workflow
+    optional_addons = _extract_between(help_workflow, "### Optional Local CLI Add-Ons", "Workflow presets are bundles")
+    _assert_normalized_fragments(
+        optional_addons,
+        (
+            "Workflow presets",
+            "gpd presets list",
+            "gpd presets show <preset>",
+            "gpd presets apply <preset>",
+            "pdflatex --version",
+            "tectonic --version",
+            "wolframscript -version",
+        ),
+    )
     assert DOCTOR_RUNTIME_SCOPE_RE.search(help_workflow) is not None
     assert_wolfram_plan_boundary_contract(help_workflow)
     assert_workflow_preset_surface_contract(help_workflow)
-    assert (
-        "Workflow preset tooling is layered on top of the base install; it does not change runtime permission alignment."
-        in help_workflow
+    _assert_normalized_fragments(
+        help_workflow,
+        (
+            "Workflow presets are bundles over the existing config keys only",
+            "they do not add a separate persisted preset block",
+            "Workflow preset tooling is layered on top of the base install",
+            "does not change runtime permission alignment",
+        ),
     )
 
 
@@ -434,26 +532,54 @@ def test_start_prompt_delegates_routing_to_workflow_only() -> None:
     start_command = (COMMANDS_DIR / "start.md").read_text(encoding="utf-8")
     start_command_expanded = expand_at_includes(start_command, REPO_ROOT / "src/gpd", "/runtime/")
     start_workflow = (WORKFLOWS_DIR / "start.md").read_text(encoding="utf-8")
+    start_registry = get_command("start")
+    reopen_recent_branch = _extract_between(
+        start_workflow,
+        "**If the researcher chooses option_id `reopen_recent`",
+        "- STOP after giving those instructions.",
+    )
 
     assert "@{GPD_INSTALL_DIR}/workflows/start.md" in start_command
     assert "@{GPD_INSTALL_DIR}/references/onboarding/beginner-command-taxonomy.md" in start_command
-    assert "actual first-run chooser when the user wants the right next action" in start_command_expanded
-    assert "read-only walkthrough when the user wants orientation before choosing a path" in start_command_expanded
-    assert "explain official terms the first time they appear" in start_command
-    assert "gpd:tour" in start_command_expanded
-    assert_start_workflow_router_contract(start_workflow)
-    assert local_cli_resume_recent_command() in start_workflow
-    assert "in your normal terminal to find the project first" in start_workflow
-    assert "The recent-project picker is advisory; choose the workspace there" in start_workflow
-    assert "reloads canonical state for that project." in start_workflow
-    assert "GPD may auto-select it" in start_workflow
-    assert "recent-project picker" in start_workflow
-    assert "Then open that project folder in the runtime and choose" in start_workflow
-    assert "\\`gpd:resume-work\\` command." in start_workflow
-    assert (
-        "the in-runtime continuation step once the recovery ladder has identified the right project" in start_workflow
+    assert start_registry.argument_hint == "[optional short goal]"
+    assert start_registry.context_mode == "projectless"
+    _assert_semantic_fragments(
+        start_command_expanded,
+        "start command wrapper delegates chooser semantics",
+        (
+            "actual first-run chooser",
+            "read-only walkthrough",
+            "gpd:tour",
+            "same-message explicit choice counts only as the chooser answer",
+        ),
     )
-    assert "reopened its workspace" in start_workflow
+    _assert_semantic_fragments(
+        start_command,
+        "start command wrapper explains terms without parallel routing",
+        (
+            "explain official terms",
+            "first time they appear",
+            "do not invent a parallel onboarding state machine",
+        ),
+    )
+    assert_start_workflow_router_contract(start_workflow)
+    assert local_cli_resume_recent_command() in reopen_recent_branch
+    _assert_semantic_fragments(
+        reopen_recent_branch,
+        "start reopen recent branch keeps terminal picker and runtime continuation boundary",
+        (
+            "normal terminal",
+            "recent-project picker",
+            "advisory",
+            "gpd:resume-work",
+            "reloads canonical state",
+            "auto-select",
+            "choose the project explicitly",
+            "open that project folder in the runtime",
+            "in-runtime continuation step",
+            "reopened its workspace",
+        ),
+    )
     assert "Read `{GPD_INSTALL_DIR}/workflows/new-project.md` with the file-read tool." not in start_workflow
     assert "Read `{GPD_INSTALL_DIR}/workflows/help.md` with the file-read tool." not in start_workflow
     assert "Read `{GPD_INSTALL_DIR}/workflows/tour.md` with the file-read tool." not in start_workflow
@@ -467,27 +593,62 @@ def test_tour_prompt_delegates_routing_to_workflow_only() -> None:
 
     assert "@{GPD_INSTALL_DIR}/workflows/tour.md" in tour_command
     assert "@{GPD_INSTALL_DIR}/references/onboarding/beginner-command-taxonomy.md" in tour_command
-    assert "teaching surface, not a chooser" in tour_command
-    assert "safe beginner walkthrough of the core GPD command paths" in tour_command
+    _assert_semantic_fragments(
+        tour_command,
+        "tour command is a teaching surface",
+        (
+            "teaching surface, not a chooser",
+            "safe beginner walkthrough of the core GPD command paths",
+        ),
+    )
     assert "gpd:set-tier-models" in tour_command
     assert "gpd:settings" in tour_command
+    assert "gpd:tour --all" in tour_command
+    assert "gpd:tour --reference" in tour_command
+    assert "gpd:help --all" in tour_command
     assert "gpd:start" in tour_command_expanded
     assert "gpd:resume-work" in tour_command_expanded
     assert_tour_command_surface_contract(tour_workflow)
     assert "$ARGUMENTS" in tour_workflow
-    assert "Do not narrow the command list, select a path, or route based on it." in tour_workflow
-    assert "the runtime, where you use the GPD command prefix provided for that runtime" in tour_workflow
-    assert "Normal terminal vs runtime" in tour_workflow
+    _assert_semantic_fragments(
+        tour_workflow,
+        "tour workflow does not route",
+        (
+            "Do not narrow the command list, select a path, or route based on non-flag context.",
+            "Unknown flags are context only unless they are exactly `--all` or `--reference`.",
+            "the runtime, where you use the GPD command prefix provided for that runtime",
+        ),
+    )
+    _assert_semantic_fragments(
+        tour_workflow,
+        "tour workflow keeps concise default and reference-mode boundaries",
+        (
+            "80 lines or fewer",
+            "4500 characters or fewer",
+            "gpd:help --all",
+            "canonical complete command index",
+            "Normal terminal vs runtime",
+        ),
+    )
 
 
 def test_help_workflow_surfaces_start_as_first_run_router() -> None:
     help_workflow = (WORKFLOWS_DIR / "help.md").read_text(encoding="utf-8")
     quick_start_reference = _extract_between(help_workflow, "## Quick Start", "## Command Index")
 
-    assert "gpd:start" in help_workflow
-    assert "Guided first-run router" in help_workflow
-    assert "gpd:tour" in help_workflow
-    assert "guided tour" in help_workflow.lower()
+    assert get_command("start").name in help_workflow
+    assert get_command("tour").name in help_workflow
+    _assert_semantic_fragments(
+        quick_start_reference,
+        "help quick start surfaces start as first-run router and tour as explainer",
+        (
+            "gpd:start",
+            "first-run router",
+            "safest first step",
+            "gpd:tour",
+            "read-only",
+        ),
+    )
     assert_beginner_startup_routing_contract(quick_start_reference)
 
 
@@ -517,10 +678,12 @@ def test_help_new_project_detail_describes_current_scope_gate_contract() -> None
 
 def test_new_project_minimal_prompt_documents_core_artifacts_not_full_mode_outputs() -> None:
     command_text = (COMMANDS_DIR / "new-project.md").read_text(encoding="utf-8")
-    workflow_text = (WORKFLOWS_DIR / "new-project.md").read_text(encoding="utf-8")
+    workflow_text = workflow_authority_text(WORKFLOWS_DIR, "new-project")
+    completion = (WORKFLOWS_DIR / "new-project" / "completion.md").read_text(encoding="utf-8")
 
-    for content in (command_text, workflow_text):
-        assert "does not promise" in content
+    assert "does not promise" in command_text
+    assert "no promise is made" in completion
+    for content in (command_text, completion):
         assert "GPD/CONVENTIONS.md" in content
         assert "GPD/literature/" in content
 
@@ -530,7 +693,11 @@ def test_new_project_minimal_prompt_documents_core_artifacts_not_full_mode_outpu
         "</success_criteria>",
     )
     assert "documented core startup set" in minimal_success
-    assert "Same directory structure and file set as full path" not in minimal_success
+    _assert_semantic_absent(
+        minimal_success,
+        "minimal mode does not promise full-mode file set",
+        ("Same directory structure and file set as full path",),
+    )
     assert "CONVENTIONS.md` created" not in minimal_success
     for stale_fragment in (
         "Ask ONE question, then generate everything",
@@ -578,15 +745,16 @@ def test_suggest_next_prompt_uses_real_cli_subcommand() -> None:
         f"If you still need to rediscover the project first, do that in your normal terminal with `{local_cli_resume_command()}` for the current workspace or `{local_cli_resume_recent_command()}` for the explicit multi-project picker before reopening the runtime."
         in suggest_prompt
     )
-    assert (
-        "Start the recommended command in a fresh context window; do not treat the fresh context reset as project recovery."
-        in suggest_prompt
+    _assert_semantic_fragments(
+        suggest_prompt,
+        "suggest-next fresh context and renderer contract",
+        (
+            "Start the recommended command in a fresh context window; do not treat the fresh context reset as project recovery.",
+            "Use the shared renderer shape for this single-recommendation block.",
+            "Do not use a separate bold-only command block.",
+        ),
     )
-    assert "Start a fresh context window, then run `{command}`." in suggest_prompt
-    assert (
-        f"If you still need to rediscover the project first, do that in your normal terminal with `{local_cli_resume_command()}` for the current workspace or `{local_cli_resume_recent_command()}` for a different project before reopening the runtime."
-        in suggest_prompt
-    )
+    assert "Primary: `{command}`" in suggest_prompt
     assert "/clear" not in suggest_prompt
     assert (
         f"`/clear` first -> fresh context window, then `{{command}}`; if you still need to rediscover the project, use `{local_cli_resume_recent_command()}` before reopening the runtime"
@@ -623,11 +791,21 @@ def test_progress_prompt_runs_preflight_after_init_context() -> None:
     workflow = (REPO_ROOT / "src/gpd/specs/workflows/progress.md").read_text(encoding="utf-8")
 
     assert "@{GPD_INSTALL_DIR}/workflows/progress.md" in command
-    assert "Follow the included workflow exactly. Do not duplicate the workflow logic here." in command
+    _assert_semantic_fragments(
+        command,
+        "progress command delegates workflow logic",
+        ("Follow the included workflow exactly. Do not duplicate the workflow logic here.",),
+    )
     assert "INIT=$(gpd --raw init progress --include state,roadmap,project,config,references)" not in command
     assert 'CONTEXT=$(gpd --raw validate command-context progress "$ARGUMENTS")' not in command
-    assert "The recent-project picker is advisory" not in command
-    assert "reloads canonical state for that project" not in command
+    _assert_semantic_absent(
+        command,
+        "progress command excludes resume-recovery branch prose",
+        (
+            "The recent-project picker is advisory",
+            "reloads canonical state for that project",
+        ),
+    )
 
     assert "INIT=$(gpd --raw init progress --include state,roadmap,project,config,references)" in workflow
     assert 'CONTEXT=$(gpd --raw validate command-context progress "$ARGUMENTS")' in workflow
@@ -642,15 +820,21 @@ def test_progress_reconcile_prompt_preserves_no_write_confirmation_branches() ->
     reconcile_end = workflow.index('<step name="init_context">', reconcile_start)
     reconcile_step = workflow[reconcile_start:reconcile_end]
 
-    assert '"Sync STATE.md to disk" (Recommended)' in reconcile_step
-    assert '"Keep STATE.md"' in reconcile_step
-    assert '"Show details" — list all mismatches before deciding' in reconcile_step
-    assert "If user chooses sync: update STATE.md position" in reconcile_step
-    assert "before any command that writes reconciled state, ask for an explicit user decision" in reconcile_step
-    assert (
-        "require a typed reply that exactly matches one of `Sync STATE.md to disk`, `Keep STATE.md`, or "
-        "`Show details`; do not infer consent from a vague acknowledgement"
-    ) in reconcile_step
+    _assert_normalized_fragments(
+        reconcile_step,
+        (
+            '"Sync STATE.md to disk" (Recommended)',
+            '"Keep STATE.md"',
+            '"Show details"',
+            "update STATE.md position",
+            "before any command that writes reconciled state",
+            "explicit user decision",
+            "`Sync STATE.md to disk`",
+            "`Keep STATE.md`",
+            "`Show details`",
+            "do not infer consent",
+        ),
+    )
     assert reconcile_step.index('"Show details"') < reconcile_step.index("If user chooses sync")
 
 
@@ -672,14 +856,34 @@ def test_progress_prompt_requires_project_not_roadmap() -> None:
 def test_progress_prompt_and_help_clarify_runtime_vs_local_cli_boundary() -> None:
     command = (REPO_ROOT / "src/gpd/commands/progress.md").read_text(encoding="utf-8")
     help_workflow = (WORKFLOWS_DIR / "help.md").read_text(encoding="utf-8")
-    progress_section = _extract_between(help_workflow, "### Progress Tracking", "### Session Management")
-    normalized_command = " ".join(command.split())
-    normalized_progress_section = " ".join(progress_section.split())
+    progress_section = _extract_between(help_workflow, "**`gpd:progress", "**`gpd:suggest-next")
+    progress_registry = get_command("progress")
 
-    assert "The local CLI `gpd progress` is a separate read-only renderer" in normalized_command
-    assert "takes `json|bar|table` and does not accept these flags" in normalized_command
-    assert "The local CLI `gpd progress` is a separate read-only renderer" in normalized_progress_section
-    assert "Local CLI: `gpd progress json|bar|table`" in normalized_progress_section
+    assert progress_registry.argument_hint == "[--brief | --full | --reconcile]"
+    assert "progress" in _declared_root_commands()
+    _assert_normalized_fragments(
+        command,
+        (
+            "`--brief`, `--full`, and `--reconcile`",
+            "runtime-surface options for `gpd:progress`",
+            "local CLI `gpd progress`",
+            "read-only renderer",
+            "json|bar|table",
+            "does not accept these flags",
+        ),
+    )
+    _assert_normalized_fragments(
+        progress_section,
+        (
+            "`gpd:progress --full`",
+            "`gpd:progress --brief`",
+            "`gpd:progress --reconcile`",
+            "local CLI `gpd progress`",
+            "read-only renderer",
+            "json|bar|table",
+            "Local CLI: `gpd progress json|bar|table`",
+        ),
+    )
 
 
 def test_progress_health_advice_uses_runtime_command_wording() -> None:
@@ -692,21 +896,32 @@ def test_progress_health_advice_uses_runtime_command_wording() -> None:
 def test_plan_phase_prompt_is_a_thin_dispatch_shell() -> None:
     command = (REPO_ROOT / "src/gpd/commands/plan-phase.md").read_text(encoding="utf-8")
 
-    assert "@{GPD_INSTALL_DIR}/workflows/plan-phase.md" in command
+    assert "@{GPD_INSTALL_DIR}/workflows/plan-phase/phase-bootstrap.md" in command
+    assert "@{GPD_INSTALL_DIR}/workflows/plan-phase.md" not in command
     assert "@{GPD_INSTALL_DIR}/templates/plan-contract-schema.md" not in command
     assert "@{GPD_INSTALL_DIR}/references/ui/ui-brand.md" not in command
-    assert "Follow the included workflow file exactly." in command
+    _assert_semantic_fragments(
+        command,
+        "plan-phase wrapper delegates later stage loading to manifest authorities",
+        ("Later stage loading is manifest-owned by the workflow stage authorities",),
+    )
     assert "agent: gpd-planner" in command
-    assert "What Makes a Good Physics Plan" not in command
+    _assert_semantic_absent(
+        command,
+        "plan-phase dispatch shell excludes planning-guide prose",
+        (
+            "What Makes a Good Physics Plan",
+            "Quick Checklist Before Approving a Plan",
+        ),
+    )
     assert "Common Failure Modes" not in command
-    assert "Quick Checklist Before Approving a Plan" not in command
     assert "Domain-Aware Planning" not in command
     assert "gpd --raw init plan-phase" not in command
 
 
 def test_new_milestone_prompt_mentions_planning_commit_docs() -> None:
     command = (REPO_ROOT / "src/gpd/commands/new-milestone.md").read_text(encoding="utf-8")
-    workflow = (REPO_ROOT / "src/gpd/specs/workflows/new-milestone.md").read_text(encoding="utf-8")
+    workflow = workflow_authority_text(WORKFLOWS_DIR, "new-milestone")
 
     for content in (command, workflow):
         assert "planning.commit_docs" in content
@@ -714,7 +929,7 @@ def test_new_milestone_prompt_mentions_planning_commit_docs() -> None:
 
 
 def test_new_milestone_state_status_literals_are_valid() -> None:
-    workflow = (REPO_ROOT / "src/gpd/specs/workflows/new-milestone.md").read_text(encoding="utf-8")
+    workflow = workflow_authority_text(WORKFLOWS_DIR, "new-milestone")
 
     statuses = re.findall(r'"--Status"\s+"([^"]+)"', workflow)
 
@@ -724,23 +939,30 @@ def test_new_milestone_state_status_literals_are_valid() -> None:
 
 
 def test_new_milestone_roadmapper_stage_parse_and_artifact_words_match_payload() -> None:
-    workflow = (REPO_ROOT / "src/gpd/specs/workflows/new-milestone.md").read_text(encoding="utf-8")
+    workflow = workflow_authority_text(WORKFLOWS_DIR, "new-milestone")
 
     roadmap_authoring = workflow[workflow.index("ROADMAPPER_INIT=") :]
 
     assert "`planning_exists`" not in roadmap_authoring.split("Use the bootstrap init", maxsplit=1)[0]
     assert "fresh `SUMMARY.md` proof" not in roadmap_authoring
-    assert "fresh ROADMAP/REQUIREMENTS proof" in roadmap_authoring
+    assert (
+        "gpd validate handoff-artifacts - --expected GPD/ROADMAP.md --expected GPD/REQUIREMENTS.md" in roadmap_authoring
+    )
     assert "shared_state_policy: return_only" in roadmap_authoring
-    assert "Do not accept a direct roadmapper edit to `GPD/STATE.md` as success proof." in roadmap_authoring
+    assert "direct roadmapper edit to\n`GPD/STATE.md` is not success proof." in roadmap_authoring
 
 
 def test_progress_route_d_includes_required_milestone_version_argument() -> None:
     workflow = (WORKFLOWS_DIR / "progress.md").read_text(encoding="utf-8")
-    route_d = workflow[workflow.index("**Route D: Milestone complete**") :]
 
-    assert "`gpd:complete-milestone {milestone_version}`" in route_d
-    assert "`gpd:complete-milestone`\n" not in route_d
+    route_step = _extract_between(workflow, '<step name="route">', "</step>")
+
+    assert "SUGGEST=$(gpd --raw suggest)" in route_step
+    assert "milestone completion" in route_step
+    assert "Do not choose" in route_step
+    assert "**Route D: Milestone complete**" not in workflow
+    assert "`gpd:complete-milestone {milestone_version}`" not in workflow
+    assert "`gpd:complete-milestone`\n" not in workflow
 
 
 def test_command_prompts_declare_valid_context_modes() -> None:
@@ -761,16 +983,18 @@ def test_command_prompts_declare_valid_context_modes() -> None:
 
 
 def test_new_project_prompt_uses_stdin_for_contract_validation_and_persistence() -> None:
-    workflow = (REPO_ROOT / "src/gpd/specs/workflows/new-project.md").read_text(encoding="utf-8")
+    workflow = (REPO_ROOT / "src/gpd/specs/workflows/new-project/scope-approval.md").read_text(encoding="utf-8")
 
     assert (
         "printf '%s\\n' \"$PROJECT_CONTRACT_JSON\" | gpd --raw validate project-contract - --mode approved" in workflow
     )
     assert "printf '%s\\n' \"$PROJECT_CONTRACT_JSON\" | gpd state set-project-contract -" in workflow
-    assert "gpd permissions sync --runtime <runtime>" in workflow
-    assert "gpd permissions sync --runtime <name>" not in workflow
     assert "/tmp/gpd-project-contract.json" not in workflow
-    assert "temporary JSON file if needed" not in workflow
+    _assert_semantic_absent(
+        workflow,
+        "project-contract persistence avoids temporary file fallback",
+        ("temporary JSON file if needed",),
+    )
 
 
 def test_state_json_schema_stays_aligned_with_stdin_contract_persistence_flow() -> None:
@@ -788,28 +1012,40 @@ def test_state_json_schema_stays_aligned_with_stdin_contract_persistence_flow() 
 
 
 def test_new_project_and_state_schema_surface_contract_id_integrity_rules() -> None:
-    workflow = (REPO_ROOT / "src/gpd/specs/workflows/new-project.md").read_text(encoding="utf-8")
+    workflow = (REPO_ROOT / "src/gpd/specs/workflows/new-project/scope-approval.md").read_text(encoding="utf-8")
     schema = expand_at_includes(
         (REPO_ROOT / "src/gpd/specs/templates/state-json-schema.md").read_text(encoding="utf-8"),
         REPO_ROOT / "src/gpd/specs",
         "/runtime/",
     )
 
-    assert (
-        "do not paraphrase the schema here; reuse its exact keys, enum values, list/object shapes, ID-linkage rules, and proof-bearing claim requirements"
-        in workflow
+    assert "Follow the schema exactly" in workflow
+    assert "no invented\nkeys" in workflow
+    assert "near-miss enum values" in workflow
+    assert "list fields" in workflow
+    _assert_semantic_fragments(
+        schema,
+        "project contract id integrity",
+        (
+            "Same-kind IDs must be unique within each section.",
+            "must not match any declared contract ID",
+        ),
     )
-    assert "Same-kind IDs must be unique within each section." in schema
-    assert "must not match any declared contract ID" in schema
 
 
 def test_compare_branches_prompt_keeps_branch_summary_extraction_in_memory() -> None:
     workflow = (REPO_ROOT / "src/gpd/specs/workflows/compare-branches.md").read_text(encoding="utf-8")
 
-    assert "Prefer parsing the `git show` output directly in memory." in workflow
-    assert "do not write it to `GPD/tmp/` just to run a path-based extractor." in workflow
-    assert "Keep branch-summary extraction in memory/stdout only" in workflow
-    assert "do not use `GPD/tmp/`, `/tmp`, or another temp root for this step." in workflow
+    _assert_semantic_fragments(
+        workflow,
+        "compare-branches keeps summary extraction in memory",
+        (
+            "Prefer parsing the `git show` output directly in memory.",
+            "Keep branch-summary extraction in memory/stdout only",
+        ),
+    )
+    assert "`GPD/tmp/`" in workflow
+    assert "`/tmp`" in workflow
 
 
 def test_help_prompts_surface_tangent_command_for_side_investigations() -> None:
@@ -823,42 +1059,71 @@ def test_help_prompts_surface_tangent_command_for_side_investigations() -> None:
 
 def test_settings_and_research_mode_docs_keep_tangent_branch_taxonomy_strict() -> None:
     settings = (WORKFLOWS_DIR / "settings.md").read_text(encoding="utf-8")
-    new_project = (WORKFLOWS_DIR / "new-project.md").read_text(encoding="utf-8")
+    new_project = workflow_authority_text(WORKFLOWS_DIR, "new-project")
     research_modes = (REPO_ROOT / "src/gpd/specs/references/research/research-modes.md").read_text(encoding="utf-8")
+    preset_labels = _workflow_preset_labels()
 
     assert "Which starting workflow preset should GPD use for `GPD/config.json`?" in new_project
-    assert "offer a preset choice before individual questions" in new_project
-    assert "preset bundle over the existing config knobs" in new_project
+    _assert_semantic_fragments(
+        new_project,
+        "new-project preset gate stays explicit",
+        (
+            "First offer a preset choice.",
+            "bundles over existing config keys only",
+            "Do not create, persist, or infer a separate preset block.",
+        ),
+    )
     assert "preview" in new_project
-    assert "writing `GPD/config.json`" in new_project
-    assert "Do not persist a separate preset key." in new_project
+    assert "Before writing `GPD/config.json`" in new_project
+    assert "Core research" in preset_labels
     assert '"Core research (Recommended)"' in new_project
-    assert '"Theory"' in new_project
-    assert '"Numerics"' in new_project
-    assert '"Publication / manuscript"' in new_project
-    assert '"Full research"' in new_project
+    for label in sorted(preset_labels - {"Core research"}):
+        assert f'"{label}"' in new_project
     assert "multiple hypothesis branches" not in settings
     assert "Minimal branching, fast convergence." not in settings
-    assert "auto-switch to exploit once approach is validated" not in settings
-    assert "does **not** by itself authorize git-backed hypothesis branches" in settings
-    assert "surface tangent decisions explicitly" in settings
-    assert "Suppress optional tangents unless the user explicitly requests them" in settings
+    _assert_semantic_absent(
+        settings,
+        "research mode docs avoid automatic exploit switching",
+        ("auto-switch to exploit once approach is validated",),
+    )
+    _assert_semantic_fragments(
+        settings,
+        "settings tangent branch boundary",
+        (
+            "does **not** by itself authorize git-backed hypothesis branches",
+            "surface tangent decisions explicitly",
+            "Suppress optional tangents unless the user explicitly requests them",
+            "explicit apply or customize choice",
+        ),
+    )
     assert "preview" in settings
-    assert "explicit apply or customize choice" in settings
-    assert "do **not** silently create git-backed hypothesis branches" in research_modes
-    assert "only explicit tangent decisions become hypothesis branches or parallel plans" in research_modes
-    assert "Flag complementary approaches as tangent candidates for optional parallel investigation" in research_modes
+    _assert_semantic_fragments(
+        research_modes,
+        "research modes keep tangent decisions explicit",
+        (
+            "do **not** silently create git-backed hypothesis branches",
+            "only explicit tangent decisions become hypothesis branches or parallel plans",
+            "Flag complementary approaches as tangent candidates for optional parallel investigation",
+        ),
+    )
 
 
 def test_new_project_and_help_surface_runtime_default_and_state_backup_gitignore_guidance() -> None:
-    new_project = (WORKFLOWS_DIR / "new-project.md").read_text(encoding="utf-8")
+    new_project = workflow_authority_text(WORKFLOWS_DIR, "new-project")
+    new_project_manifest = (WORKFLOWS_DIR / "new-project-stage-manifest.json").read_text(encoding="utf-8")
     help_workflow = (WORKFLOWS_DIR / "help.md").read_text(encoding="utf-8")
     planning_config = (REPO_ROOT / "src/gpd/specs/references/planning/planning-config.md").read_text(encoding="utf-8")
 
-    assert "without commentary about the missing override" in new_project
-    assert 'normal "use the runtime default model" path' in new_project
-    assert "GPD/state.json.bak" in new_project
-    assert "GPD/state.json.lock" in new_project
+    _assert_semantic_fragments(
+        new_project,
+        "new-project runtime default model path",
+        (
+            "without commentary about the missing override",
+            'normal "use the runtime default model" path',
+        ),
+    )
+    assert "GPD/state.json.bak" in new_project_manifest
+    assert "GPD/state.json.lock" in new_project_manifest
     assert "GPD/state.json.bak" in help_workflow
     assert "GPD/state.json.lock" in help_workflow
     assert "GPD/state.json.bak" in planning_config
@@ -871,7 +1136,7 @@ def test_regression_check_prompt_examples_include_optional_phase_before_quick_fl
     verifier_raw = (REPO_ROOT / "src/gpd/agents/gpd-verifier.md").read_text(encoding="utf-8")
     infra = (REPO_ROOT / "src/gpd/specs/references/orchestration/agent-infrastructure.md").read_text(encoding="utf-8")
 
-    assert "references/orchestration/agent-infrastructure.md" in verifier_raw
+    assert "agent-infrastructure.md" in verifier_raw
     assert "@{GPD_INSTALL_DIR}/references/orchestration/agent-infrastructure.md" not in verifier_raw
     assert "<!-- [included:" not in verifier_raw
     assert "gpd regression-check [phase] [--quick]" in infra
@@ -911,17 +1176,27 @@ def test_help_prompt_workflow_modes_match_current_settings_vocabulary() -> None:
 
 def test_help_prompt_surfaces_workflow_presets_on_the_local_cli_surface() -> None:
     help_workflow = (WORKFLOWS_DIR / "help.md").read_text(encoding="utf-8")
+    optional_addons = _extract_between(help_workflow, "### Optional Local CLI Add-Ons", "Workflow presets are bundles")
+    preset_ids = {preset.id for preset in list_workflow_presets()}
 
     assert "### Optional Local CLI Add-Ons" in help_workflow
     assert "**Workflow presets**" in help_workflow
-    assert "Paper/manuscript workflows" in help_workflow
+    assert "publication-manuscript" in preset_ids
+    assert "Paper/manuscript workflows" in optional_addons
     assert DOCTOR_RUNTIME_SCOPE_RE.search(help_workflow) is not None
-    assert "executable probes" in help_workflow
     assert_workflow_preset_surface_contract(help_workflow)
-    assert "paper-toolchain readiness" in help_workflow
-    assert "degrade `write-paper`" in help_workflow
-    assert "`paper-build` remains the build contract" in help_workflow
-    assert "`arxiv-submission` requires the built manuscript" in help_workflow
+    _assert_normalized_fragments(
+        optional_addons,
+        (
+            "paper-toolchain readiness",
+            "degrade `write-paper`",
+            "`paper-build` remains the build contract",
+            "`arxiv-submission` requires the built manuscript",
+            "pdflatex --version",
+            "tectonic --version",
+            "wolframscript -version",
+        ),
+    )
     assert "gpd:set-tier-models" in help_workflow
     assert "gpd:settings" in help_workflow
     assert "gpd:set-profile" in help_workflow
@@ -930,12 +1205,18 @@ def test_help_prompt_surfaces_workflow_presets_on_the_local_cli_surface() -> Non
 def test_help_prompt_surfaces_bounded_write_paper_external_authoring_lane() -> None:
     help_workflow = (WORKFLOWS_DIR / "help.md").read_text(encoding="utf-8")
 
-    assert "bounded external-authoring lane driven by an explicit intake manifest only" in help_workflow
+    _assert_semantic_fragments(
+        help_workflow,
+        "write-paper external authoring lane boundary",
+        (
+            "bounded external-authoring lane driven by an explicit intake manifest only",
+            "does not mine arbitrary folders",
+            "embedded external staged-review parity is out of scope",
+        ),
+    )
     assert "GPD-authored outputs live under `GPD/publication/{subject_slug}/...`" in help_workflow
     assert "`GPD/publication/{subject_slug}/intake/`" in help_workflow
-    assert "does not mine arbitrary folders" in help_workflow
-    assert "embedded external staged-review parity is out of scope" in help_workflow
-    assert "Usage: `gpd:write-paper --intake intake/write-paper-authoring-input.json`" in help_workflow
+    assert "`gpd:write-paper --intake intake/write-paper-authoring-input.json`" in help_workflow
 
 
 def test_help_prompt_selected_signatures_match_registry_argument_hints() -> None:
@@ -951,7 +1232,11 @@ def test_help_prompt_plan_phase_skip_verify_keeps_proof_bearing_exception() -> N
     help_workflow = (WORKFLOWS_DIR / "help.md").read_text(encoding="utf-8")
 
     assert "`--skip-verify`" in help_workflow
-    assert "proof-bearing plans still require checker review or an equivalent main-context audit" in help_workflow
+    _assert_semantic_fragments(
+        help_workflow,
+        "plan-phase skip-verify proof-bearing exception",
+        ("proof-bearing plans still require checker review or an equivalent main-context audit",),
+    )
 
 
 def test_help_prompt_keeps_cost_surface_on_local_cli_not_runtime_slash_command() -> None:
@@ -1032,48 +1317,98 @@ def test_help_prompt_session_management_keeps_pause_before_leave_and_resume_on_r
 
 def test_new_project_prompt_surfaces_discuss_phase_before_planning_in_command_and_workflow() -> None:
     command = (REPO_ROOT / "src/gpd/commands/new-project.md").read_text(encoding="utf-8")
-    workflow = (REPO_ROOT / "src/gpd/specs/workflows/new-project.md").read_text(encoding="utf-8")
+    workflow = (REPO_ROOT / "src/gpd/specs/workflows/new-project/completion.md").read_text(encoding="utf-8")
 
     for content in (command, workflow):
         assert "gpd:discuss-phase 1" in content
 
     assert "Discuss phase 1 now?" in command
-    assert "Discuss phase 1 now?" in workflow
+    assert "`gpd:discuss-phase 1`" in workflow
     assert "Plan phase 1 now?" not in command
     assert "Plan phase 1 now?" not in workflow
 
 
 def test_execute_phase_failure_recovery_counts_only_top_level_verification_statuses() -> None:
-    workflow = (REPO_ROOT / "src/gpd/specs/workflows/execute-phase.md").read_text(encoding="utf-8")
+    workflow = workflow_authority_text(WORKFLOWS_DIR, "execute-phase")
 
-    assert "FAILED_COUNT=$(rg -c '^status: (gaps_found|expert_needed|human_needed)$'" in workflow
-    assert "TOTAL_COUNT=$(rg -c '^status: (passed|gaps_found|expert_needed|human_needed)$'" in workflow
+    _assert_semantic_fragments(
+        workflow,
+        "execute-phase failure recovery counts authoritative statuses",
+        (
+            "Count only top-level report status and structured gap ledgers",
+            "do not use unanchored text search over nested `status:` fields",
+        ),
+    )
     assert 'grep -c "status: failed"' not in workflow
     assert 'grep -c "status:"' not in workflow
 
 
 def test_execute_phase_closeout_always_surfaces_concrete_next_commands() -> None:
-    workflow = (REPO_ROOT / "src/gpd/specs/workflows/execute-phase.md").read_text(encoding="utf-8")
+    workflow = workflow_authority_text(WORKFLOWS_DIR, "execute-phase")
+    offer_next = _extract_between(workflow, '<step name="offer_next">', "</step>")
 
-    assert 'Never end with only "ready to plan/continue" prose.' in workflow
-    assert "choose exactly one matching variant" in workflow
-    assert "make `gpd:discuss-phase {X+1}` the primary command" in workflow
-    assert "make `gpd:plan-phase {X+1}` the primary command" in workflow
-    assert "Always include `gpd:suggest-next`" in workflow
-    assert "Primary: `{chosen primary command}`" in workflow
-    assert "`gpd:complete-milestone`" in workflow
-    assert "**Also available:** `gpd:suggest-next`" in workflow
-    assert "Primary: `gpd:discuss-phase {X+1}` if context is missing" not in workflow
-    assert "If context is missing:" not in workflow
-    assert "If context exists:" not in workflow
+    assert "## > Next Up" in offer_next
+    _assert_normalized_fragments(
+        offer_next,
+        (
+            "refresh the lifecycle route",
+            "lifecycle_next_up.rendered_markdown",
+            "next_up.rendered_markdown",
+            "lifecycle_next_up.stage_stop_*",
+            "next_up.stage_stop_*",
+            "shared renderer shape",
+            "The prompt must not decide",
+            "surface the helper JSON instead of hand-rendering a route",
+        ),
+    )
+    _assert_normalized_absent(
+        offer_next,
+        (
+            "one matching variant",
+            "gpd:discuss-phase {PHASE_NUMBER_PLUS_ONE}",
+            "gpd:plan-phase {PHASE_NUMBER_PLUS_ONE}",
+            "Primary: `gpd:discuss-phase {PHASE_NUMBER_PLUS_ONE}`",
+            "Primary: `gpd:plan-phase {PHASE_NUMBER_PLUS_ONE}`",
+            "Primary: `gpd:audit-milestone`",
+            "Primary: `gpd:discuss-phase {X+1}` if context is missing",
+            "If context is missing:",
+            "If context exists:",
+        ),
+    )
+
+
+def test_execute_phase_closeout_prompt_orders_readiness_before_safe_mutation() -> None:
+    workflow = workflow_authority_text(WORKFLOWS_DIR, "execute-phase")
+
+    _assert_ordered_fragments(
+        workflow,
+        (
+            "gpd --raw phase closeout-readiness",
+            'gpd phase complete "${phase_number}"',
+        ),
+    )
+    _assert_normalized_fragments(
+        workflow,
+        (
+            "Before any roadmap/state transition, run the read-only helper",
+            "rechecks lifecycle readiness before mutating",
+            "Primary local transition",
+        ),
+    )
 
 
 def test_command_requirements_force_concrete_next_up_for_stops() -> None:
     note = command_visibility_note()
 
-    assert "completion, checkpoint, blocked return, failed return, retry gate, or stop" in note
-    assert "must end with `## > Next Up`" in note
-    assert "concrete GPD commands" in note
+    _assert_semantic_fragments(
+        note,
+        "command visibility stop closeout",
+        (
+            "completion, checkpoint, blocked return, failed return, retry gate, or stop",
+            "must end with `## > Next Up`",
+            "concrete GPD commands",
+        ),
+    )
     assert "`gpd:suggest-next`" in note
 
 
@@ -1083,29 +1418,39 @@ def test_continuation_format_covers_stop_and_checkpoint_routes() -> None:
     )
 
     assert "## Stop And Checkpoint Rules" in continuation
+    _assert_normalized_fragments(
+        continuation,
+        (
+            "stage-stop envelope",
+            "lifecycle route",
+            "typed suggestion payload",
+            "rendered next-up markdown",
+            "stage_stop.next_runtime_command",
+            "must not choose lifecycle routes itself",
+        ),
+    )
     for command in (
         "`gpd:resume-work`",
         "`gpd:new-project --minimal @file.md`",
-        "`gpd:discuss-phase N`",
-        "`gpd:plan-phase N --gaps`",
-        "`gpd:execute-phase N --gaps-only`",
-        "`gpd:verify-work N`",
-        "`gpd:validate-conventions`",
         "`gpd:suggest-next`",
     ):
         assert command in continuation
 
 
 def test_new_project_and_new_milestone_closeouts_include_concrete_next_up_commands() -> None:
-    new_project = (WORKFLOWS_DIR / "new-project.md").read_text(encoding="utf-8")
-    new_milestone = (WORKFLOWS_DIR / "new-milestone.md").read_text(encoding="utf-8")
+    new_project = workflow_authority_text(WORKFLOWS_DIR, "new-project")
+    new_milestone = workflow_authority_text(WORKFLOWS_DIR, "new-milestone")
     new_milestone_command = (COMMANDS_DIR / "new-milestone.md").read_text(encoding="utf-8")
 
-    assert "Stop after this error with `## > Next Up`" in new_project
+    _assert_semantic_fragments(
+        new_project,
+        "new-project blocked closeout includes next up",
+        ("not available, stop with `## > Next Up`",),
+    )
     assert "`gpd:discuss-phase 1`" in new_project
     assert "`gpd:plan-phase 1`" in new_project
     assert "`gpd:suggest-next`" in new_project
-    assert "re-offer `gpd:discuss-phase 1` as primary" in new_project
+    assert "user sees `gpd:discuss-phase 1` as the primary next step" in new_project
 
     assert "`gpd:discuss-phase [N]`" in new_milestone
     assert "`gpd:plan-phase [N]`" in new_milestone

@@ -11,6 +11,11 @@ allowed-tools:
   - find_files
   - search_files
   - ask_user
+help:
+  group: Tangents, memory, and exports
+  order: 640
+  compact_description: Turn audit gaps into new phases
+  display_signature: gpd:plan-milestone-gaps
 ---
 
 

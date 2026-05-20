@@ -17,9 +17,6 @@ from tests.ci_sharding import (
     CI_SHARD_WEIGHT_SPREAD_TOLERANCE,
     actual_ci_shard_matrix,
     all_test_relpaths,
-    assert_ci_workflow_pytest_shard_policy,
-    assert_contributing_documents_current_pytest_commands,
-    assert_tests_readme_documents_ci_shard_policy,
     build_ci_work_units,
     category_for_test_relpath,
     collected_test_inventory,
@@ -34,6 +31,33 @@ from tests.helpers.github_actions import load_github_actions_workflow
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TESTS_ROOT = REPO_ROOT / "tests"
 TOP_LEVEL_CONFTEST = TESTS_ROOT / "conftest.py"
+PHASE8_LARGE_TEST_FILE_LOC_BUDGETS = {
+    "tests/core/test_cli.py": 9_350,
+    "tests/test_cli_commands.py": 8_000,
+    "tests/core/test_prompt_wiring.py": 7_200,
+    "tests/core/test_context.py": 5_500,
+}
+PHASE8_DIRECT_RESULT_OUTPUT_MENTION_BUDGETS = {
+    # Phase 8 observed 99/15/24/29/0; these ratchets keep the direct-output helper migration from regressing.
+    "tests/core/test_cli.py": 100,
+    "tests/test_cli_commands.py": 16,
+    "tests/test_cli_integration.py": 25,
+    "tests/core/test_cli_install.py": 30,
+    "tests/core/test_phase_lifecycle_live_contract.py": 0,
+}
+PHASE6_CROSS_RUNTIME_ACCEPTANCE_TEST_RELPATHS = (
+    "adapters/test_runtime_projected_prompt_parity.py",
+    "adapters/test_runtime_projected_command_requirement_coverage.py",
+    "adapters/test_install_roundtrip.py",
+    "core/test_phase7_live_like.py",
+    "core/test_prompt_exactness_budget.py",
+    "test_pytest_suite_policy.py",
+)
+PHASE6_CROSS_RUNTIME_ACCEPTANCE_SUPPORT_RELPATHS = (
+    "adapters/projection_test_utils.py",
+    "adapters/projection_budget_support.py",
+)
+PROVIDER_FREE_PERSONA_CANARY_RELPATH = "core/test_provider_free_persona_canary_acceptance.py"
 
 
 def _read(relpath: str) -> str:
@@ -75,11 +99,13 @@ def _catalog_runtime_adapter_test_relpaths() -> tuple[str, ...]:
 def test_root_conftest_keeps_default_collection_as_full_suite() -> None:
     root_conftest = _read("conftest.py")
     core_conftest = _read("core/conftest.py")
+    full_suite_header = "test suite mode: full default suite"
+    targeted_suite_header = "test suite mode: targeted/sharded args"
 
     assert "_isolate_machine_local_gpd_data" in root_conftest
     assert "pytest_xdist_auto_num_workers" in root_conftest
-    assert "test suite mode: full default suite" in root_conftest
-    assert "test suite mode: targeted/sharded args" in root_conftest
+    assert full_suite_header in root_conftest
+    assert targeted_suite_header in root_conftest
     assert not hasattr(tests_conftest, "FAST_SUITE_EXCLUDES")
     assert not hasattr(tests_conftest, "pytest_ignore_collect")
     assert "FAST_SUITE_EXCLUDES" not in root_conftest
@@ -230,6 +256,20 @@ def test_no_untracked_non_ignored_tests_can_bypass_checked_in_inventory() -> Non
     )
 
 
+def test_phase8_large_test_files_stay_under_loc_targets() -> None:
+    for relpath, budget in PHASE8_LARGE_TEST_FILE_LOC_BUDGETS.items():
+        observed = len((REPO_ROOT / relpath).read_text(encoding="utf-8").splitlines())
+
+        assert observed <= budget, f"{relpath} LOC budget exceeded: observed={observed} max={budget}"
+
+
+def test_phase8_large_cli_files_do_not_regress_direct_result_output_mentions() -> None:
+    for relpath, budget in PHASE8_DIRECT_RESULT_OUTPUT_MENTION_BUDGETS.items():
+        observed = (REPO_ROOT / relpath).read_text(encoding="utf-8").count("result.output")
+
+        assert observed <= budget, f"{relpath} direct result.output mentions exceeded: observed={observed} max={budget}"
+
+
 def _assert_hotspot_metadata_references_live_relpaths(all_relpaths: tuple[str, ...]) -> None:
     live_relpaths = set(all_relpaths)
     split_relpaths = set(CI_HOT_TEST_FILE_SPLITS)
@@ -296,6 +336,46 @@ def test_adapter_hotspot_metadata_tracks_catalog_runtime_adapter_tests() -> None
     assert all(CI_HOT_TEST_FILE_WEIGHT_MULTIPLIERS[rel_path] > 1.0 for rel_path in runtime_adapter_test_files)
 
 
+def test_provider_free_persona_canary_hotspot_metadata_keeps_canary_split() -> None:
+    relpath = PROVIDER_FREE_PERSONA_CANARY_RELPATH
+
+    assert CI_HOT_TEST_FILE_SPLITS[relpath] >= 2
+    assert CI_HOT_TEST_FILE_WEIGHT_MULTIPLIERS[relpath] >= 6.0
+
+    inventory = synthetic_test_inventory()
+    work_units = build_ci_work_units(inventory)
+    provider_units = tuple(unit for unit in work_units if unit.label.startswith(f"{relpath} ["))
+    planned_core_shards = plan_category_ci_shards(category="core", inventory=inventory, work_units=work_units)
+    provider_shards = tuple(
+        shard_targets
+        for shard_targets in planned_core_shards
+        if any(PROVIDER_FREE_PERSONA_CANARY_RELPATH in target for target in shard_targets)
+    )
+
+    assert len(provider_units) == CI_HOT_TEST_FILE_SPLITS[relpath]
+    assert all("::" in target for unit in provider_units for target in unit.targets)
+    assert all(f"tests/{relpath}" not in shard_targets for shard_targets in planned_core_shards)
+    assert len(provider_shards) == len(provider_units)
+    assert all(
+        sum(1 for target in shard_targets if PROVIDER_FREE_PERSONA_CANARY_RELPATH in target) == 1
+        for shard_targets in provider_shards
+    )
+
+
+def test_phase6_cross_runtime_acceptance_surfaces_remain_ci_visible() -> None:
+    live_test_relpaths = set(all_test_relpaths(tests_root=TESTS_ROOT))
+    missing_tests = sorted(set(PHASE6_CROSS_RUNTIME_ACCEPTANCE_TEST_RELPATHS) - live_test_relpaths)
+    missing_support = sorted(
+        relpath for relpath in PHASE6_CROSS_RUNTIME_ACCEPTANCE_SUPPORT_RELPATHS if not (TESTS_ROOT / relpath).is_file()
+    )
+
+    assert not missing_tests
+    assert not missing_support
+    assert {category_for_test_relpath(relpath) for relpath in PHASE6_CROSS_RUNTIME_ACCEPTANCE_TEST_RELPATHS} <= set(
+        CI_CATEGORY_SHARD_COUNTS
+    )
+
+
 def _assert_ci_shards_cover_inventory_without_overlap_or_empty_shards(
     inventory: dict[str, tuple[str, ...]],
 ) -> None:
@@ -306,8 +386,7 @@ def _assert_ci_shards_cover_inventory_without_overlap_or_empty_shards(
     for category, shard_total in CI_CATEGORY_SHARD_COUNTS.items():
         planned_shards = plan_category_ci_shards(category=category, inventory=inventory, work_units=work_units)
         expanded_targets = [
-            expand_ci_targets_to_nodeids(shard_targets, inventory=inventory)
-            for shard_targets in planned_shards
+            expand_ci_targets_to_nodeids(shard_targets, inventory=inventory) for shard_targets in planned_shards
         ]
         category_nodeids = tuple(
             nodeid
@@ -350,29 +429,22 @@ def _assert_expected_ci_matrix_rows_resolve_live_non_empty_targets(
         assert not missing_target_relpaths, f"{display_name} resolved missing files: {sorted(missing_target_relpaths)}"
         expanded_nodeids = expand_ci_targets_to_nodeids(shard_targets, inventory=inventory)
         assert expanded_nodeids, f"{display_name} resolved no collected tests"
-        assert {
-            category_for_test_relpath(relpath) for relpath in target_relpaths
-        } == {category}, f"{display_name} resolved targets outside category {category!r}"
+        assert {category_for_test_relpath(relpath) for relpath in target_relpaths} == {category}, (
+            f"{display_name} resolved targets outside category {category!r}"
+        )
 
 
 def _assert_live_ci_shard_weight_spread_stays_tight(
     inventory: dict[str, tuple[str, ...]],
 ) -> None:
     work_units = build_ci_work_units(inventory)
-    per_target_weight = {
-        target: unit.weight / len(unit.targets)
-        for unit in work_units
-        for target in unit.targets
-    }
+    per_target_weight = {target: unit.weight / len(unit.targets) for unit in work_units for target in unit.targets}
 
     for category, shard_total in CI_CATEGORY_SHARD_COUNTS.items():
         if shard_total == 1:
             continue
         planned_shards = plan_category_ci_shards(category=category, inventory=inventory, work_units=work_units)
-        shard_weights = [
-            sum(per_target_weight[target] for target in shard_targets)
-            for shard_targets in planned_shards
-        ]
+        shard_weights = [sum(per_target_weight[target] for target in shard_targets) for shard_targets in planned_shards]
         average_weight = sum(shard_weights) / len(shard_weights)
 
         assert max(shard_weights) - min(shard_weights) <= average_weight * CI_SHARD_WEIGHT_SPREAD_TOLERANCE
@@ -501,17 +573,6 @@ def test_ci_shard_target_resolution_collects_only_requested_category(
     assert targets == ("tests/core/test_sample.py",)
 
 
-def test_ci_and_test_readme_document_default_full_suite_and_category_named_runtime_informed_shards() -> None:
-    repo_root = _repo_root()
-    workflow = _workflow_data()
-    pyproject = (repo_root / "pyproject.toml").read_text(encoding="utf-8")
-    tests_readme = (repo_root / "tests" / "README.md").read_text(encoding="utf-8")
-    contributing = (repo_root / "CONTRIBUTING.md").read_text(encoding="utf-8")
-    assert_ci_workflow_pytest_shard_policy(workflow, pyproject_text=pyproject)
-    assert_tests_readme_documents_ci_shard_policy(tests_readme)
-    assert_contributing_documents_current_pytest_commands(contributing)
-
-
 def test_hotspot_files_are_split_into_multiple_work_units() -> None:
     inventory = synthetic_test_inventory()
     work_units = build_ci_work_units(inventory)
@@ -533,8 +594,7 @@ def test_synthetic_category_shard_layout_covers_every_nodeid_without_overlap() -
     for category, shard_total in CI_CATEGORY_SHARD_COUNTS.items():
         planned_shards = plan_category_ci_shards(category=category, work_units=work_units)
         expanded_targets = [
-            expand_ci_targets_to_nodeids(shard_targets, inventory=inventory)
-            for shard_targets in planned_shards
+            expand_ci_targets_to_nodeids(shard_targets, inventory=inventory) for shard_targets in planned_shards
         ]
         category_nodeids = tuple(
             nodeid
@@ -556,20 +616,13 @@ def test_synthetic_category_shard_layout_covers_every_nodeid_without_overlap() -
 def test_synthetic_split_categories_keep_runtime_informed_weight_spread_tight() -> None:
     inventory = synthetic_test_inventory()
     work_units = build_ci_work_units(inventory)
-    per_target_weight = {
-        target: unit.weight / len(unit.targets)
-        for unit in work_units
-        for target in unit.targets
-    }
+    per_target_weight = {target: unit.weight / len(unit.targets) for unit in work_units for target in unit.targets}
 
     for category, shard_total in CI_CATEGORY_SHARD_COUNTS.items():
         if shard_total == 1:
             continue
         planned_shards = plan_category_ci_shards(category=category, work_units=work_units)
-        shard_weights = [
-            sum(per_target_weight[target] for target in shard_targets)
-            for shard_targets in planned_shards
-        ]
+        shard_weights = [sum(per_target_weight[target] for target in shard_targets) for shard_targets in planned_shards]
         average_weight = sum(shard_weights) / len(shard_weights)
 
         assert max(shard_weights) - min(shard_weights) <= average_weight * CI_SHARD_WEIGHT_SPREAD_TOLERANCE

@@ -7,6 +7,11 @@ allowed-tools:
   - file_read
   - shell
   - ask_user
+help:
+  group: Starter commands
+  order: 20
+  compact_description: Guided first-run router for the safest first path in the current folder
+  display_signature: gpd:start
 ---
 
 

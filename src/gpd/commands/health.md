@@ -9,6 +9,11 @@ allowed-tools:
   - shell
   - find_files
   - search_files
+help:
+  group: Validation and analysis
+  order: 380
+  compact_description: Run project health checks
+  display_signature: gpd:health
 ---
 
 

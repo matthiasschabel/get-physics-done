@@ -7,8 +7,14 @@ import re
 from pathlib import Path
 
 import pytest
+import yaml
 
-from gpd.adapters.install_utils import MANIFEST_NAME, build_runtime_cli_bridge_command, hook_python_interpreter
+from gpd.adapters.install_utils import (
+    COMPACT_WORKFLOW_COMMAND_SHIM_SENTINEL,
+    MANIFEST_NAME,
+    hook_python_interpreter,
+    split_markdown_frontmatter,
+)
 from gpd.adapters.opencode import (
     OpenCodeAdapter,
     configure_opencode_permissions,
@@ -17,6 +23,13 @@ from gpd.adapters.opencode import (
     copy_agents_as_agent_files,
     copy_flattened_commands,
     write_manifest,
+)
+from tests.adapters.projection_test_utils import (
+    assert_compact_help_bridge_shim,
+    assert_compact_staged_command_shim,
+    assert_compact_workflow_reference_shim,
+    iter_staged_command_projection_cases,
+    runtime_bridge_command,
 )
 from tests.adapters.review_contract_test_utils import (
     assert_review_contract_prompt_surface,
@@ -30,13 +43,17 @@ def adapter() -> OpenCodeAdapter:
 
 
 def expected_opencode_bridge(target: Path, *, is_global: bool = False, explicit_target: bool = False) -> str:
-    return build_runtime_cli_bridge_command(
-        "opencode",
-        target_dir=target,
-        config_dir_name=".opencode",
-        is_global=is_global,
-        explicit_target=explicit_target,
+    return runtime_bridge_command("opencode", target, is_global=is_global, explicit_target=explicit_target)
+
+
+def _staged_projection_case(gpd_root: Path, command_name: str):
+    cases = iter_staged_command_projection_cases(
+        commands_dir=gpd_root / "commands",
+        workflows_dir=gpd_root / "specs" / "workflows",
     )
+    case = next((candidate for candidate in cases if candidate.command_name == command_name), None)
+    assert case is not None, f"{command_name} has no staged projection case"
+    return case
 
 
 def _assert_no_manifestless_gpd_artifacts(target: Path) -> None:
@@ -45,6 +62,53 @@ def _assert_no_manifestless_gpd_artifacts(target: Path) -> None:
     assert not (target / "command").exists()
     assert not (target / "agents").exists()
     assert not (target / "hooks").exists()
+
+
+def _opencode_frontmatter_metadata(content: str) -> tuple[dict[str, object], str]:
+    _preamble, frontmatter, _separator, _body = split_markdown_frontmatter(content)
+    metadata = yaml.safe_load(frontmatter) if frontmatter.strip() else {}
+    assert isinstance(metadata, dict)
+    return metadata, frontmatter
+
+
+def test_opencode_command_projection_downgrades_non_runnable_shell_examples(tmp_path: Path) -> None:
+    target = tmp_path / ".opencode"
+    bridge = expected_opencode_bridge(target)
+    source = (
+        "---\n"
+        "name: gpd:projection-probe\n"
+        "description: Probe\n"
+        "allowed-tools:\n"
+        "  - shell\n"
+        "---\n"
+        "```bash\n"
+        "gpd status\n"
+        "```\n"
+        "\n"
+        "```bash\n"
+        "git status --porcelain\n"
+        "```\n"
+        "\n"
+        "```bash\n"
+        "if [ -d GPD ]; then\n"
+        "  gpd status\n"
+        "fi\n"
+        "```\n"
+    )
+
+    projected = OpenCodeAdapter().project_markdown_surface(
+        source,
+        surface_kind="command",
+        path_prefix="./.opencode/",
+        bridge_command=bridge,
+    )
+
+    assert f"```bash\n{bridge} status\n```" in projected
+    assert "```bash\ngit status --porcelain\n```" not in projected
+    assert "```text\ngit status --porcelain\n```" in projected
+    assert "```bash\nif [ -d GPD ]; then" not in projected
+    assert "```text\nif [ -d GPD ]; then" in projected
+    assert "Gemini shell compatibility" not in projected
 
 
 class TestProperties:
@@ -86,18 +150,21 @@ class TestConvertFrontmatter:
     def test_name_stripped(self) -> None:
         content = "---\nname: gpd:help\ndescription: Help\n---\nBody"
         result = convert_claude_to_opencode_frontmatter(content)
+        metadata, _frontmatter = _opencode_frontmatter_metadata(result)
         assert "name:" not in result
-        assert "description: Help" in result
+        assert metadata["description"] == "Help"
 
     def test_color_name_to_hex(self) -> None:
         content = "---\ncolor: cyan\ndescription: D\n---\nBody"
         result = convert_claude_to_opencode_frontmatter(content)
-        assert '"#00FFFF"' in result
+        metadata, _frontmatter = _opencode_frontmatter_metadata(result)
+        assert metadata["color"] == "#00FFFF"
 
     def test_color_hex_preserved(self) -> None:
         content = "---\ncolor: #FF0000\ndescription: D\n---\nBody"
         result = convert_claude_to_opencode_frontmatter(content)
-        assert "#FF0000" in result
+        metadata, _frontmatter = _opencode_frontmatter_metadata(result)
+        assert metadata["color"] == "#FF0000"
 
     def test_color_invalid_hex_stripped(self) -> None:
         content = "---\ncolor: #GGGGGG\ndescription: D\n---\nBody"
@@ -112,11 +179,65 @@ class TestConvertFrontmatter:
     def test_allowed_tools_to_tools_object(self) -> None:
         content = "---\ndescription: D\nallowed-tools:\n  - Read\n  - Bash\n  - AskUserQuestion\n---\nBody"
         result = convert_claude_to_opencode_frontmatter(content)
-        assert "tools:" in result
-        assert "read_file: true" in result
-        assert "shell: true" in result
-        assert "question: true" in result
+        metadata, _frontmatter = _opencode_frontmatter_metadata(result)
+        assert metadata["tools"] == {
+            "read_file": True,
+            "shell": True,
+            "question": True,
+        }
         assert "allowed-tools:" not in result
+
+    def test_inline_allowed_tools_yaml_list(self) -> None:
+        content = "---\ndescription: D\nallowed-tools: [Read, Bash, AskUserQuestion]\n---\nBody"
+        result = convert_claude_to_opencode_frontmatter(content)
+        metadata, _frontmatter = _opencode_frontmatter_metadata(result)
+        assert metadata["tools"] == {
+            "read_file": True,
+            "shell": True,
+            "question": True,
+        }
+        assert "allowed-tools:" not in result
+
+    def test_tools_bool_map_filters_false_and_translates_true_keys(self) -> None:
+        content = (
+            "---\n"
+            "description: D\n"
+            "tools:\n"
+            "  Read: true\n"
+            "  Bash: false\n"
+            "  AskUserQuestion: true\n"
+            "---\n"
+            "Body"
+        )
+        result = convert_claude_to_opencode_frontmatter(content)
+        metadata, _frontmatter = _opencode_frontmatter_metadata(result)
+        assert metadata["tools"] == {"read_file": True, "question": True}
+        assert {"Read", "Bash", "AskUserQuestion"}.isdisjoint(metadata)
+
+    def test_tools_are_deduped_across_allowed_tools_and_tools_fields(self) -> None:
+        content = (
+            "---\n"
+            "description: D\n"
+            "allowed-tools: [Read, Bash, Read]\n"
+            "tools: Read, AskUserQuestion, Bash\n"
+            "---\n"
+            "Body"
+        )
+        result = convert_claude_to_opencode_frontmatter(content)
+        metadata, frontmatter = _opencode_frontmatter_metadata(result)
+        assert metadata["tools"] == {
+            "read_file": True,
+            "shell": True,
+            "question": True,
+        }
+        assert frontmatter.count("read_file: true") == 1
+        assert frontmatter.count("shell: true") == 1
+
+    def test_icon_field_preserved(self) -> None:
+        content = "---\ndescription: D\nicon: zap\nallowed-tools: [Read]\n---\nBody"
+        result = convert_claude_to_opencode_frontmatter(content)
+        metadata, _frontmatter = _opencode_frontmatter_metadata(result)
+        assert metadata["icon"] == "zap"
 
     def test_slash_command_conversion_is_boundary_aware(self) -> None:
         content = (
@@ -157,7 +278,8 @@ class TestConvertFrontmatter:
     def test_inline_tools_field(self) -> None:
         content = "---\ndescription: D\ntools: Read, Write\n---\nBody"
         result = convert_claude_to_opencode_frontmatter(content)
-        assert "tools:" in result
+        metadata, _frontmatter = _opencode_frontmatter_metadata(result)
+        assert metadata["tools"] == {"read_file": True, "write_file": True}
 
     def test_description_with_triple_dash_is_preserved(self) -> None:
         content = "---\ndescription: before --- after\nallowed-tools:\n  - Read\n---\nBody"
@@ -479,19 +601,53 @@ class TestInstall:
     def test_local_install_uses_relative_gpd_paths(
         self,
         adapter: OpenCodeAdapter,
-        gpd_root: Path,
         tmp_path: Path,
     ) -> None:
+        gpd_root = Path(__file__).resolve().parents[2] / "src" / "gpd"
         target = tmp_path / ".opencode"
         target.mkdir()
 
         adapter.install(gpd_root, target, is_global=False)
 
-        content = (target / "command" / "gpd-help.md").read_text(encoding="utf-8")
-        assert "./.opencode/get-physics-done/ref" in content
-        assert "~/.claude/agents" in content
-        assert "./.opencode/agents" not in content
+        content = (target / "command" / "gpd-compare-experiment.md").read_text(encoding="utf-8")
+        assert "./.opencode/get-physics-done/templates/paper/experimental-comparison.md" in content
+        assert "./.opencode/get-physics-done/references/results/result-lookup-policy.md" in content
         assert f"{target.as_posix()}/get-physics-done" not in content
+
+    def test_install_projects_staged_and_help_commands_as_compact_shims(
+        self,
+        adapter: OpenCodeAdapter,
+        tmp_path: Path,
+    ) -> None:
+        gpd_root = Path(__file__).resolve().parents[2] / "src" / "gpd"
+        target = tmp_path / ".opencode"
+        target.mkdir()
+
+        adapter.install(gpd_root, target, is_global=False)
+
+        expected_bridge = expected_opencode_bridge(target, is_global=False)
+        execute_phase = (target / "command" / "gpd-execute-phase.md").read_text(encoding="utf-8")
+        help_command = (target / "command" / "gpd-help.md").read_text(encoding="utf-8")
+
+        case = _staged_projection_case(gpd_root, "execute-phase")
+        assert_compact_staged_command_shim(
+            execute_phase,
+            command_name=case.command_name,
+            first_stage=case.first_stage_id,
+            staged_loading_keys=case.staged_loading_keys,
+            command_label="/gpd-execute-phase",
+            stage_count=case.stage_count,
+        )
+        assert f'{expected_bridge} --raw init execute-phase "$ARGUMENTS" --stage phase_bootstrap' in execute_phase
+        assert "@{GPD_INSTALL_DIR}" not in execute_phase
+        assert len(execute_phase) < 20_000
+
+        assert_compact_help_bridge_shim(help_command, command_label="/gpd-help")
+        assert f"{expected_bridge} --raw help" in help_command
+        assert f"{expected_bridge} --raw help --all" in help_command
+        assert f"{expected_bridge} --raw help --command <name>" in help_command
+        assert "@{GPD_INSTALL_DIR}" not in help_command
+        assert len(help_command) < 10_000
 
     def test_install_completeness_requires_opencode_json(
         self,
@@ -656,7 +812,7 @@ class TestInstall:
         assert re.search(r"^\s*@.*?/workflows/update\.md\s*$", content, flags=re.MULTILINE) is None
         assert "gpd-reapply-patches" in content
 
-    def test_complete_milestone_command_inlines_bullet_list_includes(
+    def test_complete_milestone_command_uses_compact_workflow_reference_shim(
         self,
         adapter: OpenCodeAdapter,
         tmp_path: Path,
@@ -667,10 +823,16 @@ class TestInstall:
         adapter.install(gpd_root, target)
 
         content = (target / "command" / "gpd-complete-milestone.md").read_text(encoding="utf-8")
-        assert "<!-- [included: complete-milestone.md] -->" in content
-        assert "<!-- [included: milestone-archive.md] -->" in content
-        assert "Mark a completed research stage" in content
-        assert "# Milestone Archive Template" in content
+        assert_compact_workflow_reference_shim(
+            content,
+            workflow_id="complete-milestone",
+            command_label="/gpd-complete-milestone",
+            authority_suffixes=("get-physics-done/workflows/complete-milestone.md",),
+        )
+        assert "{GPD_INSTALL_DIR}" not in content
+        assert "get-physics-done/templates/milestone-archive.md" in content
+        assert "<!-- [included: complete-milestone.md] -->" not in content
+        assert "<!-- [included: milestone-archive.md] -->" not in content
         assert re.search(r"^\s*-\s*@.*?/workflows/complete-milestone\.md.*$", content, flags=re.MULTILINE) is None
         assert re.search(r"^\s*-\s*@.*?/templates/milestone-archive\.md.*$", content, flags=re.MULTILINE) is None
 
@@ -805,19 +967,28 @@ class TestInstall:
         expected_bridge = expected_opencode_bridge(target, is_global=False)
         command = (target / "command" / "gpd-settings.md").read_text(encoding="utf-8")
         workflow = (target / "get-physics-done" / "workflows" / "settings.md").read_text(encoding="utf-8")
-        execute_phase = (target / "get-physics-done" / "workflows" / "execute-phase.md").read_text(encoding="utf-8")
+        execute_phase = (target / "get-physics-done" / "workflows" / "execute-phase" / "phase-bootstrap.md").read_text(
+            encoding="utf-8"
+        )
         agent = (target / "agents" / "gpd-planner.md").read_text(encoding="utf-8")
+        planner_procedure = (
+            target / "get-physics-done" / "references" / "planning" / "planner-execution-procedure.md"
+        ).read_text(encoding="utf-8")
 
-        assert expected_bridge + " config ensure-section" in command
-        assert f"INIT=$({expected_bridge} --raw init progress --include state,config --no-project-reentry)" in command
+        assert COMPACT_WORKFLOW_COMMAND_SHIM_SENTINEL in command
+        assert expected_bridge + " config ensure-section" not in command
+        assert (
+            f"INIT=$({expected_bridge} --raw init progress --include state,config --no-project-reentry)" not in command
+        )
         assert expected_bridge + " config ensure-section" in workflow
         assert f"INIT=$({expected_bridge} --raw init progress --include state,config --no-project-reentry)" in workflow
         assert 'echo "ERROR: gpd initialization failed: $INIT"' in workflow
         assert f'if ! {expected_bridge} verify plan "$plan"; then' in execute_phase
-        assert f'INIT=$({expected_bridge} --raw init plan-phase "<PHASE>")' in agent
+        assert f'INIT=$({expected_bridge} --raw init plan-phase "${{PHASE}}")' in planner_procedure
         assert "```bash\ngpd config ensure-section\n" not in workflow
         assert "INIT=$(gpd --raw init progress --include state,config --no-project-reentry)" not in workflow
         assert 'if ! gpd verify plan "$plan"; then' not in execute_phase
+        assert 'INIT=$(gpd --raw init plan-phase "${PHASE}")' not in planner_procedure
         assert 'INIT=$(gpd --raw init plan-phase "<PHASE>")' not in agent
 
     def test_install_preserves_existing_mcp_overrides(

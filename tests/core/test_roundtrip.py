@@ -44,6 +44,13 @@ def _create_phase(tmp_path: Path, name: str) -> Path:
     return d
 
 
+def _write_passed_verification(phase_dir: Path) -> Path:
+    phase_number = phase_dir.name.split("-", 1)[0]
+    path = phase_dir / f"{phase_number}-VERIFICATION.md"
+    path.write_text("---\nstatus: passed\n---\n\n# Verification\nPASS\n", encoding="utf-8")
+    return path
+
+
 def _write_roadmap(tmp_path: Path, content: str) -> Path:
     p = tmp_path / "GPD" / "ROADMAP.md"
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -173,6 +180,7 @@ class TestPhaseLifecycle:
                 f'---\nphase: "{num}"\nplan: "01"\ndepth: full\nprovides: []\ncompleted: "2026-02-23"\none-liner: "Summary {num}"\n---\n\n# Summary 1\n',
                 encoding="utf-8",
             )
+            _write_passed_verification(d)
         return tmp_path
 
     def test_completing_a_phase_updates_roadmap_and_advances_state(self, tmp_path: Path) -> None:
@@ -495,6 +503,7 @@ class TestMilestoneLifecycle:
             (d / f"{num}-01-SUMMARY.md").write_text(
                 f'---\none-liner: "Phase {num} done"\ncompleted: 2026-02-23\n---\n# Summary', encoding="utf-8"
             )
+            _write_passed_verification(d)
 
         # Complete phases
         phase_complete(tmp_path, "1")
@@ -614,7 +623,9 @@ class TestPlanIndexWaveValidation:
         """
         _setup_project(tmp_path)
         d = _create_phase(tmp_path, "01-setup")
-        (d / "a-PLAN.md").write_text('---\nwave: 1\ndepends_on: []\nfiles_modified: ["src/main.py"]\n---\n# A\n', encoding="utf-8")
+        (d / "a-PLAN.md").write_text(
+            '---\nwave: 1\ndepends_on: []\nfiles_modified: ["src/main.py"]\n---\n# A\n', encoding="utf-8"
+        )
         (d / "b-PLAN.md").write_text(
             '---\nwave: 1\ndepends_on: []\nfiles_modified: ["src/main.py", "src/test.py"]\n---\n# B\n', encoding="utf-8"
         )
@@ -628,7 +639,8 @@ class TestPlanIndexWaveValidation:
         d = _create_phase(tmp_path, "01-setup")
         for name in ["a", "b", "c"]:
             (d / f"{name}-PLAN.md").write_text(
-                f'---\nwave: 1\ndepends_on: []\nfiles_modified: ["shared.py"]\n---\n# {name.upper()}\n', encoding="utf-8"
+                f'---\nwave: 1\ndepends_on: []\nfiles_modified: ["shared.py"]\n---\n# {name.upper()}\n',
+                encoding="utf-8",
             )
 
         index = phase_plan_index(tmp_path, "1")

@@ -52,7 +52,7 @@
       "integrations_status_wolfram": "gpd integrations status wolfram"
     },
     "terminal_phrase": "from your normal terminal",
-    "purpose_phrase": "install/readiness checks, typed command validation, permissions, observability, diagnostics, recovery, cost, presets, and shared Wolfram integration",
+    "purpose_phrase": "install/readiness checks, typed command validation, permissions, observability, diagnostics, recovery, cost from recorded local telemetry, presets, and shared Wolfram integration",
     "install_local_example": "gpd install <runtime> --local",
     "doctor_local_command": "gpd doctor --runtime <runtime> --local",
     "doctor_global_command": "gpd doctor --runtime <runtime> --global",

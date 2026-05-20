@@ -2,17 +2,11 @@
 /**
  * GPD bootstrap installer — installs or uninstalls Get Physics Done.
  *
- * Usage:
- *   npx -y get-physics-done
- *   npx -y get-physics-done --<runtime-flag> --global
- *   npx -y get-physics-done --<runtime-flag> --local
- *   npx -y get-physics-done --all --global
- *   npx -y get-physics-done --uninstall
- *   npx -y get-physics-done --uninstall --<runtime-flag> --global
- *   npx -y get-physics-done uninstall --all --local
+ * Run with --help to see usage rendered from generated installer metadata.
  */
 
 const fs = require("fs");
+const crypto = require("crypto");
 const http = require("http");
 const https = require("https");
 const os = require("os");
@@ -24,26 +18,25 @@ const {
   repository,
   gpdPythonVersion: rawPythonPackageVersion,
 } = require("../package.json");
-const PUBLIC_SURFACE_CONTRACT = require("../src/gpd/core/public_surface_contract.json");
-const PUBLIC_SURFACE_CONTRACT_SCHEMA = require("../src/gpd/core/public_surface_contract_schema.json");
-const BUNDLED_RUNTIME_CATALOG_PAYLOAD = require("../src/gpd/adapters/runtime_catalog.json");
-const RUNTIME_CATALOG_SCHEMA = require("../src/gpd/adapters/runtime_catalog_schema.json");
 
 const pythonPackageVersion = typeof rawPythonPackageVersion === "string" ? rawPythonPackageVersion.trim() : "";
 const GPD_HOME_ENV = "GPD_HOME";
 const GPD_HOME_DIRNAME = ".gpd";
 const GITHUB_MAIN_BRANCH = "main";
 const BOOTSTRAP_TEST_PROBES_ENV = "GPD_BOOTSTRAP_TEST_PROBES";
+const BOOTSTRAP_TEST_INSTALLER_METADATA_JSON_ENV = "GPD_BOOTSTRAP_TEST_INSTALLER_METADATA_JSON";
+const BOOTSTRAP_TEST_INSTALLER_METADATA_PATH_ENV = "GPD_BOOTSTRAP_TEST_INSTALLER_METADATA_PATH";
 const BOOTSTRAP_DISABLE_NETWORK_PROBES_ENV = "GPD_BOOTSTRAP_DISABLE_NETWORK_PROBES";
+const BOOTSTRAP_INSTALLER_METADATA_RELATIVE_PATH = path.join(
+  "src",
+  "gpd",
+  "bootstrap",
+  "installer_metadata.json"
+);
 const INSTALL_CANDIDATE_PROBE_TIMEOUT_MS = 5000;
 const INSTALL_CANDIDATE_PROBE_REDIRECT_LIMIT = 5;
 const MIN_SUPPORTED_NODE_MAJOR = 20;
 const MIN_SUPPORTED_NODE_LABEL = `${MIN_SUPPORTED_NODE_MAJOR}+`;
-const MIN_SUPPORTED_PYTHON_MAJOR = 3;
-const MIN_SUPPORTED_PYTHON_MINOR = 11;
-const MIN_SUPPORTED_PYTHON_LABEL = `${MIN_SUPPORTED_PYTHON_MAJOR}.${MIN_SUPPORTED_PYTHON_MINOR}+`;
-// Keep this in sync with gpd._python_compat.PREFERRED_VERSIONED_PYTHON_MINORS.
-const PREFERRED_VERSIONED_PYTHON_MINORS = [13, 12, MIN_SUPPORTED_PYTHON_MINOR];
 
 const red = "\x1b[31m";
 const green = "\x1b[32m";
@@ -117,112 +110,10 @@ function runtimeInstallerHelpExampleScope(runtime) {
   return runtimeRecord(runtime).installer_help_example_scope || null;
 }
 
-function loadSharedPublicSurfaceShape(contractPayload = PUBLIC_SURFACE_CONTRACT) {
-  const contract = requireJsonObject(contractPayload, "public surface contract");
-  requirePresentKeys(contract, ["schema_version"], "public surface contract");
-  if (contract.schema_version !== 1) {
-    throw new Error(`Unsupported public surface contract schema_version: ${JSON.stringify(contract.schema_version)}`);
-  }
-
-  const topLevelKeys = Object.keys(contract);
-  const sectionNames = topLevelKeys.filter((key) => key !== "schema_version");
-  const sectionKeys = Object.fromEntries(
-    sectionNames.map((sectionName) => [
-      sectionName,
-      Object.keys(requireJsonObject(contract[sectionName], `public surface contract.${sectionName}`)),
-    ])
-  );
-  const localCliBridge = requireJsonObject(contract.local_cli_bridge, "public surface contract.local_cli_bridge");
-  const namedCommands = requireJsonObject(
-    localCliBridge.named_commands,
-    "public surface contract.local_cli_bridge.named_commands"
-  );
-
-  return {
-    topLevelKeys,
-    sectionKeys,
-    localCliNamedCommandKeys: Object.keys(namedCommands),
-  };
-}
-
-const RUNTIME_CATALOG_GLOBAL_CONFIG_KEYS = Object.fromEntries(
-  Object.entries(RUNTIME_CATALOG_SCHEMA.global_config_keys).map(([strategy, keys]) => [strategy, new Set(keys)])
-);
-const RUNTIME_CATALOG_GLOBAL_CONFIG_STRATEGIES = new Set(Object.keys(RUNTIME_CATALOG_GLOBAL_CONFIG_KEYS));
-const RUNTIME_CATALOG_ENTRY_REQUIRED_KEYS = new Set(RUNTIME_CATALOG_SCHEMA.entry_required_keys);
-const RUNTIME_CATALOG_ENTRY_OPTIONAL_KEYS = new Set(RUNTIME_CATALOG_SCHEMA.entry_optional_keys);
-const RUNTIME_CATALOG_ENTRY_KEYS = {
-  required: [...RUNTIME_CATALOG_ENTRY_REQUIRED_KEYS],
-  optional: [...RUNTIME_CATALOG_ENTRY_OPTIONAL_KEYS],
-};
-const RUNTIME_CATALOG_ALLOWED_KEYS = new Set([
-  ...RUNTIME_CATALOG_ENTRY_REQUIRED_KEYS,
-  ...RUNTIME_CATALOG_ENTRY_OPTIONAL_KEYS,
-]);
-const RUNTIME_CATALOG_CAPABILITY_KEYS = new Set(RUNTIME_CATALOG_SCHEMA.capability_keys);
-const RUNTIME_CATALOG_CAPABILITY_ENUMS = Object.fromEntries(
-  Object.entries(RUNTIME_CATALOG_SCHEMA.capability_enums).map(([fieldName, values]) => [fieldName, new Set(values)])
-);
-const RUNTIME_CAPABILITY_DEFAULTS = Object.freeze(RUNTIME_CATALOG_SCHEMA.capability_defaults);
-const RUNTIME_CATALOG_HOOK_PAYLOAD_KEYS = new Set(RUNTIME_CATALOG_SCHEMA.hook_payload_keys);
-const RUNTIME_HOOK_PAYLOAD_DEFAULTS = Object.freeze(RUNTIME_CATALOG_SCHEMA.hook_payload_defaults);
-const RUNTIME_CATALOG_MANAGED_INSTALL_SURFACE_KEYS = new Set(RUNTIME_CATALOG_SCHEMA.managed_install_surface_keys);
-const RUNTIME_MANAGED_INSTALL_SURFACE_DEFAULTS = Object.freeze(
-  RUNTIME_CATALOG_SCHEMA.managed_install_surface_defaults
-);
-const RUNTIME_MANIFEST_METADATA_LIST_VALUE_KINDS = new Set(
-  RUNTIME_CATALOG_SCHEMA.manifest_metadata_list_value_kinds || []
-);
-const RUNTIME_INSTALL_HELP_EXAMPLE_SCOPES = new Set(RUNTIME_CATALOG_SCHEMA.install_help_example_scopes);
-const RUNTIME_LAUNCH_WRAPPER_PERMISSION_SURFACE_KINDS = new Set(
-  RUNTIME_CATALOG_SCHEMA.launch_wrapper_permission_surface_kinds
-);
-const RUNTIME_CATALOG_REQUIRED_CAPABILITY_ENUM_FIELDS = new Set(RUNTIME_CATALOG_SCHEMA.capability_enum_required_keys);
-const PUBLIC_SURFACE_CONTRACT_SHAPE = loadSharedPublicSurfaceShape(PUBLIC_SURFACE_CONTRACT);
-const PUBLIC_SURFACE_CONTRACT_KEYS = [...PUBLIC_SURFACE_CONTRACT_SHAPE.topLevelKeys];
-const PUBLIC_SURFACE_CONTRACT_ALLOWED_KEYS = new Set(PUBLIC_SURFACE_CONTRACT_KEYS);
-const PUBLIC_SURFACE_CONTRACT_SECTION_KEYS = Object.fromEntries(
-  Object.entries(PUBLIC_SURFACE_CONTRACT_SHAPE.sectionKeys).map(([section, keys]) => [section, [...keys]])
-);
-const PUBLIC_SURFACE_CONTRACT_SECTION_ALLOWED_KEYS = Object.fromEntries(
-  Object.entries(PUBLIC_SURFACE_CONTRACT_SECTION_KEYS).map(([section, keys]) => [section, new Set(keys)])
-);
-const PUBLIC_SURFACE_LOCAL_CLI_NAMED_COMMAND_KEYS = [...PUBLIC_SURFACE_CONTRACT_SHAPE.localCliNamedCommandKeys];
-const RUNTIME_CONFIG_SURFACE_LABEL_RE = /^[A-Za-z0-9._-]+:[A-Za-z0-9+._-]+$/;
 const RUNTIME_ID_RE = /^[a-z0-9][a-z0-9-]*$/;
 const RUNTIME_FLAG_RE = /^--[a-z0-9][a-z0-9-]*$/;
 const RUNTIME_ENV_VAR_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
-const MANIFEST_METADATA_KEY_RE = /^[a-z][a-z0-9_]*$/;
-const PYTHON_MODULE_RE = /^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$/;
-const PYTHON_IDENTIFIER_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
-const RUNTIME_CAPABILITY_BOOL_FIELDS = new Set([
-  "supports_runtime_permission_sync",
-  "supports_prompt_free_mode",
-  "prompt_free_requires_relaunch",
-  "supports_usage_tokens",
-  "supports_cost_usd",
-  "supports_context_meter",
-  "supports_structured_child_results",
-  "supports_runtime_session_payload_attribution",
-  "supports_agent_payload_attribution",
-]);
-const RUNTIME_CAPABILITY_RUNTIME_SURFACE_LABEL_FIELDS = new Set([
-  "permission_surface_kind",
-  "statusline_config_surface",
-  "notify_config_surface",
-]);
-const RUNTIME_CAPABILITY_OPTIONAL_STRING_FIELDS = new Set(["prompt_free_mode_value"]);
-
-function formatQuotedDisjunction(values) {
-  const normalized = [...values].sort();
-  if (normalized.length === 0) {
-    return "a bundled launch-wrapper surface literal";
-  }
-  if (normalized.length === 1) {
-    return JSON.stringify(normalized[0]);
-  }
-  return `one of ${normalized.map((value) => JSON.stringify(value)).join(", ")}`;
-}
+const BOOTSTRAP_PACKAGE_NAME_RE = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/;
 
 function requireJsonObject(payload, label) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
@@ -236,42 +127,6 @@ function requireJsonArray(payload, label) {
     throw new Error(`${label} must be a JSON array`);
   }
   return payload;
-}
-
-function requireNonEmptyString(payload, key, label) {
-  const value = payload[key];
-  if (typeof value !== "string" || !value.trim()) {
-    throw new Error(`${label}.${key} must be a non-empty string`);
-  }
-  return value.trim();
-}
-
-function requireNonEmptyStringList(payload, key, label) {
-  const value = payload[key];
-  if (!Array.isArray(value) || value.length === 0) {
-    throw new Error(`${label}.${key} must be a non-empty list`);
-  }
-  const items = [];
-  const seen = new Set();
-  for (const item of value) {
-    if (typeof item !== "string" || !item.trim()) {
-      throw new Error(`${label}.${key} entries must be non-empty strings`);
-    }
-    const normalized = item.trim();
-    if (seen.has(normalized)) {
-      throw new Error(`${label}.${key} must not contain duplicates`);
-    }
-    seen.add(normalized);
-    items.push(normalized);
-  }
-  return items;
-}
-
-function requireListedCommand(commands, label, command) {
-  if (!commands.includes(command)) {
-    throw new Error(`${label}.commands must include ${JSON.stringify(command)}`);
-  }
-  return command;
 }
 
 function requireStrictString(value, label) {
@@ -310,43 +165,12 @@ function requireRelativeCatalogPath(value, label, { allowSlash = true } = {}) {
   return rawValue;
 }
 
-function requireRuntimeEnvVarNameList(value, label, options = {}) {
-  const items = requireStrictStringList(value, label, options);
-  for (const [index, item] of items.entries()) {
-    requireRuntimeEnvVarName(item, `${label}[${index}]`);
-  }
-  return items;
-}
-
 function requireRuntimeFlagList(value, label, options = {}) {
   const items = requireStrictStringList(value, label, options);
   for (const [index, item] of items.entries()) {
     requireStrictPatternString(item, `${label}[${index}]`, RUNTIME_FLAG_RE, "a --kebab-case flag");
   }
   return items;
-}
-
-function requireRelativeCatalogPathList(value, label, options = {}) {
-  const items = requireStrictStringList(value, label, options);
-  for (const [index, item] of items.entries()) {
-    requireRelativeCatalogPath(item, `${label}[${index}]`, { allowSlash: true });
-  }
-  return items;
-}
-
-function requireStrictEnumString(value, label, allowedValues) {
-  const normalized = requireStrictString(value, label);
-  if (!allowedValues.has(normalized)) {
-    throw new Error(`${label} must be one of: ${[...allowedValues].sort().join(", ")}`);
-  }
-  return normalized;
-}
-
-function requireStrictBoolean(value, label) {
-  if (typeof value !== "boolean") {
-    throw new Error(`${label} must be a boolean`);
-  }
-  return value;
 }
 
 function requireStrictInteger(value, label) {
@@ -356,28 +180,33 @@ function requireStrictInteger(value, label) {
   return value;
 }
 
-function requireRuntimeSurfaceLabel(value, label, { allowSpecialValues = new Set() } = {}) {
-  const normalized = requireStrictString(value, label);
-  if (
-    normalized === "none" ||
-    allowSpecialValues.has(normalized) ||
-    RUNTIME_CONFIG_SURFACE_LABEL_RE.test(normalized)
-  ) {
-    return normalized;
+function requireNonNegativeInteger(value, label) {
+  const integer = requireStrictInteger(value, label);
+  if (integer < 0) {
+    throw new Error(`${label} must be a non-negative integer`);
   }
-  if (allowSpecialValues.size > 0) {
-    const specialValues = [...allowSpecialValues].sort();
-    if (specialValues.length === 1) {
-      throw new Error(
-        `${label} must be "none", ${JSON.stringify(specialValues[0])}, or a config surface label like file:key`
-      );
+  return integer;
+}
+
+function requireStrictIntegerList(value, label, { allowEmpty = false } = {}) {
+  if (!Array.isArray(value)) {
+    throw new Error(`${label} must be a list of integers`);
+  }
+  if (value.length === 0 && !allowEmpty) {
+    throw new Error(`${label} must contain at least one integer`);
+  }
+
+  const seen = new Set();
+  const items = [];
+  for (const [index, item] of value.entries()) {
+    const integer = requireStrictInteger(item, `${label}[${index}]`);
+    if (seen.has(integer)) {
+      throw new Error(`${label} must not contain duplicate values`);
     }
-    throw new Error(
-      `${label} must be "none", one of ${specialValues.map((value) => JSON.stringify(value)).join(", ")}, `
-      + "or a config surface label like file:key"
-    );
+    seen.add(integer);
+    items.push(integer);
   }
-  throw new Error(`${label} must be "none" or a config surface label like file:key`);
+  return items;
 }
 
 function requireKnownKeys(payload, allowedKeys, label) {
@@ -392,71 +221,6 @@ function requirePresentKeys(payload, requiredKeys, label) {
   if (missingKeys.length > 0) {
     throw new Error(`${label} is missing required key(s): ${missingKeys.join(", ")}`);
   }
-}
-
-function requireExactKeyOrder(actualKeys, expectedKeys, label) {
-  if (actualKeys.length !== expectedKeys.length || actualKeys.some((key, index) => key !== expectedKeys[index])) {
-    throw new Error(`${label} must exactly match the code-supported public surface fields`);
-  }
-}
-
-function validateSharedPublicSurfaceSchemaShape(schemaPayload = PUBLIC_SURFACE_CONTRACT_SCHEMA) {
-  const schema = requireJsonObject(schemaPayload, "public surface contract schema");
-  requireKnownKeys(schema, new Set(["schema_version", "top_level_keys", "sections"]), "public surface contract schema");
-  requirePresentKeys(schema, ["schema_version", "top_level_keys", "sections"], "public surface contract schema");
-  if (schema.schema_version !== 1) {
-    throw new Error(`Unsupported public surface contract schema_version: ${JSON.stringify(schema.schema_version)}`);
-  }
-
-  const topLevelKeys = requireStrictStringList(schema.top_level_keys, "public surface contract schema.top_level_keys");
-  requireExactKeyOrder(topLevelKeys, PUBLIC_SURFACE_CONTRACT_KEYS, "public surface contract schema.top_level_keys");
-
-  const sections = requireJsonObject(schema.sections, "public surface contract schema.sections");
-  const supportedSectionNames = PUBLIC_SURFACE_CONTRACT_KEYS.filter((key) => key !== "schema_version");
-  requireKnownKeys(sections, new Set(supportedSectionNames), "public surface contract schema.sections");
-  requirePresentKeys(sections, supportedSectionNames, "public surface contract schema.sections");
-
-  for (const [sectionName, expectedKeys] of Object.entries(PUBLIC_SURFACE_CONTRACT_SECTION_KEYS)) {
-    const section = requireJsonObject(sections[sectionName], `public surface contract schema.sections.${sectionName}`);
-    const allowedKeys = sectionName === "local_cli_bridge" ? new Set(["keys", "named_commands"]) : new Set(["keys"]);
-    requireKnownKeys(section, allowedKeys, `public surface contract schema.sections.${sectionName}`);
-    requirePresentKeys(section, [...allowedKeys], `public surface contract schema.sections.${sectionName}`);
-    const sectionKeys = requireStrictStringList(
-      section.keys,
-      `public surface contract schema.sections.${sectionName}.keys`
-    );
-    requireExactKeyOrder(
-      sectionKeys,
-      expectedKeys,
-      `public surface contract schema.sections.${sectionName}.keys`
-    );
-  }
-
-  const namedCommands = requireJsonObject(
-    sections.local_cli_bridge.named_commands,
-    "public surface contract schema.sections.local_cli_bridge.named_commands"
-  );
-  requireKnownKeys(
-    namedCommands,
-    new Set(["ordered_keys"]),
-    "public surface contract schema.sections.local_cli_bridge.named_commands"
-  );
-  requirePresentKeys(
-    namedCommands,
-    ["ordered_keys"],
-    "public surface contract schema.sections.local_cli_bridge.named_commands"
-  );
-  const orderedKeys = requireStrictStringList(
-    namedCommands.ordered_keys,
-    "public surface contract schema.sections.local_cli_bridge.named_commands.ordered_keys"
-  );
-  requireExactKeyOrder(
-    orderedKeys,
-    PUBLIC_SURFACE_LOCAL_CLI_NAMED_COMMAND_KEYS,
-    "public surface contract schema.sections.local_cli_bridge.named_commands.ordered_keys"
-  );
-
-  return schema;
 }
 
 function requireStrictStringList(value, label, { allowEmpty = false } = {}) {
@@ -480,15 +244,179 @@ function requireStrictStringList(value, label, { allowEmpty = false } = {}) {
   return items;
 }
 
-function validateRuntimeCatalogGlobalConfig(globalConfig, label) {
+function packageRootDir() {
+  return path.resolve(__dirname, "..");
+}
+
+function parseJsonPayload(text, label) {
+  try {
+    return JSON.parse(text);
+  } catch (err) {
+    throw new Error(`${label} must be valid JSON: ${err.message}`);
+  }
+}
+
+function readJsonFile(filePath, label) {
+  let raw;
+  try {
+    raw = fs.readFileSync(filePath, "utf-8");
+  } catch (err) {
+    throw new Error(`Cannot load ${label} at ${filePath}: ${err.message}`);
+  }
+  return parseJsonPayload(raw, label);
+}
+
+function defaultInstallerMetadataPath() {
+  return path.join(packageRootDir(), BOOTSTRAP_INSTALLER_METADATA_RELATIVE_PATH);
+}
+
+function loadBootstrapInstallerMetadataPayload() {
+  const inlineMetadata = process.env[BOOTSTRAP_TEST_INSTALLER_METADATA_JSON_ENV];
+  if (inlineMetadata) {
+    return parseJsonPayload(inlineMetadata, BOOTSTRAP_TEST_INSTALLER_METADATA_JSON_ENV);
+  }
+
+  const overridePath = process.env[BOOTSTRAP_TEST_INSTALLER_METADATA_PATH_ENV];
+  if (overridePath) {
+    return readJsonFile(path.resolve(overridePath), BOOTSTRAP_TEST_INSTALLER_METADATA_PATH_ENV);
+  }
+
+  return readJsonFile(defaultInstallerMetadataPath(), "bootstrap installer metadata");
+}
+
+function normalizeSha256Value(value, label) {
+  const rawValue = requireStrictString(value, label).toLowerCase();
+  const hash = rawValue.startsWith("sha256:") ? rawValue.slice("sha256:".length) : rawValue;
+  if (!/^[a-f0-9]{64}$/.test(hash)) {
+    throw new Error(`${label} must be a SHA-256 hex digest`);
+  }
+  return hash;
+}
+
+function validateSourceHashes(sourceHashes, options = {}) {
+  const payload = requireJsonObject(sourceHashes, "bootstrap installer metadata.source_hashes");
+  const sourcePaths = Object.keys(payload);
+  if (sourcePaths.length === 0) {
+    throw new Error("bootstrap installer metadata.source_hashes must not be empty");
+  }
+
+  const validated = {};
+  for (const sourcePath of sourcePaths.sort()) {
+    const normalizedSourcePath = requireRelativeCatalogPath(
+      sourcePath,
+      `bootstrap installer metadata.source_hashes.${sourcePath}`,
+      { allowSlash: true }
+    ).replace(/\\/g, "/");
+    const expectedHash = normalizeSha256Value(payload[sourcePath], `bootstrap installer metadata.source_hashes.${sourcePath}`);
+    if (!options.skipSourceHashCheck) {
+      const absoluteSourcePath = path.join(packageRootDir(), normalizedSourcePath);
+      let sourceBytes;
+      try {
+        sourceBytes = fs.readFileSync(absoluteSourcePath);
+      } catch (err) {
+        throw new Error(`Cannot read metadata source ${normalizedSourcePath}: ${err.message}`);
+      }
+      const actualHash = crypto.createHash("sha256").update(sourceBytes).digest("hex");
+      if (actualHash !== expectedHash) {
+        throw new Error(
+          `bootstrap installer metadata source hash mismatch for ${normalizedSourcePath}: `
+          + `expected ${expectedHash}, got ${actualHash}`
+        );
+      }
+    }
+    validated[normalizedSourcePath] = expectedHash;
+  }
+  return validated;
+}
+
+function validatePythonVersionMetadata(version, label) {
+  const payload = requireJsonObject(version, label);
+  const keys = ["major", "minor"];
+  requireKnownKeys(payload, new Set(keys), label);
+  requirePresentKeys(payload, keys, label);
+  const major = requireNonNegativeInteger(payload.major, `${label}.major`);
+  const minor = requireNonNegativeInteger(payload.minor, `${label}.minor`);
+  return { major, minor };
+}
+
+function validatePythonCompatibilityMetadata(pythonCompatibility) {
+  const label = "bootstrap installer metadata.python_compatibility";
+  const payload = requireJsonObject(pythonCompatibility, label);
+  const keys = [
+    "schema_version",
+    "minimum_supported_python",
+    "minimum_supported_python_label",
+    "preferred_versioned_python_minors",
+    "recommended_python_version",
+  ];
+  requireKnownKeys(payload, new Set(keys), label);
+  requirePresentKeys(payload, keys, label);
+  if (payload.schema_version !== 1) {
+    throw new Error(`Unsupported bootstrap Python compatibility schema_version: ${JSON.stringify(payload.schema_version)}`);
+  }
+
+  const minimumSupportedPython = validatePythonVersionMetadata(
+    payload.minimum_supported_python,
+    `${label}.minimum_supported_python`
+  );
+  const minimumSupportedPythonLabel = requireStrictString(
+    payload.minimum_supported_python_label,
+    `${label}.minimum_supported_python_label`
+  );
+  const expectedMinimumLabel = `${minimumSupportedPython.major}.${minimumSupportedPython.minor}`;
+  if (minimumSupportedPythonLabel !== expectedMinimumLabel) {
+    throw new Error(
+      `${label}.minimum_supported_python_label must match minimum_supported_python (${expectedMinimumLabel})`
+    );
+  }
+
+  const preferredVersionedPythonMinors = requireStrictIntegerList(
+    payload.preferred_versioned_python_minors,
+    `${label}.preferred_versioned_python_minors`
+  );
+  for (const [index, minor] of preferredVersionedPythonMinors.entries()) {
+    if (minor < minimumSupportedPython.minor) {
+      throw new Error(
+        `${label}.preferred_versioned_python_minors[${index}] must be >= minimum_supported_python.minor`
+      );
+    }
+  }
+  if (!preferredVersionedPythonMinors.includes(minimumSupportedPython.minor)) {
+    throw new Error(`${label}.preferred_versioned_python_minors must include minimum_supported_python.minor`);
+  }
+
+  const recommendedPythonVersion = validatePythonVersionMetadata(
+    payload.recommended_python_version,
+    `${label}.recommended_python_version`
+  );
+  if (recommendedPythonVersion.major !== minimumSupportedPython.major) {
+    throw new Error(`${label}.recommended_python_version.major must match minimum_supported_python.major`);
+  }
+  if (recommendedPythonVersion.minor !== preferredVersionedPythonMinors[0]) {
+    throw new Error(`${label}.recommended_python_version.minor must match the first preferred_versioned_python_minors entry`);
+  }
+
+  return {
+    schemaVersion: 1,
+    minimumSupportedPython,
+    minimumSupportedPythonLabel,
+    preferredVersionedPythonMinors,
+    recommendedPythonVersion,
+  };
+}
+
+function validateRuntimeCatalogGlobalConfigMetadata(globalConfig, label) {
   const payload = requireJsonObject(globalConfig, label);
   const strategy = requireStrictString(payload.strategy, `${label}.strategy`);
-  if (!Object.prototype.hasOwnProperty.call(RUNTIME_CATALOG_GLOBAL_CONFIG_KEYS, strategy)) {
+  if (strategy !== "env_or_home" && strategy !== "xdg_app") {
     throw new Error(`${label}.strategy must be one of: env_or_home, xdg_app`);
   }
 
-  const requiredKeys = RUNTIME_CATALOG_GLOBAL_CONFIG_KEYS[strategy];
-  requireKnownKeys(payload, requiredKeys, label);
+  const requiredKeys = strategy === "env_or_home"
+    ? ["strategy", "env_var", "home_subpath"]
+    : ["strategy", "env_dir_var", "env_file_var", "xdg_subdir", "home_subpath"];
+  const requiredKeySet = new Set(requiredKeys);
+  requireKnownKeys(payload, requiredKeySet, label);
   requirePresentKeys(payload, requiredKeys, label);
 
   if (strategy === "env_or_home") {
@@ -508,454 +436,16 @@ function validateRuntimeCatalogGlobalConfig(globalConfig, label) {
   };
 }
 
-validateSharedPublicSurfaceSchemaShape(PUBLIC_SURFACE_CONTRACT_SCHEMA);
-
-function validateRuntimeCatalogCapabilities(capabilities, label, options = {}) {
-  const payload = requireJsonObject(capabilities, label);
-  const capabilityKeys = options.capabilityKeys || RUNTIME_CATALOG_CAPABILITY_KEYS;
-  const capabilityDefaults = Object.prototype.hasOwnProperty.call(options, "capabilityDefaults")
-    ? options.capabilityDefaults
-    : RUNTIME_CAPABILITY_DEFAULTS;
-  const capabilityEnums = options.capabilityEnums || RUNTIME_CATALOG_CAPABILITY_ENUMS;
-  const launchWrapperPermissionSurfaceKinds = (
-    options.launchWrapperPermissionSurfaceKinds || RUNTIME_LAUNCH_WRAPPER_PERMISSION_SURFACE_KINDS
-  );
-  requireKnownKeys(payload, capabilityKeys, label);
-  if (capabilityDefaults === null) {
-    requirePresentKeys(payload, [...capabilityKeys], label);
-  }
-  const capabilityValue = (fieldName) => {
-    if (Object.prototype.hasOwnProperty.call(payload, fieldName)) {
-      return payload[fieldName];
-    }
-    if (
-      capabilityDefaults !== null &&
-      capabilityDefaults !== undefined &&
-      Object.prototype.hasOwnProperty.call(capabilityDefaults, fieldName)
-    ) {
-      return capabilityDefaults[fieldName];
-    }
-    throw new Error(`${label} is missing required key(s): ${fieldName}`);
-  };
-  const validated = {};
-  for (const [fieldName, enumValues] of Object.entries(capabilityEnums)) {
-    validated[fieldName] = requireStrictEnumString(
-      capabilityValue(fieldName),
-      `${label}.${fieldName}`,
-      enumValues
-    );
-  }
-  for (const fieldName of [...RUNTIME_CAPABILITY_RUNTIME_SURFACE_LABEL_FIELDS].sort()) {
-    const specialValues = fieldName === "permission_surface_kind" ? launchWrapperPermissionSurfaceKinds : new Set();
-    validated[fieldName] = requireRuntimeSurfaceLabel(
-      capabilityValue(fieldName),
-      `${label}.${fieldName}`,
-      { allowSpecialValues: specialValues }
-    );
-  }
-  for (const fieldName of [...RUNTIME_CAPABILITY_BOOL_FIELDS].sort()) {
-    validated[fieldName] = requireStrictBoolean(capabilityValue(fieldName), `${label}.${fieldName}`);
-  }
-  for (const fieldName of [...RUNTIME_CAPABILITY_OPTIONAL_STRING_FIELDS].sort()) {
-    const rawValue = capabilityValue(fieldName);
-    validated[fieldName] = rawValue === null ? null : requireStrictString(rawValue, `${label}.${fieldName}`);
-  }
-  const validatedFields = new Set(Object.keys(validated));
-  for (const fieldName of [...capabilityKeys].sort()) {
-    if (!validatedFields.has(fieldName)) {
-      validated[fieldName] = requireStrictString(capabilityValue(fieldName), `${label}.${fieldName}`);
-    }
-  }
-  if (validated.permissions_surface === "config-file") {
-    if (
-      validated.permission_surface_kind === "none" ||
-      launchWrapperPermissionSurfaceKinds.has(validated.permission_surface_kind)
-    ) {
-      throw new Error(
-        `${label}.permission_surface_kind must be a config surface label when permissions_surface=config-file`
-      );
-    }
-    if (!validated.supports_runtime_permission_sync) {
-      throw new Error(`${label}.supports_runtime_permission_sync must be true when permissions_surface=config-file`);
-    }
-  } else if (validated.permissions_surface === "launch-wrapper") {
-    if (!launchWrapperPermissionSurfaceKinds.has(validated.permission_surface_kind)) {
-      throw new Error(
-        `${label}.permission_surface_kind must be ${formatQuotedDisjunction(launchWrapperPermissionSurfaceKinds)} `
-        + "when permissions_surface=launch-wrapper"
-      );
-    }
-    if (!validated.supports_runtime_permission_sync) {
-      throw new Error(`${label}.supports_runtime_permission_sync must be true when permissions_surface=launch-wrapper`);
-    }
-  } else {
-    if (validated.permission_surface_kind !== "none") {
-      throw new Error(`${label}.permission_surface_kind must be "none" when permissions_surface=unsupported`);
-    }
-    if (validated.supports_runtime_permission_sync) {
-      throw new Error(`${label}.supports_runtime_permission_sync must be false when permissions_surface=unsupported`);
-    }
-    if (validated.supports_prompt_free_mode) {
-      throw new Error(`${label}.supports_prompt_free_mode must be false when permissions_surface=unsupported`);
-    }
-    if (validated.prompt_free_requires_relaunch) {
-      throw new Error(`${label}.prompt_free_requires_relaunch must be false when permissions_surface=unsupported`);
-    }
-  }
-  if (!validated.supports_prompt_free_mode && validated.prompt_free_requires_relaunch) {
-    throw new Error(`${label}.prompt_free_requires_relaunch requires supports_prompt_free_mode=true`);
-  }
-  if (validated.supports_prompt_free_mode && validated.prompt_free_mode_value === null) {
-    throw new Error(`${label}.prompt_free_mode_value must be a non-empty string when supports_prompt_free_mode=true`);
-  }
-  if (validated.supports_structured_child_results && validated.continuation_surface !== "explicit") {
-    throw new Error(`${label}.continuation_surface must be explicit when supports_structured_child_results=true`);
-  }
-  if (validated.statusline_surface === "explicit") {
-    if (validated.statusline_config_surface === "none") {
-      throw new Error(`${label}.statusline_config_surface must not be "none" when statusline_surface=explicit`);
-    }
-  } else if (validated.statusline_config_surface !== "none") {
-    throw new Error(`${label}.statusline_config_surface must be "none" when statusline_surface=none`);
-  }
-  if (validated.notify_surface === "explicit") {
-    if (validated.notify_config_surface === "none") {
-      throw new Error(`${label}.notify_config_surface must not be "none" when notify_surface=explicit`);
-    }
-  } else if (validated.notify_config_surface !== "none") {
-    throw new Error(`${label}.notify_config_surface must be "none" when notify_surface=none`);
-  }
-  if (validated.telemetry_completeness === "none") {
-    if (validated.telemetry_source !== "none") {
-      throw new Error(`${label}.telemetry_source must be "none" when telemetry_completeness=none`);
-    }
-    if (validated.supports_usage_tokens) {
-      throw new Error(`${label}.supports_usage_tokens must be false when telemetry_completeness=none`);
-    }
-    if (validated.supports_cost_usd) {
-      throw new Error(`${label}.supports_cost_usd must be false when telemetry_completeness=none`);
-    }
-  } else if (validated.telemetry_source === "none") {
-    throw new Error(`${label}.telemetry_source must not be "none" when telemetry_completeness is not none`);
-  }
-  return validated;
-}
-
-function validateRuntimeCatalogCapabilityEnums(
-  capabilityEnumsPayload,
-  capabilityKeys,
-  label,
-  requiredCapabilityEnumFields = RUNTIME_CATALOG_REQUIRED_CAPABILITY_ENUM_FIELDS
-) {
-  const payload = requireJsonObject(capabilityEnumsPayload, label);
-  requireKnownKeys(payload, capabilityKeys, label);
-  requirePresentKeys(payload, [...requiredCapabilityEnumFields], label);
-  const validated = {};
-  for (const [fieldName, rawValues] of Object.entries(payload)) {
-    if (typeof fieldName !== "string" || !fieldName.trim() || fieldName.trim() !== fieldName) {
-      throw new Error(`${label} keys must be non-empty strings`);
-    }
-    validated[fieldName] = new Set(requireStrictStringList(rawValues, `${label}.${fieldName}`));
-  }
-  return validated;
-}
-
-function validateRuntimeCatalogSchemaShape(schemaPayload = RUNTIME_CATALOG_SCHEMA) {
-  const schema = requireJsonObject(schemaPayload, "runtime catalog schema");
-  const allowedTopLevelKeys = new Set([
-    "schema_version",
-    "entry_required_keys",
-    "entry_optional_keys",
-    "global_config_keys",
-    "capability_keys",
-    "capability_defaults",
-    "capability_enums",
-    "capability_enum_required_keys",
-    "hook_payload_keys",
-    "hook_payload_defaults",
-    "managed_install_surface_keys",
-    "managed_install_surface_defaults",
-    "manifest_metadata_list_value_kinds",
-    "install_help_example_scopes",
-    "launch_wrapper_permission_surface_kinds",
-  ]);
-  requireKnownKeys(schema, allowedTopLevelKeys, "runtime catalog schema");
-  requirePresentKeys(schema, [...allowedTopLevelKeys], "runtime catalog schema");
-  if (schema.schema_version !== 1) {
-    throw new Error(`Unsupported runtime catalog schema_version: ${JSON.stringify(schema.schema_version)}`);
-  }
-
-  const capabilityKeys = requireStrictStringList(schema.capability_keys, "runtime catalog schema.capability_keys");
-  const capabilityKeySet = new Set(capabilityKeys);
-  const capabilityEnumRequiredKeys = requireStrictStringList(
-    schema.capability_enum_required_keys,
-    "runtime catalog schema.capability_enum_required_keys"
-  );
-  const unknownRequiredCapabilityEnumKeys = capabilityEnumRequiredKeys.filter((key) => !capabilityKeySet.has(key));
-  if (unknownRequiredCapabilityEnumKeys.length > 0) {
-    throw new Error(
-      "runtime catalog schema.capability_enum_required_keys contains unknown key(s): "
-      + unknownRequiredCapabilityEnumKeys.join(", ")
-    );
-  }
-  const capabilityDefaults = requireJsonObject(schema.capability_defaults, "runtime catalog schema.capability_defaults");
-  requireKnownKeys(capabilityDefaults, capabilityKeySet, "runtime catalog schema.capability_defaults");
-  requirePresentKeys(capabilityDefaults, capabilityKeys, "runtime catalog schema.capability_defaults");
-  const capabilityEnums = validateRuntimeCatalogCapabilityEnums(
-    schema.capability_enums,
-    capabilityKeySet,
-    "runtime catalog schema.capability_enums",
-    new Set(capabilityEnumRequiredKeys)
-  );
-  const launchWrapperPermissionSurfaceKinds = new Set(requireStrictStringList(
-    schema.launch_wrapper_permission_surface_kinds,
-    "runtime catalog schema.launch_wrapper_permission_surface_kinds"
-  ));
-  validateRuntimeCatalogCapabilities(capabilityDefaults, "runtime catalog schema.capability_defaults", {
-    capabilityKeys: capabilityKeySet,
-    capabilityDefaults: null,
-    capabilityEnums,
-    launchWrapperPermissionSurfaceKinds,
-  });
-  const hookPayloadKeys = requireStrictStringList(schema.hook_payload_keys, "runtime catalog schema.hook_payload_keys");
-  const hookPayloadKeySet = new Set(hookPayloadKeys);
-  const hookPayloadDefaults = requireJsonObject(
-    schema.hook_payload_defaults,
-    "runtime catalog schema.hook_payload_defaults"
-  );
-  requireKnownKeys(hookPayloadDefaults, hookPayloadKeySet, "runtime catalog schema.hook_payload_defaults");
-  requirePresentKeys(hookPayloadDefaults, hookPayloadKeys, "runtime catalog schema.hook_payload_defaults");
-  validateRuntimeCatalogHookPayload(hookPayloadDefaults, "runtime catalog schema.hook_payload_defaults", {
-    hookPayloadKeys: hookPayloadKeySet,
-    hookPayloadDefaults: null,
-  });
-  const managedInstallSurfaceKeys = requireStrictStringList(
-    schema.managed_install_surface_keys,
-    "runtime catalog schema.managed_install_surface_keys"
-  );
-  const managedInstallSurfaceKeySet = new Set(managedInstallSurfaceKeys);
-  const managedInstallSurfaceDefaults = requireJsonObject(
-    schema.managed_install_surface_defaults,
-    "runtime catalog schema.managed_install_surface_defaults"
-  );
-  requireKnownKeys(
-    managedInstallSurfaceDefaults,
-    managedInstallSurfaceKeySet,
-    "runtime catalog schema.managed_install_surface_defaults"
-  );
-  requirePresentKeys(
-    managedInstallSurfaceDefaults,
-    managedInstallSurfaceKeys,
-    "runtime catalog schema.managed_install_surface_defaults"
-  );
-  validateRuntimeCatalogManagedInstallSurface(
-    managedInstallSurfaceDefaults,
-    "runtime catalog schema.managed_install_surface_defaults",
-    {
-      managedInstallSurfaceKeys: managedInstallSurfaceKeySet,
-      managedInstallSurfaceDefaults: null,
-    }
-  );
-  requireStrictStringList(
-    schema.manifest_metadata_list_value_kinds,
-    "runtime catalog schema.manifest_metadata_list_value_kinds"
-  );
-  return schema;
-}
-
-function validateStringListPolicy(payload, keys, defaults, label) {
-  requireKnownKeys(payload, keys, label);
-  if (defaults === null) {
-    requirePresentKeys(payload, [...keys], label);
-  }
-  const validated = {};
-  for (const fieldName of [...keys].sort()) {
-    if (Object.prototype.hasOwnProperty.call(payload, fieldName)) {
-      validated[fieldName] = requireStrictStringList(payload[fieldName], `${label}.${fieldName}`, {
-        allowEmpty: true,
-      });
-      continue;
-    }
-    if (defaults === null) {
-      throw new Error(`${label} is missing required key(s): ${fieldName}`);
-    }
-    validated[fieldName] = [...defaults[fieldName]];
-  }
-  return validated;
-}
-
-function validateRuntimeCatalogHookPayload(hookPayload, label, options = {}) {
-  const payload = requireJsonObject(hookPayload, label);
-  return validateStringListPolicy(
-    payload,
-    options.hookPayloadKeys || RUNTIME_CATALOG_HOOK_PAYLOAD_KEYS,
-    Object.prototype.hasOwnProperty.call(options, "hookPayloadDefaults")
-      ? options.hookPayloadDefaults
-      : RUNTIME_HOOK_PAYLOAD_DEFAULTS,
-    label
-  );
-}
-
-function validateRuntimeCatalogManagedInstallSurface(managedInstallSurface, label, options = {}) {
-  const payload = requireJsonObject(managedInstallSurface, label);
-  const validated = validateStringListPolicy(
-    payload,
-    options.managedInstallSurfaceKeys || RUNTIME_CATALOG_MANAGED_INSTALL_SURFACE_KEYS,
-    Object.prototype.hasOwnProperty.call(options, "managedInstallSurfaceDefaults")
-      ? options.managedInstallSurfaceDefaults
-      : RUNTIME_MANAGED_INSTALL_SURFACE_DEFAULTS,
-    label
-  );
-  for (const [fieldName, patterns] of Object.entries(validated)) {
-    patterns.forEach((pattern, index) => {
-      const normalized = pattern.replace(/\\/g, "/");
-      if (
-        normalized.startsWith("/") ||
-        normalized.startsWith("~") ||
-        /^[A-Za-z]:/.test(normalized) ||
-        normalized.split("/").includes("..")
-      ) {
-        throw new Error(`${label}.${fieldName}.${index} must be a relative managed install glob without traversal`);
-      }
-    });
-  }
-  return validated;
-}
-
-function validateManifestMetadataItemAffix(value, label) {
-  const affix = requireStrictString(value, label);
-  if (affix.includes("/") || affix.includes("\\")) {
-    throw new Error(`${label} must not contain path separators`);
-  }
-  return affix;
-}
-
-function optionalManifestMetadataItemAffix(policy, fieldName, label) {
-  if (!Object.prototype.hasOwnProperty.call(policy, fieldName) || policy[fieldName] === null) {
-    return null;
-  }
-  return validateManifestMetadataItemAffix(policy[fieldName], label);
-}
-
-function validateRuntimeCatalogManifestMetadataListPolicies(policies, label) {
-  if (policies === undefined || policies === null) {
-    return [];
-  }
-  const payload = requireJsonArray(policies, label);
-  const allowedKeys = new Set(["key", "value_kind", "item_prefix", "item_suffix"]);
-  const seenKeys = new Set();
-  return payload.map((rawPolicy, index) => {
-    const policyLabel = `${label}[${index}]`;
-    const policy = requireJsonObject(rawPolicy, policyLabel);
-    requireKnownKeys(policy, allowedKeys, policyLabel);
-    requirePresentKeys(policy, ["key", "value_kind"], policyLabel);
-    const key = requireStrictPatternString(
-      policy.key,
-      `${policyLabel}.key`,
-      MANIFEST_METADATA_KEY_RE,
-      "a lowercase manifest metadata key"
-    );
-    if (seenKeys.has(key)) {
-      throw new Error(`${policyLabel}.key duplicates manifest metadata key ${JSON.stringify(key)}`);
-    }
-    seenKeys.add(key);
-
-    const valueKind = requireStrictEnumString(
-      policy.value_kind,
-      `${policyLabel}.value_kind`,
-      RUNTIME_MANIFEST_METADATA_LIST_VALUE_KINDS
-    );
-    const itemPrefix = optionalManifestMetadataItemAffix(policy, "item_prefix", `${policyLabel}.item_prefix`);
-    const itemSuffix = optionalManifestMetadataItemAffix(policy, "item_suffix", `${policyLabel}.item_suffix`);
-    if (valueKind !== "path_segment" && (itemPrefix !== null || itemSuffix !== null)) {
-      throw new Error(`${policyLabel}.item_prefix/item_suffix require value_kind=path_segment`);
-    }
-    return {
-      key,
-      value_kind: valueKind,
-      item_prefix: itemPrefix,
-      item_suffix: itemSuffix,
-    };
-  });
-}
-
-function validateRuntimeCatalogAttributionCoherence(capabilities, hookPayload, label) {
-  const supportsRuntimeSessionPayloadAttribution = hookPayload.runtime_session_id_keys.length > 0;
-  if (capabilities.supports_runtime_session_payload_attribution !== supportsRuntimeSessionPayloadAttribution) {
-    throw new Error(
-      `${label}.capabilities.supports_runtime_session_payload_attribution must match `
-      + `${label}.hook_payload.runtime_session_id_keys`
-    );
-  }
-
-  const supportsAgentPayloadAttribution = Boolean(
-    hookPayload.agent_id_keys.length || hookPayload.agent_name_keys.length || hookPayload.agent_scope_keys.length
-  );
-  if (capabilities.supports_agent_payload_attribution !== supportsAgentPayloadAttribution) {
-    throw new Error(
-      `${label}.capabilities.supports_agent_payload_attribution must match `
-      + `${label}.hook_payload.agent_id_keys/agent_name_keys/agent_scope_keys`
-    );
-  }
-}
-
-function validateRuntimeCatalogCapabilityHookPayloadContract(capabilities, hookPayload, label) {
-  const requireHookPayloadFields = (capabilityField, fieldNames) => {
-    const missing = fieldNames.filter((fieldName) => hookPayload[fieldName].length === 0);
-    if (missing.length > 0) {
-      throw new Error(
-        `${label}.capabilities.${capabilityField} requires `
-        + missing.map((fieldName) => `${label}.hook_payload.${fieldName}`).join(", ")
-      );
-    }
-  };
-
-  if (capabilities.statusline_surface === "explicit") {
-    requireHookPayloadFields("statusline_surface", ["model_keys"]);
-  }
-  if (capabilities.notify_surface === "explicit") {
-    requireHookPayloadFields("notify_surface", ["notify_event_types"]);
-  }
-  if (capabilities.telemetry_source === "notify-hook") {
-    if (capabilities.notify_surface !== "explicit") {
-      throw new Error(`${label}.capabilities.telemetry_source requires ${label}.capabilities.notify_surface=explicit`);
-    }
-    requireHookPayloadFields("telemetry_source", ["notify_event_types"]);
-  }
-  if (capabilities.supports_usage_tokens) {
-    if (capabilities.telemetry_source === "none") {
-      throw new Error(
-        `${label}.capabilities.supports_usage_tokens requires ${label}.capabilities.telemetry_source!="none"`
-      );
-    }
-    requireHookPayloadFields("supports_usage_tokens", ["usage_keys", "input_tokens_keys", "output_tokens_keys"]);
-  }
-  if (capabilities.supports_cost_usd) {
-    if (capabilities.telemetry_source === "none") {
-      throw new Error(`${label}.capabilities.supports_cost_usd requires ${label}.capabilities.telemetry_source!="none"`);
-    }
-    requireHookPayloadFields("supports_cost_usd", ["cost_usd_keys"]);
-  }
-  if (capabilities.supports_context_meter) {
-    if (capabilities.statusline_surface !== "explicit") {
-      throw new Error(
-        `${label}.capabilities.supports_context_meter requires ${label}.capabilities.statusline_surface=explicit`
-      );
-    }
-    requireHookPayloadFields("supports_context_meter", ["context_window_size_keys", "context_remaining_keys"]);
-  }
-}
-
-function parsePublicCommandSurfacePrefix(value, label, commandPrefix) {
-  const prefix = value === undefined || value === null ? commandPrefix : requireStrictString(value, label);
+function parseCommandPrefix(value, label) {
+  const prefix = requireStrictString(value, label);
   if (!/^[/$][A-Za-z0-9][A-Za-z0-9._-]*(?::|-)$/.test(prefix)) {
     throw new Error(`${label} must be a slash or dollar command prefix ending in ':' or '-'`);
   }
   return prefix;
 }
 
-function parseCommandPrefix(value, label) {
-  const prefix = requireStrictString(value, label);
+function parsePublicCommandSurfacePrefix(value, label, commandPrefix) {
+  const prefix = value === undefined || value === null ? commandPrefix : requireStrictString(value, label);
   if (!/^[/$][A-Za-z0-9][A-Za-z0-9._-]*(?::|-)$/.test(prefix)) {
     throw new Error(`${label} must be a slash or dollar command prefix ending in ':' or '-'`);
   }
@@ -967,27 +457,32 @@ function parseInstallHelpExampleScope(value, label) {
     return null;
   }
   const scope = requireStrictString(value, label);
-  if (!RUNTIME_INSTALL_HELP_EXAMPLE_SCOPES.has(scope)) {
-    throw new Error(`${label} must be one of: ${[...RUNTIME_INSTALL_HELP_EXAMPLE_SCOPES].sort().join(", ")}`);
+  if (scope !== "global" && scope !== "local") {
+    throw new Error(`${label} must be one of: global, local`);
   }
   return scope;
 }
 
-function validateRuntimeCatalogEntry(entry, index, options = {}) {
-  const label = `runtime catalog entry ${index}`;
+function validateRuntimeMetadataEntry(entry, index) {
+  const label = `bootstrap installer metadata.runtimes[${index}]`;
   const payload = requireJsonObject(entry, label);
-  requireKnownKeys(payload, RUNTIME_CATALOG_ALLOWED_KEYS, label);
-  requirePresentKeys(payload, RUNTIME_CATALOG_ENTRY_KEYS.required, label);
-
-  const globalConfig = validateRuntimeCatalogGlobalConfig(payload.global_config, `${label}.global_config`);
-  const capabilities = validateRuntimeCatalogCapabilities(payload.capabilities, `${label}.capabilities`);
-  const hookPayload = validateRuntimeCatalogHookPayload(payload.hook_payload, `${label}.hook_payload`);
-  const managedInstallSurface = validateRuntimeCatalogManagedInstallSurface(
-    Object.prototype.hasOwnProperty.call(payload, "managed_install_surface") ? payload.managed_install_surface : {},
-    `${label}.managed_install_surface`
-  );
-  validateRuntimeCatalogCapabilityHookPayloadContract(capabilities, hookPayload, label);
-  validateRuntimeCatalogAttributionCoherence(capabilities, hookPayload, label);
+  const requiredKeys = [
+    "runtime_name",
+    "display_name",
+    "priority",
+    "config_dir_name",
+    "install_flag",
+    "launch_command",
+    "selection_flags",
+    "selection_aliases",
+    "command_prefix",
+    "public_command_surface_prefix",
+    "installer_help_example_scope",
+    "global_config",
+  ];
+  requireKnownKeys(payload, new Set(requiredKeys), label);
+  requirePresentKeys(payload, requiredKeys, label);
+  const commandPrefix = parseCommandPrefix(payload.command_prefix, `${label}.command_prefix`);
 
   return {
     runtime_name: requireStrictPatternString(
@@ -1008,72 +503,23 @@ function validateRuntimeCatalogEntry(entry, index, options = {}) {
       "a --kebab-case flag"
     ),
     launch_command: requireStrictString(payload.launch_command, `${label}.launch_command`),
-    adapter_module: requireStrictPatternString(
-      payload.adapter_module,
-      `${label}.adapter_module`,
-      PYTHON_MODULE_RE,
-      "a Python module path"
-    ),
-    adapter_class: requireStrictPatternString(
-      payload.adapter_class,
-      `${label}.adapter_class`,
-      PYTHON_IDENTIFIER_RE,
-      "a Python class name"
-    ),
-    command_prefix: parseCommandPrefix(payload.command_prefix, `${label}.command_prefix`),
-    activation_env_vars: requireRuntimeEnvVarNameList(payload.activation_env_vars, `${label}.activation_env_vars`),
     selection_flags: requireRuntimeFlagList(payload.selection_flags, `${label}.selection_flags`),
     selection_aliases: requireStrictStringList(payload.selection_aliases, `${label}.selection_aliases`),
-    global_config: globalConfig,
-    capabilities,
-    hook_payload: hookPayload,
-    managed_install_surface: managedInstallSurface,
-    manifest_metadata_list_policies: validateRuntimeCatalogManifestMetadataListPolicies(
-      payload.manifest_metadata_list_policies,
-      `${label}.manifest_metadata_list_policies`
-    ),
-    manifest_file_prefixes: Object.prototype.hasOwnProperty.call(payload, "manifest_file_prefixes")
-      ? requireRelativeCatalogPathList(payload.manifest_file_prefixes, `${label}.manifest_file_prefixes`, {
-          allowEmpty: true,
-        })
-      : [],
-    native_include_support: requireStrictBoolean(
-      Object.prototype.hasOwnProperty.call(payload, "native_include_support")
-        ? payload.native_include_support
-        : false,
-      `${label}.native_include_support`
-    ),
-    agent_prompt_uses_dollar_templates: requireStrictBoolean(
-      Object.prototype.hasOwnProperty.call(payload, "agent_prompt_uses_dollar_templates")
-        ? payload.agent_prompt_uses_dollar_templates
-        : false,
-      `${label}.agent_prompt_uses_dollar_templates`
-    ),
-    installer_help_example_scope: Object.prototype.hasOwnProperty.call(payload, "installer_help_example_scope")
-      ? parseInstallHelpExampleScope(payload.installer_help_example_scope, `${label}.installer_help_example_scope`)
-      : null,
-    validated_command_surface: Object.prototype.hasOwnProperty.call(payload, "validated_command_surface")
-      ? (() => {
-          const surface = requireStrictString(payload.validated_command_surface, `${label}.validated_command_surface`);
-          if (!/^public_runtime_[a-z0-9_]+_command$/.test(surface)) {
-            throw new Error(
-              `${label}.validated_command_surface must match /^public_runtime_[a-z0-9_]+_command$/`
-            );
-          }
-          return surface;
-        })()
-      : "public_runtime_command_surface",
+    command_prefix: commandPrefix,
     public_command_surface_prefix: parsePublicCommandSurfacePrefix(
-      Object.prototype.hasOwnProperty.call(payload, "public_command_surface_prefix")
-        ? payload.public_command_surface_prefix
-        : undefined,
+      payload.public_command_surface_prefix,
       `${label}.public_command_surface_prefix`,
-      parseCommandPrefix(payload.command_prefix, `${label}.command_prefix`)
+      commandPrefix
     ),
+    installer_help_example_scope: parseInstallHelpExampleScope(
+      payload.installer_help_example_scope,
+      `${label}.installer_help_example_scope`
+    ),
+    global_config: validateRuntimeCatalogGlobalConfigMetadata(payload.global_config, `${label}.global_config`),
   };
 }
 
-function validateRuntimeCatalogHelpExampleScopes(entries) {
+function validateRuntimeMetadataHelpExampleScopes(entries) {
   const scopeOwners = new Map();
   for (const entry of entries) {
     if (!entry.installer_help_example_scope) {
@@ -1082,25 +528,19 @@ function validateRuntimeCatalogHelpExampleScopes(entries) {
     const existingOwner = scopeOwners.get(entry.installer_help_example_scope);
     if (existingOwner && existingOwner !== entry.runtime_name) {
       throw new Error(
-        `runtime catalog contains duplicate installer_help_example_scope ${JSON.stringify(entry.installer_help_example_scope)} for ${JSON.stringify(existingOwner)} and ${JSON.stringify(entry.runtime_name)}`
+        `bootstrap installer metadata.runtimes contains duplicate installer_help_example_scope ${JSON.stringify(entry.installer_help_example_scope)} for ${JSON.stringify(existingOwner)} and ${JSON.stringify(entry.runtime_name)}`
       );
     }
     scopeOwners.set(entry.installer_help_example_scope, entry.runtime_name);
   }
 }
 
-function sameManifestMetadataListPolicy(left, right) {
-  return (
-    left.key === right.key
-    && left.value_kind === right.value_kind
-    && left.item_prefix === right.item_prefix
-    && left.item_suffix === right.item_suffix
-  );
-}
-
-function validateRuntimeCatalog(catalogPayload) {
-  const payload = requireJsonArray(catalogPayload, "runtime catalog");
-  const entries = payload.map((entry, index) => validateRuntimeCatalogEntry(entry, index));
+function validateRuntimeMetadataList(runtimes) {
+  const payload = requireJsonArray(runtimes, "bootstrap installer metadata.runtimes");
+  if (payload.length === 0) {
+    throw new Error("bootstrap installer metadata.runtimes must not be empty");
+  }
+  const entries = payload.map((entry, index) => validateRuntimeMetadataEntry(entry, index));
   entries.sort((left, right) => {
     if (left.priority !== right.priority) {
       return left.priority - right.priority;
@@ -1112,11 +552,10 @@ function validateRuntimeCatalog(catalogPayload) {
   const installFlags = new Map();
   const selectionFlags = new Map();
   const selectionTokens = new Map();
-  const manifestMetadataListPolicies = new Map();
   for (const entry of entries) {
     if (runtimeNames.has(entry.runtime_name)) {
       throw new Error(
-        `runtime catalog contains duplicate runtime_name ${JSON.stringify(entry.runtime_name)}`
+        `bootstrap installer metadata.runtimes contains duplicate runtime_name ${JSON.stringify(entry.runtime_name)}`
       );
     }
     runtimeNames.set(entry.runtime_name, entry.runtime_name);
@@ -1124,7 +563,7 @@ function validateRuntimeCatalog(catalogPayload) {
     const existingInstallFlagRuntime = installFlags.get(entry.install_flag);
     if (existingInstallFlagRuntime && existingInstallFlagRuntime !== entry.runtime_name) {
       throw new Error(
-        `runtime catalog contains duplicate install_flag ${JSON.stringify(entry.install_flag)} for ${JSON.stringify(existingInstallFlagRuntime)} and ${JSON.stringify(entry.runtime_name)}`
+        `bootstrap installer metadata.runtimes contains duplicate install_flag ${JSON.stringify(entry.install_flag)} for ${JSON.stringify(existingInstallFlagRuntime)} and ${JSON.stringify(entry.runtime_name)}`
       );
     }
     installFlags.set(entry.install_flag, entry.runtime_name);
@@ -1133,7 +572,7 @@ function validateRuntimeCatalog(catalogPayload) {
       const existingRuntime = selectionFlags.get(flag);
       if (existingRuntime && existingRuntime !== entry.runtime_name) {
         throw new Error(
-          `runtime catalog contains duplicate selection flag ${JSON.stringify(flag)} for ${JSON.stringify(existingRuntime)} and ${JSON.stringify(entry.runtime_name)}`
+          `bootstrap installer metadata.runtimes contains duplicate selection flag ${JSON.stringify(flag)} for ${JSON.stringify(existingRuntime)} and ${JSON.stringify(entry.runtime_name)}`
         );
       }
       selectionFlags.set(flag, entry.runtime_name);
@@ -1152,249 +591,295 @@ function validateRuntimeCatalog(catalogPayload) {
       const existingRuntime = selectionTokens.get(normalizedToken);
       if (existingRuntime && existingRuntime !== entry.runtime_name) {
         throw new Error(
-          `runtime catalog contains duplicate runtime selection token ${JSON.stringify(token)} for ${JSON.stringify(existingRuntime)} and ${JSON.stringify(entry.runtime_name)}`
+          `bootstrap installer metadata.runtimes contains duplicate runtime selection token ${JSON.stringify(token)} for ${JSON.stringify(existingRuntime)} and ${JSON.stringify(entry.runtime_name)}`
         );
       }
       selectionTokens.set(normalizedToken, entry.runtime_name);
     }
-
-    for (const policy of entry.manifest_metadata_list_policies) {
-      const existing = manifestMetadataListPolicies.get(policy.key);
-      if (existing) {
-        if (!sameManifestMetadataListPolicy(existing.policy, policy)) {
-          throw new Error(
-            `runtime catalog contains conflicting manifest_metadata_list_policies.key ${JSON.stringify(policy.key)} `
-            + `for ${JSON.stringify(existing.runtimeName)} and ${JSON.stringify(entry.runtime_name)}`
-          );
-        }
-        continue;
-      }
-      manifestMetadataListPolicies.set(policy.key, { runtimeName: entry.runtime_name, policy });
-    }
   }
 
-  validateRuntimeCatalogHelpExampleScopes(entries);
+  validateRuntimeMetadataHelpExampleScopes(entries);
 
   return entries;
 }
 
-validateRuntimeCatalogSchemaShape(RUNTIME_CATALOG_SCHEMA);
-RUNTIME_CATALOG = validateRuntimeCatalog(BUNDLED_RUNTIME_CATALOG_PAYLOAD);
-ALL_RUNTIMES = RUNTIME_CATALOG.map((runtime) => runtime.runtime_name);
-RUNTIME_BY_NAME = Object.fromEntries(RUNTIME_CATALOG.map((runtime) => [runtime.runtime_name, runtime]));
-
-function validateSharedPublicSurfaceContract(contractPayload) {
-  const contract = requireJsonObject(contractPayload, "public surface contract");
-  requireKnownKeys(contract, PUBLIC_SURFACE_CONTRACT_ALLOWED_KEYS, "public surface contract");
-  requirePresentKeys(contract, PUBLIC_SURFACE_CONTRACT_KEYS, "public surface contract");
-  if (contract.schema_version !== 1) {
-    throw new Error(`Unsupported public surface contract schema_version: ${JSON.stringify(contract.schema_version)}`);
-  }
-
-  const beginnerPayload = requireJsonObject(contract.beginner_onboarding, "beginner_onboarding");
-  requireKnownKeys(
-    beginnerPayload,
-    PUBLIC_SURFACE_CONTRACT_SECTION_ALLOWED_KEYS.beginner_onboarding,
-    "beginner_onboarding"
-  );
-  requirePresentKeys(beginnerPayload, PUBLIC_SURFACE_CONTRACT_SECTION_KEYS.beginner_onboarding, "beginner_onboarding");
-  const localCliBridge = requireJsonObject(contract.local_cli_bridge, "local_cli_bridge");
-  requireKnownKeys(
-    localCliBridge,
-    PUBLIC_SURFACE_CONTRACT_SECTION_ALLOWED_KEYS.local_cli_bridge,
-    "local_cli_bridge"
-  );
-  requirePresentKeys(localCliBridge, PUBLIC_SURFACE_CONTRACT_SECTION_KEYS.local_cli_bridge, "local_cli_bridge");
-  const localCliNamedCommands = requireJsonObject(localCliBridge.named_commands, "local_cli_bridge.named_commands");
-  requireKnownKeys(
-    localCliNamedCommands,
-    new Set(PUBLIC_SURFACE_LOCAL_CLI_NAMED_COMMAND_KEYS),
-    "local_cli_bridge.named_commands"
-  );
-  requirePresentKeys(
-    localCliNamedCommands,
-    PUBLIC_SURFACE_LOCAL_CLI_NAMED_COMMAND_KEYS,
-    "local_cli_bridge.named_commands"
-  );
-  const postStartSettings = requireJsonObject(contract.post_start_settings, "post_start_settings");
-  requireKnownKeys(
-    postStartSettings,
-    PUBLIC_SURFACE_CONTRACT_SECTION_ALLOWED_KEYS.post_start_settings,
-    "post_start_settings"
-  );
-  requirePresentKeys(postStartSettings, PUBLIC_SURFACE_CONTRACT_SECTION_KEYS.post_start_settings, "post_start_settings");
-  const resumeAuthority = requireJsonObject(contract.resume_authority, "resume_authority");
-  requireKnownKeys(
-    resumeAuthority,
-    PUBLIC_SURFACE_CONTRACT_SECTION_ALLOWED_KEYS.resume_authority,
-    "resume_authority"
-  );
-  requirePresentKeys(resumeAuthority, PUBLIC_SURFACE_CONTRACT_SECTION_KEYS.resume_authority, "resume_authority");
-  const recoveryLadder = requireJsonObject(contract.recovery_ladder, "recovery_ladder");
-  requireKnownKeys(
-    recoveryLadder,
-    PUBLIC_SURFACE_CONTRACT_SECTION_ALLOWED_KEYS.recovery_ladder,
-    "recovery_ladder"
-  );
-  requirePresentKeys(recoveryLadder, PUBLIC_SURFACE_CONTRACT_SECTION_KEYS.recovery_ladder, "recovery_ladder");
-
-  const beginnerHubUrl = requireNonEmptyString(beginnerPayload, "hub_url", "beginner_onboarding");
-  const beginnerPreflightRequirements = requireNonEmptyStringList(
-    beginnerPayload,
-    "preflight_requirements",
-    "beginner_onboarding"
-  );
-  const beginnerCaveats = requireNonEmptyStringList(beginnerPayload, "caveats", "beginner_onboarding");
-  const beginnerStartupLadder = requireNonEmptyStringList(beginnerPayload, "startup_ladder", "beginner_onboarding");
-  const localCliBridgeCommands = requireNonEmptyStringList(localCliBridge, "commands", "local_cli_bridge");
-  const namedCommands = Object.fromEntries(
-    PUBLIC_SURFACE_LOCAL_CLI_NAMED_COMMAND_KEYS.map((key) => [
-      key,
-      requireNonEmptyString(localCliNamedCommands, key, "local_cli_bridge.named_commands"),
-    ])
-  );
-  const orderedNamedCommands = PUBLIC_SURFACE_LOCAL_CLI_NAMED_COMMAND_KEYS.map((key) =>
-    requireListedCommand(localCliBridgeCommands, "local_cli_bridge", namedCommands[key])
-  );
-  if (
-    localCliBridgeCommands.length !== orderedNamedCommands.length
-    || localCliBridgeCommands.some((command, index) => command !== orderedNamedCommands[index])
-  ) {
+function validateSharedInstallMetadata(installMetadata) {
+  const label = "bootstrap installer metadata.shared_install_metadata";
+  const keys = [
+    "schemaVersion",
+    "bootstrapPackageName",
+    "bootstrapCommand",
+    "installRootDirName",
+    "manifestName",
+    "patchesDirName",
+  ];
+  const payload = requireJsonObject(installMetadata, label);
+  requireKnownKeys(payload, new Set(keys), label);
+  requirePresentKeys(payload, keys, label);
+  if (payload.schemaVersion !== 1) {
     throw new Error(
-      "local_cli_bridge.commands must exactly match local_cli_bridge.named_commands in canonical order"
+      `Unsupported bootstrap shared install metadata schemaVersion: ${JSON.stringify(payload.schemaVersion)}`
     );
   }
-  const terminalPhrase = requireNonEmptyString(localCliBridge, "terminal_phrase", "local_cli_bridge");
-  const purposePhrase = requireNonEmptyString(localCliBridge, "purpose_phrase", "local_cli_bridge");
-  const installLocalExample = requireNonEmptyString(localCliBridge, "install_local_example", "local_cli_bridge");
-  const doctorLocalCommand = requireNonEmptyString(localCliBridge, "doctor_local_command", "local_cli_bridge");
-  const doctorGlobalCommand = requireNonEmptyString(localCliBridge, "doctor_global_command", "local_cli_bridge");
-  const validateCommandContextCommand = requireNonEmptyString(
-    localCliBridge,
-    "validate_command_context_command",
-    "local_cli_bridge"
+
+  const bootstrapPackageName = requireStrictPatternString(
+    payload.bootstrapPackageName,
+    `${label}.bootstrapPackageName`,
+    BOOTSTRAP_PACKAGE_NAME_RE,
+    "a lowercase npm package name"
   );
-  const settingsCommandSentence = requireNonEmptyString(postStartSettings, "primary_sentence", "post_start_settings");
-  const settingsRecommendationSentence = requireNonEmptyString(
-    postStartSettings,
-    "default_sentence",
-    "post_start_settings"
-  );
-  const durableAuthorityPhrase = requireNonEmptyString(
-    resumeAuthority,
-    "durable_authority_phrase",
-    "resume_authority"
-  );
-  const publicVocabularyIntro = requireNonEmptyString(resumeAuthority, "public_vocabulary_intro", "resume_authority");
-  const publicFields = requireNonEmptyStringList(resumeAuthority, "public_fields", "resume_authority");
-  const recoveryTitle = requireNonEmptyString(recoveryLadder, "title", "recovery_ladder");
-  const recoveryLocalSnapshotCommand = requireListedCommand(
-    localCliBridgeCommands,
-    "local_cli_bridge",
-    requireNonEmptyString(
-      recoveryLadder,
-      "local_snapshot_command",
-      "recovery_ladder"
-    )
-  );
-  const recoveryLocalSnapshotPhrase = requireNonEmptyString(
-    recoveryLadder,
-    "local_snapshot_phrase",
-    "recovery_ladder"
-  );
-  const recoveryCrossWorkspaceCommand = requireListedCommand(
-    localCliBridgeCommands,
-    "local_cli_bridge",
-    requireNonEmptyString(
-      recoveryLadder,
-      "cross_workspace_command",
-      "recovery_ladder"
-    )
-  );
-  if (recoveryLocalSnapshotCommand !== namedCommands.resume) {
-    throw new Error(
-      "recovery_ladder.local_snapshot_command must equal local_cli_bridge.named_commands.resume"
-    );
+  const bootstrapCommand = requireStrictString(payload.bootstrapCommand, `${label}.bootstrapCommand`);
+  const expectedBootstrapCommand = `npx -y ${bootstrapPackageName}`;
+  if (bootstrapCommand !== expectedBootstrapCommand) {
+    throw new Error(`${label}.bootstrapCommand must be ${JSON.stringify(expectedBootstrapCommand)}`);
   }
-  if (recoveryCrossWorkspaceCommand !== namedCommands.resume_recent) {
-    throw new Error(
-      "recovery_ladder.cross_workspace_command must equal local_cli_bridge.named_commands.resume_recent"
-    );
-  }
-  const recoveryCrossWorkspacePhrase = requireNonEmptyString(
-    recoveryLadder,
-    "cross_workspace_phrase",
-    "recovery_ladder"
-  );
-  const recoveryResumePhrase = requireNonEmptyString(recoveryLadder, "resume_phrase", "recovery_ladder");
-  const recoveryNextPhrase = requireNonEmptyString(recoveryLadder, "next_phrase", "recovery_ladder");
-  const recoveryPausePhrase = requireNonEmptyString(recoveryLadder, "pause_phrase", "recovery_ladder");
 
   return {
-    beginnerHubUrl,
-    beginnerPreflightRequirements,
-    beginnerCaveats,
-    beginnerStartupLadder,
-    localCliBridgeCommands,
-    localCliBridge: {
-      doctorCommand: namedCommands.doctor,
-      helpCommand: namedCommands.help,
-      permissionsStatusCommand: namedCommands.permissions_status,
-      permissionsSyncCommand: namedCommands.permissions_sync,
-      resumeCommand: namedCommands.resume,
-      resumeRecentCommand: namedCommands.resume_recent,
-      observeExecutionCommand: namedCommands.observe_execution,
-      costCommand: namedCommands.cost,
-      presetsListCommand: namedCommands.presets_list,
-      planPreflightCommand: namedCommands.plan_preflight,
-      integrationsStatusWolframCommand: namedCommands.integrations_status_wolfram,
-      terminalPhrase,
-      purposePhrase,
-      installLocalExample,
-      doctorLocalCommand,
-      doctorGlobalCommand,
-      validateCommandContextCommand,
-      unattendedReadinessCommand: namedCommands.unattended_readiness,
-    },
     schemaVersion: 1,
+    bootstrapPackageName,
+    bootstrapCommand,
+    installRootDirName: requireRelativeCatalogPath(payload.installRootDirName, `${label}.installRootDirName`, {
+      allowSlash: false,
+    }),
+    manifestName: requireRelativeCatalogPath(payload.manifestName, `${label}.manifestName`, {
+      allowSlash: false,
+    }),
+    patchesDirName: requireRelativeCatalogPath(payload.patchesDirName, `${label}.patchesDirName`, {
+      allowSlash: false,
+    }),
+  };
+}
+
+function validateSharedPublicSurfaceTextMetadata(publicSurfaceText) {
+  const sharedPublicSurfaceTextLabel = "bootstrap installer metadata.shared_public_surface_text";
+  const sharedPublicSurfaceTextKeys = [
+    "schemaVersion",
+    "beginnerHubUrl",
+    "beginnerPreflightRequirements",
+    "beginnerCaveats",
+    "beginnerStartupLadder",
+    "localCliBridgeCommands",
+    "localCliBridge",
+    "resumeAuthority",
+    "recoveryLadder",
+    "settingsCommandSentence",
+    "settingsRecommendationSentence",
+  ];
+  const payload = requireJsonObject(
+    publicSurfaceText,
+    sharedPublicSurfaceTextLabel
+  );
+  requireKnownKeys(payload, new Set(sharedPublicSurfaceTextKeys), sharedPublicSurfaceTextLabel);
+  requirePresentKeys(payload, sharedPublicSurfaceTextKeys, sharedPublicSurfaceTextLabel);
+  if (payload.schemaVersion !== 1) {
+    throw new Error(
+      `Unsupported bootstrap public surface text schemaVersion: ${JSON.stringify(payload.schemaVersion)}`
+    );
+  }
+
+  const localCliBridgeLabel = "bootstrap installer metadata.shared_public_surface_text.localCliBridge";
+  const localCliBridgeKeys = [
+    "doctorCommand",
+    "helpCommand",
+    "permissionsStatusCommand",
+    "permissionsSyncCommand",
+    "resumeCommand",
+    "resumeRecentCommand",
+    "observeExecutionCommand",
+    "costCommand",
+    "presetsListCommand",
+    "planPreflightCommand",
+    "integrationsStatusWolframCommand",
+    "terminalPhrase",
+    "purposePhrase",
+    "installLocalExample",
+    "doctorLocalCommand",
+    "doctorGlobalCommand",
+    "validateCommandContextCommand",
+    "unattendedReadinessCommand",
+  ];
+  const localCliBridge = requireJsonObject(
+    payload.localCliBridge,
+    localCliBridgeLabel
+  );
+  requireKnownKeys(localCliBridge, new Set(localCliBridgeKeys), localCliBridgeLabel);
+  requirePresentKeys(localCliBridge, localCliBridgeKeys, localCliBridgeLabel);
+
+  const resumeAuthorityLabel = "bootstrap installer metadata.shared_public_surface_text.resumeAuthority";
+  const resumeAuthorityKeys = ["durableAuthorityPhrase", "publicVocabularyIntro", "publicFields"];
+  const resumeAuthority = requireJsonObject(
+    payload.resumeAuthority,
+    resumeAuthorityLabel
+  );
+  requireKnownKeys(resumeAuthority, new Set(resumeAuthorityKeys), resumeAuthorityLabel);
+  requirePresentKeys(resumeAuthority, resumeAuthorityKeys, resumeAuthorityLabel);
+
+  const recoveryLadderLabel = "bootstrap installer metadata.shared_public_surface_text.recoveryLadder";
+  const recoveryLadderKeys = [
+    "title",
+    "localSnapshotCommand",
+    "localSnapshotPhrase",
+    "crossWorkspaceCommand",
+    "crossWorkspacePhrase",
+    "resumePhrase",
+    "nextPhrase",
+    "pausePhrase",
+  ];
+  const recoveryLadder = requireJsonObject(
+    payload.recoveryLadder,
+    recoveryLadderLabel
+  );
+  requireKnownKeys(recoveryLadder, new Set(recoveryLadderKeys), recoveryLadderLabel);
+  requirePresentKeys(recoveryLadder, recoveryLadderKeys, recoveryLadderLabel);
+
+  return {
+    schemaVersion: 1,
+    beginnerHubUrl: requireStrictString(
+      payload.beginnerHubUrl,
+      "bootstrap installer metadata.shared_public_surface_text.beginnerHubUrl"
+    ),
+    beginnerPreflightRequirements: requireStrictStringList(
+      payload.beginnerPreflightRequirements,
+      "bootstrap installer metadata.shared_public_surface_text.beginnerPreflightRequirements"
+    ),
+    beginnerCaveats: requireStrictStringList(
+      payload.beginnerCaveats,
+      "bootstrap installer metadata.shared_public_surface_text.beginnerCaveats"
+    ),
+    beginnerStartupLadder: requireStrictStringList(
+      payload.beginnerStartupLadder,
+      "bootstrap installer metadata.shared_public_surface_text.beginnerStartupLadder"
+    ),
+    localCliBridgeCommands: requireStrictStringList(
+      payload.localCliBridgeCommands,
+      "bootstrap installer metadata.shared_public_surface_text.localCliBridgeCommands"
+    ),
+    localCliBridge: {
+      doctorCommand: requireStrictString(localCliBridge.doctorCommand, "bootstrap installer metadata.shared_public_surface_text.localCliBridge.doctorCommand"),
+      helpCommand: requireStrictString(localCliBridge.helpCommand, "bootstrap installer metadata.shared_public_surface_text.localCliBridge.helpCommand"),
+      permissionsStatusCommand: requireStrictString(localCliBridge.permissionsStatusCommand, "bootstrap installer metadata.shared_public_surface_text.localCliBridge.permissionsStatusCommand"),
+      permissionsSyncCommand: requireStrictString(localCliBridge.permissionsSyncCommand, "bootstrap installer metadata.shared_public_surface_text.localCliBridge.permissionsSyncCommand"),
+      resumeCommand: requireStrictString(localCliBridge.resumeCommand, "bootstrap installer metadata.shared_public_surface_text.localCliBridge.resumeCommand"),
+      resumeRecentCommand: requireStrictString(localCliBridge.resumeRecentCommand, "bootstrap installer metadata.shared_public_surface_text.localCliBridge.resumeRecentCommand"),
+      observeExecutionCommand: requireStrictString(localCliBridge.observeExecutionCommand, "bootstrap installer metadata.shared_public_surface_text.localCliBridge.observeExecutionCommand"),
+      costCommand: requireStrictString(localCliBridge.costCommand, "bootstrap installer metadata.shared_public_surface_text.localCliBridge.costCommand"),
+      presetsListCommand: requireStrictString(localCliBridge.presetsListCommand, "bootstrap installer metadata.shared_public_surface_text.localCliBridge.presetsListCommand"),
+      planPreflightCommand: requireStrictString(localCliBridge.planPreflightCommand, "bootstrap installer metadata.shared_public_surface_text.localCliBridge.planPreflightCommand"),
+      integrationsStatusWolframCommand: requireStrictString(localCliBridge.integrationsStatusWolframCommand, "bootstrap installer metadata.shared_public_surface_text.localCliBridge.integrationsStatusWolframCommand"),
+      terminalPhrase: requireStrictString(localCliBridge.terminalPhrase, "bootstrap installer metadata.shared_public_surface_text.localCliBridge.terminalPhrase"),
+      purposePhrase: requireStrictString(localCliBridge.purposePhrase, "bootstrap installer metadata.shared_public_surface_text.localCliBridge.purposePhrase"),
+      installLocalExample: requireStrictString(localCliBridge.installLocalExample, "bootstrap installer metadata.shared_public_surface_text.localCliBridge.installLocalExample"),
+      doctorLocalCommand: requireStrictString(localCliBridge.doctorLocalCommand, "bootstrap installer metadata.shared_public_surface_text.localCliBridge.doctorLocalCommand"),
+      doctorGlobalCommand: requireStrictString(localCliBridge.doctorGlobalCommand, "bootstrap installer metadata.shared_public_surface_text.localCliBridge.doctorGlobalCommand"),
+      validateCommandContextCommand: requireStrictString(localCliBridge.validateCommandContextCommand, "bootstrap installer metadata.shared_public_surface_text.localCliBridge.validateCommandContextCommand"),
+      unattendedReadinessCommand: requireStrictString(localCliBridge.unattendedReadinessCommand, "bootstrap installer metadata.shared_public_surface_text.localCliBridge.unattendedReadinessCommand"),
+    },
     resumeAuthority: {
-      durableAuthorityPhrase,
-      publicVocabularyIntro,
-      publicFields,
+      durableAuthorityPhrase: requireStrictString(
+        resumeAuthority.durableAuthorityPhrase,
+        "bootstrap installer metadata.shared_public_surface_text.resumeAuthority.durableAuthorityPhrase"
+      ),
+      publicVocabularyIntro: requireStrictString(
+        resumeAuthority.publicVocabularyIntro,
+        "bootstrap installer metadata.shared_public_surface_text.resumeAuthority.publicVocabularyIntro"
+      ),
+      publicFields: requireStrictStringList(
+        resumeAuthority.publicFields,
+        "bootstrap installer metadata.shared_public_surface_text.resumeAuthority.publicFields"
+      ),
     },
     recoveryLadder: {
-      title: recoveryTitle,
-      localSnapshotCommand: recoveryLocalSnapshotCommand,
-      localSnapshotPhrase: recoveryLocalSnapshotPhrase,
-      crossWorkspaceCommand: recoveryCrossWorkspaceCommand,
-      crossWorkspacePhrase: recoveryCrossWorkspacePhrase,
-      resumePhrase: recoveryResumePhrase,
-      nextPhrase: recoveryNextPhrase,
-      pausePhrase: recoveryPausePhrase,
+      title: requireStrictString(recoveryLadder.title, "bootstrap installer metadata.shared_public_surface_text.recoveryLadder.title"),
+      localSnapshotCommand: requireStrictString(recoveryLadder.localSnapshotCommand, "bootstrap installer metadata.shared_public_surface_text.recoveryLadder.localSnapshotCommand"),
+      localSnapshotPhrase: requireStrictString(recoveryLadder.localSnapshotPhrase, "bootstrap installer metadata.shared_public_surface_text.recoveryLadder.localSnapshotPhrase"),
+      crossWorkspaceCommand: requireStrictString(recoveryLadder.crossWorkspaceCommand, "bootstrap installer metadata.shared_public_surface_text.recoveryLadder.crossWorkspaceCommand"),
+      crossWorkspacePhrase: requireStrictString(recoveryLadder.crossWorkspacePhrase, "bootstrap installer metadata.shared_public_surface_text.recoveryLadder.crossWorkspacePhrase"),
+      resumePhrase: requireStrictString(recoveryLadder.resumePhrase, "bootstrap installer metadata.shared_public_surface_text.recoveryLadder.resumePhrase"),
+      nextPhrase: requireStrictString(recoveryLadder.nextPhrase, "bootstrap installer metadata.shared_public_surface_text.recoveryLadder.nextPhrase"),
+      pausePhrase: requireStrictString(recoveryLadder.pausePhrase, "bootstrap installer metadata.shared_public_surface_text.recoveryLadder.pausePhrase"),
     },
-    settingsCommandSentence,
-    settingsRecommendationSentence,
+    settingsCommandSentence: requireStrictString(
+      payload.settingsCommandSentence,
+      "bootstrap installer metadata.shared_public_surface_text.settingsCommandSentence"
+    ),
+    settingsRecommendationSentence: requireStrictString(
+      payload.settingsRecommendationSentence,
+      "bootstrap installer metadata.shared_public_surface_text.settingsRecommendationSentence"
+    ),
   };
+}
+
+function validateBootstrapInstallerMetadata(metadataPayload, options = {}) {
+  const payload = requireJsonObject(metadataPayload, "bootstrap installer metadata");
+  requireKnownKeys(
+    payload,
+    new Set([
+      "schema_version",
+      "source_hashes",
+      "python_compatibility",
+      "runtimes",
+      "shared_install_metadata",
+      "shared_public_surface_text",
+    ]),
+    "bootstrap installer metadata"
+  );
+  requirePresentKeys(
+    payload,
+    [
+      "schema_version",
+      "source_hashes",
+      "python_compatibility",
+      "runtimes",
+      "shared_install_metadata",
+      "shared_public_surface_text",
+    ],
+    "bootstrap installer metadata"
+  );
+  if (payload.schema_version !== 1) {
+    throw new Error(`Unsupported bootstrap installer metadata schema_version: ${JSON.stringify(payload.schema_version)}`);
+  }
+
+  return {
+    schemaVersion: 1,
+    sourceHashes: validateSourceHashes(payload.source_hashes, options),
+    pythonCompatibility: validatePythonCompatibilityMetadata(payload.python_compatibility),
+    runtimes: validateRuntimeMetadataList(payload.runtimes),
+    sharedInstallMetadata: validateSharedInstallMetadata(payload.shared_install_metadata),
+    sharedPublicSurfaceText: validateSharedPublicSurfaceTextMetadata(payload.shared_public_surface_text),
+  };
+}
+
+function loadBootstrapInstallerMetadata() {
+  return validateBootstrapInstallerMetadata(loadBootstrapInstallerMetadataPayload());
+}
+
+function cloneJson(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+const BOOTSTRAP_INSTALLER_METADATA = loadBootstrapInstallerMetadata();
+const PYTHON_COMPATIBILITY = BOOTSTRAP_INSTALLER_METADATA.pythonCompatibility;
+const MIN_SUPPORTED_PYTHON_MAJOR = PYTHON_COMPATIBILITY.minimumSupportedPython.major;
+const MIN_SUPPORTED_PYTHON_MINOR = PYTHON_COMPATIBILITY.minimumSupportedPython.minor;
+const MIN_SUPPORTED_PYTHON_LABEL = `${PYTHON_COMPATIBILITY.minimumSupportedPythonLabel}+`;
+const PREFERRED_VERSIONED_PYTHON_MINORS = PYTHON_COMPATIBILITY.preferredVersionedPythonMinors;
+RUNTIME_CATALOG = BOOTSTRAP_INSTALLER_METADATA.runtimes;
+ALL_RUNTIMES = RUNTIME_CATALOG.map((runtime) => runtime.runtime_name);
+RUNTIME_BY_NAME = Object.fromEntries(RUNTIME_CATALOG.map((runtime) => [runtime.runtime_name, runtime]));
+const SHARED_INSTALL_METADATA = BOOTSTRAP_INSTALLER_METADATA.sharedInstallMetadata;
+const SHARED_PUBLIC_SURFACE_TEXT = BOOTSTRAP_INSTALLER_METADATA.sharedPublicSurfaceText;
+
+function loadSharedInstallMetadata() {
+  return cloneJson(SHARED_INSTALL_METADATA);
 }
 
 function loadSharedPublicSurfaceText() {
-  const contract = validateSharedPublicSurfaceContract(PUBLIC_SURFACE_CONTRACT);
-  return {
-    schemaVersion: contract.schemaVersion,
-    beginnerHubUrl: contract.beginnerHubUrl,
-    beginnerPreflightRequirements: contract.beginnerPreflightRequirements,
-    beginnerCaveats: contract.beginnerCaveats,
-    beginnerStartupLadder: contract.beginnerStartupLadder,
-    localCliBridgeCommands: contract.localCliBridgeCommands,
-    localCliBridge: contract.localCliBridge,
-    resumeAuthority: contract.resumeAuthority,
-    recoveryLadder: contract.recoveryLadder,
-    settingsCommandSentence: contract.settingsCommandSentence,
-    settingsRecommendationSentence: contract.settingsRecommendationSentence,
-  };
+  return cloneJson(SHARED_PUBLIC_SURFACE_TEXT);
 }
 
-const SHARED_PUBLIC_SURFACE_TEXT = loadSharedPublicSurfaceText();
+function sharedBootstrapCommand() {
+  return SHARED_INSTALL_METADATA.bootstrapCommand;
+}
 
 function beginnerStartupLadderText() {
   return `\`${SHARED_PUBLIC_SURFACE_TEXT.beginnerStartupLadder.join(" -> ")}\``;
@@ -1524,8 +1009,8 @@ function isSupportedPython(info) {
 
 function preferredPythonCommands() {
   return [
-    ...PREFERRED_VERSIONED_PYTHON_MINORS.map((minor) => `python3.${minor}`),
-    "python3",
+    ...PREFERRED_VERSIONED_PYTHON_MINORS.map((minor) => `python${MIN_SUPPORTED_PYTHON_MAJOR}.${minor}`),
+    `python${MIN_SUPPORTED_PYTHON_MAJOR}`,
     "python",
   ];
 }
@@ -1741,7 +1226,7 @@ function probeHttpCandidate(urlString, redirectCount = 0) {
       {
         method: "HEAD",
         headers: {
-          "User-Agent": `get-physics-done-bootstrap/${packageVersion}`,
+          "User-Agent": `${SHARED_INSTALL_METADATA.bootstrapPackageName}-bootstrap/${packageVersion}`,
         },
       },
       (response) => {
@@ -2039,7 +1524,7 @@ async function installManagedPackage(python, pythonVersion, options = {}) {
       : "Installing GPD";
 
   // 1. Try PyPI first — fast, reliable, no auth needed.
-  const pypiSpec = `get-physics-done==${pythonVersion}`;
+  const pypiSpec = `${SHARED_INSTALL_METADATA.bootstrapPackageName}==${pythonVersion}`;
   log(`${action} from PyPI (${pypiSpec}) into the managed environment...`);
   const pypiResult = runPipInstall(python, pypiSpec, pipInstallEnv, { forceReinstall });
   if (pypiResult.status === 0) {
@@ -2489,7 +1974,7 @@ function printBanner() {
 }
 
 function printHelp() {
-  const installCommand = "npx -y get-physics-done";
+  const installCommand = sharedBootstrapCommand();
   const primaryRuntime = ALL_RUNTIMES[0];
   const globalHelpRuntime = runtimeHelpExampleRuntime("global", primaryRuntime);
   const localHelpRuntime = runtimeHelpExampleRuntime("local", globalHelpRuntime);
@@ -2506,9 +1991,13 @@ function printHelp() {
   console.log(` ${cyan}--uninstall${reset}             Uninstall from selected runtime config`);
   console.log(` ${cyan}--reinstall${reset}             Reinstall \${GPD_HOME:-~/.gpd}/venv from the PyPI pinned release, with tagged GitHub fallback`);
   console.log(` ${cyan}--upgrade${reset}               Upgrade \${GPD_HOME:-~/.gpd}/venv from the latest unreleased GitHub main source`);
-  for (const runtime of ALL_RUNTIMES) {
-    const flags = runtimeSelectionFlagList(runtime).join(", ");
-    const padding = " ".repeat(Math.max(0, 24 - flags.length));
+  const runtimeFlagRows = ALL_RUNTIMES.map((runtime) => [
+    runtime,
+    runtimeSelectionFlagList(runtime).join(", "),
+  ]);
+  const runtimeFlagColumnWidth = Math.max(...runtimeFlagRows.map(([, flags]) => flags.length)) + 1;
+  for (const [runtime, flags] of runtimeFlagRows) {
+    const padding = " ".repeat(runtimeFlagColumnWidth - flags.length);
     console.log(` ${cyan}${flags}${reset}${padding}Select ${runtimeDisplayName(runtime)} only`);
   }
   console.log(` ${cyan}--all${reset}                  Select all supported runtimes`);
@@ -2616,7 +2105,7 @@ function validateBootstrapArgs(args) {
     const label = typeof arg === "string" && arg.startsWith("-")
       ? "Unknown bootstrap option"
       : "Unexpected bootstrap argument";
-    error(`${label}: ${arg}. Run npx -y get-physics-done --help for usage.`);
+    error(`${label}: ${arg}. Run ${sharedBootstrapCommand()} --help for usage.`);
     process.exit(1);
   }
 }
@@ -3019,14 +2508,13 @@ if (require.main === module) {
 
 module.exports = {
   ensureSupportedNodeVersion,
+  loadBootstrapInstallerMetadata,
+  loadSharedInstallMetadata,
   loadSharedPublicSurfaceText,
   nodeMajorVersion,
   resolveRuntimeSelectionChoice,
   runtimeGlobalConfigDirCandidates,
   runtimeSelectionMenuEntries,
   targetDirMatchesGlobal,
-  validateRuntimeCatalog,
-  validateRuntimeCatalogSchemaShape,
-  validateSharedPublicSurfaceSchemaShape,
-  validateSharedPublicSurfaceContract,
+  validateBootstrapInstallerMetadata,
 };

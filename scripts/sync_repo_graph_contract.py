@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import difflib
 import json
 import sys
 from collections.abc import Sequence
@@ -13,6 +12,7 @@ if __package__ in {None, ""}:
     repo_root = Path(__file__).resolve().parent.parent
     sys.path[:0] = [str(repo_root), str(repo_root / "src")]
 
+from scripts.generated_region_support import unified_diff_text
 from scripts.repo_graph_contract import (
     CONTRACT_PATH,
     GRAPH_PATH,
@@ -26,17 +26,6 @@ from scripts.repo_graph_contract import (
 
 def _contract_text(contract: dict[str, object]) -> str:
     return json.dumps(contract, indent=2) + "\n"
-
-
-def _diff(expected: str, actual: str, *, path: Path) -> str:
-    return "".join(
-        difflib.unified_diff(
-            actual.splitlines(keepends=True),
-            expected.splitlines(keepends=True),
-            fromfile=f"{path.as_posix()} (current)",
-            tofile=f"{path.as_posix()} (expected)",
-        )
-    )
 
 
 def expected_generated_artifacts(
@@ -66,9 +55,9 @@ def check_generated_artifacts(
 
     diffs: list[str] = []
     if current_contract != expected_contract:
-        diffs.append(_diff(expected_contract, current_contract, path=contract_path))
+        diffs.append(unified_diff_text(expected_contract, current_contract, path=contract_path, block_id="contract"))
     if current_graph != expected_graph:
-        diffs.append(_diff(expected_graph, current_graph, path=graph_path))
+        diffs.append(unified_diff_text(expected_graph, current_graph, path=graph_path, block_id="readme"))
     untracked_scope_files = untracked_graph_scope_files(repo_root)
     if untracked_scope_files:
         formatted_paths = "\n".join(f"- {path.as_posix()}" for path in untracked_scope_files)

@@ -9,6 +9,14 @@ allowed-tools:
   - shell
   - find_files
   - search_files
+help:
+  group: Configuration and maintenance
+  order: 680
+  compact_description: Archive old `STATE.md` entries
+  display_signature: gpd:compact-state
+  notes:
+    - Suggested by `gpd:progress` when STATE.md grows large.
+  root_detail_order: 330
 ---
 
 

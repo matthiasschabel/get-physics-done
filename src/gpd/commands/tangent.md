@@ -12,6 +12,11 @@ allowed-tools:
   - shell
   - task
   - ask_user
+help:
+  group: Tangents, memory, and exports
+  order: 500
+  compact_description: Chooser for stay / quick / defer / branch when a side investigation appears
+  display_signature: gpd:tangent [description]
 ---
 
 

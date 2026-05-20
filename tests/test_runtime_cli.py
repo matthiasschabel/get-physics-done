@@ -127,6 +127,7 @@ def _run_runtime_cli_with_recording(
     monkeypatch.delenv(ENV_GPD_DISABLE_CHECKOUT_REEXEC, raising=False)
     monkeypatch.setattr(adapter, "missing_install_artifacts", record_missing_install_artifacts)
     monkeypatch.setattr("gpd.runtime_cli.get_adapter", lambda runtime_name: adapter)
+    monkeypatch.setattr("gpd.hooks.install_metadata.get_adapter", lambda runtime_name: adapter)
     monkeypatch.setattr("gpd.runtime_cli._maybe_reexec_from_checkout", lambda *_args, **_kwargs: None)
     monkeypatch.setattr("gpd.cli.entrypoint", fake_entrypoint)
 
@@ -181,6 +182,148 @@ def test_runtime_cli_fails_cleanly_for_incomplete_install(tmp_path: Path, capsys
     assert f"`{MANIFEST_NAME}`" in captured.err
     assert f"`{_SHARED_INSTALL.install_root_dir_name}`" in captured.err
     assert f"{BOOTSTRAP_COMMAND} {adapter.install_flag} --local" in captured.err
+
+
+def test_runtime_cli_does_not_rescan_owned_complete_install_after_assessment(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    descriptor = _RUNTIME_DESCRIPTORS[0]
+    adapter = get_adapter(descriptor.runtime_name)
+    config_dir = tmp_path / adapter.config_dir_name
+    _mark_lookup_only_install(config_dir, runtime=descriptor.runtime_name)
+    calls: list[Path] = []
+    observed: dict[str, object] = {}
+
+    def fake_missing_install_artifacts(target_dir: Path) -> tuple[str, ...]:
+        calls.append(target_dir)
+        if len(calls) > 1:
+            raise AssertionError("owned_complete install artifacts should be assessed once")
+        return ()
+
+    def fake_entrypoint() -> int:
+        observed["argv"] = list(sys.argv)
+        observed["runtime"] = os.environ.get(ENV_GPD_ACTIVE_RUNTIME)
+        return 0
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(adapter, "missing_install_artifacts", fake_missing_install_artifacts)
+    monkeypatch.setattr("gpd.runtime_cli.get_adapter", lambda runtime_name: adapter)
+    monkeypatch.setattr("gpd.hooks.install_metadata.get_adapter", lambda runtime_name: adapter)
+    monkeypatch.setattr("gpd.runtime_cli._maybe_reexec_from_checkout", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("gpd.cli.entrypoint", fake_entrypoint)
+
+    exit_code = main(
+        [
+            "--runtime",
+            descriptor.runtime_name,
+            "--config-dir",
+            str(config_dir),
+            "--install-scope",
+            "local",
+            "state",
+            "load",
+        ]
+    )
+
+    assert exit_code == 0
+    assert calls == [config_dir.resolve(strict=False)]
+    assert observed["argv"] == ["gpd", "state", "load"]
+    assert observed["runtime"] == descriptor.runtime_name
+
+
+def test_runtime_cli_uses_assessment_missing_artifacts_for_owned_incomplete(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    descriptor = _RUNTIME_DESCRIPTORS[0]
+    adapter = get_adapter(descriptor.runtime_name)
+    config_dir = tmp_path / adapter.config_dir_name
+    _mark_lookup_only_install(config_dir, runtime=descriptor.runtime_name)
+    calls: list[Path] = []
+    missing_artifact = "agents/gpd-help/SKILL.md"
+
+    def fake_missing_install_artifacts(target_dir: Path) -> tuple[str, ...]:
+        calls.append(target_dir)
+        if len(calls) > 1:
+            raise AssertionError("owned_incomplete install artifacts should be assessed once")
+        return (missing_artifact,)
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(adapter, "missing_install_artifacts", fake_missing_install_artifacts)
+    monkeypatch.setattr("gpd.runtime_cli.get_adapter", lambda runtime_name: adapter)
+    monkeypatch.setattr("gpd.hooks.install_metadata.get_adapter", lambda runtime_name: adapter)
+    monkeypatch.setattr("gpd.runtime_cli._maybe_reexec_from_checkout", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "gpd.cli.entrypoint",
+        lambda: (_ for _ in ()).throw(AssertionError("entrypoint should not run for incomplete installs")),
+    )
+
+    exit_code = main(
+        [
+            "--runtime",
+            descriptor.runtime_name,
+            "--config-dir",
+            str(config_dir),
+            "--install-scope",
+            "local",
+            "state",
+            "load",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 127
+    assert calls == [config_dir.resolve(strict=False)]
+    assert f"`{missing_artifact}`" in captured.err
+
+
+@pytest.mark.parametrize("target_exists", [False, True], ids=["absent", "clean"])
+def test_runtime_cli_still_scans_absent_and_clean_targets_for_missing_artifacts(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    target_exists: bool,
+) -> None:
+    descriptor = _RUNTIME_DESCRIPTORS[0]
+    adapter = get_adapter(descriptor.runtime_name)
+    config_dir = tmp_path / adapter.config_dir_name
+    if target_exists:
+        config_dir.mkdir(parents=True)
+    calls: list[Path] = []
+    missing_artifact = MANIFEST_NAME
+
+    def fake_missing_install_artifacts(target_dir: Path) -> tuple[str, ...]:
+        calls.append(target_dir)
+        return (missing_artifact,)
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(adapter, "missing_install_artifacts", fake_missing_install_artifacts)
+    monkeypatch.setattr("gpd.runtime_cli.get_adapter", lambda runtime_name: adapter)
+    monkeypatch.setattr("gpd.runtime_cli._maybe_reexec_from_checkout", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "gpd.cli.entrypoint",
+        lambda: (_ for _ in ()).throw(AssertionError("entrypoint should not run for incomplete installs")),
+    )
+
+    exit_code = main(
+        [
+            "--runtime",
+            descriptor.runtime_name,
+            "--config-dir",
+            str(config_dir),
+            "--install-scope",
+            "local",
+            "state",
+            "load",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 127
+    assert calls == [config_dir.resolve(strict=False)]
+    assert f"`{missing_artifact}`" in captured.err
 
 
 @pytest.mark.parametrize("descriptor", _RUNTIME_DESCRIPTORS, ids=lambda descriptor: descriptor.runtime_name)

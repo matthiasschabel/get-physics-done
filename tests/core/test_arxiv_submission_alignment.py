@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import tarfile
 from pathlib import Path
 
@@ -11,11 +12,26 @@ from typer.testing import CliRunner
 from gpd.cli import app
 from gpd.core.arxiv_package import ARXIV_TARBALL_NAME, validate_arxiv_package
 from gpd.core.workflow_staging import resolve_workflow_stage_manifest_path, validate_workflow_stage_manifest_payload
+from tests.lifecycle_contract_test_support import (
+    assert_forbidden_lifecycle_prose as _assert_forbidden_semantic,
+)
+from tests.lifecycle_contract_test_support import (
+    assert_semantic_contract as _assert_semantic,
+)
+from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COMMANDS_DIR = REPO_ROOT / "src/gpd/commands"
 WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
 runner = CliRunner()
+
+_SHELL_VAR_REFERENCE_RE = re.compile(r"\$(?:\{([A-Za-z_][A-Za-z0-9_]*)(?::-[^}]*)?\}|([A-Za-z_][A-Za-z0-9_]*))")
+_SHELL_ASSIGNMENT_RE = re.compile(r"(?:^\s*|[;&]\s*|then\s+)(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=")
+_ARXIV_STAGE_SHELL_AMBIENT = frozenset(
+    {
+        "ARGUMENTS",
+    }
+)
 
 
 def _check_by_name(result: object, name: str) -> object:
@@ -45,6 +61,66 @@ def _validate_paper_arxiv_submission(tmp_path: Path):
     )
 
 
+def _assert_arxiv_command_wrapper_semantics(command: str) -> None:
+    _assert_semantic(
+        command,
+        "arxiv command wrapper delegates to staged bootstrap",
+        "included arxiv-submission bootstrap authority",
+        "workflow resolves the active GPD-owned manuscript root",
+        "standalone interactive intake",
+        "arbitrary external directories",
+    )
+
+
+def _assert_arxiv_manuscript_root_semantics(workflow: str) -> None:
+    _assert_semantic(
+        workflow,
+        "arxiv workflow resolves manuscript root from preflight without globbing",
+        "shared publication bootstrap reference",
+        "source of truth",
+        "STOP",
+        "explicit manuscript path",
+        "repaired manuscript-root state",
+        "supported roots",
+        "arbitrary external directories",
+        "standalone `.tex` entrypoints",
+        "wildcard matching",
+    )
+
+
+def _assert_arxiv_package_gate_semantics(workflow: str) -> None:
+    _assert_semantic(
+        workflow,
+        "arxiv executable package gate preserves review and manuscript boundaries",
+        "executable package boundary",
+        "reruns strict",
+        "validator must pass",
+        "strict manuscript preflight",
+        "review_gate latest-round checks",
+        "response freshness",
+        "gpd:peer-review",
+        "proof-review manifests",
+        "tarballs beside the manuscript root",
+    )
+
+
+def _assert_missing_bibliography_material(tex_check: object) -> None:
+    assert tex_check.name == "submission_tex_ready"
+    assert tex_check.passed is False
+    detail = tex_check.detail
+    assert ".bib" in detail
+    assert ".bbl" in detail
+    assert "inlined bibliography" in detail
+
+
+def _shell_variables_referenced(source: str) -> set[str]:
+    return {braced or bare for braced, bare in _SHELL_VAR_REFERENCE_RE.findall(source) if (braced or bare)}
+
+
+def _shell_variables_assigned(source: str) -> set[str]:
+    return {match.group(1) for line in source.splitlines() for match in _SHELL_ASSIGNMENT_RE.finditer(line)}
+
+
 def test_arxiv_submission_command_declares_manuscript_root_gates_without_first_match_discovery() -> None:
     command = (COMMANDS_DIR / "arxiv-submission.md").read_text(encoding="utf-8")
 
@@ -54,22 +130,18 @@ def test_arxiv_submission_command_declares_manuscript_root_gates_without_first_m
     assert "allow_interactive_without_subject: false" in command
     assert "bootstrap_allowed: false" in command
     assert "default_output_subtree: GPD/publication/{subject_slug}/arxiv" in command
+    assert "paper/*.tex" in command
+    assert "manuscript/*.tex" in command
+    assert "draft/*.tex" in command
     assert "GPD/publication/*/manuscript/*.tex" in command
     assert "manuscript-root artifact manifest" in command
     assert "manuscript-root bibliography audit" in command
-    assert "Follow the included arxiv-submission workflow exactly." in command
+    _assert_arxiv_command_wrapper_semantics(command)
     assert "artifact_manifest" in command
     assert "bibliography_audit" in command
     assert "bibliography_audit_clean" in command
-    assert (
-        "Paper target: $ARGUMENTS (optional manuscript root or `.tex` entrypoint; "
-        "when omitted, the workflow resolves the active GPD-owned manuscript root)."
-    ) in command
-    assert (
-        "Explicit manuscript subjects must stay under `paper/`, `manuscript/`, `draft/`, or `GPD/publication/{subject_slug}/manuscript/`."
-        in command
-    )
-    assert "do not switch to standalone interactive intake or arbitrary external directories" in command
+    assert "$ARGUMENTS" in command
+    assert ".tex" in command
     assert "scope_variants:" not in command
     assert "@{GPD_INSTALL_DIR}/templates/paper/publication-manuscript-root-preflight.md" not in command
     assert "@{GPD_INSTALL_DIR}/references/publication/publication-review-round-artifacts.md" not in command
@@ -78,7 +150,7 @@ def test_arxiv_submission_command_declares_manuscript_root_gates_without_first_m
 
 
 def test_arxiv_submission_workflow_resolves_manifest_based_manuscript_root_without_globbing() -> None:
-    workflow = (WORKFLOWS_DIR / "arxiv-submission.md").read_text(encoding="utf-8")
+    workflow = workflow_authority_text(WORKFLOWS_DIR, "arxiv-submission")
 
     assert "gpd --raw init arxiv-submission --stage bootstrap" in workflow
     assert 'gpd --raw init arxiv-submission --stage bootstrap -- "$ARGUMENTS"' in workflow
@@ -87,8 +159,8 @@ def test_arxiv_submission_workflow_resolves_manifest_based_manuscript_root_witho
     assert 'gpd --raw init arxiv-submission --stage package -- "$ARGUMENTS"' in workflow
     assert 'gpd --raw init arxiv-submission --stage finalize -- "$ARGUMENTS"' in workflow
     assert "metadata-only" not in workflow
-    assert "Use the shared publication bootstrap reference as the source of truth" in workflow
-    assert "@{GPD_INSTALL_DIR}/references/publication/publication-bootstrap-preflight.md" in workflow
+    _assert_arxiv_manuscript_root_semantics(workflow)
+    assert "{GPD_INSTALL_DIR}/references/publication/publication-bootstrap-preflight.md" in workflow
     assert "{GPD_INSTALL_DIR}/references/publication/publication-review-round-artifacts.md" in workflow
     assert "{GPD_INSTALL_DIR}/references/publication/peer-review-reliability.md" not in workflow
     assert "staged `peer-review-reliability.md` reference" in workflow
@@ -98,35 +170,51 @@ def test_arxiv_submission_workflow_resolves_manifest_based_manuscript_root_witho
     assert "BIBLIOGRAPHY-AUDIT.json" in workflow
     assert "bibliography_audit_clean" in workflow
     assert "gpd paper-build" in workflow
-    assert "STOP and require an explicit manuscript path or a repaired manuscript-root state" in workflow
-    assert "Do not fall back to `find` or arbitrary wildcard matching outside the documented default roots." in workflow
-    assert (
-        "it must match that resolved entrypoint and already live under `paper/`, `manuscript/`, `draft/`, or `GPD/publication/<subject_slug>/manuscript/`."
-        in workflow
-    )
-    assert (
-        "Do not accept arbitrary external directories or standalone `.tex` entrypoints outside those supported roots."
-        in workflow
-    )
+    assert "manuscript_entrypoint" in workflow
+    assert "manuscript_root" in workflow
+    assert "GPD/publication/<subject_slug>/manuscript/" in workflow
     assert 'PACKAGE_ROOT="${PUBLICATION_ROOT}/arxiv"' in workflow
     assert 'PACKAGE_TARBALL="${PACKAGE_ROOT}/arxiv-submission.tar.gz"' in workflow
+    assert "executable_gate:" in workflow
+    assert "id: arxiv_package_validator" in workflow
+    assert "role: arxiv-package-validator" in workflow
+    assert "GPD/publication/${SUBJECT_SLUG}/arxiv/arxiv-submission.tar.gz" in workflow
+    _assert_arxiv_package_gate_semantics(workflow)
     assert (
         'gpd --raw validate arxiv-package --materialize --submission-dir "$SUBMISSION_DIR" --tarball "$PACKAGE_TARBALL"'
         in workflow
     )
-    assert "reruns strict `arxiv-submission` review preflight" in workflow
-    assert "the executable arXiv package validator must pass" in workflow
-    assert "latest-response discovery" in workflow
-    assert "latest response artifacts already reached" not in workflow
     assert (
-        "Do not write proof-review manifests, package staging trees, or tarballs beside the manuscript root itself."
+        'gpd --raw validate arxiv-package --submission-dir "$SUBMISSION_DIR" --tarball "$PACKAGE_TARBALL"'
         in workflow
+    )
+    assert "latest-response discovery" in workflow
+    _assert_forbidden_semantic(
+        workflow,
+        "arxiv workflow avoids stale latest-response clearance prose",
+        "latest response artifacts already reached",
     )
     assert "must not persist `PROOF-REVIEW-MANIFEST.json` beside the manuscript root" in workflow
     assert "failed `response_freshness` check" in workflow
     assert "checkpoint as `response_gate`" in workflow
-    assert "Even for an explicit external manuscript subject" not in workflow
+    _assert_forbidden_semantic(
+        workflow,
+        "arxiv workflow avoids explicit external manuscript subject mode",
+        "Even for an explicit external manuscript subject",
+    )
     assert 'ls "${DIR}"/*.tex' not in workflow
+
+
+def test_arxiv_submission_stage_files_bind_shell_variables_locally() -> None:
+    offenders: list[str] = []
+
+    for stage_path in sorted((WORKFLOWS_DIR / "arxiv-submission").glob("*.md")):
+        source = stage_path.read_text(encoding="utf-8")
+        allowed = _shell_variables_assigned(source) | _ARXIV_STAGE_SHELL_AMBIENT
+        for variable in sorted(_shell_variables_referenced(source) - allowed):
+            offenders.append(f"{stage_path.name}:${variable}")
+
+    assert offenders == []
 
 
 def test_arxiv_submission_stage_manifest_path_is_resolved_and_loadable() -> None:
@@ -150,17 +238,33 @@ def test_arxiv_submission_stage_manifest_path_is_resolved_and_loadable() -> None
     )
     for stage_id in manifest.stage_ids():
         assert "arxiv_submission_argument_input" in manifest.stage(stage_id).required_init_fields
+    assert manifest.stage("bootstrap").loaded_authorities[0] == "workflows/arxiv-submission/bootstrap.md"
+    assert "workflows/arxiv-submission.md" in manifest.stage("bootstrap").must_not_eager_load
+    assert "workflows/arxiv-submission/manuscript-preflight.md" in manifest.stage("bootstrap").must_not_eager_load
     assert "references/publication/publication-bootstrap-preflight.md" in manifest.stage("bootstrap").loaded_authorities
     assert "managed publication output root state" in manifest.stage("bootstrap").produced_state
+    assert manifest.stage("manuscript_preflight").loaded_authorities[0] == (
+        "workflows/arxiv-submission/manuscript-preflight.md"
+    )
     assert (
         "references/publication/publication-review-round-artifacts.md"
         in manifest.stage("review_gate").loaded_authorities
     )
-    assert "references/publication/peer-review-reliability.md" in manifest.stage("review_gate").loaded_authorities
+    assert manifest.stage("review_gate").loaded_authorities[0] == "workflows/arxiv-submission/review-gate.md"
+    assert "references/publication/peer-review-reliability.md" not in manifest.stage("review_gate").loaded_authorities
+    assert {
+        conditional.when: conditional.authorities
+        for conditional in manifest.stage("review_gate").conditional_authorities
+    } == {
+        "review_integrity_recovery_needed": ("references/publication/peer-review-reliability.md",),
+    }
+    assert "references/publication/peer-review-reliability.md" in manifest.stage("review_gate").must_not_eager_load
     assert (
         "references/publication/publication-response-writer-handoff.md"
         not in manifest.stage("review_gate").loaded_authorities
     )
+    assert manifest.stage("package").loaded_authorities == ("workflows/arxiv-submission/package.md",)
+    assert manifest.stage("finalize").loaded_authorities == ("workflows/arxiv-submission/finalize.md",)
     assert manifest.stage("package").writes_allowed == ("GPD/publication/{subject_slug}/arxiv",)
     assert manifest.stage("finalize").writes_allowed == ("GPD/publication/{subject_slug}/arxiv",)
 
@@ -216,8 +320,7 @@ def test_arxiv_package_validator_detects_citations_in_included_tex_files(tmp_pat
     result = _validate_paper_arxiv_submission(tmp_path)
 
     tex_check = _check_by_name(result, "submission_tex_ready")
-    assert tex_check.passed is False
-    assert "citation commands but no packaged .bib, packaged .bbl, or inlined bibliography material" in tex_check.detail
+    _assert_missing_bibliography_material(tex_check)
 
 
 def test_arxiv_package_validator_fails_tex_ready_when_root_entrypoint_is_not_packaged_tex(
@@ -255,8 +358,7 @@ def test_arxiv_package_validator_rejects_unreferenced_bib_source_material(tmp_pa
     result = _validate_paper_arxiv_submission(tmp_path)
 
     tex_check = _check_by_name(result, "submission_tex_ready")
-    assert tex_check.passed is False
-    assert "citation commands but no packaged .bib, packaged .bbl, or inlined bibliography material" in tex_check.detail
+    _assert_missing_bibliography_material(tex_check)
 
 
 def test_arxiv_package_validator_rejects_bibliography_only_in_unreachable_tex(tmp_path: Path) -> None:
@@ -271,8 +373,7 @@ def test_arxiv_package_validator_rejects_bibliography_only_in_unreachable_tex(tm
     result = _validate_paper_arxiv_submission(tmp_path)
 
     tex_check = _check_by_name(result, "submission_tex_ready")
-    assert tex_check.passed is False
-    assert "citation commands but no packaged .bib, packaged .bbl, or inlined bibliography material" in tex_check.detail
+    _assert_missing_bibliography_material(tex_check)
 
 
 def test_arxiv_package_validator_accepts_included_tex_bibliography_material(tmp_path: Path) -> None:

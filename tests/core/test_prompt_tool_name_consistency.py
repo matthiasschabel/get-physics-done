@@ -9,6 +9,7 @@ from gpd.adapters import iter_adapters
 from gpd.adapters.install_utils import convert_tool_references_in_body
 from gpd.adapters.tool_names import CANONICAL_TOOL_NAMES, build_canonical_alias_map, canonical
 from gpd.registry import _parse_frontmatter, _parse_tools
+from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PRIMARY_PROMPT_ROOTS = (
@@ -55,6 +56,14 @@ _CODE_TOOL_ALIAS_RE = re.compile(
     + "|".join(re.escape(alias) for alias in _CODE_TOOL_ALIAS_NAMES)
     + r")(?:\([^`]*\))?$"
 )
+
+
+def _new_project_stage_text(stage_file: str) -> str:
+    return (REPO_ROOT / "src/gpd/specs/workflows/new-project" / stage_file).read_text(encoding="utf-8")
+
+
+def _is_phase3_placeholder(content: str) -> bool:
+    return "<placeholder>" in content and "Phase 3 Worker 1 skeleton only" in content
 
 
 def _iter_markdown_sources(*roots: Path) -> list[Path]:
@@ -221,24 +230,36 @@ def test_shared_specs_use_canonical_tool_references() -> None:
 
 
 def test_new_project_notation_delegate_threads_resolved_model_through_the_spawn_call() -> None:
-    content = (REPO_ROOT / "src/gpd/specs/workflows/new-project.md").read_text(encoding="utf-8")
-    marker = 'NOTATION_MODEL=$(gpd resolve-model gpd-notation-coordinator)'
-    start = content.index(marker)
-    section_end = content.index("**Handle notation-coordinator return:**", start)
-    notation_block = content[start:section_end]
+    conventions = _new_project_stage_text("conventions-handoff.md")
+    if _is_phase3_placeholder(conventions):
+        root_index = (REPO_ROOT / "src/gpd/specs/workflows/new-project.md").read_text(encoding="utf-8")
+        assert "`conventions_handoff` -> `workflows/new-project/conventions-handoff.md`" in root_index
+        return
 
-    assert 'task(prompt=NOTATION_PROMPT, subagent_type="gpd-notation-coordinator", model="$NOTATION_MODEL"' in notation_block
-    assert 'task(prompt=NOTATION_PROMPT, subagent_type="gpd-notation-coordinator", readonly=false' in notation_block
-    assert 'model="{NOTATION_MODEL}"' not in notation_block
-    assert "If `NOTATION_MODEL` is empty or null, omit `model=` entirely in the spawn call." in content
+    content = workflow_authority_text(REPO_ROOT / "src/gpd/specs/workflows", "new-project")
+    assert "Do not require a `notation_model` init field." in conventions
+    assert "NOTATION_MODEL=$(gpd resolve-model gpd-notation-coordinator)" in conventions
+    assert 'task(prompt=NOTATION_PROMPT, subagent_type="gpd-notation-coordinator"' in conventions
+    assert 'model="$NOTATION_MODEL"' in conventions
+    assert "readonly=false" in conventions
+    assert 'model="{NOTATION_MODEL}"' not in content
+    assert "If `NOTATION_MODEL` is empty or null, omit `model=` entirely" in conventions
 
 
-def test_new_project_resume_prompt_uses_checkpoint_language_for_fractional_steps() -> None:
-    content = (REPO_ROOT / "src/gpd/specs/workflows/new-project.md").read_text(encoding="utf-8")
+def test_new_project_split_completion_keeps_fractional_checkpoint_language_stage_local() -> None:
+    completion = _new_project_stage_text("completion.md")
+    conventions = _new_project_stage_text("conventions-handoff.md")
+    if _is_phase3_placeholder(completion) or _is_phase3_placeholder(conventions):
+        root_index = (REPO_ROOT / "src/gpd/specs/workflows/new-project.md").read_text(encoding="utf-8")
+        assert "`conventions_handoff` -> `workflows/new-project/conventions-handoff.md`" in root_index
+        assert "`completion` -> `workflows/new-project/completion.md`" in root_index
+        return
 
-    assert 'Resume from the next unfinished checkpoint' in content
+    content = workflow_authority_text(REPO_ROOT / "src/gpd/specs/workflows", "new-project")
+
     assert 'Resume from step {PREV_STEP + 1}' not in content
-    assert '**Checkpoint step 8.5:**' in content
+    assert 'Checkpoint step 8.5' in conventions
+    assert "Delete `GPD/init-progress.json` only after all selected initialization artifacts" in completion
 
 
 def test_prompt_sources_avoid_contextual_runtime_alias_spellings() -> None:

@@ -28,6 +28,16 @@ allowed-tools:
   - search_files
   - find_files
   - ask_user
+help:
+  group: Validation and analysis
+  order: 320
+  compact_description: Check known limits for a project phase or one explicit current-workspace file
+  display_signature: gpd:limiting-cases
+  examples:
+    - gpd:limiting-cases results/01-SUMMARY.md
+  notes:
+    - Part of the project-aware technical-analysis lane for explicit current-workspace limit checks.
+  root_detail_order: 150
 ---
 
 

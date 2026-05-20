@@ -7,9 +7,18 @@ from pathlib import Path
 
 from gpd.adapters.install_utils import expand_at_includes
 from gpd.core.contract_validation import validate_project_contract
+from tests.assertion_taxonomy_support import assert_prompt_contracts, semantic_concept
 
 FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "stage0"
-WORKFLOW_SPEC = Path(__file__).resolve().parents[2] / "src" / "gpd" / "specs" / "workflows" / "new-project.md"
+WORKFLOW_SPEC = (
+    Path(__file__).resolve().parents[2]
+    / "src"
+    / "gpd"
+    / "specs"
+    / "workflows"
+    / "new-project"
+    / "scope-approval.md"
+)
 STATE_SCHEMA_SPEC = (
     Path(__file__).resolve().parents[2] / "src" / "gpd" / "specs" / "templates" / "state-json-schema.md"
 )
@@ -133,7 +142,21 @@ def test_specs_surface_anchor_gap_phrases_for_runtime_visibility() -> None:
         "/runtime/",
     )
 
-    assert "need grounding" in workflow_text
-    assert "target not yet chosen" in workflow_text
-    assert "Need grounding before the decisive anchor is chosen." in state_schema_text
-    assert "Decisive target not yet chosen before planning can proceed." in state_schema_text
+    assert "explicit missing-anchor uncertainty" in workflow_text
+    assert_prompt_contracts(
+        workflow_text,
+        *semantic_concept(
+            "scope approval surfaces concrete anchor gap phrasing",
+            required=("at least one concrete anchor, reference, prior-output constraint, or baseline",),
+        ),
+    )
+    assert_prompt_contracts(
+        state_schema_text,
+        *semantic_concept(
+            "state schema surfaces anchor gap examples",
+            required=(
+                "Need grounding before the decisive anchor is chosen.",
+                "Decisive target not yet chosen before planning can proceed.",
+            ),
+        ),
+    )

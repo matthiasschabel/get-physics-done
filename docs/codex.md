@@ -40,27 +40,17 @@ If `codex` is missing, install the runtime first with:
 npm install -g @openai/codex
 ```
 
-## 2) Install GPD for Codex
+## 2) Install, start, and use GPD
 
-Copy-paste this exact command:
+<!-- gpd-public-surface:runtime-quickstart-codex:start -->
+From your normal terminal:
 
 ```bash
 npx -y get-physics-done --codex --local
-```
-
-## 3) Start Codex
-
-From the same project folder:
-
-```bash
 codex
 ```
 
-The first time you run Codex, it should prompt you to sign in with your ChatGPT account or an API key.
-
-## 4) First launch / help / start / tour
-
-Type these inside Codex, not in your normal terminal:
+Inside Codex:
 
 ```text
 $gpd-help
@@ -71,32 +61,16 @@ $gpd-map-research
 $gpd-resume-work
 ```
 
-If you are not sure what this folder is yet, start with `$gpd-start`.
-If you want a read-only walkthrough first, use `$gpd-tour`.
+Suggested order for beginners: `$gpd-help`, `$gpd-start`, `$gpd-tour`, then either `$gpd-new-project --minimal`, `$gpd-map-research`, or `$gpd-resume-work`.
 
-Suggested order for beginners: `$gpd-help`, `$gpd-start`, `$gpd-tour`, then
-either `$gpd-new-project --minimal`, `$gpd-map-research`, or
-`$gpd-resume-work`.
+Return to work from your normal terminal with `gpd resume` or `gpd resume --recent`, then reopen `codex` in the right folder and run `$gpd-resume-work`.
 
-GPD is designed to favor scientific rigor and critical thinking. Treat preferred answers as hypotheses to test, and if a citation, artifact, or run result is missing, keep that gap explicit instead of inventing it.
+After your first successful start or later, use `$gpd-settings` to review autonomy, workflow defaults, model-cost posture, runtime permission sync, and preset/tier overrides. The safest starting point is `review` plus runtime defaults. Favor scientific rigor and explicit uncertainty over agreement-seeking, and keep missing evidence or artifacts explicit instead of inventing them.
+<!-- gpd-public-surface:runtime-quickstart-codex:end -->
 
-## Return to work
+The first time you run Codex, it should prompt you to sign in with your ChatGPT account or an API key.
 
-- Use `$gpd-resume-work` when this folder already has GPD state and you want to
-  continue.
-- If you are not sure whether this folder already has GPD state, use
-  `$gpd-start` first.
-- If you need to reopen the project from your normal terminal first, use
-  `gpd resume` or `gpd resume --recent`, then open the right folder and run
-  `$gpd-resume-work`.
-
-## Settings
-
-After your first successful start or later, use `$gpd-settings` to review
-autonomy, workflow defaults, and model-cost posture. Use `$gpd-set-tier-models`
-when you only want to pin concrete `tier-1`, `tier-2`, and `tier-3` model ids.
-
-## 5) What success looks like
+## What success looks like
 
 You are in the right place when:
 
@@ -107,7 +81,7 @@ You are in the right place when:
 - `$gpd-tour` gives a read-only walkthrough of the main commands.
 - `$gpd-new-project --minimal`, `$gpd-map-research`, or `$gpd-resume-work` starts the right GPD flow for new work, existing research, or an existing GPD project.
 
-## 6) Quick troubleshooting
+## Quick troubleshooting
 
 - If a command is missing, make sure you are typing it inside Codex, not in your normal terminal.
 - If `codex` is not found, install or relaunch Codex first.

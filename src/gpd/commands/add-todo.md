@@ -8,6 +8,11 @@ allowed-tools:
   - file_write
   - shell
   - ask_user
+help:
+  group: Tangents, memory, and exports
+  order: 540
+  compact_description: Capture a task or idea
+  display_signature: gpd:add-todo [description]
 ---
 
 

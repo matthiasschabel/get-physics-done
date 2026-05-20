@@ -130,6 +130,9 @@ def test_progress_watch_exit_on_idle_flag(tmp_path: Path, monkeypatch) -> None:
     # a non-None live_execution shell for empty projects, so we override
     # ``_is_idle`` to reflect the contract ("no active execution = idle").
     monkeypatch.setattr(cli_module, "_is_idle", lambda _result: True)
+    # Keep this loop-wiring test independent from per-worker recent-execution
+    # caches populated by unrelated xdist tests.
+    monkeypatch.setattr("gpd.core.phases._build_progress_live_execution", lambda _cwd: None)
 
     def _fail_if_called(_interval: float) -> None:  # pragma: no cover - should not run
         raise AssertionError("sleep should not be reached when --exit-on-idle fires on tick 1")

@@ -2145,9 +2145,13 @@ def run_check(
     domain: Annotated[str, Field(min_length=1, pattern=r"\S")],
     artifact_content: Annotated[str, Field(min_length=1, pattern=r"\S")],
 ) -> dict:
-    """Run a specific verification check on an artifact.
+    """Run static triage for a verification check on an artifact.
 
-    Returns the check result with evidence and confidence.
+    Returns check metadata, static pattern findings, and caller guidance.
+    This tool is non-authoritative: it does not perform physics verification,
+    does not pass or certify the artifact, and cannot grant final verification
+    status. Empty ``automated_issues`` means only that this static scan found
+    no matching pattern issue.
     The actual physics verification is performed by the calling agent;
     this tool provides the check specification, what to look for,
     and structured result formatting.
@@ -2273,10 +2277,19 @@ def run_check(
                     "domain": domain,
                     "domain_specific_checks": relevant_domain_checks,
                     "automated_issues": issues,
+                    "result_kind": "static_triage",
+                    "triage_status": "schema_only" if not issues else "failed_or_tension",
+                    "passes_physics": False,
+                    "requires_caller_verification": True,
+                    "grants_final_verification_pass": False,
+                    "empty_automated_issues_means": (
+                        "No static pattern issue was detected; this is not a pass verdict."
+                    ),
                     "artifact_length": len(artifact_content),
                     "guidance": (
                         f"Run check {check_meta.check_id} ({check_meta.name}) for domain '{domain}'. "
-                        f"This check catches: {check_meta.catches}."
+                        f"This static triage check catches: {check_meta.catches}. "
+                        "Caller-owned verification is still required before assigning any final status."
                     ),
                 }
             )

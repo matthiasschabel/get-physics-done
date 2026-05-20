@@ -128,6 +128,12 @@ defines manuscript build truth and local compiler runs are smoke checks. For
 `templates/paper/paper-config-schema.md`, set a short underscore
 `output_filename`, and run `gpd paper-build` before drafting.
 
+For fresh bootstrap, pre-fill `authors` via `gpd.core.profile.load_profile()`
+(reads `~/.gpd/profile.json`; `GPD_DATA_DIR` env overrides the base dir). Map
+each `AuthorProfile` to an `authors[]` entry: `name`/`email` directly,
+`affiliations` joined with `"; "` into the singular `affiliation`. Prompt the
+user only when the profile is empty.
+
 For `resume_existing_manuscript`, do not probe the builder with throwaway `/tmp`
 configs or create optional `${PAPER_DIR}/PAPER-CONFIG.json` when an accepted
 entrypoint exists. Read the schema only for real builder repair; if unclear or

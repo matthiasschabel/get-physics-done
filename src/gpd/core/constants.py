@@ -70,6 +70,7 @@ __all__ = [
     "PUBLICATION_MANUSCRIPT_DIR_NAME",
     "PUBLICATION_REVIEW_DIR_NAME",
     "PUBLICATION_PROOF_REVIEW_DIR_NAME",
+    "PROFILE_FILENAME",
     "PROJECT_FILENAME",
     "ProjectLayout",
     "RECOMMENDED_PYTHON_VERSION",
@@ -319,6 +320,9 @@ PATTERNS_BY_DOMAIN_DIR = "patterns-by-domain"
 
 HOME_DATA_DIR_NAME = ".gpd"
 """Hidden home-directory data root for cross-project caches and managed runtime state."""
+
+PROFILE_FILENAME = "profile.json"
+"""User author-profile file (name, affiliations, email, ORCID) at the data root."""
 
 
 # ─── Environment Variable Names ──────────────────────────────────────────────

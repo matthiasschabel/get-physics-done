@@ -5171,6 +5171,17 @@ class TestInitPhaseOp:
     def test_stage_builds_heavy_contexts_when_manifest_requires_them(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        # Defensive isolation: other tests in the same xdist worker can call
+        # importlib.reload(gpd.core.context) (e.g. test_context_platform.py)
+        # and warm @cache on the workflow-staging manifest loader. Clear both
+        # before this test so monkeypatched builders + fake manifest get the
+        # fresh module wiring.
+        import importlib
+
+        from gpd.core.workflow_staging import invalidate_workflow_stage_manifest_cache
+
+        invalidate_workflow_stage_manifest_cache()
+        importlib.reload(context_module)
         _setup_project(tmp_path)
         _create_phase_dir(tmp_path, "01-test")
         install_fake_stage_manifest(
@@ -5237,7 +5248,10 @@ class TestInitPhaseOp:
         monkeypatch.setattr(context_module, "_build_state_memory_runtime_context", state_memory_context)
         monkeypatch.setattr(context_module, "_build_execution_runtime_context", execution_context)
 
-        result = init_phase_op(tmp_path, phase="1", stage="research_handoff")
+        # Call via the (potentially reloaded) module attribute so the function
+        # body resolves the monkeypatched builders against the current module
+        # globals rather than a stale top-of-file `init_phase_op` binding.
+        result = context_module.init_phase_op(tmp_path, phase="1", stage="research_handoff")
 
         assert calls == ["reference", "structured_state", "state_memory", "execution"]
         assert result["active_reference_context"] == "reference context"

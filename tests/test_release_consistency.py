@@ -78,22 +78,29 @@ _ARXIV_EXTRA_PREREQUISITE = (
 )
 _EXPECTED_OPTIONAL_DEPENDENCIES = {
     "paper": ["cairosvg>=2.7.0", "pypdf>=5.0"],
-    "arxiv": ["arxiv-mcp-server>=0.4.11", "arxiv>=2.4.1", "cairosvg>=2.7.0", "pypdf>=5.0"],
+    "arxiv": ["arxiv-mcp-server[pdf]>=0.4.11", "arxiv>=2.4.1", "httpx>=0.27", "cairosvg>=2.7.0", "pypdf>=5.0"],
 }
 _OPTIONAL_IMPORT_MODULE_TO_DEPENDENCY = {
     "arxiv": "arxiv",
     "cairosvg": "cairosvg",
+    "httpx": "httpx",
     "pypdf": "pypdf",
 }
 _EXPECTED_OPTIONAL_IMPORT_LOCATIONS = {
     "arxiv": {"src/gpd/mcp/paper/bibliography.py"},
     "cairosvg": {"src/gpd/mcp/paper/figures.py"},
+    "httpx": {
+        "src/gpd/mcp/servers/_arxiv_ar5iv.py",
+        "src/gpd/mcp/servers/_arxiv_gcs.py",
+        "src/gpd/mcp/servers/arxiv_translators.py",
+    },
     "pypdf": {"src/gpd/core/artifact_text.py", "src/gpd/mcp/paper/compiler.py"},
 }
 _EXPECTED_OPTIONAL_DEPENDENCY_EXTRAS = {
     "arxiv": {"arxiv"},
     "arxiv-mcp-server": {"arxiv"},
     "cairosvg": {"arxiv", "paper"},
+    "httpx": {"arxiv"},
     "pypdf": {"arxiv", "paper"},
 }
 _EXPECTED_BUILD_BACKEND_REQUIREMENT = "hatchling==1.29.0"

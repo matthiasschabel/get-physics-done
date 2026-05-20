@@ -779,16 +779,21 @@ def test_reward_hacking_self_check_reference_exists_and_is_wired() -> None:
         assert "integrity_gate:" in surface
         assert "items_failed" in surface
 
-    # The write-paper workflow must run the integrity gate as a step before pre_submission_review.
-    write_paper = (WORKFLOWS_DIR / "write-paper.md").read_text(encoding="utf-8")
-    assert '<step name="reward_hacking_integrity_gate">' in write_paper
-    gate_idx = write_paper.index('<step name="reward_hacking_integrity_gate">')
-    review_idx = write_paper.index('<step name="pre_submission_review">')
+    # The write-paper workflow must run the integrity gate before pre_submission_review.
+    # The workflow has been split into stage authorities; the integrity gate lives in the
+    # publication-review-finalization stage authority (the same stage that owns
+    # pre_submission_review).
+    publication_stage = (
+        WORKFLOWS_DIR / "write-paper" / "publication-review-finalization.md"
+    ).read_text(encoding="utf-8")
+    assert "<reward_hacking_integrity_gate>" in publication_stage
+    gate_idx = publication_stage.index("<reward_hacking_integrity_gate>")
+    review_idx = publication_stage.index("<pre_submission_review>")
     assert gate_idx < review_idx, (
         "reward_hacking_integrity_gate must run before pre_submission_review"
     )
-    assert "INTEGRITY-GATE.json" in write_paper
-    assert "overall_passed" in write_paper
+    assert "INTEGRITY-GATE.json" in publication_stage
+    assert "overall_passed" in publication_stage
 
 
 def test_bibliographer_uses_lightweight_path_mentions_for_metadata_only_reference_packs() -> None:

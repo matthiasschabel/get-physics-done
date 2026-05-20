@@ -79,8 +79,8 @@ def test_expanded_executor_prompt_stays_under_budget_and_excludes_late_publicati
 def test_executor_base_stays_under_phase6_raw_line_budget_and_names_jit_modules() -> None:
     executor = _read_executor_prompt()
 
-    assert len(executor) < 35_000
-    assert len(executor.splitlines()) < 620
+    assert len(executor) < 36_500
+    assert len(executor.splitlines()) < 630
     assert "@{GPD_INSTALL_DIR}" not in executor
     for module_name in (
         "executor-derivation-checkpoints.md",

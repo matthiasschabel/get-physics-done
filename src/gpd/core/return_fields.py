@@ -145,6 +145,7 @@ _RETURN_EXTENSION_FIELD_NAMES = (
     "figures_added",
     "focus",
     "framing_strategy",
+    "integrity_gate",
     "issues_found",
     "journal_calibration",
     "major_issues",

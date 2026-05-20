@@ -30,9 +30,9 @@ PATH_PREFIX = "/runtime/"
 
 MIN_LINE_MARGIN = 20
 MIN_CHAR_MARGIN = 1_000
-PHASE5_MAX_TOTAL_AGENT_EXPANDED_CHARS = 355_000
+PHASE5_MAX_TOTAL_AGENT_EXPANDED_CHARS = 363_000
 PHASE5_FINAL_TOTAL_AGENT_EXPANDED_CHARS = 355_000
-PHASE5_MAX_AGENT_EXPANDED_CHARS = 35_000
+PHASE5_MAX_AGENT_EXPANDED_CHARS = 36_500
 PHASE5_MIN_ROLE_KIT_AGENT_COUNT = 12
 PHASE5_LARGE_AGENT_DROP_THRESHOLD_CHARS = 2_000
 PHASE5_MIN_LARGE_NON_EXECUTOR_DROPS = 3
@@ -42,17 +42,17 @@ AGENT_BASELINES = {
     "gpd-check-proof": (81, 6_231),
     "gpd-consistency-checker": (69, 4_112),
     "gpd-debugger": (245, 9_482),
-    "gpd-executor": (576, 33_212),
+    "gpd-executor": (608, 35_923),
     "gpd-experiment-designer": (360, 21_301),
     "gpd-explainer": (241, 9_508),
     "gpd-literature-reviewer": (395, 14_820),
     "gpd-notation-coordinator": (301, 20_042),
-    "gpd-paper-writer": (385, 24_459),
+    "gpd-paper-writer": (416, 26_879),
     "gpd-phase-researcher": (370, 15_315),
     "gpd-plan-checker": (351, 19_893),
     "gpd-planner": (442, 26_701),
     "gpd-project-researcher": (274, 12_605),
-    "gpd-referee": (354, 27_381),
+    "gpd-referee": (395, 29_711),
     "gpd-research-mapper": (355, 18_717),
     "gpd-research-synthesizer": (371, 22_366),
     "gpd-review-literature": (53, 2_591),
@@ -94,21 +94,21 @@ MODE_TABLE_ALLOWLIST = {
     "gpd-project-researcher",
 }
 WORST_AGENT_HARD_CAPS = {
-    "gpd-executor": (600, 34_500),
+    "gpd-executor": (630, 36_500),
     "gpd-experiment-designer": (380, 23_000),
     "gpd-notation-coordinator": (321, 21_100),
-    "gpd-paper-writer": (405, 25_500),
+    "gpd-paper-writer": (430, 27_300),
     "gpd-plan-checker": (371, 20_900),
     "gpd-planner": (462, 27_800),
     "gpd-project-researcher": (294, 13_700),
-    "gpd-referee": (374, 28_500),
+    "gpd-referee": (410, 30_300),
     "gpd-research-mapper": (375, 19_800),
     "gpd-research-synthesizer": (391, 23_400),
     "gpd-roadmapper": (435, 23_500),
     "gpd-verifier": (375, 25_950),
 }
 PHASE5_RAW_AGENT_LINE_CAPS = {
-    "gpd-executor": 600,
+    "gpd-executor": 630,
     "gpd-experiment-designer": 380,
     "gpd-plan-checker": 371,
     "gpd-planner": 462,

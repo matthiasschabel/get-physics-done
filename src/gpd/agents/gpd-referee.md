@@ -356,14 +356,14 @@ gpd_return:
     - ${selected_publication_root}/REFEREE-REPORT{round_suffix}.md
   issues: []
   next_actions: []
-  recommendation: "{accept | minor_revision | major_revision | reject}"
-  confidence: "{high | medium | low}"
-  major_issues: N
-  minor_issues: N
-  dimensions_evaluated: N  # out of 10
+  recommendation: "minor_revision"   # one of: accept | minor_revision | major_revision | reject
+  confidence: "high"                  # one of: high | medium | low
+  major_issues: 0
+  minor_issues: 0
+  dimensions_evaluated: 0             # out of 10
   integrity_gate:
-    passed: true | false      # required: never finalize with passed=false
-    items_failed: []           # named items from reward-hacking-self-check.md
+    passed: true                      # required: never finalize when false
+    items_failed: []                  # named items from reward-hacking-self-check.md
 ```
 
 The return file list may name only paths produced in this Stage 6 run and allowed by `<report_format>`. Upstream `CLAIMS`, `STAGE-*`, and `PROOF-REDTEAM` inputs are read-only evidence and must never appear. For upstream-artifact `blocked` returns, keep the list empty unless this run wrote a `CONSISTENCY-REPORT.md` diagnostic sidecar.

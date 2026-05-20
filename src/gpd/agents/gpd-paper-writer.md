@@ -340,7 +340,7 @@ gpd_return:
   framing_strategy: "systematic-study"
   context_pressure: null              # null | "high" (present when ORANGE threshold reached)
   integrity_gate:
-    passed: true | false              # required; never finalize when passed=false
+    passed: true                      # required; never finalize when false
     items_failed: []                  # named items from reward-hacking-self-check.md, e.g. ["S2: Smith2024 unverified"]
 ```
 

@@ -547,7 +547,7 @@ gpd_return:
   tasks_total: 2
   duration_seconds: 180
   integrity_gate:
-    passed: true | false   # required; never finalize when passed=false
+    passed: true           # required; never finalize when false
     items_failed: []       # named items from reward-hacking-self-check.md
 ```
 

@@ -21,7 +21,7 @@ def test_gpd_referee_prompt_stays_within_expected_budget() -> None:
         path_prefix=PATH_PREFIX,
     )
 
-    assert len(referee) < 27_400
+    assert len(referee) < 30_300
     assert metrics.raw_include_count == 0
     assert metrics.expanded_line_count < 800
     assert metrics.expanded_char_count < 50_000

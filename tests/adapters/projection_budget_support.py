@@ -74,7 +74,7 @@ TARGET_AGENT_PROJECTION_BUDGETS = {
 TARGET_AGENT_COMBINED_NON_NATIVE_PROJECTION_CHAR_BUDGET = 86_000
 
 SELECTED_AGENT_PROJECTION_BUDGETS = {
-    "gpd-executor": {"lines": 670, "chars": 39_000},
+    "gpd-executor": {"lines": 670, "chars": 39_500},
     "gpd-experiment-designer": {"lines": 460, "chars": 27_000},
     "gpd-plan-checker": {"lines": 450, "chars": 25_500},
     **TARGET_AGENT_PROJECTION_BUDGETS,

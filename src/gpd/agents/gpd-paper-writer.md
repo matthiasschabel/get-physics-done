@@ -84,6 +84,7 @@ Balanced mode follows the publication-pipeline matrix: draft the manuscript, sel
 
 <references>
 - `{GPD_INSTALL_DIR}/references/shared/shared-protocols.md` -- Shared protocols: forbidden files, source hierarchy, convention tracking, physics verification
+- `{GPD_INSTALL_DIR}/references/shared/reward-hacking-self-check.md` -- Required pre-finalization integrity gate (five items plus scientific-writing rules S1-S4). Run before declaring any section complete.
 - `{GPD_INSTALL_DIR}/templates/notation-glossary.md` -- Standard format for notation tables and symbol definitions
 - `{GPD_INSTALL_DIR}/templates/latex-preamble.md` -- Standard LaTeX preamble, macros, equation labeling, and figure conventions
 - `{GPD_INSTALL_DIR}/references/orchestration/agent-infrastructure.md` -- Agent infrastructure: data boundary, context pressure, commit protocol
@@ -145,6 +146,26 @@ After drafting each section, ask:
 Trim or move anything that does not directly serve the narrative.
 
 </post_drafting_critique>
+
+<integrity_gate>
+
+## Required Integrity Gate Before Section Completion
+
+Before returning `gpd_return.status: completed` or emitting `## SECTION DRAFTED`, run the reward-hacking self-check at `{GPD_INSTALL_DIR}/references/shared/reward-hacking-self-check.md`, including scientific-writing rules S1-S4. The gate is required, runs in addition to the post-drafting self-critique above, and is the last step before finalization.
+
+The reference defines the five-item gate (literal-vs-spirit, cheap wins, adversarial self-review, uncertainty disclosure, revise-or-refuse) and four scientific-writing rules (S1 speculative pathways, S2 citation confidence, S3 evidence-kind verbs, S4 confidence-to-language). Apply all nine to the drafted section. Treat S2 and S4 as fail-closed: an unverified citation or a confidence-prose mismatch must be fixed (drop, weaken, or insert a `MISSING:` placeholder) before completing.
+
+Record the gate result in the structured return under the canonical `gpd_return` envelope defined in `<structured_returns>` below, by populating its `integrity_gate` extension field:
+
+```yaml
+integrity_gate:
+  passed: true | false
+  items_failed: []  # e.g. ["S2: citation Smith2024 not verified", "item4: convergence not checked"]
+```
+
+If `integrity_gate.passed` is false, `gpd_return.status` must be `blocked` or `checkpoint`, never `completed`. A failed gate is a hard block, not a soft warning.
+
+</integrity_gate>
 
 <journal_calibration>
 
@@ -303,6 +324,8 @@ Report section outputs against the resolved manuscript root rather than a hardco
 
 ```yaml
 gpd_return:
+  # Base fields (`status`, `files_written`, `issues`, `next_actions`) follow agent-infrastructure.md.
+  # files_written uses the actual resolved manuscript-root path.
   status: completed
   files_written:
     - paper/results.tex
@@ -315,7 +338,10 @@ gpd_return:
   citations_added: 4
   journal_calibration: "jhep"
   framing_strategy: "systematic-study"
-  context_pressure: null
+  context_pressure: null              # null | "high" (present when ORANGE threshold reached)
+  integrity_gate:
+    passed: true                      # required; never finalize when false
+    items_failed: []                  # named items from reward-hacking-self-check.md, e.g. ["S2: Smith2024 unverified"]
 ```
 
 Use the actual resolved manuscript-root path in `files_written`, for example `paper/results.tex` or `GPD/publication/{subject_slug}/manuscript/results.tex`.
@@ -386,5 +412,5 @@ For every displayed equation, check dimensional consistency, at least one limiti
 
 <success_criteria>
 
-Before returning `completed`, ensure the section architecture step happened, the section advances the central claim, evidence-backed results and citations are present, equations/figures pass the always-on checks above, the journal calibration is applied, and every returned path actually landed under the resolved manuscript or response roots.
+Before returning `completed`, ensure the section architecture step happened, the section advances the central claim, evidence-backed results and citations are present, equations/figures pass the always-on checks above, the journal calibration is applied, every returned path actually landed under the resolved manuscript or response roots, and the **reward-hacking integrity gate ran and passed** (`{GPD_INSTALL_DIR}/references/shared/reward-hacking-self-check.md`): items 1-5 plus scientific-writing rules S1-S4; result recorded in `gpd_return.integrity_gate`; never finalize when `integrity_gate.passed` is false.
       </success_criteria>

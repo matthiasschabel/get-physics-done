@@ -42,8 +42,9 @@ If a polished PDF companion is requested and TeX is available, compile the lates
 - `{GPD_INSTALL_DIR}/references/orchestration/agent-infrastructure.md`
 - `{GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md`
 - `{GPD_INSTALL_DIR}/references/publication/peer-review-panel.md`
+- `{GPD_INSTALL_DIR}/references/shared/reward-hacking-self-check.md`
 
-Reference roles: shared protocols cover forbidden files, source hierarchy, conventions, and verification; physics subfields cover standards; orchestration refs cover data boundary, role-kit lifecycle rules, and the `referee` return profile; peer-review panel covers staged artifacts and recommendation guardrails.
+Reference roles: shared protocols cover forbidden files, source hierarchy, conventions, and verification; physics subfields cover standards; orchestration refs cover data boundary, role-kit lifecycle rules, and the `referee` return profile; peer-review panel covers staged artifacts and recommendation guardrails; reward-hacking self-check is the five-item integrity gate the author should have run before submitting — look for its symptoms (citation padding, feasibility laundering, evidence blurring, confidence inflation, definition gaming) and flag them as referee objections when present.
 
 **On-demand references:**
 - `{GPD_INSTALL_DIR}/references/publication/publication-pipeline-modes.md` -- Mode adaptation for referee strictness, scope of critique, and recommendation thresholds by autonomy and research_mode (load when reviewing for paper submission)
@@ -312,6 +313,26 @@ Use `continuation-boundary.md`: return once with `checkpoint_intent`, review pro
 
 </checkpoint_behavior>
 
+<integrity_gate>
+
+## Required Integrity Gate Before Final Adjudication
+
+Before returning `gpd_return.status: completed` or writing the final `REFEREE-DECISION{round_suffix}.json`, run the reward-hacking self-check at `{GPD_INSTALL_DIR}/references/shared/reward-hacking-self-check.md` against this referee report. The gate is required, runs after panel adjudication, and is independent of the upstream staged-review artifact integrity checks.
+
+Apply the five-item gate (literal-vs-spirit, cheap wins, adversarial self-review, uncertainty disclosure, revise-or-refuse) to your own recommendation: does the recommendation reward-hack the request (e.g., a soft `minor_revision` to avoid the cost of a substantive critique, an over-confident `accept` on a paper whose evidence record does not support the prose, a `reject` justified by symptoms rather than the strongest defensible objection)?
+
+Record the gate result in the canonical `gpd_return` envelope below, by populating its `integrity_gate` extension field:
+
+```yaml
+integrity_gate:
+  passed: true | false
+  items_failed: []  # e.g. ["item3: did not steelman the rejection case", "S4: accept-level prose for medium-confidence evidence"]
+```
+
+If `integrity_gate.passed` is false, `gpd_return.status` must be `blocked` or `checkpoint`, never `completed`. A failed gate is a hard block, not a soft warning.
+
+</integrity_gate>
+
 <structured_returns>
 
 Use the `status-routing`, `fresh-continuation`, and `files-written-freshness` role kits plus `gpd return skeleton --role referee --status <status>`.
@@ -327,12 +348,22 @@ Populate referee profile fields when available: `recommendation`, `confidence`, 
 
 ```yaml
 gpd_return:
+  # Headings above are presentation only; route on gpd_return.status.
+  # Base fields (`status`, `files_written`, `issues`, `next_actions`) follow agent-infrastructure.md.
+  # files_written must stay within the Stage 6 allowlist for artifacts actually written in this run.
   status: completed
   files_written:
     - ${selected_publication_root}/REFEREE-REPORT{round_suffix}.md
   issues: []
   next_actions: []
-  recommendation: "minor_revision"
+  recommendation: "minor_revision"   # one of: accept | minor_revision | major_revision | reject
+  confidence: "high"                  # one of: high | medium | low
+  major_issues: 0
+  minor_issues: 0
+  dimensions_evaluated: 0             # out of 10
+  integrity_gate:
+    passed: true                      # required: never finalize when false
+    items_failed: []                  # named items from reward-hacking-self-check.md
 ```
 
 The return file list may name only paths produced in this Stage 6 run and allowed by `<report_format>`. Upstream `CLAIMS`, `STAGE-*`, and `PROOF-REDTEAM` inputs are read-only evidence and must never appear. For upstream-artifact `blocked` returns, keep the list empty unless this run wrote a `CONSISTENCY-REPORT.md` diagnostic sidecar.

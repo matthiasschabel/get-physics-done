@@ -12,10 +12,10 @@ from gpd.core.prompt_diagnostics import build_prompt_surface_report, report_to_d
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-PROMPT_TOTAL_BUDGET = {"lines": 42_800, "chars": 1_765_000}
+PROMPT_TOTAL_BUDGET = {"lines": 42_900, "chars": 1_773_000}
 PROMPT_KIND_BUDGETS = {
     "command": {"lines": 20_200, "chars": 760_000},
-    "agent": {"lines": 6_400, "chars": 355_000},
+    "agent": {"lines": 6_500, "chars": 363_000},
     "workflow": {"lines": 15_300, "chars": 618_000},
 }
 STAGE_FIRST_TURN_BUDGET = {"lines": 3_180, "chars": 134_000}
@@ -42,7 +42,7 @@ PHASE3_TARGET_STAGE_EAGER_CHAR_BUDGETS = {
     ("sync-state", "single_source_recovery"): 1_890,
 }
 PHASE5_STAGE_EAGER_CHAR_BUDGETS = {
-    ("write-paper", "publication_review"): 12_320,
+    ("write-paper", "publication_review"): 15_500,
     ("peer-review", "panel_stages"): 19_100,
     ("peer-review", "final_adjudication"): 19_950,
 }
@@ -142,7 +142,7 @@ SHELL_MIGRATION_TARGET_WORKFLOWS = frozenset(
 TARGET_WORKFLOW_SHELL_FENCE_BUDGET = 2
 TARGET_WORKFLOW_SHELL_PARSING_LINE_BUDGET = 3
 NON_REFERENCE_SEMANTIC_DUPLICATE_BUDGETS = {
-    "status_handling": 58,
+    "status_handling": 70,
     "files_written_freshness": 12,
     "stale_artifact_rejection": 14,
     "fresh_continuation": 15,
@@ -160,7 +160,7 @@ PHASE4_NON_REFERENCE_SEMANTIC_DUPLICATE_TARGETS = {
     "no_synthesized_child_gpd_return": 2,
 }
 PHASE5_NON_REFERENCE_SEMANTIC_DUPLICATE_TARGETS = {
-    "status_handling": 58,
+    "status_handling": 70,
     "fresh_continuation": 15,
     "files_written_freshness": 12,
     "stale_artifact_rejection": 14,

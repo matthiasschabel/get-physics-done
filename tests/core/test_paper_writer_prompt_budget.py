@@ -22,7 +22,7 @@ def test_gpd_paper_writer_prompt_stays_within_expected_budget_and_keeps_contract
     expanded = expanded_prompt_text(path, src_root=SOURCE_ROOT, path_prefix=PATH_PREFIX)
 
     assert metrics.raw_include_count == 0
-    assert len(source) < 25_000
+    assert len(source) < 27_300
     assert metrics.expanded_line_count < 3_400
     assert metrics.expanded_char_count < 160_000
     assert "gpd return skeleton --role paper_writer --status <status>" in source

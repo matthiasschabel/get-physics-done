@@ -629,9 +629,25 @@ def _prepend_header_to_result(
             title=title, authors=authors, year=year,
             returned_id=pid or queried_id, queried_id=queried_id,
         )
-    new_content: list = [types.TextContent(type="text", text=header + text)]
-    for item in result.content[1:]:
+    # Locate the first TextContent block by iteration and replace it
+    # in-place. Using `result.content[1:]` here would silently drop a
+    # leading non-text block (image, blob, etc.) and put the header
+    # text at the wrong index — `_first_text_payload` already walks the
+    # list looking for `.text`, so its return may come from any index.
+    new_content: list = []
+    replaced = False
+    for item in result.content:
+        item_text = getattr(item, "text", None)
+        if not replaced and isinstance(item_text, str):
+            new_content.append(types.TextContent(type="text", text=header + item_text))
+            replaced = True
+            continue
         new_content.append(item)
+    if not replaced:
+        # Should be unreachable — `text is None` was checked above — but if a
+        # custom CallToolResult ever stores text only in attributes outside
+        # `.content`, return the original untouched rather than risk loss.
+        return result
     return types.CallToolResult(
         content=new_content,
         isError=result.isError,

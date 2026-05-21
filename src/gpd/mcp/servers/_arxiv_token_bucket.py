@@ -32,6 +32,12 @@ _CAPACITY: float = 4.0
 _lock: asyncio.Lock | None = None
 _tokens: float = _CAPACITY
 _last_refill_time: float = 0.0
+# Monotonically-advancing deadline for the next available slot once the
+# bucket has drained. Each waiter past the burst claims a slot at
+# `max(_next_available, now + needed*_MIN_INTERVAL)` then pushes the
+# deadline forward by `_MIN_INTERVAL` so subsequent waiters queue in
+# order instead of all sleeping the same 3 s and stampeding on wakeup.
+_next_available: float = 0.0
 
 
 def _get_lock() -> asyncio.Lock:
@@ -43,7 +49,7 @@ def _get_lock() -> asyncio.Lock:
 
 @asynccontextmanager
 async def acquire() -> AsyncIterator[None]:
-    global _tokens, _last_refill_time
+    global _tokens, _last_refill_time, _next_available
 
     lock = _get_lock()
     wait_seconds = 0.0
@@ -62,11 +68,19 @@ async def acquire() -> AsyncIterator[None]:
         if _tokens >= 1.0:
             _tokens -= 1.0
         else:
-            # Wait until the bucket has exactly 1 token, then take it.
+            # Anchor to the latest scheduled slot so concurrent post-burst
+            # waiters queue at _MIN_INTERVAL spacing instead of converging
+            # on the same wake time. Without this, two waiters that enter
+            # the critical section a few microseconds apart each compute
+            # `wait = _MIN_INTERVAL` from their own `now` and wake almost
+            # simultaneously — the exact stampede the bucket exists to
+            # prevent. See PR #233 / CodeRabbit thread for the walkthrough.
             needed = 1.0 - _tokens
-            wait_seconds = needed * _MIN_INTERVAL
+            target = max(_next_available, now + needed * _MIN_INTERVAL)
+            wait_seconds = target - now
+            _next_available = target + _MIN_INTERVAL
             _tokens = 0.0
-            _last_refill_time = now + wait_seconds
+            _last_refill_time = target
 
     if wait_seconds > 0:
         await asyncio.sleep(wait_seconds)
@@ -75,7 +89,8 @@ async def acquire() -> AsyncIterator[None]:
 
 
 def _reset_for_tests() -> None:
-    global _lock, _tokens, _last_refill_time
+    global _lock, _tokens, _last_refill_time, _next_available
     _lock = None
     _tokens = _CAPACITY
     _last_refill_time = 0.0
+    _next_available = 0.0

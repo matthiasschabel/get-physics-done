@@ -55,6 +55,12 @@ def _stream_capped(client: httpx.Client, url: str, *, follow_redirects: bool = F
                         return None
                 except ValueError:
                     pass
+            # Check content-type BEFORE draining the body — arxiv.org/pdf
+            # answers HTML for withdrawn papers, and buffering up to
+            # _MAX_PDF_BYTES of HTML just to throw it away is wasteful.
+            ct = resp.headers.get("content-type", "")
+            if ct and url.endswith(".pdf") and not ct.startswith("application/pdf"):
+                return None
             chunks: list[bytes] = []
             total = 0
             for chunk in resp.iter_bytes():
@@ -67,11 +73,6 @@ def _stream_capped(client: httpx.Client, url: str, *, follow_redirects: bool = F
                     )
                     return None
                 chunks.append(chunk)
-            ct = resp.headers.get("content-type", "")
-            if ct and url.endswith(".pdf") and not ct.startswith("application/pdf"):
-                # arxiv.org/pdf can answer with HTML when the paper is
-                # withdrawn; the caller treats None as miss.
-                return None
             return b"".join(chunks)
     except httpx.RequestError as exc:
         logger.info("gcs/arxiv GET error for %s: %s", url, exc)

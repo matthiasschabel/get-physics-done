@@ -612,6 +612,15 @@ def _prepend_header_to_result(
 
     if result.isError or not result.content:
         return result
+    # JSON-status failures (`{"status": "error", "message": "...",`
+    # `"paper_id": "..."}` with isError=False) carry a paper_id in the
+    # body, which would otherwise trick _extract_meta_from_json into
+    # building a "Returned arxiv:<id> — canonical paper served" header
+    # in front of an error payload — actively misleading the model.
+    # Gate header injection on the same _is_success() predicate the
+    # caller already uses to decide cache writes.
+    if not _is_success(result):
+        return result
     text = _first_text_payload(result)
     if text is None:
         return result

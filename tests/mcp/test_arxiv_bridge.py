@@ -553,6 +553,64 @@ async def test_search_papers_short_circuits_to_openalex(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "extra_arg",
+    [
+        {"categories": ["hep-ph"]},
+        {"date_from": "2025-01-01"},
+        {"date_to": "2025-12-31"},
+        {"sort_by": "submittedDate"},
+        {"categories": ["hep-ph"], "date_from": "2025-01-01"},
+    ],
+    ids=["categories", "date_from", "date_to", "sort_by_non_relevance", "combined"],
+)
+async def test_search_papers_falls_through_to_upstream_when_filters_present(
+    extra_arg: dict[str, object],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OpenAlex translator only honors query + max_results. Any filter-bearing
+    call must skip the OpenAlex short-circuit and fall through to upstream so
+    `categories` / `date_from` / `date_to` / non-default `sort_by` are not
+    silently dropped on the wire."""
+    from gpd.mcp.servers import _arxiv_token_bucket, arxiv_translators
+    from gpd.mcp.servers.arxiv_bridge import ArxivBridge, ArxivBridgeConfig
+
+    _arxiv_token_bucket._reset_for_tests()
+
+    async def no_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(_arxiv_token_bucket.asyncio, "sleep", no_sleep)
+
+    translator_called: list[dict] = []
+
+    def fake_search(args: dict) -> dict:
+        translator_called.append(args)
+        return {
+            "papers": [{"id": "2401.12345", "title": "T", "authors": ["A"]}],
+            "total_results": 1,
+        }
+
+    monkeypatch.setattr(arxiv_translators, "openalex_search", fake_search)
+
+    fake, log = _make_fake_session()
+    bridge = ArxivBridge(ArxivBridgeConfig(backend="hybrid"))
+    bridge._session = fake  # type: ignore[assignment]
+    try:
+        args = {"query": "q", **extra_arg}
+        await bridge.call_tool("search_papers", args)
+    finally:
+        bridge._session = None
+
+    assert translator_called == [], (
+        f"OpenAlex translator must NOT be invoked when caller passes "
+        f"non-translatable filters; got args={translator_called}"
+    )
+    assert log, "upstream session must be called when filters are present"
+    assert log[0][0] == "search_papers"
+
+
+@pytest.mark.asyncio
 async def test_get_abstract_short_circuits_to_openalex(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
@@ -596,6 +654,66 @@ async def test_get_abstract_short_circuits_to_openalex(
 
     assert log == [], "upstream session must not be called when OpenAlex succeeds"
     assert first.content[0].text == second.content[0].text
+
+
+@pytest.mark.asyncio
+async def test_get_abstract_error_payload_does_not_get_confirmation_header(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """An upstream payload of the form
+        {"status": "error", "message": "...", "paper_id": "invalid"}
+    with isError=False must NOT be wrapped with a "Returned arxiv:invalid —
+    canonical paper served" header. The header is a positive assertion of
+    success and prepending it in front of an error payload actively misleads
+    the model (it is the exact failure mode the header was added to prevent
+    on the inverted hallucination axis). Regression for the CodeRabbit
+    outside-diff finding on PR #233."""
+    from gpd.mcp.servers import _arxiv_cache, _arxiv_token_bucket, arxiv_translators
+    from gpd.mcp.servers.arxiv_bridge import ArxivBridge, ArxivBridgeConfig
+
+    _arxiv_token_bucket._reset_for_tests()
+    monkeypatch.setattr(_arxiv_cache, "_CACHE_DIR", tmp_path)
+    monkeypatch.setattr(_arxiv_cache, "_CACHE_DB", tmp_path / "cache.sqlite")
+
+    async def no_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(_arxiv_token_bucket.asyncio, "sleep", no_sleep)
+    # OpenAlex translator declines (caller falls through to upstream).
+    monkeypatch.setattr(
+        arxiv_translators,
+        "openalex_abstract",
+        lambda _args: {"status": "error", "paper_id": "invalid", "title": "", "authors": [], "abstract": "", "categories": [], "published": "", "pdf_url": "", "message": "lookup failed"},
+    )
+
+    import mcp.types as types
+
+    class FakeSession:
+        async def call_tool(self, name, arguments):
+            return types.CallToolResult(
+                content=[
+                    types.TextContent(
+                        type="text",
+                        text='{"status": "error", "message": "Paper not found", "paper_id": "invalid"}',
+                    )
+                ],
+            )
+
+    bridge = ArxivBridge(ArxivBridgeConfig(storage_path=tmp_path, backend="hybrid"))
+    bridge._session = FakeSession()  # type: ignore[assignment]
+    try:
+        result = await bridge.call_tool("get_abstract", {"paper_id": "invalid"})
+    finally:
+        bridge._session = None
+
+    payload = result.content[0].text
+    assert "Returned arxiv:" not in payload, (
+        f"error-status payloads must NOT be wrapped with a 'Returned arxiv:' "
+        f"header; got payload={payload[:300]!r}"
+    )
+    assert '"status": "error"' in payload, (
+        f"error body must be preserved verbatim; got payload={payload[:300]!r}"
+    )
 
 
 @pytest.mark.asyncio

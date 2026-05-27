@@ -843,6 +843,7 @@ async def test_download_paper_large_returns_path_not_inline(
     _arxiv_token_bucket._reset_for_tests()
 
     async def no_sleep(_seconds: float) -> None:
+        """Stub out the token-bucket backoff so the test runs instantly."""
         return None
 
     big_body = "\n".join(f"line {i} of a long paper" for i in range(8000))

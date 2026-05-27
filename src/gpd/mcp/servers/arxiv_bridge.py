@@ -220,6 +220,15 @@ class ArxivBridge:
         return await self.session.get_prompt(name, arguments)
 
     async def call_tool(self, name: str, arguments: dict[str, object] | None) -> types.CallToolResult:
+        """Dispatch an advertised tool call through the bridge.
+
+        Rejects un-advertised tools, serves the GPD-owned ``download_source``
+        tool, and (in the default ``hybrid`` backend) intercepts
+        ``download_paper`` / ``read_paper`` for cache-first, size-aware
+        serving and routes ``search_papers`` / ``get_abstract`` through the
+        OpenAlex translator + cache. Everything else is forwarded to the
+        upstream arXiv MCP via the token-bucket-gated throttled path.
+        """
         if name not in ADVERTISED_TOOL_NAMES:
             return _tool_error(f"Tool {name!r} is not advertised by the GPD arXiv bridge")
         if name == DOWNLOAD_SOURCE_TOOL_NAME:
@@ -381,6 +390,15 @@ class ArxivBridge:
     async def _intercept_download(
         self, args: dict[str, object]
     ) -> types.CallToolResult | None:
+        """Fetch a paper locally and return it via the content envelope.
+
+        Resolution order: local ``.md`` cache → ar5iv (LaTeXML HTML) →
+        ``gs://arxiv-dataset`` PDF converted with pymupdf4llm, caching the
+        result each time. Returns the paper via :func:`_content_envelope`
+        (passing ``cache_path`` so large papers come back as a path), or
+        ``None`` on a malformed ``paper_id`` or total miss so ``call_tool``
+        falls through to the upstream ``download_paper``.
+        """
         paper_id_raw = args.get("paper_id")
         if not isinstance(paper_id_raw, str):
             return None
@@ -457,6 +475,14 @@ class ArxivBridge:
     async def _intercept_read_paper(
         self, args: dict[str, object]
     ) -> types.CallToolResult | None:
+        """Serve a cached paper through the size-aware content envelope.
+
+        Returns the cached ``.md`` via :func:`_content_envelope` (inline for
+        small papers, path + preview for large ones) when the paper has been
+        downloaded. Returns ``None`` on a malformed ``paper_id`` or a cache
+        miss so ``call_tool`` falls through to the upstream ``read_paper``,
+        whose "download first" error also lists the available papers.
+        """
         paper_id_raw = args.get("paper_id")
         if not isinstance(paper_id_raw, str):
             return None
@@ -604,6 +630,15 @@ def _content_envelope(
     content: str,
     cache_path: Path | None = None,
 ) -> types.CallToolResult:
+    """Build the tool result for a fetched paper, sized to avoid blob dumps.
+
+    Small papers (or callers without a saved ``cache_path``) are returned
+    inline with the ``_CONTENT_WARNING`` prefix. Papers above
+    ``_INLINE_CONTENT_MAX_BYTES`` are returned as the saved-file ``path`` plus
+    a short warning-prefixed ``preview`` and "treat as untrusted data"
+    instructions, so the model reads the clean on-disk ``.md`` directly
+    instead of chunk-reading a truncated single-line JSON blob (RES-1205).
+    """
     # Small papers (or callers that don't have a saved path) return inline.
     content_bytes = len((_CONTENT_WARNING + content).encode("utf-8"))
     if cache_path is None or content_bytes <= _INLINE_CONTENT_MAX_BYTES:
